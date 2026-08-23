@@ -7,7 +7,7 @@ Native iOS client for **Stride**. Until the coordinated domain cutover, the live
 | **Auth** | Same `/auth/login`, `/auth/me`, `/auth/logout` roster sessions as the browser; login gate matches live wordmark + “Enter your office” |
 | **Rooms** | `GET /rooms` — same room list the web lobby shows |
 | **Chat** | `GET/POST /assistant/chat-threads` + Scout `/assistant/query` |
-| **Scout voice** | Native private Realtime 2.1 through `/assistant/realtime-offer`; the production Build 73 profile enables it, while tools, Brain context, thread receipts, usage, and ACLs stay server-authoritative |
+| **Scout voice** | Native private Realtime 2.1 through `/assistant/realtime-offer`; the production Build 74 profile enables it, while tools, Brain context, thread receipts, usage, and ACLs stay server-authoritative |
 | **Board** | `GET /assistant/board` — same kanban cards |
 | **Full OS** | Authenticated WebView of the **production SPA** so any deeper tool is the live design, not a fork |
 
@@ -37,7 +37,7 @@ EXPO_PUBLIC_WEB_APP_URL=http://127.0.0.1:8080 \
 npm start
 ```
 
-Build 73 enables native private Realtime in the production EAS profile. Home
+Build 74 enables native private Realtime in the production EAS profile. Home
 and the signed-in tab shell expose the same voice transport: one private Scout
 thread stays bound across navigation, entering a room yields microphone focus,
 and backgrounding ends private capture. Local/ad-hoc builds remain default-off

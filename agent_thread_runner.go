@@ -264,6 +264,22 @@ func (app *kanbanBoardApp) launchGoalAgentThreadScaffold(mode string, query stri
 	return app.launchAgentThreadWithSpecBound(mode, query, createdBy, origin, spec, "", nil, false)
 }
 
+// normalizeAgentThreadLaunchQuery keeps ordinary human-authored launches on
+// the compact single-line contract while preserving the one server-authored
+// machine envelope whose receipt is explicitly byte-bound. Collapsing fields
+// in an entailment child mutates the source-snapshot framing (and can mutate
+// repeated whitespace inside fetched evidence), so the downstream gate can no
+// longer prove that the provider saw the exact authorized snapshot.
+func normalizeAgentThreadLaunchQuery(query string, spec agentThreadGoalSpec) string {
+	if spec.Deliverable &&
+		strings.TrimSpace(spec.ParentGoalID) != "" &&
+		strings.TrimSpace(spec.SubtaskID) == "evidence_entailment" &&
+		strings.TrimSpace(spec.OutputContract) == packagingStudioEntailmentContract {
+		return strings.TrimSpace(query)
+	}
+	return canonicalizeBoardText(query)
+}
+
 // launchAgentThreadWithSpecAndTenantAuthority is the server-ingress seam main
 // and tool adapters must use in cutover. runID is minted before the envelope so
 // its purpose MAC is bound to this exact durable work item.
@@ -311,7 +327,7 @@ func (app *kanbanBoardApp) launchAgentThreadWithSpecBound(mode string, query str
 	if mode == "" {
 		return scoutAgentThread{}, fmt.Errorf("thread mode is required")
 	}
-	query = canonicalizeBoardText(query)
+	query = normalizeAgentThreadLaunchQuery(query, spec)
 	if query == "" {
 		return scoutAgentThread{}, fmt.Errorf("thread query is required")
 	}
@@ -2148,6 +2164,12 @@ func (app *kanbanBoardApp) buildAgentThreadOpenAIRequest(thread scoutAgentThread
 func configureExternalEvidenceV2Request(app *kanbanBoardApp, thread scoutAgentThread, request openAITextRequest) openAITextRequest {
 	if agentThreadUsesExternalEvidenceEntailmentContract(thread) {
 		request.JSONSchema = externalEvidenceEntailmentJSONSchema()
+		authority, authorityErr := authorizedExternalEvidenceEntailmentAuthority(app, thread)
+		if authorityErr != nil {
+			request.PreflightError = fmt.Errorf("external evidence entailment authority is invalid before provider handoff: %w", authorityErr)
+		} else if _, inputDigest, inputErr := externalSourceSnapshotEnvelopeFromText(request.Input); inputErr != nil || inputDigest != authority.SourceDigest {
+			request.PreflightError = fmt.Errorf("external evidence entailment provider request does not contain the exact authorized source snapshot")
+		}
 		request.NormalizeOutput = func(body string) (string, error) {
 			return normalizeExternalEvidenceEntailmentArtifact(app, thread, body)
 		}

@@ -1635,7 +1635,12 @@ func (backend *openAIToolProductBackend) commitOpenAIToolFinalArtifactAndChat(ct
 
 	store := backend.app.memory
 	store.mu.Lock()
-	defer store.mu.Unlock()
+	storeLocked := true
+	defer func() {
+		if storeLocked {
+			store.mu.Unlock()
+		}
+	}()
 	currentGeneration, err := openAIToolProductStoreGenerationLocked(store)
 	if err != nil || currentGeneration != expectedStoreGeneration {
 		return meetingMemoryEntry{}, errors.New("OpenAI tool final store generation changed")
@@ -1748,9 +1753,14 @@ func (backend *openAIToolProductBackend) commitOpenAIToolFinalArtifactAndChat(ct
 		store.entries[artifactIndex], store.entries[threadIndex] = current, threadEntry
 		return meetingMemoryEntry{}, err
 	}
-	// The store lock remains held through the one private live projection. A
-	// concurrent memory/source or secondary-artifact write cannot interleave
-	// between the authenticated terminal CAS and fan-out.
+	// The artifact + chat commit above is one durable transaction. Release its
+	// source-store lock before the viewer projection: result projection performs
+	// fresh header/body ACL fences of its own, and recursively taking store.mu
+	// here deadlocks every terminal tool result. A concurrent edit can therefore
+	// produce only the new current result or a fail-closed sparse work card,
+	// never a stale authorized body.
+	store.mu.Unlock()
+	storeLocked = false
 	backend.app.sendScoutChatThreadUpdateToViewerWithContext(ctx, backend.expectation.RequesterAccount, thread, *changedMessage)
 	if openAIToolAfterFinalArtifactCommitProbe != nil {
 		if err := openAIToolAfterFinalArtifactCommitProbe(updated); err != nil {
@@ -1842,6 +1852,7 @@ func (backend *openAIToolProductBackend) appendPrivateArtifactWithCollectionCAS(
 		return meetingMemoryEntry{}, err
 	}
 	store.entries = append(store.entries, entry)
+	store.indexMeetingEntryLocked(len(store.entries)-1, entry)
 	if store.seen == nil {
 		store.seen = map[string]struct{}{}
 	}

@@ -361,6 +361,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const authoredResultCanPresent = Boolean(richArtifactId)
     && (!managedAuthoredResult || (authoredResultAdmitted && workThread?.ref.resultCanPresent === true));
   const showRichWorkResult = Boolean(richArtifactId) || Boolean(workThread?.active && workThread.family === 'Presentation');
+  const governedRichResult = Boolean(workThread?.governedRecord && workThread.complete && String(message.work?.artifactHref ?? '').trim());
   const proposal = message.proposal;
   const proposalKind = String(proposal?.kind ?? '').toLowerCase();
   const proposalStatus = String(proposal?.status ?? '').toLowerCase();
@@ -588,6 +589,16 @@ export const MessageBubble = React.memo(function MessageBubble({
                   </Pressable>
                 </View>
               ) : null}
+            </View>
+          ) : governedRichResult && workThread ? (
+            <View style={styles.richWorkResult}>
+              <InlineArtifactPreview
+                kind="deliverable"
+                title={String(workThread.ref.resultTitle ?? workThread.query ?? '').trim() || 'Completed work'}
+                text={String(workThread.ref.resultPreview ?? workThread.progressCopy ?? '').trim()}
+                agentName={workThread.agentName}
+                onExpand={() => onOpenWorkArtifact?.(message)}
+              />
             </View>
           ) : workThread
             && !(String(workThread.ref.projectTitle ?? '').trim() && workThread.family === 'Research')

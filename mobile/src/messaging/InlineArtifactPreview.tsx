@@ -5,6 +5,7 @@ import { SymbolView } from 'expo-symbols';
 import { api } from '../api/client';
 import { API_BASE_URL } from '../config';
 import { buildApiUrl } from '../api/requestHelpers';
+import { nativeTextArtifactIsRenderable } from '../artifacts/nativeDeckViewer';
 import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
 import { ScoutRichText } from './ScoutRichText';
@@ -17,7 +18,7 @@ import {
   type DeckPreviewNavigationState,
 } from './deckPreviewNavigation';
 
-export type InlineArtifactKind = 'html_deck' | 'table' | 'ideation' | 'research' | 'document';
+export type InlineArtifactKind = 'html_deck' | 'table' | 'ideation' | 'research' | 'document' | 'deliverable';
 
 type Props = {
   kind: InlineArtifactKind;
@@ -44,6 +45,7 @@ const kindLabel: Record<InlineArtifactKind, string> = {
   ideation: 'Ideation',
   research: 'Research',
   document: 'Document',
+  deliverable: 'Deliverable',
 };
 
 const kindIcon: Record<InlineArtifactKind, string> = {
@@ -52,6 +54,7 @@ const kindIcon: Record<InlineArtifactKind, string> = {
   ideation: 'lightbulb',
   research: 'text.book.closed',
   document: 'doc.text',
+  deliverable: 'doc.badge.checkmark',
 };
 
 /**
@@ -360,9 +363,15 @@ export function InlineArtifactPreview({
     );
   }
 
-  // Non-deck kinds: badge + title + text preview
-  const previewLines = text.split('\n').slice(0, expanded ? undefined : 12);
-  const hasMore = text.split('\n').length > 12;
+  // Non-deck previews are prose, never serialized Studio state or markup. The
+  // authoritative full-screen route can still open the real artifact, but an
+  // unexpected JSON payload must fail closed instead of reproducing the raw
+  // code screen that older iOS builds exposed.
+  const previewText = nativeTextArtifactIsRenderable(text)
+    ? text
+    : `${kindLabel[kind]} is ready to open.`;
+  const previewLines = previewText.split('\n').slice(0, expanded ? undefined : 12);
+  const hasMore = previewText.split('\n').length > 12;
 
   return (
     <Glass radius={radius.lg} style={styles.container}>

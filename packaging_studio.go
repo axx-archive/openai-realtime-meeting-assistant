@@ -773,9 +773,31 @@ func compilePackagingStudioDeckOnly(app *kanbanBoardApp, plan *goalPlan, parentI
 	if !ok || strings.TrimSpace(artifact.Text) == "" {
 		return "", nil, fmt.Errorf("ship_deck produced no deck body — nothing to compile")
 	}
-	deckHTML, imageryNote, err := injectStudioDeckImagery(app, plan, strings.TrimSpace(artifact.Text))
-	if err != nil {
-		return "", nil, err
+	deckTitle := "Packaging Studio deck"
+	if parent, found := app.osArtifactByID(parentID); found {
+		if title := strings.TrimSpace(parent.Metadata["title"]); title != "" {
+			deckTitle = title + " — presenter deck"
+		}
+	}
+	deckHTML := strings.TrimSpace(artifact.Text)
+	deckAssets := studioDeckImageryAssets(app, plan)
+	deckSceneRef := ""
+	imageryNote := ""
+	reviewedDeck, reviewedAssets, reviewedChange, reviewErr := reviewedStudioDeckChangeSource(app, plan, parentID, artifact)
+	if reviewedChange {
+		if reviewErr != nil {
+			return "", nil, reviewErr
+		}
+		deckHTML = compileDeckDocumentHTML(reviewedDeck, deckTitle)
+		deckAssets = reviewedAssets
+		deckSceneRef = strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey])
+		imageryNote = fmt.Sprintf("Studio changes: exact reviewed native scene carried with %d image asset(s).", len(reviewedAssets))
+	} else {
+		var err error
+		deckHTML, imageryNote, err = injectStudioDeckImagery(app, plan, deckHTML)
+		if err != nil {
+			return "", nil, err
+		}
 	}
 	if requested, explicit := packagingPlanSlideCount(app, plan); explicit {
 		actual := renderedDeckSlideCount(deckHTML)
@@ -783,21 +805,14 @@ func compilePackagingStudioDeckOnly(app *kanbanBoardApp, plan *goalPlan, parentI
 			return "", nil, fmt.Errorf("the direct request requires %d slides but the authored deck contains %d", requested, actual)
 		}
 	}
-	deckAssets := studioDeckImageryAssets(app, plan)
-	if draft && packagingGeneratedScenePreflightRequired(plan) {
+	if draft && packagingGeneratedScenePreflightRequired(plan) && !reviewedChange {
 		if err := validatePackagingGeneratedScene(app, plan, deckHTML, deckAssets); err != nil {
 			return "", nil, fmt.Errorf("generated presentation scene preflight failed: %w", err)
 		}
 	}
-	deckTitle := "Packaging Studio deck"
-	if parent, found := app.osArtifactByID(parentID); found {
-		if title := strings.TrimSpace(parent.Metadata["title"]); title != "" {
-			deckTitle = title + " — presenter deck"
-		}
-	}
 	filed, err := app.fileStudioShipDeliverables(studioShipInputs{
 		GoalID: parentID, PackageID: plan.PackageID, CreatedBy: plan.CreatedBy,
-		DeckHTML: deckHTML, DeckAssets: deckAssets,
+		DeckHTML: deckHTML, DeckAssets: deckAssets, DeckSceneRef: deckSceneRef,
 		DeckTitle: deckTitle, DeckOnly: true, RouteMetadata: goalRouteChildBindingMetadata(plan),
 	})
 	if err != nil {
@@ -3288,12 +3303,16 @@ type studioShipInputs struct {
 	CreatedBy  string
 	DeckHTML   string          // ship_deck's self-contained HTML
 	DeckAssets []artifactAsset // generated FIG images, attached for faithful editing
-	Wall       string          // the slide-copy record ("The Wall")
-	Talk       string          // the branded one-sheet ("The Talk") — text-native, paperKit
-	Rigor      string          // the diligence companion
-	Findings   string          // the findings audit trail (every panel/gate/jury verdict)
-	DeckTitle  string
-	DeckOnly   bool // active v3 default: supporting stage records stay internal
+	// DeckSceneRef is set only by review_changes after its exact revision,
+	// capability digest, and native scene receipt have been revalidated. It
+	// preserves that reviewed scene directly instead of lossy HTML re-import.
+	DeckSceneRef string
+	Wall         string // the slide-copy record ("The Wall")
+	Talk         string // the branded one-sheet ("The Talk") — text-native, paperKit
+	Rigor        string // the diligence companion
+	Findings     string // the findings audit trail (every panel/gate/jury verdict)
+	DeckTitle    string
+	DeckOnly     bool // active v3 default: supporting stage records stay internal
 	// RouteMetadata is the verified goal's source binding. In particular,
 	// originSurface lets artifact persistence inherit the source conversation's
 	// exact private owner/public audience rather than default to organization.
@@ -3349,6 +3368,59 @@ func materializeStudioDeckScene(body string, assets []artifactAsset) (map[string
 		deckSceneRefMetadataKey:   ref,
 		deckSchemaMetadataKey:     strconv.Itoa(deckDocumentSchemaVersion),
 		artifactAssetsMetadataKey: string(assetsRaw),
+	}, nil
+}
+
+// bindReviewedStudioDeckScene preserves a review_changes source's exact native
+// scene. The source receipt has already bound the revision/digest/ref; this
+// second compiler boundary independently verifies the content-addressed scene,
+// every attached image blob, and the deterministic HTML projection before the
+// candidate is filed. Generated writer HTML continues through
+// materializeStudioDeckScene instead.
+func bindReviewedStudioDeckScene(body, title, sceneRef string, assets []artifactAsset) (map[string]string, error) {
+	sceneRef = strings.TrimSpace(sceneRef)
+	if !validBlobRef(sceneRef) {
+		return nil, fmt.Errorf("reviewed deck scene ref is invalid")
+	}
+	if _, sceneMetadata, sceneErr := getBlob(sceneRef); sceneErr != nil || !strings.EqualFold(strings.TrimSpace(sceneMetadata.Mime), "application/vnd.bonfire.deck+json") {
+		return nil, fmt.Errorf("reviewed deck scene is unavailable")
+	}
+	normalized := make([]artifactAsset, 0, len(assets))
+	seen := map[string]struct{}{}
+	for _, asset := range assets {
+		asset.Ref = strings.TrimSpace(asset.Ref)
+		asset.Mime = strings.ToLower(strings.TrimSpace(asset.Mime))
+		asset.Name = strings.TrimSpace(asset.Name)
+		asset.Kind = strings.ToLower(strings.TrimSpace(asset.Kind))
+		if !validBlobRef(asset.Ref) || !artifactAssetIsEditableImage(asset) {
+			return nil, fmt.Errorf("reviewed deck image asset is invalid")
+		}
+		if _, duplicate := seen[asset.Ref]; duplicate {
+			return nil, fmt.Errorf("reviewed deck image asset is duplicated")
+		}
+		_, blobMetadata, err := getBlob(asset.Ref)
+		if err != nil || !strings.EqualFold(strings.TrimSpace(blobMetadata.Mime), asset.Mime) || !strings.HasPrefix(asset.Mime, "image/") {
+			return nil, fmt.Errorf("reviewed deck image asset is unavailable")
+		}
+		seen[asset.Ref] = struct{}{}
+		normalized = append(normalized, asset)
+	}
+	assetsRaw, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("encode reviewed deck assets: %w", err)
+	}
+	candidate := meetingMemoryEntry{Text: strings.TrimSpace(body), Metadata: map[string]string{
+		"type": artifactTypeHTMLDeck, deckSceneRefMetadataKey: sceneRef, artifactAssetsMetadataKey: string(assetsRaw),
+	}}
+	deck, imported, quality, err := loadDeckDocument(candidate)
+	if err != nil || imported || quality != "native" {
+		return nil, fmt.Errorf("reviewed deck scene is unavailable or invalid")
+	}
+	if compileDeckDocumentHTML(deck, title) != strings.TrimSpace(body) {
+		return nil, fmt.Errorf("reviewed deck HTML does not match its exact native scene")
+	}
+	return map[string]string{
+		deckSceneRefMetadataKey: sceneRef, deckSchemaMetadataKey: strconv.Itoa(deckDocumentSchemaVersion), artifactAssetsMetadataKey: string(assetsRaw),
 	}, nil
 }
 
@@ -3515,7 +3587,13 @@ func (app *kanbanBoardApp) fileStudioShipDeliverables(in studioShipInputs) ([]st
 			}
 		}
 		if spec.contract == packagingStudioDeckContract {
-			nativeMetadata, materializeErr := materializeStudioDeckScene(body, in.DeckAssets)
+			var nativeMetadata map[string]string
+			var materializeErr error
+			if strings.TrimSpace(in.DeckSceneRef) != "" {
+				nativeMetadata, materializeErr = bindReviewedStudioDeckScene(body, deckTitle, in.DeckSceneRef, in.DeckAssets)
+			} else {
+				nativeMetadata, materializeErr = materializeStudioDeckScene(body, in.DeckAssets)
+			}
 			if materializeErr != nil {
 				return filed, fmt.Errorf("materialize ship deliverable %q: %w", spec.contract, materializeErr)
 			}

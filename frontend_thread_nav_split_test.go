@@ -184,10 +184,19 @@ func TestIndexCompletedWorkRendersGovernedFieldsAndStructuredViewer(t *testing.T
 	if !strings.Contains(body, "recordKind === 'work_result' || recordKind === 'work_record'") || !strings.Contains(body, "scoutChatWorkRecordNode(message)") {
 		t.Fatal("structured completed work must bypass the ordinary raw message body")
 	}
+	projection := functionBody(html, "function scoutChatRecordBelongsInTimeline(message)")
+	if !strings.Contains(projection, "governedWorkResourcePath(message.work.artifactHref, 'artifact')") {
+		t.Fatal("only an authorized governed artifact may promote completed work into the timeline")
+	}
 	workBody := functionBody(html, "function scoutChatWorkRecordNode(message)")
-	for _, expected := range []string{"workerName", "progressPercent", "artifactHref", "evidenceHref", "providerExecutionFenced"} {
+	for _, expected := range []string{"workerName", "deliverable", "artifactHref", "evidenceHref", "providerExecutionFenced", "resultArtifactHref"} {
 		if !strings.Contains(workBody, expected) {
 			t.Fatalf("completed-work card is missing governed field %q", expected)
+		}
+	}
+	for _, leaked := range []string{"scout-chat-work-record__progress", "work.currentStage", "work.progressPercent"} {
+		if strings.Contains(workBody, leaked) {
+			t.Fatalf("completed deliverable preview still exposes process chrome %q", leaked)
 		}
 	}
 	if strings.Contains(workBody, "document.createElement('a')") || strings.Contains(workBody, ".href =") || strings.Contains(workBody, "Artifact:") {

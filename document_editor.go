@@ -42,6 +42,7 @@ type documentStudioArtifactView struct {
 	Title        string `json:"title"`
 	Type         string `json:"type"`
 	Version      int    `json:"version"`
+	GoalID       string `json:"goalId,omitempty"`
 	UpdatedAt    string `json:"updatedAt,omitempty"`
 	SavedToFiles bool   `json:"savedToFiles"`
 }
@@ -49,6 +50,7 @@ type documentStudioArtifactView struct {
 func documentStudioView(entry meetingMemoryEntry) documentStudioArtifactView {
 	return documentStudioArtifactView{
 		ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Type: artifactType(entry),
+		GoalID:  strings.TrimSpace(firstNonEmptyString(entry.Metadata["goalId"], entry.Metadata["goalParentId"])),
 		Version: artifactVersion(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
 		SavedToFiles: strings.EqualFold(strings.TrimSpace(entry.Metadata["savedToFiles"]), "true"),
 	}
@@ -249,14 +251,11 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 	var internalCopyErr bool
 	sourceEntry := prior
 	staleBranch := false
-	guardErr := kanbanApp.withFinalExportAdmissionOperation(prior, func(current meetingMemoryEntry) error {
+	guardErr := kanbanApp.withAuthoredCopySourceOperation(prior, func(current meetingMemoryEntry) error {
 		sourceEntry = current
 		currentSourceVersion := artifactVersion(current)
 		staleBranch = payload.ExpectedVersion != currentSourceVersion
-		managed := strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"])) != ""
-		if managed && (staleBranch || payload.Document.Markdown != documentStudioDocumentFromEntry(current).Markdown) {
-			return fmt.Errorf("review the current authored document before saving an independent copy")
-		}
+		parentID := strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"]))
 
 		storedBody, emptyMarker := documentStudioStoredBody(payload.Document.Markdown)
 		metadata := map[string]string{
@@ -286,6 +285,11 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		if staleBranch {
 			metadata["copiedFromStaleRevision"] = "true"
 		}
+		if parentID != "" {
+			metadata["goalParentId"] = parentID
+			metadata[authoredCopyReviewMetadataKey] = authoredCopyReviewPending
+			metadata[authoredCopyAdmissionRootMetadataKey] = strings.TrimSpace(firstNonEmptyString(current.Metadata[authoredCopyAdmissionRootMetadataKey], current.ID))
+		}
 		var appended bool
 		var createErr error
 		copyEntry, appended, createErr = kanbanApp.createOSArtifactWithMetadata("artifacts", payload.Title, storedBody, actor, metadata)
@@ -314,10 +318,13 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 	if fileErr != nil {
 		stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
 		storedView := documentStudioView(stored)
+		qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(stored)
+		_, aclCanExport := authorizedArtifactForActions(r.Context(), user, stored.ID, ACLReadContent, ACLExport)
 		writeAuthJSON(w, fileSaveErrorStatus(fileErr), map[string]any{
 			"ok": false, "partialSuccess": true,
 			"error":    "document copy was created, but Files filing failed",
 			"artifact": storedView, "document": documentStudioDocumentFromEntry(stored),
+			"qualityState": qualityState, "canExport": stable && canExport && aclCanExport,
 			"receipt": map[string]any{
 				"outcome": "copy_created_files_failed", "artifactId": stored.ID,
 				"artifactVersion": artifactVersion(stored), "contentSaved": true,
@@ -331,9 +338,12 @@ func documentEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
+	qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(stored)
+	_, aclCanExport := authorizedArtifactForActions(r.Context(), user, stored.ID, ACLReadContent, ACLExport)
 	broadcastSignedInKanbanEvent("file", file)
 	writeAuthJSON(w, http.StatusCreated, map[string]any{
 		"ok": true, "artifact": documentStudioView(stored), "document": documentStudioDocumentFromEntry(stored), "file": file,
+		"qualityState": qualityState, "canExport": stable && canExport && aclCanExport,
 		"receipt": map[string]any{
 			"outcome": "copy_created_and_filed", "artifactId": stored.ID,
 			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,

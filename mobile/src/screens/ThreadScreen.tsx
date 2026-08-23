@@ -148,6 +148,12 @@ import { createConversationOperationId } from "../conversations/newConversation"
 import { RegenerateWorkSheet } from "../artifacts/RegenerateWorkSheet";
 import { nativeTextArtifactIsRenderable } from "../artifacts/nativeDeckViewer";
 import { WorkActivitySheet } from "../messaging/WorkActivitySheet";
+import { WorkActivityPill } from "../messaging/WorkActivityPill";
+import { workActivitySurfaceIdentity } from "../messaging/workActivityDismissal";
+import {
+  dismissWorkActivityForViewer,
+  viewerDismissedWorkActivity,
+} from "../messaging/workActivityDismissalStore";
 import {
   compactThreadWorkMessages,
   isScoutWorkMessage,
@@ -181,18 +187,6 @@ type WorkstreamCorrectionTarget = {
   sessionToken: string;
   returnFocusHandle?: number;
 };
-
-function workThreadIsActive(message: ScoutMessage): boolean {
-  if (String(message.kind ?? "").toLowerCase() !== "thread" || !message.thread)
-    return false;
-  return [
-    "queued",
-    "running",
-    "approval_required",
-    "needs_input",
-    "parked",
-  ].includes(String(message.thread.status ?? "").toLowerCase());
-}
 
 function workThreadPhase(message: ScoutMessage): string {
   return workPhaseLabel(message.thread);
@@ -529,7 +523,6 @@ export function ThreadScreen({ route, navigation }: Props) {
     report?: { agentName: string; mode: string; status: string };
   } | null>(null);
   const expandedMessageReturnFocusHandleRef = useRef<number | null>(null);
-  const activeWorkTriggerRef = useRef<View>(null);
   const [workActivityMessage, setWorkActivityMessage] = useState<ScoutMessage | null>(null);
   const [workActivityReturnFocusHandle, setWorkActivityReturnFocusHandle] = useState<number | null>(null);
   const [participants, setParticipants] = useState<ChatMentionCandidate[]>([
@@ -1381,7 +1374,54 @@ export function ThreadScreen({ route, navigation }: Props) {
     () => latestScoutWorkMessage(visibleMessages),
     [visibleMessages],
   );
-  const showCurrentWorkActivity = Boolean(currentWorkMessage);
+  const currentWorkSurfaceIdentity = useMemo(
+    () => workActivitySurfaceIdentity(route.params.threadId, currentWorkMessage),
+    [currentWorkMessage, route.params.threadId],
+  );
+  const currentWorkSurfaceWorkKey = currentWorkSurfaceIdentity?.workKey ?? '';
+  const currentWorkSurfaceVersionKey = currentWorkSurfaceIdentity?.versionKey ?? '';
+  const currentWorkSurfaceToken = currentWorkSurfaceIdentity
+    ? `${currentWorkSurfaceWorkKey}.${currentWorkSurfaceVersionKey}`
+    : '';
+  const [workActivityDismissal, setWorkActivityDismissal] = useState({
+    token: '',
+    hydrated: false,
+    dismissed: false,
+  });
+  useEffect(() => {
+    let current = true;
+    if (!currentWorkSurfaceWorkKey || !currentWorkSurfaceVersionKey) {
+      setWorkActivityDismissal({ token: '', hydrated: true, dismissed: false });
+      return () => { current = false; };
+    }
+    const token = currentWorkSurfaceToken;
+    setWorkActivityDismissal({ token, hydrated: false, dismissed: false });
+    void viewerDismissedWorkActivity(email, {
+      workKey: currentWorkSurfaceWorkKey,
+      versionKey: currentWorkSurfaceVersionKey,
+    }).then((dismissed) => {
+      if (!current) return;
+      setWorkActivityDismissal({ token, hydrated: true, dismissed });
+    });
+    return () => { current = false; };
+  }, [currentWorkSurfaceToken, currentWorkSurfaceVersionKey, currentWorkSurfaceWorkKey, email]);
+  const dismissCurrentWorkActivity = useCallback(() => {
+    if (!currentWorkSurfaceWorkKey || !currentWorkSurfaceVersionKey) return;
+    const token = currentWorkSurfaceToken;
+    setWorkActivityDismissal({ token, hydrated: true, dismissed: true });
+    void dismissWorkActivityForViewer(email, {
+      workKey: currentWorkSurfaceWorkKey,
+      versionKey: currentWorkSurfaceVersionKey,
+    });
+    void Haptics.selectionAsync();
+  }, [currentWorkSurfaceToken, currentWorkSurfaceVersionKey, currentWorkSurfaceWorkKey, email]);
+  const showCurrentWorkActivity = Boolean(
+    currentWorkMessage
+    && currentWorkSurfaceToken
+    && workActivityDismissal.token === currentWorkSurfaceToken
+    && workActivityDismissal.hydrated
+    && !workActivityDismissal.dismissed,
+  );
   const latestRiffAnchor = useMemo(
     () => [...messages].reverse().find((message) => Boolean(String(message.id ?? "").trim())) ?? null,
     [messages],
@@ -4210,37 +4250,18 @@ export function ThreadScreen({ route, navigation }: Props) {
         )}
 
         {!editingMessage && currentWorkMessage && showCurrentWorkActivity ? (
-          <Pressable
-            ref={activeWorkTriggerRef}
-            accessibilityRole="button"
-            accessibilityLabel={`${String(currentWorkMessage.thread?.agentName ?? "Scout")}, ${workFamilyLabel(currentWorkMessage.thread)} work, ${workThreadPhase(currentWorkMessage)}${Number(currentWorkMessage.thread?.progressPercent) > 0 ? `, ${Math.round(Number(currentWorkMessage.thread?.progressPercent))}% complete` : ""}`}
-            accessibilityHint="Opens the work activity sheet"
-            focusable
-            onPress={() => {
-              setWorkActivityReturnFocusHandle(findNodeHandle(activeWorkTriggerRef.current) ?? null);
+          <WorkActivityPill
+            key={currentWorkSurfaceToken}
+            message={currentWorkMessage}
+            stacked={workspaceLayout.stackedActivity}
+            reduceMotion={reduceMotion}
+            onOpen={(returnFocusHandle) => {
+              setWorkActivityReturnFocusHandle(returnFocusHandle ?? null);
               setWorkActivityMessage(currentWorkMessage);
               void Haptics.selectionAsync();
             }}
-            style={({ pressed }) => [
-              styles.activeWork,
-              workspaceLayout.stackedActivity && styles.activeWorkStacked,
-              pressed && styles.activeWorkPressed,
-            ]}
-          >
-            <View style={styles.activeWorkSignal}>
-              <View style={styles.activeWorkBarShort} />
-              <View style={styles.activeWorkBarTall} />
-              <View style={styles.activeWorkBarMid} />
-            </View>
-            <Text maxFontSizeMultiplier={1.8} style={[styles.activeWorkText, workspaceLayout.stackedActivity && styles.activeWorkTextStacked]}>
-              {String(currentWorkMessage.thread?.agentName ?? "Scout")} ·{" "}
-              {workFamilyLabel(currentWorkMessage.thread)} ·{" "}
-              {workThreadPhase(currentWorkMessage)}
-            </Text>
-            <Text maxFontSizeMultiplier={1.8} style={[styles.activeWorkAction, workspaceLayout.stackedActivity && styles.activeWorkActionStacked]}>
-              {workThreadIsActive(currentWorkMessage) ? "View activity" : "Details"}
-            </Text>
-          </Pressable>
+            onDismiss={dismissCurrentWorkActivity}
+          />
         ) : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -4802,59 +4823,6 @@ const styles = StyleSheet.create({
     color: colors.text3,
     textAlign: "center",
   },
-  activeWork: {
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: space[2],
-    marginHorizontal: space[4],
-    marginBottom: space[2],
-    paddingHorizontal: space[3],
-    borderRadius: radius.lg,
-    borderCurve: "continuous",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.line1,
-    backgroundColor: colors.surface2,
-  },
-  activeWorkPressed: { opacity: 0.76, transform: [{ scale: 0.96 }] },
-  activeWorkStacked: {
-    minHeight: 0,
-    flexDirection: "column",
-    alignItems: "flex-start",
-    paddingVertical: space[3],
-  },
-  activeWorkSignal: {
-    width: 26,
-    height: 26,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-    borderRadius: radius.sm,
-    backgroundColor: colors.emberSoft,
-  },
-  activeWorkBarShort: {
-    width: 2,
-    height: 7,
-    borderRadius: radius.full,
-    backgroundColor: colors.emberText,
-  },
-  activeWorkBarTall: {
-    width: 2,
-    height: 13,
-    borderRadius: radius.full,
-    backgroundColor: colors.emberText,
-  },
-  activeWorkBarMid: {
-    width: 2,
-    height: 9,
-    borderRadius: radius.full,
-    backgroundColor: colors.emberText,
-  },
-  activeWorkText: { ...type.captionMedium, flex: 1, color: colors.text1 },
-  activeWorkTextStacked: { flex: 0, alignSelf: "stretch" },
-  activeWorkAction: { ...type.captionMedium, color: colors.emberText },
-  activeWorkActionStacked: { alignSelf: "stretch", textAlign: "right" },
   composer: {
     marginHorizontal: space[4],
     marginBottom: space[2],

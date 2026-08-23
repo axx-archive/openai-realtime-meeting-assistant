@@ -402,6 +402,23 @@ type meetingMemoryStore struct {
 	path    string
 	entries []meetingMemoryEntry
 	seen    map[string]struct{}
+	// artifactIndexes is the ordered, body-free directory for current artifact
+	// rows, while artifactIndexByID provides exact lookup. Chat tail projection
+	// reauthorizes several result refs per message; walking the lifetime memory
+	// ledger for each header/body fence made one dense channel O(messages *
+	// lifetime rows). Both indexes are rebuilt with the other in-memory indexes
+	// after deletion/reload and advanced by every ordinary append.
+	artifactIndexes    []int
+	artifactIndexByID  map[string]int
+	scoutChatIndexByID map[string]int
+	indexedEntryCount  int
+	// artifactEntryVisitHook is a test-only observation seam. It is invoked for
+	// every durable row inspected by the directory-backed result projection and
+	// exact authorization lookup, and is nil in production.
+	artifactEntryVisitHook func()
+	// scoutChatEntryVisitHook is the matching test-only seam for exact chat
+	// source lookups used by hydration and dynamic artifact audience resolution.
+	scoutChatEntryVisitHook func()
 	// meetingEntryIndexes is a process-local body-free directory from durable
 	// meeting id to canonical entry positions. It keeps Meeting navigation
 	// proportional to the selected 60/200 records instead of rescanning the
@@ -488,6 +505,8 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	store := &meetingMemoryStore{
 		path:                     path,
 		seen:                     map[string]struct{}{},
+		artifactIndexByID:        map[string]int{},
+		scoutChatIndexByID:       map[string]int{},
 		meetingEntryIndexes:      map[string][]int{},
 		currentDigestIndexes:     map[string]map[string]int{},
 		currentDigestDayIndexes:  map[string]map[string]map[string]int{},
@@ -628,6 +647,10 @@ func (store *meetingMemoryStore) reloadVisibleMemoryGenerationLocked() error {
 }
 
 func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
+	store.artifactIndexes = nil
+	store.artifactIndexByID = map[string]int{}
+	store.scoutChatIndexByID = map[string]int{}
+	store.indexedEntryCount = 0
 	store.meetingEntryIndexes = map[string][]int{}
 	store.transcriptCaptureSequences = nil
 	store.transcriptDuplicateCaptureSequences = nil
@@ -637,9 +660,33 @@ func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
 	for index, entry := range store.entries {
 		store.indexMeetingEntryLocked(index, entry)
 	}
+	store.indexedEntryCount = len(store.entries)
 }
 
 func (store *meetingMemoryStore) indexMeetingEntryLocked(index int, entry meetingMemoryEntry) {
+	if entry.Kind == meetingMemoryKindOSArtifact && strings.TrimSpace(entry.ID) != "" {
+		if store.artifactIndexByID == nil {
+			store.artifactIndexByID = map[string]int{}
+		}
+		if prior, exists := store.artifactIndexByID[entry.ID]; exists {
+			for position, candidate := range store.artifactIndexes {
+				if candidate == prior {
+					store.artifactIndexes[position] = index
+					break
+				}
+			}
+		} else {
+			store.artifactIndexes = append(store.artifactIndexes, index)
+		}
+		store.artifactIndexByID[entry.ID] = index
+	}
+	if entry.Kind == meetingMemoryKindScoutChat && strings.TrimSpace(entry.ID) != "" {
+		if store.scoutChatIndexByID == nil {
+			store.scoutChatIndexByID = map[string]int{}
+		}
+		store.scoutChatIndexByID[entry.ID] = index
+	}
+	store.indexedEntryCount = len(store.entries)
 	if entry.Kind == meetingMemoryKindTranscript {
 		if sequence, ok := entryCaptureSequence(entry); ok {
 			position := sort.Search(len(store.transcriptCaptureSequences), func(candidate int) bool {
@@ -1756,6 +1803,12 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 		}
 	}
 	entry.Metadata = stamped
+	if kind == meetingMemoryKindOSArtifact {
+		// roomId/sittingId are capability-bound. appendOSArtifact prepares the
+		// caller-owned fields before this lock, but the store owns these final
+		// scope stamps, so mint the persisted digest only after they are present.
+		entry.Metadata[artifactContentDigestMetadataKey] = artifactCapabilityDigest(entry)
+	}
 	stampMeetingRecordBodyDigest(&entry)
 
 	raw, err := json.Marshal(entry)
@@ -1843,6 +1896,122 @@ func (store *meetingMemoryStore) metadataSnapshotOfKind(kind string, limit int) 
 		result = append(result, meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata})
 	}
 	return result
+}
+
+// artifactMetadataSnapshot returns the current artifact directory in durable
+// order without cloning any artifact body. Result selection needs only the
+// server-owned metadata; the one selected body is fetched later through the
+// exact ACL/header fence. This keeps a tail read proportional to the number of
+// artifacts rather than to years of transcripts and conversation memory.
+func (store *meetingMemoryStore) artifactMetadataSnapshot() []meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	result := make([]meetingMemoryEntry, 0, len(store.artifactIndexes))
+	for _, index := range store.artifactIndexes {
+		if index < 0 || index >= len(store.entries) {
+			continue
+		}
+		if store.artifactEntryVisitHook != nil {
+			store.artifactEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindOSArtifact || memoryEntryHiddenFromRecall(entry) {
+			continue
+		}
+		metadata := make(map[string]string, len(entry.Metadata))
+		for key, value := range entry.Metadata {
+			metadata[key] = value
+		}
+		// Preserve the canonical bytes-over-label repair before dropping Text:
+		// older workers occasionally stamped an HTML deck as markdown. The result
+		// index remains body-free, but must still select the same render type as
+		// the full artifact authorization seam.
+		metadata["type"] = artifactType(entry)
+		result = append(result, meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata})
+	}
+	return result
+}
+
+// artifactEntryIndexByIDLocked resolves one exact current artifact row. Caller
+// holds store.mu. The validation prevents a stale process index from becoming
+// authority; direct test fixtures and any future exceptional writer fall back
+// to the canonical rows and repair the body-free pointer.
+func (store *meetingMemoryStore) artifactEntryIndexByIDLocked(id string) (int, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return -1, false
+	}
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	if index, found := store.artifactIndexByID[id]; found && index >= 0 && index < len(store.entries) {
+		if store.artifactEntryVisitHook != nil {
+			store.artifactEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind == meetingMemoryKindOSArtifact && entry.ID == id {
+			return index, true
+		}
+	}
+	for index := range store.entries {
+		if store.artifactEntryVisitHook != nil {
+			store.artifactEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != id {
+			continue
+		}
+		if store.artifactIndexByID == nil {
+			store.artifactIndexByID = map[string]int{}
+		}
+		store.artifactIndexByID[id] = index
+		return index, true
+	}
+	return -1, false
+}
+
+// scoutChatEntryIndexByIDLocked is the exact counterpart for one durable chat
+// source. Artifact ACL resolution follows originSurface=chat:<id> on every
+// result read, so this directory is part of the same bounded tail hot path.
+// Caller holds store.mu.
+func (store *meetingMemoryStore) scoutChatEntryIndexByIDLocked(id string) (int, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return -1, false
+	}
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	if index, found := store.scoutChatIndexByID[id]; found && index >= 0 && index < len(store.entries) {
+		if store.scoutChatEntryVisitHook != nil {
+			store.scoutChatEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind == meetingMemoryKindScoutChat && entry.ID == id {
+			return index, true
+		}
+	}
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		if store.scoutChatEntryVisitHook != nil {
+			store.scoutChatEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != id {
+			continue
+		}
+		if store.scoutChatIndexByID == nil {
+			store.scoutChatIndexByID = map[string]int{}
+		}
+		store.scoutChatIndexByID[id] = index
+		return index, true
+	}
+	return -1, false
 }
 
 // maxPromptBodyBytes is the store-layer cap on how many bytes of one entry's
@@ -2111,6 +2280,12 @@ func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meeti
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if kind == meetingMemoryKindScoutChat {
+		if index, found := store.scoutChatEntryIndexByIDLocked(id); found && !memoryEntryIsMediaSoakCanary(store.entries[index]) {
+			return cloneMemoryEntry(store.entries[index]), true
+		}
+		return meetingMemoryEntry{}, false
+	}
 
 	for index := len(store.entries) - 1; index >= 0; index-- {
 		entry := store.entries[index]

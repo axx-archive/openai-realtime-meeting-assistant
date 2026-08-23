@@ -18006,6 +18006,20 @@
           font: 700 13px/1 var(--font-sans);
         }
 
+        #chatTool .chat-work-indicator[data-work-state="failed"] .chat-work-indicator__signal {
+          background: color-mix(in srgb, var(--danger) 14%, transparent);
+          color: var(--danger);
+        }
+
+        #chatTool .chat-work-indicator[data-work-state="failed"] .chat-work-indicator__signal span {
+          display: none;
+        }
+
+        #chatTool .chat-work-indicator[data-work-state="failed"] .chat-work-indicator__signal::after {
+          content: "!";
+          font: 750 14px/1 var(--font-sans);
+        }
+
         @keyframes chat-work-wave {
           to { transform: scaleY(0.48); opacity: 0.58; }
         }
@@ -48042,6 +48056,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		})
 		const hasDocumentExportCapability = Object.prototype.hasOwnProperty.call(payload || {}, 'canExport') || Object.prototype.hasOwnProperty.call(options || {}, 'canExport')
 		const documentProjectedPublication = {
+		  managed: documentManagedAuthoredResult,
 		  qualityState: String(options?.qualityState || '').trim(),
 		  ...(Object.prototype.hasOwnProperty.call(options || {}, 'canExport') ? { canExport: options.canExport === true } : {})
 		}
@@ -48644,19 +48659,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
           hydrateDocumentImageRuntimeStates(block)
           selectDocumentImage(block.querySelector('img'), true)
         }
-        function updateDocumentImagePresentation(patch) {
+        function mutateDocumentImagePresentation(patch) {
           const image = selectedDocumentImage()
-          if (!image) return
-          commitDocumentMutation(() => {
-            const presentation = { ...documentImagePresentation(image.getAttribute('src')), ...patch }
-            setDocumentImageSource(image, documentImageSourceWithPresentation(image.getAttribute('src'), presentation))
-            const block = image.closest('[data-doc-image-block]')
-            if (block) {
-              block.dataset.align = presentation.align
-              block.style.width = `${presentation.width}%`
-              block.querySelector('.document-editor__image-caption').textContent = presentation.caption
-            }
-          })
+          if (!image) return false
+          const presentation = { ...documentImagePresentation(image.getAttribute('src')), ...patch }
+          setDocumentImageSource(image, documentImageSourceWithPresentation(image.getAttribute('src'), presentation))
+          const block = image.closest('[data-doc-image-block]')
+          if (block) {
+            block.dataset.align = presentation.align
+            block.style.width = `${presentation.width}%`
+            block.querySelector('.document-editor__image-caption').textContent = presentation.caption
+          }
+          return true
+        }
+        function updateDocumentImagePresentation(patch) {
+          if (!selectedDocumentImage()) return
+          commitDocumentMutation(() => mutateDocumentImagePresentation(patch))
+          syncDocumentImageTools()
+        }
+        function observeDocumentImageFieldInput(kind, mutator) {
+          documentHistory.atomicMutation = true
+          let changed = false
+          try { changed = mutator() !== false } finally { documentHistory.atomicMutation = false }
+          if (!changed) return
+          observeDocumentInput(kind)
           syncDocumentImageTools()
         }
         async function uploadDocumentImage(file, existing, insertionRange) {
@@ -48845,7 +48871,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             })
             const result = await response.json().catch(() => ({}))
             if (!response.ok && result?.partialSuccess && result?.artifact?.id) {
-              addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), savedToFiles: 'false', status: 'complete' } }, { select: false })
+              addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), goalParentId: String(result.artifact.goalId || ''), savedToFiles: 'false', status: 'complete' } }, { select: false })
               const retry = await fetch('/assistant/files/save', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ artifactId: result.artifact.id, fileName: destination.fileName, folderId: destination.folderId })
@@ -48859,9 +48885,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
             } else if (!response.ok || !result?.artifact || !result?.file) {
               throw new Error(result?.error || 'Document copy could not be saved')
             }
-            addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), savedToFiles: 'true', status: 'complete' } }, { select: false })
+            addArtifactEntry({ id: result.artifact.id, text: source.value, metadata: { title: result.artifact.title, type: 'markdown', artifactVersion: String(result.artifact.version), goalParentId: String(result.artifact.goalId || ''), savedToFiles: 'true', status: 'complete' } }, { select: false })
             if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
-            setStatus(state.dirty ? `Saved copy “${destination.fileName}”; this draft still has unsaved changes` : `Saved “${destination.fileName}” to Files`, state.dirty ? '' : 'saved')
+			const reviewBoundCopy = Boolean(String(result?.qualityState || '').trim() && result?.qualityState !== 'admitted')
+			setStatus(reviewBoundCopy
+			  ? `Saved copy “${destination.fileName}” to Files · review required before final export`
+			  : state.dirty
+			    ? `Saved copy “${destination.fileName}”; this draft still has unsaved changes`
+			    : `Saved “${destination.fileName}” to Files`, state.dirty || reviewBoundCopy ? '' : 'saved')
             return true
           } catch (error) {
             setStatus(error?.message || 'Document copy could not be saved', 'error')
@@ -49035,12 +49066,19 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'divider') runRichCommand('insertHorizontalRule')
         })
         editor.querySelector('[data-doc-block]').addEventListener('change', event => runRichCommand('formatBlock', event.target.value))
-        editor.querySelector('[data-doc-image-alt]').addEventListener('change', event => {
+        const documentImageAltInput = editor.querySelector('[data-doc-image-alt]')
+        const documentImageCaptionInput = editor.querySelector('[data-doc-image-caption]')
+        documentImageAltInput.addEventListener('beforeinput', () => stageDocumentBeforeInput('image-alt'))
+        documentImageAltInput.addEventListener('input', event => observeDocumentImageFieldInput('image-alt', () => {
           const image = selectedDocumentImage()
-          if (image) commitDocumentMutation(() => { image.alt = sanitizeDocumentImageAlt(event.target.value) })
-          syncDocumentImageTools()
-        })
-        editor.querySelector('[data-doc-image-caption]').addEventListener('change', event => updateDocumentImagePresentation({ caption: event.target.value }))
+          if (!image) return false
+          image.alt = sanitizeDocumentImageAlt(event.target.value)
+          return true
+        }))
+        documentImageAltInput.addEventListener('blur', finishDocumentTypingBatch)
+        documentImageCaptionInput.addEventListener('beforeinput', () => stageDocumentBeforeInput('image-caption'))
+        documentImageCaptionInput.addEventListener('input', event => observeDocumentImageFieldInput('image-caption', () => mutateDocumentImagePresentation({ caption: event.target.value })))
+        documentImageCaptionInput.addEventListener('blur', finishDocumentTypingBatch)
         editor.querySelector('[data-doc-image-width]').addEventListener('change', event => updateDocumentImagePresentation({ width: Number(event.target.value) }))
         const formattingToolbar = editor.querySelector('[role="toolbar"]')
         formattingToolbar.addEventListener('keydown', event => {
@@ -49205,6 +49243,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		const optionsHaveDeckPresentCapability = Object.prototype.hasOwnProperty.call(options || {}, 'canPresent')
 		const optionsHaveDeckExportCapability = Object.prototype.hasOwnProperty.call(options || {}, 'canExport')
 		const deckProjectedPublication = {
+		  managed: deckManagedAuthoredResult,
 		  qualityState: String(options?.qualityState || '').trim(),
 		  ...(optionsHaveDeckPresentCapability ? { canPresent: options.canPresent === true } : {}),
 		  ...(optionsHaveDeckExportCapability ? { canExport: options.canExport === true } : {})
@@ -49223,6 +49262,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           selectedId: '',
           history: [],
           future: [],
+          savedSnapshot: null,
           dirty: false,
           saving: false,
           saveError: '',
@@ -49236,6 +49276,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  managedAuthoredResult: deckManagedAuthoredResult,
 		  canPresent: initialDeckCanPresent,
 		  canExport: initialDeckCanExport,
+		  savedCanPresent: initialDeckCanPresent,
+		  savedCanExport: initialDeckCanExport,
           savedToFiles: payload?.artifact?.savedToFiles === true || String(payload?.artifact?.metadata?.savedToFiles || '').toLowerCase() === 'true',
           options
         }
@@ -49455,6 +49497,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const zoomInput = editor.querySelector('[data-zoom]')
         const zoomOutput = editor.querySelector('[data-zoom-output]')
         let lastInspectorSelectionId = ''
+		let deckTitleMutationBefore = null
 
 		function updateDeckPublicationControls() {
 		  const reviewNeeded = state.managedAuthoredResult && state.canPresent !== true
@@ -49490,8 +49533,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  )
 		  state.qualityState = String(capability?.qualityState || state.qualityState || '').trim()
 		  state.managedAuthoredResult = capability?.managed === true || state.managedAuthoredResult
-		  state.canPresent = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'present')
-		  state.canExport = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'export')
+		  state.savedCanPresent = artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'present')
+		  state.savedCanExport = artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'export')
+		  state.canPresent = state.dirty ? false : state.savedCanPresent
+		  state.canExport = state.dirty ? false : state.savedCanExport
 		  updateDeckPublicationControls()
 		  return state.canPresent === true || state.canExport === true
 		}
@@ -49599,19 +49644,75 @@ Wrap the entire export in one code block. After the code block, say whether the 
           options.entry = entry
           return entry
         }
-        function checkpoint() {
-          state.history.push(clone(state.deck))
-          if (state.history.length > 60) state.history.shift()
+        function deckSnapshot() {
+          return {
+            deck: clone(state.deck),
+            title: titleInput.value,
+            slideIndex: state.slideIndex,
+            selectedId: state.selectedId
+          }
+        }
+        function deckSnapshotsHaveSameContent(left, right) {
+          if (!left || !right || left.title !== right.title) return false
+          return JSON.stringify(left.deck) === JSON.stringify(right.deck)
+        }
+        function deckSnapshotMatchesSaved(snapshot) {
+          return deckSnapshotsHaveSameContent(snapshot, state.savedSnapshot)
+        }
+        function updateDeckHistoryControls() {
+          editor.querySelectorAll('[data-action="undo"]').forEach(button => { button.disabled = state.history.length === 0 })
+          editor.querySelectorAll('[data-action="redo"]').forEach(button => { button.disabled = state.future.length === 0 })
+        }
+        function pushDeckHistory(snapshot) {
+          const previous = state.history[state.history.length - 1]
+          if (!deckSnapshotsHaveSameContent(previous, snapshot)) {
+            state.history.push(snapshot)
+            if (state.history.length > 60) state.history.shift()
+          }
           state.future = []
+          updateDeckHistoryControls()
+        }
+        function finishDeckTitleMutation() {
+          if (!deckTitleMutationBefore) return
+          const before = deckTitleMutationBefore
+          deckTitleMutationBefore = null
+          if (!deckSnapshotsHaveSameContent(before, deckSnapshot())) pushDeckHistory(before)
+        }
+        function checkpoint() {
+          pushDeckHistory(deckSnapshot())
           state.dirty = true
           state.saveError = ''
 		  revokeDeckPublication()
         }
         function restore(snapshot) {
-          state.deck = normalizeDeckDocument(snapshot)
-          state.selectedId = ''
+          const normalized = snapshot?.deck ? snapshot : { deck: snapshot, title: titleInput.value, slideIndex: state.slideIndex, selectedId: '' }
+          state.deck = normalizeDeckDocument(normalized.deck)
+          titleInput.value = String(normalized.title ?? state.title ?? 'Untitled deck')
+          state.slideIndex = Math.max(0, Math.min(state.deck.slides.length - 1, Number(normalized.slideIndex) || 0))
+          state.selectedId = slide()?.elements.some(element => element.id === normalized.selectedId) ? normalized.selectedId : ''
+          state.dirty = !deckSnapshotMatchesSaved(deckSnapshot())
+          state.saveError = ''
+          editor.setAttribute('aria-label', `Deck Studio — ${titleInput.value.trim() || 'Untitled deck'}`)
+		  if (state.managedAuthoredResult && state.dirty) revokeDeckPublication()
+		  else {
+			state.canPresent = state.savedCanPresent
+			state.canExport = state.savedCanExport
+			updateDeckPublicationControls()
+		  }
           renderAll()
         }
+		function applyDeckHistory(direction) {
+		  finishDeckTitleMutation()
+		  const source = direction === 'undo' ? state.history : state.future
+		  const destination = direction === 'undo' ? state.future : state.history
+		  if (!source.length) return false
+		  destination.push(deckSnapshot())
+		  if (destination.length > 60) destination.shift()
+		  restore(source.pop())
+		  updateDeckHistoryControls()
+		  return true
+		}
+		state.savedSnapshot = deckSnapshot()
 
         function elementImageUrl(element) {
           if (element.dataUrl) return element.dataUrl
@@ -49802,8 +49903,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           indicator.textContent = `${state.slideIndex + 1} / ${state.deck.slides.length}`
           editor.querySelectorAll('[data-action="prev-slide"], [data-action="move-slide-earlier"]').forEach(button => { button.disabled = state.slideIndex === 0 })
           editor.querySelectorAll('[data-action="next-slide"], [data-action="move-slide-later"]').forEach(button => { button.disabled = state.slideIndex === state.deck.slides.length - 1 })
-          editor.querySelectorAll('[data-action="undo"]').forEach(button => { button.disabled = state.history.length === 0 })
-          editor.querySelectorAll('[data-action="redo"]').forEach(button => { button.disabled = state.future.length === 0 })
+          updateDeckHistoryControls()
           editor.querySelectorAll('[data-action="delete-slide"]').forEach(button => { button.disabled = state.deck.slides.length <= 1 })
         }
 
@@ -50043,6 +50143,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             const file = input.files?.[0]
             if (!file) return
             if (state.dirty && !(await saveDeck(false))) return
+			const beforeUpload = deckSnapshot()
             const form = new FormData()
             form.append('artifactId', state.artifactId)
             form.append('expectedVersion', String(state.version))
@@ -50059,10 +50160,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
               state.version = Number(result?.artifact?.version || state.version + 1)
               state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
               state.selectedId = String(result?.element?.id || '')
-              state.history = []
-              state.future = []
+			  pushDeckHistory(beforeUpload)
               state.dirty = false
 			  revokeDeckPublication()
+			  state.savedCanPresent = state.canPresent
+			  state.savedCanExport = state.canExport
+			  state.savedSnapshot = deckSnapshot()
               imageStatus.dataset.state = 'done'
               imageStatus.textContent = 'Image uploaded and added to this slide.'
               const updatedEntry = mergeArtifactUpdate(result.artifact)
@@ -50376,6 +50479,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         async function saveDeck(closeAfter = true) {
           if (!requireDeckWrite()) return false
           if (state.saving) return false
+		  finishDeckTitleMutation()
           const deck = deckWithoutLocalImages()
           if (!deck) return false
           const requestedTitle = titleInput.value.trim() || state.title || 'Untitled deck'
@@ -50406,11 +50510,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			else if (state.managedAuthoredResult && result?.updated === true) state.canExport = false
             titleInput.value = state.title
             editor.setAttribute('aria-label', `Deck Studio — ${state.title}`)
-            state.history = []
-            state.future = []
             state.dirty = false
             state.saveError = ''
+			state.savedCanPresent = state.canPresent
+			state.savedCanExport = state.canExport
+			state.savedSnapshot = deckSnapshot()
 			updateDeckPublicationControls()
+			updateDeckHistoryControls()
             const updatedEntry = mergeArtifactUpdate(result.artifact)
             if (destination) {
               await saveDeckToFiles(destination)
@@ -50444,6 +50550,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
         async function saveDeckCopy() {
           if (!requireDeckWrite() || state.saving) return false
+		  finishDeckTitleMutation()
           const deck = deckWithoutLocalImages()
           if (!deck) return false
           const defaultName = `${titleInput.value.trim() || state.title} copy`
@@ -50479,11 +50586,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
             }
             const entry = {
               id: result.artifact.id,
-              metadata: { title: result.artifact.title, type: result.artifact.type, artifactVersion: String(result.artifact.version), source: 'scout_thread', status: 'complete', savedToFiles: 'true' }
+              metadata: { title: result.artifact.title, type: result.artifact.type, artifactVersion: String(result.artifact.version), goalParentId: String(result.artifact.goalId || ''), source: 'scout_thread', status: 'complete', savedToFiles: 'true' }
             }
             addArtifactEntry(entry, { select: false })
             if (typeof loadFilesSurface === 'function') loadFilesSurface(true)
-            showToast({ text: `Saved “${destination.fileName}” to Files`, kind: 'done' })
+			const reviewBoundCopy = Boolean(String(result?.qualityState || '').trim() && result?.qualityState !== 'admitted')
+			showToast({ text: reviewBoundCopy
+			  ? `Saved “${destination.fileName}” to Files as a review-only draft`
+			  : state.dirty
+			    ? `Saved copy “${destination.fileName}”; this deck still has unsaved changes`
+			    : `Saved “${destination.fileName}” to Files`, kind: 'done' })
             return true
           } catch (error) {
             showToast({ text: error?.message || 'Deck copy could not be saved.', kind: 'error' })
@@ -50501,6 +50613,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (!prompt) { editor.querySelector('[data-image-prompt]')?.focus(); return }
           const placement = String(editor.querySelector('[data-image-placement]')?.value || 'image')
           if (state.dirty && !(await saveDeck(false))) return
+		  const beforeGeneration = deckSnapshot()
           state.imageGenerating = true
           imageStatus.dataset.state = 'working'
           imageStatus.textContent = 'Scout is generating this image…'
@@ -50516,10 +50629,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
             state.version = Number(result?.artifact?.version || state.version + 1)
             state.sceneRef = String(result?.artifact?.sceneRef || state.sceneRef).trim()
             state.selectedId = String(result?.element?.id || '')
-            state.history = []
-            state.future = []
+			pushDeckHistory(beforeGeneration)
             state.dirty = false
 			revokeDeckPublication()
+			state.savedCanPresent = state.canPresent
+			state.savedCanExport = state.canExport
+			state.savedSnapshot = deckSnapshot()
             imageStatus.dataset.state = 'done'
             imageStatus.textContent = 'Image generated and added to this slide.'
             const updatedEntry = mergeArtifactUpdate(result.artifact)
@@ -50647,8 +50762,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           else if (action === 'delete-slide') deleteSlide()
           else if (action === 'prev-slide' && state.slideIndex > 0) { state.slideIndex--; state.selectedId = ''; renderAll() }
           else if (action === 'next-slide' && state.slideIndex < state.deck.slides.length - 1) { state.slideIndex++; state.selectedId = ''; renderAll() }
-          else if (action === 'undo' && state.history.length) { state.future.push(clone(state.deck)); restore(state.history.pop()) }
-          else if (action === 'redo' && state.future.length) { state.history.push(clone(state.deck)); restore(state.future.pop()) }
+          else if (action === 'undo') applyDeckHistory('undo')
+          else if (action === 'redo') applyDeckHistory('redo')
           else if (action === 'generate-image') generateImage()
         })
 
@@ -50659,13 +50774,22 @@ Wrap the entire export in one code block. After the code block, say whether the 
           renderAll()
         })
 
+        titleInput.addEventListener('focus', () => { if (!deckTitleMutationBefore) deckTitleMutationBefore = deckSnapshot() })
+        titleInput.addEventListener('beforeinput', () => { if (!deckTitleMutationBefore) deckTitleMutationBefore = deckSnapshot() })
         titleInput.addEventListener('input', () => {
           if (!requireDeckWrite()) return
-          state.dirty = true
-		  revokeDeckPublication()
+		  state.dirty = !deckSnapshotMatchesSaved(deckSnapshot())
+		  if (state.managedAuthoredResult && state.dirty) revokeDeckPublication()
+		  else if (!state.dirty) {
+			state.canPresent = state.savedCanPresent
+			state.canExport = state.savedCanExport
+			updateDeckPublicationControls()
+		  }
           editor.setAttribute('aria-label', `Deck Studio — ${titleInput.value.trim() || 'Untitled deck'}`)
           updateDeckSaveState()
         })
+		titleInput.addEventListener('change', finishDeckTitleMutation)
+		titleInput.addEventListener('blur', finishDeckTitleMutation)
 
         zoomInput.addEventListener('input', event => {
           state.zoom = Math.max(.5, Math.min(1.4, Number(event.target.value || 100) / 100))
@@ -50724,7 +50848,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             saveDeck(false)
             return
           }
-          if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
+          if (!targetIsEditorField && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
             event.preventDefault()
             editor.querySelector(`[data-action="${event.shiftKey ? 'redo' : 'undo'}"]`)?.click()
             return
@@ -50810,8 +50934,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			capability => {
 			  state.qualityState = String(capability?.qualityState || state.qualityState || '').trim()
 			  state.managedAuthoredResult = capability?.managed === true || state.managedAuthoredResult
-			  state.canPresent = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'present')
-			  state.canExport = !state.dirty && artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'export')
+			  state.savedCanPresent = artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'present')
+			  state.savedCanExport = artifactPublicationCapabilityAllows(capability, deckProjectedPublication, 'export')
+			  state.canPresent = state.dirty ? false : state.savedCanPresent
+			  state.canExport = state.dirty ? false : state.savedCanExport
 			  updateDeckPublicationControls()
 			},
 			{ isActive: () => activeDeckEditor?.element === editor && editor.isConnected }
@@ -67743,8 +67869,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // error / needs_attention — a compact recovery brief: explain what
         // happened, keep the activity record inspectable in place, then offer
         // one obvious continuation and two quieter alternatives.
-        const m = artifact.metadata || {}
-        const message = plan?.blocker || m.blocker || 'The goal stopped before finishing.'
+		const m = artifact.metadata || {}
+		const message = desktopWorkAttentionCopy(
+		  desktopWorkDurableAttentionReason(artifact, plan, null),
+		  desktopWorkAgentName(null, artifact)
+		)
 		const deliveredBeforeFailure = Boolean(
 		  scoutChatThread?.querySelector(`.manifest-card[data-goal-id="${selectorEscape(String(artifact?.id || ''))}"]:not(.manifest-card--held)`)
 		)
@@ -71873,8 +72002,70 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        stack.appendChild(status)
 	      }
 
+	      // The conversation is for people and finished things. Durable work
+	      // records still drive the bottom Activity indicator and right rail,
+	      // but they do not become feed cards unless they contain a real human
+	      // decision or an actual rich result. This mirrors the native timeline
+	      // compactor without deleting any server-owned history.
+	      function scoutThreadTimelineProjection(message) {
+	        const ref = message?.thread || {}
+	        const artifactId = String(ref.artifactId || '').trim()
+	        const resultArtifactId = String(ref.resultArtifactId || '').trim()
+	        const artifact = artifactId
+	          ? artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) || scoutThreadFromChatMessage(message).artifact
+	          : scoutThreadFromChatMessage(message).artifact
+	        const resultArtifact = resultArtifactId
+	          ? artifactEntries.find(candidate => String(candidate?.id || '') === resultArtifactId)
+	          : null
+	        const resultDocument = resultArtifact && artifactIsMarkdownDocument(resultArtifact, ref.resultArtifactType)
+	        const richResult = Boolean(
+	          (resultArtifact && (artifactIsHTMLDeck(resultArtifact) || resultDocument)) ||
+	          (!resultArtifactId && artifact && artifactIsHTMLDeck(artifact) && !String(artifact?.metadata?.goalParentId || '').trim())
+	        )
+	        const plan = artifact ? goalPlanFromArtifact(artifact) : null
+	        const checkpoint = artifact ? (ref.checkpoint || goalPendingCheckpoint(artifact, plan)) : null
+	        return { artifact, resultArtifact, resultDocument, richResult, checkpoint }
+	      }
+
+	      function scoutManifestHasRichDeck(message) {
+	        const manifest = message?.manifest || {}
+	        if (String(manifest.status || '') === 'held') return false
+	        return (Array.isArray(manifest.deliverables) ? manifest.deliverables : []).some(deliverable => {
+	          const artifactId = String(deliverable?.artifactId || '').trim()
+	          const entry = artifactId ? artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) : null
+	          return String(deliverable?.badge || '').toLowerCase() === 'deck' || deliverable?.present === true || Boolean(entry && artifactIsHTMLDeck(entry))
+	        })
+	      }
+
+	      function scoutChatRecordBelongsInTimeline(message) {
+	        const kind = String(message?.kind || 'message')
+	        if (kind === 'message' || kind === 'image') return true
+	        if (kind === 'proposal' && message?.proposal) {
+	          // Scout proposals are pending while status is empty; accepted and
+	          // dismissed are the only durable terminal values. `proposed` is a
+	          // compatibility value from the older task-proposal surface, not a
+	          // requirement for the live Scout decision card.
+	          const status = String(message.proposal.status || '').trim().toLowerCase()
+	          return status === '' || status === 'proposed'
+	        }
+	        if (kind === 'choices') return Boolean(message?.choices) && !String(message.choices.status || '').trim()
+	        if (kind === 'manifest') return scoutManifestHasRichDeck(message)
+	        if ((kind === 'work_result' || kind === 'work_record') && message?.work) {
+	          return Boolean(governedWorkResourcePath(message.work.artifactHref, 'artifact'))
+	        }
+	        if (kind === 'thread' && message?.thread) {
+	          const projection = scoutThreadTimelineProjection(message)
+	          return Boolean(projection.richResult || projection.checkpoint)
+	        }
+	        if (kind === 'artifact' && message?.thread) return scoutThreadTimelineProjection(message).richResult
+	        // Pending-image placeholders and generic work/stage receipts remain
+	        // visible through Activity. Only the finished image rejoins chat.
+	        return false
+	      }
+
 	      function scoutChatMessageRecordNode(message) {
 	        const recordKind = String(message?.kind || '')
+	        if (!scoutChatRecordBelongsInTimeline(message)) return document.createDocumentFragment()
 	        // Workflow children already land as one authored stage receipt in
 	        // the compact process rail. Their generic terminal thread record is
 	        // an internal transport duplicate; rendering it as a full research
@@ -71945,17 +72136,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (recordKind === 'thread' && message.thread) {
 	          feedPrevMsgKey = ''
 	          const run = scoutThreadFromChatMessage(message)
-	          const resultArtifactId = String(message.thread?.resultArtifactId || '').trim()
-	          const resultArtifact = artifactEntries.find(candidate => String(candidate?.id || '') === resultArtifactId)
-	          const resultDocument = resultArtifact && artifactIsMarkdownDocument(resultArtifact, message.thread?.resultArtifactType)
-	          // P0-1: a goal ref mounts the live goalcard in the thread — for
-	          // everyone, across reloads — instead of the research run card
+	          const projection = scoutThreadTimelineProjection(message)
+	          const resultArtifact = projection.resultArtifact
+	          const resultDocument = projection.resultDocument
+	          // A goal ref contributes only a real checkpoint or the exact
+	          // authored result. Lifecycle and launch narration stay in
+	          // Activity instead of becoming a second feed surface.
 	          if (run.artifact && (String(message.intentOutcome || '') === 'start_private_work' || String(message.thread?.mode || '') === 'goal' || isGoalArtifact(run.artifact))) {
-	            const goalNode = scoutGoalRefRecordNode(message, run.artifact)
-	            if (!resultArtifact || (!artifactIsHTMLDeck(resultArtifact) && !resultDocument)) return goalNode
 	            const group = document.createDocumentFragment()
-	            if (artifactIsHTMLDeck(resultArtifact)) group.append(goalNode, scoutHTMLDeckRefRecordNode(message, resultArtifact))
-	            else group.append(goalNode, scoutMarkdownDocumentRefRecordNode(message, resultArtifact))
+	            if (projection.checkpoint) group.appendChild(scoutGoalRefRecordNode(message, run.artifact))
+	            if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) group.appendChild(scoutHTMLDeckRefRecordNode(message, resultArtifact))
+	            else if (resultDocument) group.appendChild(scoutMarkdownDocumentRefRecordNode(message, resultArtifact))
 	            return group
 	          }
 	          if (resultArtifact && artifactIsHTMLDeck(resultArtifact)) {
@@ -71967,27 +72158,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (run.artifact && artifactIsHTMLDeck(run.artifact)) {
 	            return scoutHTMLDeckRefRecordNode(message, run.artifact)
 	          }
-	          // Process children already have a single authored run-log row.
-	          // Rendering their worker receipt as a second full report card is
-	          // the feed clutter seen in production, so fold the exact bound
-	          // artifact into the same stage spine.
-	          if (run.artifact && String(run.artifact?.metadata?.goalParentId || '').trim()
-	              && (packagingStudioStagePresentationFor(run.artifact) || String(run.artifact?.metadata?.processStage || run.artifact?.metadata?.goalSubtaskId || '').trim())) {
-	            return scoutStageArtifactNode({ ...message, kind: 'artifact' })
-	          }
 	          runlogMarkerGoalId = ''
-	          const card = scoutChatResearchNode(run)
-	          // the launch reply is a real committed scout message (design copy:
-	          // "on it — research workstream kicked off. …") — render it as a
-	          // scout bubble with the run card beneath, not just the card, so
-	          // the sidebar preview text actually appears inside the thread
-	          const replyText = String(message?.text || '').trim()
-	          if (replyText && replyText !== String(message.thread?.query || '').trim()) {
-	            const group = document.createDocumentFragment()
-	            group.append(scoutThreadReplyNode(replyText, message), card)
-	            return group
-	          }
-	          return card
+	          return document.createDocumentFragment()
 	        }
 	        if (recordKind === 'artifact' && message.thread) {
 	          runlogMarkerGoalId = ''
@@ -72268,24 +72440,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function scoutChatWorkRecordNode(message) {
 	        const work = message?.work || {}
 	        const card = document.createElement('article')
-	        card.className = 'scout-chat-work-record'
+	        card.className = 'scout-chat-work-record scout-chat-work-record--deliverable'
 	        card.dataset.messageId = String(message?.id || '')
+	        card.dataset.resultArtifactHref = governedWorkResourcePath(work.artifactHref, 'artifact')
 	        card.setAttribute('aria-label', `${String(work.title || 'Completed work')}. ${String(work.status || 'complete')}. ${String(work.summary || '')}`)
 
 	        const head = document.createElement('div')
 	        head.className = 'scout-chat-work-record__head'
-	        const identity = bfEl('span', 'scout-chat-work-record__identity', `${String(work.workerName || 'Scout')} · completed work`)
-	        const status = bfEl('span', 'scout-chat-work-record__status', String(work.status || 'complete').replaceAll('_', ' '))
+	        const identity = bfEl('span', 'scout-chat-work-record__identity', `${String(work.workerName || 'Scout')} · deliverable`)
+	        const status = bfEl('span', 'scout-chat-work-record__status', 'ready')
 	        head.append(identity, status)
 
 	        const title = bfEl('h3', 'scout-chat-work-record__title', String(work.title || 'Completed work'))
 	        const summary = bfEl('p', 'scout-chat-work-record__summary', String(work.summary || message?.text || ''))
-	        const progress = document.createElement('div')
-	        progress.className = 'scout-chat-work-record__progress'
-	        const progressBar = document.createElement('span')
-	        progressBar.style.width = `${Math.max(0, Math.min(100, Number(work.progressPercent || 0)))}%`
-	        progress.appendChild(progressBar)
-	        const stage = bfEl('div', 'scout-chat-work-record__stage', `${String(work.currentStage || 'complete').replaceAll('_', ' ')} · ${Math.round(Number(work.progressPercent || 100))}%`)
 
 	        const actions = document.createElement('div')
 	        actions.className = 'scout-chat-work-record__actions'
@@ -72301,10 +72468,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        addAction(work.artifactHref, 'Open', 'artifact', true)
 	        addAction(work.evidenceHref, 'View source', 'evidence')
-	        const fence = bfEl('span', 'scout-chat-work-record__fence', work.providerExecutionFenced ? 'deterministic local · provider fenced' : 'provider-backed')
+	        const fence = bfEl('span', 'scout-chat-work-record__fence', work.providerExecutionFenced ? 'verified local result' : 'verified result')
 	        actions.appendChild(fence)
 
-	        card.append(head, title, summary, progress, stage, actions)
+	        card.append(head, title, summary, actions)
 	        return card
 	      }
 
@@ -73940,11 +74107,29 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return String(message?.thread?.agentName || meta.agentName || meta.agentDisplayName || meta.workerName || 'Scout').trim() || 'Scout'
 	      }
 
+	      function desktopWorkDurableAttentionReason(artifact, plan, ref) {
+	        // The plan blocker is the durable source of truth for a goal. It may
+	        // contain stage ids and validator language, so it is input to the
+	        // closed copy mapper below and is never rendered verbatim.
+	        return [
+	          plan?.blocker,
+	          artifact?.metadata?.goalBlocker,
+	          artifact?.metadata?.error,
+	          ref?.attentionReason
+	        ].map(value => String(value || '').trim()).filter(Boolean).join(' ')
+	      }
+
 	      function desktopWorkAttentionCopy(reason, agentName = 'Scout') {
 	        const value = String(reason || '').toLowerCase()
-	        if (value === 'output_truncated') return `${agentName} reached the final report, but the response was cut off before a deliverable could be accepted.`
-	        if (value === 'quality_gate_failed') return `${agentName} finished a draft, but it did not meet the evidence and quality bar.`
-	        if (value === 'provider_unavailable') return 'The research provider became unavailable before the work could finish.'
+	        if (value === 'output_truncated' || value.includes('max_output_truncation')) return `${agentName} reached the final report, but the response was cut off before a deliverable could be accepted.`
+	        if (value === 'research_scope_failed' || value.includes('bounded comparative evidence lane') || value.includes('authorized direct-evidence dimensions') || value.includes('research scope')) {
+	          return `${agentName} kept the evidence bar in place, but the research brief was too broad or drifted from the decision you asked about. Retry will narrow the research scope before the report continues.`
+	        }
+	        if (value === 'evidence_gate_failed' || value.includes('external-evidence format failure') || value.includes('source gate stayed closed') || value.includes('evidence dossier') || value.includes('evidence admission') || value.includes('entailment') || value.includes('unsupported factual material')) {
+	          return `${agentName} could not verify that the available sources directly supported the report's claims. The evidence gate stayed closed; retry will return to the unsupported evidence.`
+	        }
+	        if (value === 'quality_gate_failed' || value.includes('output_validation_error')) return `${agentName} finished a draft, but it did not meet the evidence and quality bar.`
+	        if (value === 'provider_unavailable' || value.includes('provider unavailable') || value.includes('transport_error')) return 'The research provider became unavailable before the work could finish.'
 	        return `${agentName}'s run stopped before delivery.`
 	      }
 
@@ -74000,6 +74185,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const agentName = desktopWorkAgentName(message, artifact)
 	        const family = desktopWorkFamily(ref, artifact)
 	        const plan = goalPlanFromArtifact(artifact)
+	        const attentionReason = desktopWorkDurableAttentionReason(artifact, plan, ref)
 	        const isPackagingStudio = String(plan?.processId || plan?.toolTemplate || artifact?.metadata?.processId || '').trim() === 'packaging_studio'
 	        const activityPlan = isPackagingStudio && String(plan?.processId || plan?.toolTemplate || '').trim() !== 'packaging_studio'
 	          ? { ...plan, processId: 'packaging_studio' }
@@ -74015,7 +74201,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? packagingStudioCheckpointQuestion(activityPlan, customerCheckpoint)
 	            : customerProgress.current?.sentence || 'Scout is building the presentation.'
 	          : terminalError
-	          ? (deliveredResult ? `${agentName} delivered the package; a follow-up check needs attention.` : desktopWorkAttentionCopy(ref.attentionReason, agentName))
+	          ? (deliveredResult ? `${agentName} delivered the package; a follow-up check needs attention.` : desktopWorkAttentionCopy(attentionReason, agentName))
 	          : terminalComplete
 	            ? compactArtifactPreview(String(artifact?.text || `${agentName} delivered this work.`))
 	            : desktopSafeWorkNote(artifact?.metadata?.progressNote || ref.progressNote, `${agentName} is ${phase.label.toLowerCase()}.`)
@@ -74194,11 +74380,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!chatWorkIndicator || !desktopChatLayoutQuery.matches) return
 	        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
 	        const workMessages = messages.filter(candidate => String(candidate?.kind || '') === 'thread' && candidate?.thread)
-	        const activeMessage = workMessages.slice().reverse().find(candidate => {
+	        const surfacedStatuses = new Set(['queued', 'running', 'approval_required', 'needs_input', 'parked', 'error', 'failed', 'needs_attention', 'rejected'])
+	        const activityMessages = workMessages.filter(candidate => {
 	          const artifact = artifactEntries.find(entry => String(entry?.id || '') === String(candidate.thread.artifactId || ''))
 	          const status = String(artifactStatusValue(artifact) || candidate.thread.status || '').toLowerCase()
-	          return ['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(status)
+	          return surfacedStatuses.has(status)
 	        })
+	        // Match native's root-first ownership: a goal or direct run outranks
+	        // delegated stage receipts, while a stage remains a truthful fallback
+	        // if it is the only activity record the viewer can access.
+	        const activeMessage = activityMessages.slice().reverse().find(candidate =>
+	          String(candidate.thread.mode || '').toLowerCase() === 'goal' || !String(candidate.thread.delegatedBy || '').trim()
+	        ) || activityMessages[activityMessages.length - 1]
 	        const message = activeMessage
 	        if (!message) {
 	          chatWorkIndicator.hidden = true
@@ -74212,6 +74405,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const status = String(artifactStatusValue(artifact) || message.thread.status || 'running')
 	        const normalizedStatus = status.toLowerCase()
 	        const complete = ['complete', 'completed', 'published'].includes(normalizedStatus)
+	        const failed = ['error', 'failed', 'needs_attention', 'rejected'].includes(normalizedStatus)
 	        const phase = desktopWorkPhase(artifact, status, message.thread)
 	        const agent = desktopWorkAgentName(message, artifact)
 	        const family = desktopWorkFamily(message.thread, artifact)
@@ -74226,11 +74420,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const event = complete ? title : (update ? compactArtifactPreview(update) : phase.label)
 	        chatWorkIndicatorText.textContent = complete
 	          ? `${agent} delivered ${family.toLowerCase()} · ${event}`
+	          : failed
+	            ? `${agent} · ${family} · Needs attention · ${event}`
 	          : packaging
 	            ? `${agent} · Presentation · Phase ${customerProgress.currentNumber} of ${customerProgress.count} · ${event}${pct === null ? '' : ` · ${pct}%`}`
 	            : `${agent} · ${family} · ${event}${Number.isFinite(pct) ? ` · ${Math.round(pct)}%` : ''}`
 	        chatWorkIndicator.dataset.messageId = String(message.id || '')
-	        chatWorkIndicator.dataset.workState = complete ? 'complete' : normalizedStatus
+	        chatWorkIndicator.dataset.workState = complete ? 'complete' : failed ? 'failed' : normalizedStatus
 	        if (chatWorkIndicatorActions) {
 	          chatWorkIndicatorActions.replaceChildren()
 	          if (complete && artifact) {
@@ -75043,8 +75239,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return card
 	      }
 
-	      // The LAST goal-ref message mounts one outcome-first work card at every
-	      // responsive width. Earlier refs collapse to a marker that jumps to it.
+	      // Only the latest unresolved decision may promote a goal ref into the
+	      // conversation. Older lifecycle receipts remain in Activity and never
+	      // become jump markers or status-card clutter.
 	      function scoutGoalRefRecordNode(message, artifact) {
 	        // The run identity is immutable across the artifactless -> material
 	        // artifact transition. Artifact identity remains for Open/Save only;
@@ -75060,31 +75257,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        const isLatest = !lastRefId || String(message?.id || '') === lastRefId
 	        if (!isLatest) {
-	          // §2: consecutive same-goal markers collapse — the first survives,
-	          // the rest render nothing
-	          if (runlogMarkerGoalId === goalId) {
-	            return document.createDocumentFragment()
-	          }
-	          runlogMarkerGoalId = goalId
-	          const marker = document.createElement('p')
-	          marker.className = 'scout-chat-system goalcard-marker'
-	          const jump = bfEl('button', 'goalcard__link', `▸ ${goalArtifactTitle(artifact)} — jump to the card`)
-	          jump.type = 'button'
-	          jump.addEventListener('click', () => {
-	            scoutChatThread.querySelector(`.scout-chat-work-card[data-work-artifact-id="${selectorEscape(goalId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-	          })
-	          marker.appendChild(jump)
-	          return marker
+	          return document.createDocumentFragment()
 	        }
 	        runlogMarkerGoalId = ''
+	        const plan = goalPlanFromArtifact(artifact)
+	        if (!goalPendingCheckpoint(artifact, plan) && !message?.thread?.checkpoint) return document.createDocumentFragment()
 	        const card = scoutDesktopGoalWorkCardNode(message, artifact)
 	        if (!card) return document.createDocumentFragment()
-	        const replyText = String(message?.text || '').trim()
-	        if (replyText && replyText !== String(message.thread?.query || '').trim()) {
-	          const group = document.createDocumentFragment()
-	          group.append(scoutThreadReplyNode(replyText, message), card)
-	          return group
-	        }
 	        return card
 	      }
 
@@ -77563,9 +77742,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      preview.textContent = body
 	    }
 	    if (attention) {
-	      const attentionReason = String(card.dataset.attentionReason || '').toLowerCase()
+	      const workPlan = goalPlanFromArtifact(artifact)
+	      const attentionReason = desktopWorkDurableAttentionReason(artifact, workPlan, {
+	        attentionReason: card.dataset.attentionReason
+	      })
 	      const copy = !error ? ''
-	        : `${desktopWorkAttentionCopy(attentionReason)} Inspect the failure or retry the research.`
+	        : `${desktopWorkAttentionCopy(attentionReason)} Inspect the run activity or retry from the blocker.`
 	      attention.hidden = !copy
 	      attention.textContent = copy
 	    }

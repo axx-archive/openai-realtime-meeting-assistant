@@ -7,6 +7,7 @@ const historicalResultKindByProcessId: Readonly<Record<string, string>> = {
   packaging_studio: 'html_deck',
   document_report: 'markdown',
 };
+const governedWorkArtifactHref = /^\/api\/stride\/v1\/work\/runs\/[a-z0-9_-]+\/artifact$/u;
 
 /**
  * Returns the server-declared result kind, or a compatibility kind derived
@@ -22,7 +23,21 @@ export function workResultArtifactKind(work: ScoutWorkThreadRef | null | undefin
 }
 
 export function isScoutWorkMessage(message: ScoutMessage | null | undefined): boolean {
-  return String(message?.kind ?? '').trim().toLowerCase() === 'thread' && Boolean(message?.thread);
+  const kind = String(message?.kind ?? '').trim().toLowerCase();
+  return (kind === 'thread' || kind === 'artifact') && Boolean(message?.thread);
+}
+
+function isGovernedWorkMessage(message: ScoutMessage | null | undefined): boolean {
+  const kind = String(message?.kind ?? '').trim().toLowerCase();
+  return (kind === 'work_result' || kind === 'work_record') && Boolean(message?.work);
+}
+
+function governedWorkHasRichResult(message: ScoutMessage | null | undefined): boolean {
+  if (!isGovernedWorkMessage(message)) return false;
+  const status = String(message?.work?.status ?? '').trim().toLowerCase();
+  const href = String(message?.work?.artifactHref ?? '').trim();
+  return ['complete', 'completed', 'published'].includes(status)
+    && governedWorkArtifactHref.test(href);
 }
 
 export function workMessageHasActionableDecision(message: ScoutMessage | null | undefined): boolean {
@@ -60,31 +75,58 @@ function primaryResultKey(work: ScoutWorkThreadRef | undefined): string {
 export function compactThreadWorkMessages(messages: readonly ScoutMessage[]): ScoutMessage[] {
   const latestResultIndex = new Map<string, number>();
   messages.forEach((message, index) => {
-    if (!workMessageHasPrimaryResult(message)) return;
-    const key = primaryResultKey(message.thread);
+    const key = workMessageHasPrimaryResult(message)
+      ? primaryResultKey(message.thread)
+      : governedWorkHasRichResult(message)
+        ? String(message.work?.artifactHref ?? '').trim()
+        : '';
     if (key) latestResultIndex.set(key, index);
   });
 
   return messages.filter((message, index) => {
+    const kind = String(message.kind ?? '').trim().toLowerCase();
+    if (isGovernedWorkMessage(message)) {
+      if (!governedWorkHasRichResult(message)) return false;
+      const key = String(message.work?.artifactHref ?? '').trim();
+      return Boolean(key) && latestResultIndex.get(key) === index;
+    }
+    // A proposed action is a real decision. Once accepted or dismissed, its
+    // lifecycle belongs in Activity rather than becoming launch narration in
+    // the conversation.
+    if (kind === 'proposal' && message.proposal) {
+      return !String(message.proposal.status ?? '').trim();
+    }
     if (!isScoutWorkMessage(message)) return true;
     if (workMessageHasActionableDecision(message)) return true;
     if (workMessageHasPrimaryResult(message)) {
       const key = primaryResultKey(message.thread);
       return Boolean(key) && latestResultIndex.get(key) === index;
     }
-    const status = String(message.thread?.status ?? '').trim().toLowerCase();
-    if (['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(status)) return false;
-    const processId = String(message.thread?.processId ?? '').trim();
-    const mode = String(message.thread?.mode ?? '').trim().toLowerCase();
-    // Goal/process stage records live in Activity. Standalone terminal work
-    // (for example a direct Research run) remains a real deliverable card.
-    return !processId && mode !== 'goal';
+    // A generic work reference is activity, even when it reaches a terminal
+    // state. The server projects a real final artifact through the explicit
+    // result fields above, which renders as rich media. Keeping a generic
+    // terminal card as a substitute is what produced the repeated “Scout ·
+    // Work” wall in channels. Historical/untyped references remain available
+    // from the viewer-local Activity surface and Files, never as chat spam.
+    return false;
   });
 }
 
 export function latestScoutWorkMessage(messages: readonly ScoutMessage[]): ScoutMessage | null {
+  let fallback: ScoutMessage | null = null;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (isScoutWorkMessage(messages[index])) return messages[index];
+    const message = messages[index];
+    if (!isScoutWorkMessage(message)) continue;
+    fallback ??= message;
+    if (workMessageHasPrimaryResult(message) || workMessageHasActionableDecision(message)) return message;
+    const mode = String(message.thread?.mode ?? '').trim().toLowerCase();
+    if (mode === 'goal') return message;
+    const delegatedBy = String(message.thread?.delegatedBy ?? '').trim();
+    const status = String(message.thread?.status ?? '').trim().toLowerCase();
+    const terminal = ['complete', 'completed', 'published'].includes(status);
+    // A direct active/failed run may not have a final result yet. It can own
+    // the pill; a completed sub-agent/stage card cannot outrank its root.
+    if (!delegatedBy && !terminal) return message;
   }
-  return null;
+  return fallback;
 }

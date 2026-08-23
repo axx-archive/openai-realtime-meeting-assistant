@@ -253,6 +253,73 @@ func TestResearchReportPrintHTMLInlinesOnlyBoundedLocalImages(t *testing.T) {
 	}
 }
 
+func TestResearchReportPrintHTMLPreservesNativeImagePresentationMetadata(t *testing.T) {
+	setupIsolatedBlobStore(t)
+	png := tinyPNG(t)
+	ref, err := putBlob(png, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets, err := json.Marshal([]artifactAsset{{Ref: ref, Mime: "image/png", Name: "field.png", Kind: "image"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join([]string{
+		"## Visual evidence",
+		"",
+		"![Attached field](/artifacts/blob?ref=" + ref + "&name=field.png#stride-doc-image?width=50&align=right&caption=Measured+field+%3Cproof%3E)",
+		"",
+		"![Remote campaign](https://images.example.test/campaign.jpg?view=wide&v=2#stride-doc-image?width=25&align=left&caption=Campaign+reference)",
+	}, "\n")
+	doc := renderResearchReportPrintHTML(meetingMemoryEntry{
+		Text:     body,
+		Metadata: map[string]string{artifactAssetsMetadataKey: string(assets)},
+	})
+
+	attachedData := "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	for _, want := range []string{
+		`class="report-image report-image--width-50 report-image--align-right"><img src="` + attachedData + `" alt="Attached field">`,
+		`<span class="report-image__caption">Measured field &lt;proof&gt;</span>`,
+		`class="report-image report-image--width-25 report-image--align-left report-image--reference"`,
+		`<span class="report-image__eyebrow">External image reference</span>`,
+		`<span class="report-image__caption">Campaign reference</span>`,
+		`External image not embedded in this PDF · <a href="https://images.example.test/campaign.jpg?view=wide&amp;v=2">Source · images.example.test</a>`,
+	} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("presentation-faithful image export missing %q:\n%s", want, doc)
+		}
+	}
+	for _, unwanted := range []string{
+		"#stride-doc-image?",
+		`src="https://images.example.test`,
+		`<span class="report-image__caption">Attached field</span>`,
+	} {
+		if strings.Contains(doc, unwanted) {
+			t.Fatalf("presentation metadata or unsafe fallback leaked %q:\n%s", unwanted, doc)
+		}
+	}
+	for _, css := range []string{
+		`.report-image--width-50{width:50%}`,
+		`.report-image--align-right{margin-left:auto;margin-right:0;text-align:right}`,
+	} {
+		if !strings.Contains(doc, css) {
+			t.Fatalf("print stylesheet does not implement %q", css)
+		}
+	}
+}
+
+func TestReportPrintImagePresentationRejectsUnboundedOrUnknownLayoutTokens(t *testing.T) {
+	presentation := parseReportPrintImagePresentation("https://example.test/image.jpg#stride-doc-image?width=90&align=justify&caption=One%09two%0Athree%00")
+	if presentation.source != "https://example.test/image.jpg" || presentation.width != 100 || presentation.align != "center" || presentation.caption != "One two three" {
+		t.Fatalf("unexpected bounded presentation: %+v", presentation)
+	}
+
+	oversized := parseReportPrintImagePresentation("https://example.test/image.jpg#stride-doc-image?caption=" + strings.Repeat("x", reportPrintMaxImageParamsBytes+1))
+	if oversized.source != "https://example.test/image.jpg" || oversized.width != 100 || oversized.align != "center" || oversized.caption != "" {
+		t.Fatalf("oversized presentation parameters must be stripped and ignored: %+v", oversized)
+	}
+}
+
 func TestArtifactExportPDFMarkdownQueuesLocalImageBytesWithoutRemoteFetch(t *testing.T) {
 	_, member := shareLinkTestEnv(t)
 	queueDir := setupRenderSidecarEnv(t)

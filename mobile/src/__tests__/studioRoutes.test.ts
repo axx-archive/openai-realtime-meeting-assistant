@@ -125,6 +125,7 @@ test('documents expose Edit and full-screen actions while unsupported artifacts 
     'studio-preview-stub:../api/client': `export const api={};`,
     'studio-preview-stub:../config': `export const API_BASE_URL='https://example.test';`,
     'studio-preview-stub:../api/requestHelpers': `export const buildApiUrl=(_base,path)=>path;`,
+    'studio-preview-stub:../artifacts/nativeDeckViewer': `export const nativeTextArtifactIsRenderable=value=>{const text=String(value??'').trim();if(!text||text.startsWith('<'))return false;try{JSON.parse(text);return false}catch{return true}};`,
     'studio-preview-stub:../theme/glass': `export const Glass='Glass';`,
     'studio-preview-stub:../theme/tokens': `const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const space=proxy; export const type=proxy;`,
     'studio-preview-stub:./ScoutRichText': `export const ScoutRichText='ScoutRichText';`,
@@ -158,4 +159,17 @@ test('documents expose Edit and full-screen actions while unsupported artifacts 
   });
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Edit document' }).length, 0);
   assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Open in full screen' }).length, 1);
+
+  await act(async () => {
+    renderer!.update(React.createElement(InlineArtifactPreview, {
+      title: props.title,
+      text: '{"artifact":{"slides":[]}}',
+      artifactId: props.artifactId,
+      kind: 'document',
+      onExpand: props.onExpand,
+    }));
+  });
+  const serializedPreview = renderer!.root.findByProps({ text: 'Document is ready to open.' }).props.text as string;
+  assert.equal(serializedPreview, 'Document is ready to open.');
+  assert.doesNotMatch(serializedPreview, /artifact|slides|\{|\}/u);
 });

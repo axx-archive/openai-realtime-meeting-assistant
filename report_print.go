@@ -72,6 +72,8 @@ const (
 	reportPrintMaxInlineImageBytes = 8 << 20
 	reportPrintMaxImageBytes       = 16 << 20
 	reportPrintMaxImages           = 24
+	reportPrintImageMarker         = "#stride-doc-image?"
+	reportPrintMaxImageParamsBytes = 4096
 )
 
 var reportPrintSafeImageMIME = map[string]bool{
@@ -88,6 +90,82 @@ type reportPrintRenderer struct {
 	images         map[string]artifactAsset
 	expandedBytes  int
 	expandedImages int
+}
+
+// reportPrintImagePresentation is the print-safe subset of Document Studio's
+// image presentation contract. The native editor stores these values in a
+// reserved source fragment so the Markdown remains portable. Only fixed width
+// and alignment tokens become CSS classes; the caption is decoded, bounded,
+// normalized, and escaped at the point of rendering.
+type reportPrintImagePresentation struct {
+	source  string
+	width   int
+	align   string
+	caption string
+}
+
+func parseReportPrintImagePresentation(source string) reportPrintImagePresentation {
+	presentation := reportPrintImagePresentation{
+		source: strings.TrimSpace(source),
+		width:  100,
+		align:  "center",
+	}
+	marker := strings.Index(presentation.source, reportPrintImageMarker)
+	if marker < 0 {
+		return presentation
+	}
+
+	paramsText := presentation.source[marker+len(reportPrintImageMarker):]
+	presentation.source = strings.TrimSpace(presentation.source[:marker])
+	if len(paramsText) > reportPrintMaxImageParamsBytes {
+		return presentation
+	}
+	params, err := url.ParseQuery(paramsText)
+	if err != nil {
+		return presentation
+	}
+	if width, err := strconv.Atoi(params.Get("width")); err == nil && (width == 25 || width == 50 || width == 75 || width == 100) {
+		presentation.width = width
+	}
+	if align := params.Get("align"); align == "left" || align == "center" || align == "right" {
+		presentation.align = align
+	}
+	presentation.caption = sanitizeReportPrintImageCaption(params.Get("caption"))
+	return presentation
+}
+
+func sanitizeReportPrintImageCaption(value string) string {
+	value = strings.Map(func(character rune) rune {
+		if character < 0x20 || character == 0x7f {
+			return ' '
+		}
+		return character
+	}, value)
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) > 500 {
+		value = string(runes[:500])
+	}
+	return value
+}
+
+func (presentation reportPrintImagePresentation) className(reference bool) string {
+	classes := []string{
+		"report-image",
+		"report-image--width-" + strconv.Itoa(presentation.width),
+		"report-image--align-" + presentation.align,
+	}
+	if reference {
+		classes = append(classes, "report-image--reference")
+	}
+	return strings.Join(classes, " ")
+}
+
+func (presentation reportPrintImagePresentation) captionHTML() string {
+	if presentation.caption == "" {
+		return ""
+	}
+	return `<span class="report-image__caption">` + html.EscapeString(presentation.caption) + `</span>`
 }
 
 func newReportPrintRenderer(artifact meetingMemoryEntry) *reportPrintRenderer {
@@ -516,20 +594,22 @@ func (renderer *reportPrintRenderer) imageHTML(alt string, source string) string
 	if alt == "" {
 		alt = "Document image"
 	}
-	if dataURI, ok := renderer.localImageDataURI(source); ok {
-		return `<span class="report-image"><img src="` + html.EscapeString(dataURI) + `" alt="` + html.EscapeString(alt) + `"><span class="report-image__caption">` + html.EscapeString(alt) + `</span></span>`
+	presentation := parseReportPrintImagePresentation(source)
+	if dataURI, ok := renderer.localImageDataURI(presentation.source); ok {
+		return `<span class="` + presentation.className(false) + `"><img src="` + html.EscapeString(dataURI) + `" alt="` + html.EscapeString(alt) + `">` + presentation.captionHTML() + `</span>`
 	}
 
 	// A web URL is authored content, but fetching it while exporting would
 	// disclose renderer traffic and create an SSRF surface. Keep its intent and
-	// provenance in the PDF without ever assigning the URL to img.src.
-	sourceLabel := "Available in the native document"
-	sourceHTML := html.EscapeString(sourceLabel)
-	if parsed, err := url.Parse(strings.TrimSpace(source)); err == nil && parsed.IsAbs() && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != "" {
+	// provenance in the PDF without ever assigning the URL to img.src. The
+	// reference copy is deliberately explicit so the exported PDF never
+	// suggests that a remote image was embedded when it was not.
+	sourceHTML := `<span class="report-image__source">Image unavailable in this PDF</span>`
+	if parsed, err := url.Parse(presentation.source); err == nil && parsed.IsAbs() && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Hostname() != "" {
 		host := parsed.Hostname()
-		sourceHTML = `<a href="` + html.EscapeString(source) + `">Source · ` + html.EscapeString(host) + `</a>`
+		sourceHTML = `<span class="report-image__source">External image not embedded in this PDF · <a href="` + html.EscapeString(presentation.source) + `">Source · ` + html.EscapeString(host) + `</a></span>`
 	}
-	return `<span class="report-image report-image--reference"><span class="report-image__reference" role="img" aria-label="` + html.EscapeString(alt) + `"><span class="report-image__eyebrow">Image</span><span class="report-image__title">` + html.EscapeString(alt) + `</span></span><span class="report-image__caption">` + sourceHTML + `</span></span>`
+	return `<span class="` + presentation.className(true) + `"><span class="report-image__reference" role="img" aria-label="` + html.EscapeString(alt) + `"><span class="report-image__eyebrow">External image reference</span><span class="report-image__title">` + html.EscapeString(alt) + `</span></span>` + presentation.captionHTML() + sourceHTML + `</span>`
 }
 
 func (renderer *reportPrintRenderer) localImageDataURI(source string) (string, bool) {
@@ -633,8 +713,11 @@ body{font-family:"Google Sans Flex",-apple-system,"Segoe UI",sans-serif;font-siz
 .report code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:9.5pt;background:#f1f3f7;border-radius:2pt;padding:.5pt 3pt}
 .report a{color:#1a1d23;text-decoration:underline;text-decoration-thickness:.5pt;text-underline-offset:2pt}
 .report-image{display:block;width:100%;margin:8pt 0 11pt;page-break-inside:avoid;break-inside:avoid}
-.report-image img{display:block;max-width:100%;max-height:122mm;width:auto;height:auto;margin:0 auto;border-radius:4pt;object-fit:contain}
+.report-image--width-25{width:25%}.report-image--width-50{width:50%}.report-image--width-75{width:75%}.report-image--width-100{width:100%}
+.report-image--align-left{margin-left:0;margin-right:auto;text-align:left}.report-image--align-center{margin-left:auto;margin-right:auto;text-align:center}.report-image--align-right{margin-left:auto;margin-right:0;text-align:right}
+.report-image img{display:block;max-width:100%;max-height:122mm;width:100%;height:auto;margin:0;border-radius:4pt;object-fit:contain}
 .report-image__caption{display:block;margin-top:4pt;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7.5pt;line-height:1.4;color:#6a7180}
+.report-image__source{display:block;margin-top:3pt;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7pt;line-height:1.4;color:#7b8290}
 .report-image__reference{display:flex;min-height:42mm;padding:12pt;flex-direction:column;justify-content:flex-end;border:.5pt solid #d8dce4;border-radius:4pt;background:#f7f8fa}
 .report-image__eyebrow{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7pt;letter-spacing:.16em;text-transform:uppercase;color:#6a7180}
 .report-image__title{display:block;max-width:42ch;margin-top:3pt;font-size:13pt;line-height:1.25;font-weight:700;color:#1a1d23}

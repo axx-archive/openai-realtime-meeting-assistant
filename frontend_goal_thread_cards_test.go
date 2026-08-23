@@ -53,10 +53,10 @@ func TestIndexConcreteDeckResultOwnsOneRichFeedCard(t *testing.T) {
 		t.Fatal("could not extract concrete deck feed functions")
 	}
 	for _, want := range []string{
-		"message.thread?.resultArtifactId",
+		"projection.resultArtifact",
 		"artifactIsHTMLDeck(resultArtifact)",
-		"group.append(goalNode, scoutHTMLDeckRefRecordNode(message, resultArtifact))",
-		"packagingStudioStagePresentationFor(run.artifact)",
+		"group.appendChild(scoutHTMLDeckRefRecordNode(message, resultArtifact))",
+		"if (projection.checkpoint)",
 	} {
 		if !strings.Contains(router, want) {
 			t.Errorf("deck result router missing %q", want)
@@ -103,7 +103,7 @@ func TestIndexCompletedMarkdownResultOwnsOneBoundedEditableFeedCard(t *testing.T
 	for _, want := range []string{
 		"resultDocument",
 		"scoutMarkdownDocumentRefRecordNode(message, resultArtifact)",
-		"metadata?.processStage || run.artifact?.metadata?.goalSubtaskId",
+		"projection.resultDocument",
 	} {
 		if !strings.Contains(router, want) {
 			t.Errorf("document result router missing %q", want)
@@ -213,8 +213,8 @@ func TestIndexGoalCardNodeCacheReuse(t *testing.T) {
 	}
 }
 
-// Latest wins: the LAST goal-ref message mounts the live card; earlier refs
-// render the jump marker; the committed mount clears the ghost stamp.
+// Latest wins: only the LAST unresolved goal checkpoint mounts a decision
+// card. Earlier lifecycle refs stay in Activity and render no jump markers.
 func TestIndexGoalRefLatestWinsMountRule(t *testing.T) {
 	html := readIndexForGoalThreadCards(t)
 	body := functionBody(html, "function scoutGoalRefRecordNode(message, artifact)")
@@ -223,10 +223,9 @@ func TestIndexGoalRefLatestWinsMountRule(t *testing.T) {
 	}
 	for _, want := range []string{
 		"lastRefId",
-		"jump to the card",
-		"scrollIntoView",
+		"return document.createDocumentFragment()",
+		"goalPendingCheckpoint(artifact, plan)",
 		"scoutDesktopGoalWorkCardNode(message, artifact)",
-		".scout-chat-work-card[data-work-artifact-id=",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("scoutGoalRefRecordNode body missing %q", want)
@@ -234,6 +233,9 @@ func TestIndexGoalRefLatestWinsMountRule(t *testing.T) {
 	}
 	if strings.Contains(body, "goalCardNodeFor(artifact)") {
 		t.Error("responsive conversation refs must not fall back to the legacy goal/runtime card")
+	}
+	if strings.Contains(body, "jump to the card") || strings.Contains(body, "scrollIntoView") {
+		t.Error("historical lifecycle refs must not add navigation clutter to the conversation")
 	}
 	// the rebuild pass detaches cached cards and re-mounts this thread's own
 	render := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")

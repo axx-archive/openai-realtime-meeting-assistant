@@ -355,10 +355,13 @@ type goalSubtask struct {
 }
 
 type goalSubtaskReview struct {
-	Verdict string  `json:"verdict"`
-	Score   float64 `json:"score,omitempty"`
-	Reasons string  `json:"reasons,omitempty"`
-	By      string  `json:"by,omitempty"`
+	Verdict          string  `json:"verdict"`
+	Score            float64 `json:"score,omitempty"`
+	Reasons          string  `json:"reasons,omitempty"`
+	By               string  `json:"by,omitempty"`
+	ArtifactVersion  int     `json:"artifactVersion,omitempty"`
+	ArtifactDigest   string  `json:"artifactDigest,omitempty"`
+	ArtifactSceneRef string  `json:"artifactSceneRef,omitempty"`
 }
 
 type goalGate struct {
@@ -1220,8 +1223,27 @@ func (e *goalEngine) drive(ctx context.Context, plan *goalPlan, parentID string)
 		case goalStateReview:
 			if goalUsesAuthoritativeRenderedAdmission(plan) {
 				if !goalAllComplete(plan) {
-					e.fail(plan, parentID, goalBlockerLine(plan))
-					return
+					// Authoritative rendered admission replaces only the late,
+					// generic text review after every authored stage completes. It
+					// must not bypass the ordinary bounded repair path for a stage
+					// that failed while authoring. In particular, validation failures
+					// from context_snapshot carry actionable revision notes that the
+					// same stage can address without lowering the evidence gate.
+					switch e.repairFailedAuthoritativeSubtasks(plan) {
+					case goalReviewOutcomeRequeue:
+						plan.State = goalStateExecute
+						e.persist(plan, parentID, "")
+						continue
+					case goalReviewOutcomeBlocked:
+						e.fail(plan, parentID, goalBlockerLine(plan))
+						return
+					default:
+						// An incomplete authored plan cannot advance to its exact
+						// rendered publication check. Fail closed if its state is
+						// internally inconsistent rather than weakening admission.
+						e.fail(plan, parentID, goalBlockerLine(plan))
+						return
+					}
 				}
 				if err := e.validateAuthoritativeRenderedPublication(plan, parentID); err != nil {
 					e.fail(plan, parentID, "exact rendered publication changed before terminal review: "+compactAssistantLine(err.Error()))
@@ -2380,17 +2402,25 @@ func (e *goalEngine) processStageInputsAuthorized(plan *goalPlan, parentID strin
 		if strings.TrimSpace(artifact.Text) == "" {
 			return "", fmt.Errorf("input artifact from process stage %s is empty", from)
 		}
+		reviewedStudioChange := false
+		if from == "ship_deck" {
+			_, _, reviewed, reviewErr := reviewedStudioDeckChangeSource(e.app, plan, parentID, artifact)
+			if reviewed && reviewErr != nil {
+				return "", fmt.Errorf("input from process stage %s is invalid: %w", from, reviewErr)
+			}
+			reviewedStudioChange = reviewed
+		}
 		if strings.TrimSpace(plan.ProcessID) != "" {
-			if expectedParentID := strings.TrimSpace(parentID); expectedParentID != "" && strings.TrimSpace(artifact.Metadata["goalParentId"]) != expectedParentID {
+			if expectedParentID := strings.TrimSpace(parentID); expectedParentID != "" && strings.TrimSpace(artifact.Metadata["goalParentId"]) != expectedParentID && !reviewedStudioChange {
 				return "", fmt.Errorf("input artifact from process stage %s is bound to a different goal", from)
 			}
-			if strings.TrimSpace(artifact.Metadata["goalSubtaskId"]) != from {
+			if strings.TrimSpace(artifact.Metadata["goalSubtaskId"]) != from && !reviewedStudioChange {
 				return "", fmt.Errorf("input artifact from process stage %s is bound to a different subtask", from)
 			}
-			if processID := strings.TrimSpace(artifact.Metadata["processId"]); processID != "" && processID != strings.TrimSpace(plan.ProcessID) {
+			if processID := strings.TrimSpace(artifact.Metadata["processId"]); processID != "" && processID != strings.TrimSpace(plan.ProcessID) && !reviewedStudioChange {
 				return "", fmt.Errorf("input artifact from process stage %s is bound to a different process", from)
 			}
-			if processStage := strings.TrimSpace(artifact.Metadata["processStage"]); processStage != "" && processStage != from {
+			if processStage := strings.TrimSpace(artifact.Metadata["processStage"]); processStage != "" && processStage != from && !reviewedStudioChange {
 				return "", fmt.Errorf("input artifact from process stage %s is bound to a different process stage", from)
 			}
 		}
@@ -3517,8 +3547,10 @@ func (e *goalEngine) resumeProcessCheckpoint(plan *goalPlan, parentID string, ap
 func (e *goalEngine) proceedProcessCheckpoint(plan *goalPlan, parentID string, st *goalSubtask, resolvedBy string, choice string, disclosure string) error {
 	checkpoint := plan.Checkpoint
 	if plan.ProcessID == packagingStudioProcessID && checkpoint.StageID == "ship_approval" {
-		if deck, ok := e.app.scoutChatResultIndex().deckByGoal[parentID]; ok {
-			bindGoalAcceptedResult(plan, deck)
+		if indexed, ok := e.app.scoutChatResultIndex().deckByGoal[parentID]; ok {
+			if deck, current := e.app.scoutChatCurrentIndexedArtifact(indexed); current {
+				bindGoalAcceptedResult(plan, deck)
+			}
 		}
 	}
 	recordedChoice := firstNonEmptyString(choice, "(approved without an explicit choice)")
@@ -3876,6 +3908,47 @@ func authoredRenderedPlanParentID(app *kanbanBoardApp, plan *goalPlan) string {
 	return ""
 }
 
+// repairFailedAuthoritativeSubtasks is the narrow repair seam for authored
+// deck/document processes whose final quality authority is their deterministic
+// rendered admission. A later compiler, renderer, or gate failure may retry
+// only that failed stage. It must not send earlier completed writer/research
+// stages through the generic model reviewer merely because those stages have
+// no text-review receipt; their process-specific contracts and final rendered
+// jury own that judgment.
+func (e *goalEngine) repairFailedAuthoritativeSubtasks(plan *goalPlan) goalReviewOutcome {
+	requeued := false
+	for index := range plan.Subtasks {
+		st := &plan.Subtasks[index]
+		if st.Status == subtaskBlocked {
+			return goalReviewOutcomeBlocked
+		}
+		if st.Status != subtaskFailed {
+			continue
+		}
+		if st.FailureClass == agentThreadFailureClassExternalEvidenceSyntax {
+			st.Status = subtaskBlocked
+			plan.Blocker = fmt.Sprintf("subtask %q stopped after an external-evidence format failure; the source gate stayed closed and automatic hosted-research retries were suppressed", st.ID)
+			return goalReviewOutcomeBlocked
+		}
+		resetGoalReviewDependents(plan, st.ID)
+		failureReason := "the subtask worker returned an error"
+		if st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
+			failureReason = st.Review.Reasons
+		}
+		if !e.requeueOrBlock(plan, st, failureReason) {
+			return goalReviewOutcomeBlocked
+		}
+		requeued = true
+	}
+	if requeued {
+		return goalReviewOutcomeRequeue
+	}
+	// An authoritative plan can reach this seam only because it is incomplete.
+	// With no failed stage to repair, its state is internally stranded and must
+	// fail closed instead of re-reviewing or silently advancing prior work.
+	return goalReviewOutcomeBlocked
+}
+
 func (e *goalEngine) validateAuthoritativeRenderedPublication(plan *goalPlan, parentID string) error {
 	switch strings.TrimSpace(plan.ProcessID) {
 	case packagingStudioProcessID:
@@ -3917,7 +3990,15 @@ func (e *goalEngine) reviewSubtasks(ctx context.Context, plan *goalPlan) goalRev
 			// this stage is already exhausted, a later human Retry still must not
 			// reuse downstream artifacts compiled from the failed revision.
 			resetGoalReviewDependents(plan, st.ID)
-			if !e.requeueOrBlock(plan, st, "the subtask worker returned an error") {
+			failureReason := "the subtask worker returned an error"
+			if st.Review != nil && strings.TrimSpace(st.Review.Reasons) != "" {
+				// failProcessStage already recorded the exact bounded validation
+				// failure. Preserve it across automatic revision and, if the
+				// budget is spent, in the durable blocker. The UI maps this record
+				// to closed customer copy instead of exposing stage identifiers.
+				failureReason = st.Review.Reasons
+			}
+			if !e.requeueOrBlock(plan, st, failureReason) {
 				return goalReviewOutcomeBlocked
 			}
 			requeued = true
@@ -4949,8 +5030,10 @@ func (e *goalEngine) reopenGoalForFeedback(plan *goalPlan, parentID string, resu
 		plan.Checkpoint != nil && plan.Checkpoint.StageID == "ship_approval" &&
 		plan.Checkpoint.LastAction == processCheckpointActionProceed &&
 		strings.TrimSpace(plan.Checkpoint.ResolvedAt) != "" {
-		if accepted, ok := e.app.scoutChatResultIndex().acceptedDeckByGoal[parentID]; ok {
-			bindGoalAcceptedResult(plan, accepted)
+		if indexed, ok := e.app.scoutChatResultIndex().acceptedDeckByGoal[parentID]; ok {
+			if accepted, current := e.app.scoutChatCurrentIndexedArtifact(indexed); current {
+				bindGoalAcceptedResult(plan, accepted)
+			}
 		}
 	}
 	target.Status = subtaskReady

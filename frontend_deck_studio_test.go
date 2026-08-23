@@ -106,14 +106,15 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.DECK_STUDIO_INDEX,'utf8');
 const artifactId='deck-studio-artifact';
 const sceneRef='c'.repeat(64);
-let version=4;let canWrite=true;let deckTitle='Studio proof';
+let version=4;let canWrite=true;let deckTitle='Studio proof';let managed=false;let publicationReady=false;
 let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',notes:'Opening field story [BEAT]',elements:[{id:'headline',type:'text',x:150,y:130,width:1100,height:190,z:3,opacity:1,rotation:0,text:'A first-class deck',fontSize:76,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal',fill:'#ffffff',stroke:'#000000'},{id:'rich-proof',type:'text',x:150,y:360,width:900,height:260,z:4,opacity:1,rotation:0,text:'OBSERVED 6.1M',richText:'OBSERVED <span style="display:block;font-family:Georgia;font-size:75px;letter-spacing:.13em;margin:9px 0">6.1M</span>',fontSize:24,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
 let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];let fileRetries=[];let pptxRequests=[];
 const artifact=()=>({id:artifactId,title:deckTitle,version,sceneRef,metadata:{title:deckTitle,type:'html_deck',savedToFiles:'true',artifactVersion:String(version),deckSceneRef:sceneRef}});
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
-  if(req.url==='/artifacts/deck?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),deck,canWrite}));}
+  if(req.url==='/artifacts/deck?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),deck,canWrite,managed,qualityState:managed?(publicationReady?'admitted':'draft_needs_attention'):'',canPresent:managed?publicationReady:true,canExport:managed?publicationReady:true}));}
+  if(req.url==='/artifacts/final-export-capability?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({artifactId,artifactVersion:version,managed,qualityState:publicationReady?'admitted':'draft_needs_attention',canPresent:publicationReady,canExport:publicationReady}));}
   if(req.url==='/artifacts/render-token?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,url:'/mock-deck-render'}));}
   if(req.url==='/mock-deck-render'){res.writeHead(200,{'content-type':'text/html'});return res.end('<!doctype html><title>safe viewer</title>');}
   if(req.url==='/artifacts/deck'&&req.method==='PATCH'){
@@ -153,6 +154,15 @@ const server=http.createServer((req,res)=>{
  assert.ok(Math.abs(geometry.ratio-16/9)<0.01,JSON.stringify(geometry));
  assert.ok(geometry.canvas.left>=geometry.wrap.left&&geometry.canvas.right<=geometry.wrap.right,JSON.stringify(geometry));
  assert.ok(geometry.canvas.top>=geometry.wrap.top&&geometry.canvas.bottom<=geometry.wrap.bottom,JSON.stringify(geometry));
+
+ // Native text-input history stays native. The deck-level shortcut must not
+ // swallow Cmd/Ctrl-Z while the title field owns focus.
+ const deckName=page.getByRole('textbox',{name:'Deck name'});
+ await deckName.evaluate(node=>{node.focus();node.setSelectionRange(node.value.length,node.value.length);});
+ await page.keyboard.press('x');
+ await page.keyboard.press(process.platform==='darwin'?'Meta+z':'Control+z');
+ assert.equal(await deckName.inputValue(),'Studio proof');
+ assert.match(await page.locator('[data-save-state]').textContent(),/^Saved/);
 
  const slideQuick=page.locator('[data-slide-quick-tools]');
  assert.equal(await slideQuick.isVisible(),true);
@@ -314,7 +324,7 @@ const server=http.createServer((req,res)=>{
  await page.getByRole('button',{name:'Bring to front',exact:true}).click();
 	 await page.getByRole('button',{name:'Undo'}).click();
 	 await page.getByRole('button',{name:'Redo'}).click();
-	 await page.getByRole('textbox',{name:'Deck name'}).fill('Studio proof — final');
+	 await deckName.fill('Studio proof — final');
 	 await page.getByRole('button',{name:'Save',exact:true}).click();
 	 await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="save"]');return button&&!button.disabled&&button.textContent==='Save';});
 	 assert.equal(await page.locator('.deck-editor').count(),1,'Save must keep Deck Studio open');
@@ -334,6 +344,14 @@ const server=http.createServer((req,res)=>{
  assert.equal(savedHeadline.lineHeight,1.2);
 	 assert.equal(savedHeadline.letterSpacing,'.04em');
 	 assert.equal(patches[0].deck.slides[0].notes,'Revised opening note [BEAT]');
+	 // Save is a persistence boundary, not an undo-history reset. The title
+	 // rename remains reversible, and redo returns exactly to the saved state.
+	 await page.getByRole('button',{name:'Undo'}).click();
+	 assert.equal(await deckName.inputValue(),'Studio proof');
+	 assert.equal(await page.locator('[data-save-state]').textContent(),'Unsaved');
+	 await page.getByRole('button',{name:'Redo'}).click();
+	 assert.equal(await deckName.inputValue(),'Studio proof — final');
+	 assert.match(await page.locator('[data-save-state]').textContent(),/^Saved/);
 	 await page.getByRole('button',{name:'Close Deck Studio'}).click();
 	 await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
 
@@ -368,6 +386,10 @@ const server=http.createServer((req,res)=>{
  assert.equal(imageRequests[0].slideId,'slide-one');
  assert.equal(await page.locator('[data-scene] [data-element-id="generated-image"]').count(),1);
  assert.equal(await page.locator('.deck-editor__scout-status').textContent(),'Image generated and added to this slide.');
+	 await page.getByRole('button',{name:'Undo'}).click();
+	 assert.equal(await page.locator('[data-scene] [data-element-id="generated-image"]').count(),0,'generated imagery must be undoable');
+	 await page.getByRole('button',{name:'Redo'}).click();
+	 assert.equal(await page.locator('[data-scene] [data-element-id="generated-image"]').count(),1,'generated imagery must be redoable');
 
  await page.getByRole('tab',{name:'Design'}).click();
  const chooserPromise=page.waitForEvent('filechooser');
@@ -379,6 +401,10 @@ const server=http.createServer((req,res)=>{
  assert.match(uploadRequests[0].contentType,/^multipart\/form-data; boundary=/);
  assert.ok(uploadRequests[0].bytes>8);
  assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),1);
+	 await page.getByRole('button',{name:'Undo'}).click();
+	 assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),0,'uploaded imagery must be undoable');
+	 await page.getByRole('button',{name:'Redo'}).click();
+	 assert.equal(await page.locator('[data-scene] [data-element-id="uploaded-image"]').count(),1,'uploaded imagery must be redoable');
 
  await page.locator('[data-prop="fit"]').selectOption('contain');
  await page.getByRole('button',{name:'Back one',exact:true}).click();
@@ -407,6 +433,28 @@ const server=http.createServer((req,res)=>{
 	 assert.equal(flattenedRich.richText,'');
 	 await page.getByRole('button',{name:'Close Deck Studio'}).click();
 	 await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
+
+	 // An async rendered review can admit the exact saved revision while Studio
+	 // remains open. A later local edit revokes publication, but Undo must
+	 // restore the newly admitted saved capability immediately instead of
+	 // waiting for the next polling interval.
+	 managed=true;publicationReady=false;
+	 await page.evaluate(id=>openDeckStudio(id,'Studio proof',{}),artifactId);
+	 await page.waitForSelector('.deck-editor');
+	 assert.equal(await page.getByRole('button',{name:'Present',exact:true}).count(),0);
+	 await page.waitForTimeout(80);
+	 publicationReady=true;
+	 await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+	 await page.waitForFunction(()=>{const button=document.querySelector('.deck-editor [data-action="present"]');return button&&!button.hidden&&!button.disabled;});
+	 assert.equal(await page.locator('.deck-editor__download').isVisible(),true);
+	 await page.getByRole('button',{name:'Rectangle',exact:true}).click();
+	 assert.equal(await page.getByRole('button',{name:'Present',exact:true}).count(),0);
+	 await page.getByRole('button',{name:'Undo'}).click();
+	 assert.equal(await page.getByRole('button',{name:'Present',exact:true}).isVisible(),true,'Undo must restore the newly admitted saved presentation capability immediately');
+	 assert.equal(await page.locator('.deck-editor__download').isVisible(),true,'Undo must restore the newly admitted saved export capability immediately');
+	 await page.getByRole('button',{name:'Close Deck Studio'}).click();
+	 await page.waitForFunction(()=>!document.querySelector('.deck-editor'));
+	 managed=false;publicationReady=false;
 
  canWrite=false;
  deck.slides.push({id:'slide-two',background:'#f2eee5',elements:[{id:'second-title',type:'text',x:180,y:160,width:1300,height:180,z:1,opacity:1,text:'The second slide',fontSize:72,fontWeight:700,color:'#151515'}]});

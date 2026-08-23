@@ -474,6 +474,11 @@ func TestScoutChatHumanAcceptedDeckNeverBypassesRenderedAdmission(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	index := app.scoutChatResultIndex()
+	indexedDeck, indexed := index.acceptedDeckByGoal[goal.ID]
+	if !indexed || indexedDeck.Text != "" || index.acceptedDeckBindingByGoal[goal.ID].State != scoutChatResultApprovalExact {
+		t.Fatalf("body-free accepted binding=%+v deck_text_bytes=%d indexed=%t persisted_digest=%q accepted_digest=%q full_digest=%q", index.acceptedDeckBindingByGoal[goal.ID], len(indexedDeck.Text), indexed, indexedDeck.Metadata[artifactContentDigestMetadataKey], plan.Report.AcceptedResultArtifactDigest, artifactCapabilityDigest(deck))
+	}
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{
 		ID: "approved-goal", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: goal.ID, Mode: "goal", Status: "complete", ArtifactID: goal.ID},
 	}}}
@@ -481,6 +486,24 @@ func TestScoutChatHumanAcceptedDeckNeverBypassesRenderedAdmission(t *testing.T) 
 	exactRef := exact.Messages[0].Thread
 	if exactRef.ResultArtifactID != deck.ID || exactRef.ResultApprovalState != scoutChatResultApprovalExact || !exactRef.ResultCanEdit || exactRef.ResultQualityState != authoredResultQualityDraftNeedsAttention || exactRef.ResultCanPresent || exactRef.ResultCanExport {
 		t.Fatalf("human acceptance bypassed rendered admission: %+v", exactRef)
+	}
+
+	// Compatibility: production rows created before the current append seam
+	// could persist contentDigest before room/sitting scope was stamped. The
+	// body-bound accepted tuple remains authoritative, so an old metadata stamp
+	// must not falsely label an unchanged deck as edited.
+	app.memory.mu.Lock()
+	deckIndex, found := app.memory.artifactEntryIndexByIDLocked(deck.ID)
+	if !found {
+		app.memory.mu.Unlock()
+		t.Fatal("accepted deck disappeared before legacy digest check")
+	}
+	app.memory.entries[deckIndex].Metadata[artifactContentDigestMetadataKey] = strings.Repeat("0", 64)
+	app.memory.mu.Unlock()
+	legacyDigest := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	legacyDigestRef := legacyDigest.Messages[0].Thread
+	if legacyDigestRef.ResultArtifactID != deck.ID || legacyDigestRef.ResultApprovalState != scoutChatResultApprovalExact {
+		t.Fatalf("legacy metadata digest falsely revoked exact accepted body: %+v", legacyDigestRef)
 	}
 
 	edited, _, err := app.updateOSArtifact(deck.ID, "Approved deck", "<!doctype html><html><body><section class=\"pg\">edited after approval</section></body></html>", "AJ")
@@ -564,9 +587,41 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 		"artifactId": fixture.deck.ID, "expectedVersion": artifactVersion(fixture.deck),
 		"title": "Reviewed deck copy", "fileName": "Reviewed deck copy", "folderId": "", "deck": admittedDeckDocument,
 	})
-	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(copyPayload), adminCookies, deckEditorCopyHandler); copied.Code != http.StatusCreated {
-		t.Fatalf("exact admitted deck copy status=%d body=%s", copied.Code, copied.Body.String())
+	assertReviewBoundDeckCopy := func(label string, sourceID string, copied *httptest.ResponseRecorder) deckArtifactView {
+		t.Helper()
+		if copied.Code != http.StatusCreated {
+			t.Fatalf("%s status=%d body=%s", label, copied.Code, copied.Body.String())
+		}
+		var response struct {
+			Artifact     deckArtifactView `json:"artifact"`
+			QualityState string           `json:"qualityState"`
+			CanPresent   bool             `json:"canPresent"`
+			CanExport    bool             `json:"canExport"`
+		}
+		if err := json.Unmarshal(copied.Body.Bytes(), &response); err != nil || response.Artifact.ID == "" || response.QualityState != authoredResultQualityEditedAfterAdmission || response.CanPresent || response.CanExport {
+			t.Fatalf("%s response=%s", label, copied.Body.String())
+		}
+		stored := mustArtifact(t, fixture.app, response.Artifact.ID)
+		if stored.Metadata["goalParentId"] != fixture.parentID || stored.Metadata[authoredCopyReviewMetadataKey] != authoredCopyReviewPending || stored.Metadata["copiedFromArtifactId"] != sourceID || stored.Metadata[authoredCopyAdmissionRootMetadataKey] != fixture.deck.ID {
+			t.Fatalf("%s review-bound metadata=%+v", label, stored.Metadata)
+		}
+		get := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/deck?id="+response.Artifact.ID, "", adminCookies, deckEditorHandler)
+		var opened struct {
+			QualityState string `json:"qualityState"`
+			CanPresent   bool   `json:"canPresent"`
+			CanExport    bool   `json:"canExport"`
+		}
+		if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &opened) != nil || opened.QualityState != authoredResultQualityEditedAfterAdmission || opened.CanPresent || opened.CanExport {
+			t.Fatalf("%s reopened capability status=%d body=%s", label, get.Code, get.Body.String())
+		}
+		return response.Artifact
 	}
+	firstDeckCopy := assertReviewBoundDeckCopy("exact admitted deck copy", fixture.deck.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(copyPayload), adminCookies, deckEditorCopyHandler))
+	recursiveDeckCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": firstDeckCopy.ID, "expectedVersion": firstDeckCopy.Version,
+		"title": "Second-generation deck copy", "fileName": "Second-generation deck copy", "folderId": "", "deck": admittedDeckDocument,
+	})
+	assertReviewBoundDeckCopy("copy of unreviewed deck copy", firstDeckCopy.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(recursiveDeckCopyPayload), adminCookies, deckEditorCopyHandler))
 	modifiedCopy := admittedDeckDocument
 	modifiedCopy.Slides = append([]deckSlide(nil), admittedDeckDocument.Slides...)
 	modifiedCopy.Slides[0].Elements = append([]deckElement(nil), admittedDeckDocument.Slides[0].Elements...)
@@ -575,9 +630,7 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 		"artifactId": fixture.deck.ID, "expectedVersion": artifactVersion(fixture.deck),
 		"title": "Unreviewed deck copy", "fileName": "Unreviewed deck copy", "folderId": "", "deck": modifiedCopy,
 	})
-	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(modifiedCopyPayload), adminCookies, deckEditorCopyHandler); copied.Code != http.StatusConflict {
-		t.Fatalf("modified managed deck copy status=%d body=%s", copied.Code, copied.Body.String())
-	}
+	assertReviewBoundDeckCopy("modified managed deck copy", fixture.deck.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(modifiedCopyPayload), adminCookies, deckEditorCopyHandler))
 
 	// The channel index is an optimization, not publication authority. Move
 	// only the parent plan after the result child has been authorized: the
@@ -654,9 +707,7 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 		"artifactId": edited.ID, "expectedVersion": artifactVersion(edited),
 		"title": "Edited draft copy", "fileName": "Edited draft copy", "folderId": "", "deck": editedDeckDocument,
 	})
-	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(editedCopyPayload), adminCookies, deckEditorCopyHandler); copied.Code != http.StatusConflict {
-		t.Fatalf("edited authored draft copy status=%d body=%s", copied.Code, copied.Body.String())
-	}
+	editedCopy := assertReviewBoundDeckCopy("edited authored draft copy", edited.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/deck/copies", string(editedCopyPayload), adminCookies, deckEditorCopyHandler))
 	projected = fixture.app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
 	ref = projected.Messages[0].Thread
 	if ref.ResultArtifactID != fixture.deck.ID || ref.ResultQualityState != authoredResultQualityEditedAfterAdmission || !ref.ResultCanContinue || ref.ResultCanPresent || ref.ResultCanExport {
@@ -703,7 +754,7 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 	startedReview := false
 	startGoalFeedbackResumeAsync = func(func()) { startedReview = true }
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousFeedbackStart })
-	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, edited.ID))
+	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, editedCopy.ID))
 	if review.Code != http.StatusAccepted {
 		t.Fatalf("review changes status=%d body=%s", review.Code, review.Body.String())
 	}
@@ -711,7 +762,7 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 		t.Fatal("review changes did not schedule the persisted goal re-drive")
 	}
 	reopened := mustGoalPlan(t, fixture.app, parent.ID)
-	if reopened.State != goalStateExecute || reopened.subtaskByID("ship_deck").ArtifactID != edited.ID || reopened.subtaskByID("draft_compile").Status != subtaskReady {
+	if reopened.State != goalStateExecute || reopened.subtaskByID("ship_deck").ArtifactID != editedCopy.ID || reopened.subtaskByID("draft_compile").Status != subtaskReady {
 		t.Fatalf("edited deck was not rebound into the rendered-review tail: state=%q ship=%+v render=%+v", reopened.State, reopened.subtaskByID("ship_deck"), reopened.subtaskByID("draft_compile"))
 	}
 }
@@ -783,18 +834,46 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 		"artifactId": current.ID, "expectedVersion": artifactVersion(current),
 		"title": "Reviewed report copy", "fileName": "Reviewed report copy", "folderId": "", "document": exactDocument,
 	})
-	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(documentCopyPayload), adminCookies, documentEditorCopyHandler); copied.Code != http.StatusCreated {
-		t.Fatalf("exact admitted document copy status=%d body=%s", copied.Code, copied.Body.String())
+	assertReviewBoundDocumentCopy := func(label string, sourceID string, copied *httptest.ResponseRecorder) documentStudioArtifactView {
+		t.Helper()
+		if copied.Code != http.StatusCreated {
+			t.Fatalf("%s status=%d body=%s", label, copied.Code, copied.Body.String())
+		}
+		var response struct {
+			Artifact     documentStudioArtifactView `json:"artifact"`
+			QualityState string                     `json:"qualityState"`
+			CanExport    bool                       `json:"canExport"`
+		}
+		if err := json.Unmarshal(copied.Body.Bytes(), &response); err != nil || response.Artifact.ID == "" || response.QualityState != authoredResultQualityEditedAfterAdmission || response.CanExport {
+			t.Fatalf("%s response=%s", label, copied.Body.String())
+		}
+		stored := mustArtifact(t, fixture.app, response.Artifact.ID)
+		if stored.Metadata["goalParentId"] != fixture.parentID || stored.Metadata[authoredCopyReviewMetadataKey] != authoredCopyReviewPending || stored.Metadata["copiedFromArtifactId"] != sourceID || stored.Metadata[authoredCopyAdmissionRootMetadataKey] != fixture.report.ID {
+			t.Fatalf("%s review-bound metadata=%+v", label, stored.Metadata)
+		}
+		get := artifactAuthorizationRequest(t, http.MethodGet, "/artifacts/document?id="+response.Artifact.ID, "", adminCookies, documentEditorHandler)
+		var opened struct {
+			QualityState string `json:"qualityState"`
+			CanExport    bool   `json:"canExport"`
+		}
+		if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &opened) != nil || opened.QualityState != authoredResultQualityEditedAfterAdmission || opened.CanExport {
+			t.Fatalf("%s reopened capability status=%d body=%s", label, get.Code, get.Body.String())
+		}
+		return response.Artifact
 	}
+	firstDocumentCopy := assertReviewBoundDocumentCopy("exact admitted document copy", fixture.report.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(documentCopyPayload), adminCookies, documentEditorCopyHandler))
+	recursiveDocumentCopyPayload, _ := json.Marshal(map[string]any{
+		"artifactId": firstDocumentCopy.ID, "expectedVersion": firstDocumentCopy.Version,
+		"title": "Second-generation report copy", "fileName": "Second-generation report copy", "folderId": "", "document": exactDocument,
+	})
+	assertReviewBoundDocumentCopy("copy of unreviewed document copy", firstDocumentCopy.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(recursiveDocumentCopyPayload), adminCookies, documentEditorCopyHandler))
 	modifiedDocument := exactDocument
 	modifiedDocument.Markdown += "\n\nUnreviewed copy change."
 	modifiedDocumentCopyPayload, _ := json.Marshal(map[string]any{
 		"artifactId": current.ID, "expectedVersion": artifactVersion(current),
 		"title": "Unreviewed report copy", "fileName": "Unreviewed report copy", "folderId": "", "document": modifiedDocument,
 	})
-	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(modifiedDocumentCopyPayload), adminCookies, documentEditorCopyHandler); copied.Code != http.StatusConflict {
-		t.Fatalf("modified managed document copy status=%d body=%s", copied.Code, copied.Body.String())
-	}
+	assertReviewBoundDocumentCopy("modified managed document copy", fixture.report.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(modifiedDocumentCopyPayload), adminCookies, documentEditorCopyHandler))
 	blockedPlan := plan
 	blockedPlan.State = goalStateBlocked
 	blockedPlanJSON, _ := json.Marshal(blockedPlan)
@@ -840,9 +919,7 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 		"artifactId": edited.ID, "expectedVersion": artifactVersion(edited),
 		"title": "Edited draft report copy", "fileName": "Edited draft report copy", "folderId": "", "document": documentStudioDocumentFromEntry(edited),
 	})
-	if copied := artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(editedDocumentCopyPayload), adminCookies, documentEditorCopyHandler); copied.Code != http.StatusConflict {
-		t.Fatalf("edited authored document copy status=%d body=%s", copied.Code, copied.Body.String())
-	}
+	editedCopy := assertReviewBoundDocumentCopy("edited authored document copy", edited.ID, artifactAuthorizationRequest(t, http.MethodPost, "/artifacts/document/copies", string(editedDocumentCopyPayload), adminCookies, documentEditorCopyHandler))
 	request := httptest.NewRequest(http.MethodPost, "/artifacts/export-pdf", strings.NewReader(fmt.Sprintf(`{"artifactId":%q,"expectedVersion":%d}`, edited.ID, artifactVersion(edited))))
 	request.Header.Set("Content-Type", "application/json")
 	for _, cookie := range adminCookies {
@@ -858,7 +935,7 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 	startedReview := false
 	startGoalFeedbackResumeAsync = func(func()) { startedReview = true }
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousFeedbackStart })
-	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, edited.ID))
+	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, editedCopy.ID))
 	if review.Code != http.StatusAccepted {
 		t.Fatalf("document review changes status=%d body=%s", review.Code, review.Body.String())
 	}
@@ -866,7 +943,7 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 		t.Fatal("document review changes did not schedule the persisted goal re-drive")
 	}
 	reopened := mustGoalPlan(t, fixture.app, parent.ID)
-	if reopened.State != goalStateExecute || reopened.subtaskByID("write").ArtifactID != edited.ID || reopened.subtaskByID(documentReportDraftRenderStageID).Status != subtaskReady {
+	if reopened.State != goalStateExecute || reopened.subtaskByID("write").ArtifactID != editedCopy.ID || reopened.subtaskByID(documentReportDraftRenderStageID).Status != subtaskReady {
 		t.Fatalf("edited document was not rebound into rendered review: state=%q write=%+v render=%+v", reopened.State, reopened.subtaskByID("write"), reopened.subtaskByID(documentReportDraftRenderStageID))
 	}
 }

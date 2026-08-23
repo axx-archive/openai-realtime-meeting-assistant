@@ -41,7 +41,7 @@ product source of truth for this client.
 
 Tokens live in `mobile/src/theme/tokens.ts`, mirrored from `:root` in `index.html`.
 
-Build 73's production profile opts the native client into private Realtime with
+Build 74's production profile opts the native client into private Realtime with
 `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true`. The server remains an
 independent fail-closed key: `/client-config` qualifies the launcher only when
 `PRIVATE_REALTIME_VOICE_QUALIFIED=true` is explicitly installed by an exact VPS

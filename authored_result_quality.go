@@ -18,6 +18,9 @@ const (
 	authoredResultQualityAdmitted             = "admitted"
 	authoredResultQualityDraftNeedsAttention  = "draft_needs_attention"
 	authoredResultQualityEditedAfterAdmission = "edited_after_admission"
+	authoredCopyReviewMetadataKey             = "authoredCopyReview"
+	authoredCopyReviewPending                 = "pending"
+	authoredCopyAdmissionRootMetadataKey      = "authoredCopyAdmissionRootId"
 )
 
 type authoredResultAdmissionTuple struct {
@@ -39,6 +42,30 @@ func (tuple authoredResultAdmissionTuple) identifies(entry meetingMemoryEntry) b
 	}
 	return strings.TrimSpace(tuple.CapabilityDigest) != "" &&
 		strings.EqualFold(strings.TrimSpace(tuple.CapabilityDigest), artifactCapabilityDigest(entry))
+}
+
+// authoredCopyNeedsIndependentReview identifies a server-created branch of an
+// admitted authored result. The copy deliberately keeps the source goal
+// binding, so it cannot inherit the standalone-artifact publication behavior.
+// Its server-owned admission-root lineage plus the pending-review marker lets
+// the normal Studio review-changes route start from any copy generation
+// without pretending that the branch was covered by the source jury receipt.
+func (app *kanbanBoardApp) authoredCopyNeedsIndependentReview(entry meetingMemoryEntry, admittedSourceID string) bool {
+	admittedSourceID = strings.TrimSpace(admittedSourceID)
+	if admittedSourceID == "" || !strings.EqualFold(strings.TrimSpace(entry.Metadata[authoredCopyReviewMetadataKey]), authoredCopyReviewPending) {
+		return false
+	}
+	copyRoot := strings.TrimSpace(firstNonEmptyString(entry.Metadata[authoredCopyAdmissionRootMetadataKey], entry.Metadata["copiedFromArtifactId"]))
+	if copyRoot == "" {
+		return false
+	}
+	admittedRoot := admittedSourceID
+	if app != nil {
+		if admitted, ok := app.osArtifactByID(admittedSourceID); ok {
+			admittedRoot = strings.TrimSpace(firstNonEmptyString(admitted.Metadata[authoredCopyAdmissionRootMetadataKey], admitted.ID))
+		}
+	}
+	return copyRoot == admittedRoot
 }
 
 // packagingStudioAdmissionTuple reads only the server-authored quality and
@@ -113,8 +140,13 @@ func (app *kanbanBoardApp) authoredGoalResultQuality(plan goalPlan, parentID str
 		if err == nil && review.DeckID == result.ID && review.DeckVersion == artifactVersion(result) && strings.EqualFold(review.DeckDigest, artifactCapabilityDigest(result)) {
 			return authoredResultQualityAdmitted
 		}
-		if tuple, ok := packagingStudioAdmissionTuple(app, plan, parentID); ok && strings.TrimSpace(tuple.ArtifactID) == strings.TrimSpace(result.ID) && !tuple.identifies(result) {
-			return authoredResultQualityEditedAfterAdmission
+		if tuple, ok := packagingStudioAdmissionTuple(app, plan, parentID); ok {
+			if strings.TrimSpace(tuple.ArtifactID) == strings.TrimSpace(result.ID) && !tuple.identifies(result) {
+				return authoredResultQualityEditedAfterAdmission
+			}
+			if app.authoredCopyNeedsIndependentReview(result, tuple.ArtifactID) {
+				return authoredResultQualityEditedAfterAdmission
+			}
 		}
 		return authoredResultQualityDraftNeedsAttention
 	}
@@ -124,8 +156,13 @@ func (app *kanbanBoardApp) authoredGoalResultQuality(plan goalPlan, parentID str
 		if err == nil && review.ArtifactID == result.ID && review.ArtifactVersion == artifactVersion(result) && strings.EqualFold(review.ContentDigest, documentReportBodyDigest(result)) && strings.EqualFold(review.CapabilityDigest, artifactCapabilityDigest(result)) {
 			return authoredResultQualityAdmitted
 		}
-		if tuple, ok := documentReportAdmissionTuple(app, plan, parentID); ok && strings.TrimSpace(tuple.ArtifactID) == strings.TrimSpace(result.ID) && !tuple.identifies(result) {
-			return authoredResultQualityEditedAfterAdmission
+		if tuple, ok := documentReportAdmissionTuple(app, plan, parentID); ok {
+			if strings.TrimSpace(tuple.ArtifactID) == strings.TrimSpace(result.ID) && !tuple.identifies(result) {
+				return authoredResultQualityEditedAfterAdmission
+			}
+			if app.authoredCopyNeedsIndependentReview(result, tuple.ArtifactID) {
+				return authoredResultQualityEditedAfterAdmission
+			}
 		}
 	}
 	return authoredResultQualityDraftNeedsAttention
@@ -428,6 +465,71 @@ func (app *kanbanBoardApp) withFinalExportAdmissionOperation(result meetingMemor
 	return nil
 }
 
+// withAuthoredCopySourceOperation protects Save a Copy without requiring the
+// source revision to be publishable. That distinction is intentional: a
+// person must be able to preserve dirty or stale Studio work, while the copy's
+// retained goal binding keeps presentation and final export closed until the
+// copied revision earns its own rendered review. The operation binds both the
+// exact source header and, when present, the complete parent goal record so a
+// concurrent review transition cannot leave a copy with ambiguous lineage.
+func (app *kanbanBoardApp) withAuthoredCopySourceOperation(result meetingMemoryEntry, operation func(meetingMemoryEntry) error) error {
+	if app == nil || app.memory == nil || operation == nil {
+		return fmt.Errorf("artifacts are unavailable")
+	}
+	parentID := strings.TrimSpace(firstNonEmptyString(result.Metadata["goalId"], result.Metadata["goalParentId"]))
+	var unlock func()
+	if parentID != "" {
+		lock := goalEngineLock(parentID)
+		if !lock.TryLock() {
+			return fmt.Errorf("the artifact review is busy; try again from the current revision")
+		}
+		unlock = lock.Unlock
+		defer unlock()
+	}
+
+	header := app.resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(result))
+	current, exact := app.memory.artifactSnapshotIfHeaderMatches(result.ID, header)
+	if !exact {
+		return fmt.Errorf("the artifact changed; reopen the current revision")
+	}
+	var parentHeader ArtifactAuthorizationHeader
+	parentDigest := ""
+	if parentID != "" {
+		var found bool
+		parentHeader, found = app.memory.artifactAuthorizationHeaderByID(parentID)
+		if !found {
+			return fmt.Errorf("the authored review record is unavailable")
+		}
+		parent, parentExact := app.memory.artifactSnapshotIfHeaderMatches(parentID, parentHeader)
+		if !parentExact {
+			return fmt.Errorf("the authored review changed; try again")
+		}
+		parentDigest = authoredAdmissionRecordDigest(parent)
+		if parentDigest == "" {
+			return fmt.Errorf("the authored review is unavailable")
+		}
+	}
+	// Preserve the existing deterministic race seam. The name predates
+	// review-bound copies, but tests and fault injection still need one point
+	// between the frozen source snapshot and durable child creation.
+	if authoredCopyAfterAdmissionProbe != nil {
+		authoredCopyAfterAdmissionProbe()
+	}
+	if err := operation(current); err != nil {
+		return err
+	}
+	if _, exact = app.memory.artifactSnapshotIfHeaderMatches(result.ID, header); !exact {
+		return fmt.Errorf("the artifact changed while the copy was being created")
+	}
+	if parentID != "" {
+		parent, parentExact := app.memory.artifactSnapshotIfHeaderMatches(parentID, parentHeader)
+		if !parentExact || !strings.EqualFold(parentDigest, authoredAdmissionRecordDigest(parent)) {
+			return fmt.Errorf("the artifact review changed while the copy was being created")
+		}
+	}
+	return nil
+}
+
 func rollbackAuthoredIndependentCopy(app *kanbanBoardApp, artifactID string) {
 	artifactID = strings.TrimSpace(artifactID)
 	if app == nil || app.memory == nil || artifactID == "" {
@@ -497,6 +599,79 @@ func authoredResultFinalExportCapabilityHandler(w http.ResponseWriter, r *http.R
 	})
 }
 
+// reviewedStudioDeckChangeSource resolves the one exceptional process input
+// introduced by review_changes: a human-edited native deck replaces the
+// original ship_deck child without asking the writer to regenerate it. The
+// persisted review receipt binds the exact artifact revision, capability
+// digest, and content-addressed scene that the user submitted. Compilation
+// then carries only image assets referenced by that validated scene. A save,
+// asset mutation, or scene swap after review was requested fails closed and
+// requires the user to submit the latest revision again.
+func reviewedStudioDeckChangeSource(app *kanbanBoardApp, plan *goalPlan, parentID string, artifact meetingMemoryEntry) (deckDocument, []artifactAsset, bool, error) {
+	if app == nil || plan == nil || plan.ProcessID != packagingStudioProcessID {
+		return deckDocument{}, nil, false, nil
+	}
+	producer := plan.subtaskByID("ship_deck")
+	if producer == nil || producer.Review == nil || producer.Review.By != "studio_review_changes" {
+		return deckDocument{}, nil, false, nil
+	}
+	if producer.Status != subtaskComplete || strings.TrimSpace(producer.ArtifactID) == "" || producer.ArtifactID != artifact.ID || producer.Review.Verdict != goalReviewPass {
+		return deckDocument{}, nil, true, fmt.Errorf("edited presentation review source is not the completed ship_deck input")
+	}
+	review := producer.Review
+	if review.ArtifactVersion < 1 || review.ArtifactVersion != artifactVersion(artifact) || strings.TrimSpace(review.ArtifactDigest) == "" || !strings.EqualFold(strings.TrimSpace(review.ArtifactDigest), artifactCapabilityDigest(artifact)) {
+		return deckDocument{}, nil, true, fmt.Errorf("edited presentation changed after review was requested")
+	}
+	sceneRef := strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey])
+	if !validBlobRef(sceneRef) || sceneRef != strings.TrimSpace(review.ArtifactSceneRef) {
+		return deckDocument{}, nil, true, fmt.Errorf("edited presentation scene changed after review was requested")
+	}
+	if _, sceneMetadata, sceneErr := getBlob(sceneRef); sceneErr != nil || !strings.EqualFold(strings.TrimSpace(sceneMetadata.Mime), "application/vnd.bonfire.deck+json") {
+		return deckDocument{}, nil, true, fmt.Errorf("edited presentation scene is unavailable")
+	}
+	parentID = strings.TrimSpace(parentID)
+	if parentID == "" || (strings.TrimSpace(artifact.Metadata["goalParentId"]) != "" && strings.TrimSpace(artifact.Metadata["goalParentId"]) != parentID) || (strings.TrimSpace(artifact.Metadata["goalId"]) != "" && strings.TrimSpace(artifact.Metadata["goalId"]) != parentID) || strings.TrimSpace(firstNonEmptyString(artifact.Metadata["goalParentId"], artifact.Metadata["goalId"])) != parentID || artifactType(artifact) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(artifact) {
+		return deckDocument{}, nil, true, fmt.Errorf("edited presentation is not bound to this goal")
+	}
+
+	deck, imported, quality, err := loadDeckDocument(artifact)
+	if err != nil || imported || quality != "native" {
+		return deckDocument{}, nil, true, fmt.Errorf("edited presentation is not an exact native deck scene")
+	}
+	assetsByRef := make(map[string]artifactAsset)
+	for _, asset := range artifactAssets(artifact) {
+		if !artifactAssetIsEditableImage(asset) {
+			continue
+		}
+		if prior, duplicate := assetsByRef[asset.Ref]; duplicate && (prior.Mime != asset.Mime || prior.Name != asset.Name || prior.Kind != asset.Kind) {
+			return deckDocument{}, nil, true, fmt.Errorf("edited presentation has ambiguous image asset metadata")
+		}
+		assetsByRef[asset.Ref] = asset
+	}
+	usedRefs := make(map[string]struct{})
+	for _, slide := range deck.Slides {
+		for _, element := range slide.Elements {
+			if element.Type == "image" {
+				usedRefs[element.Ref] = struct{}{}
+			}
+		}
+	}
+	assets := make([]artifactAsset, 0, len(usedRefs))
+	for ref := range usedRefs {
+		asset, ok := assetsByRef[ref]
+		if !ok || !validBlobRef(asset.Ref) {
+			return deckDocument{}, nil, true, fmt.Errorf("edited presentation image asset is not attached")
+		}
+		_, blobMetadata, blobErr := getBlob(ref)
+		if blobErr != nil || !strings.HasPrefix(strings.ToLower(strings.TrimSpace(blobMetadata.Mime)), "image/") || !strings.EqualFold(strings.TrimSpace(blobMetadata.Mime), strings.TrimSpace(asset.Mime)) {
+			return deckDocument{}, nil, true, fmt.Errorf("edited presentation image asset is unavailable")
+		}
+		assets = append(assets, asset)
+	}
+	sort.Slice(assets, func(i, j int) bool { return assets[i].Ref < assets[j].Ref })
+	return deck, assets, true, nil
+}
+
 // reviewEditedAuthoredResult reopens only the deterministic render/admission
 // tail for a human-edited result. It never sends the request back through the
 // writer and therefore cannot overwrite a normal Studio save with an older
@@ -562,7 +737,11 @@ func (app *kanbanBoardApp) reviewEditedAuthoredResult(parentSnapshot, resultSnap
 		// persist it in place and enqueue a fresh render without regenerating it.
 		producer.Status = subtaskComplete
 		producer.ArtifactID = result.ID
-		producer.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: reviewReason, By: "studio_review_changes"}
+		producer.Review = &goalSubtaskReview{
+			Verdict: goalReviewPass, Reasons: reviewReason, By: "studio_review_changes",
+			ArtifactVersion: artifactVersion(result), ArtifactDigest: artifactCapabilityDigest(result),
+			ArtifactSceneRef: strings.TrimSpace(result.Metadata[deckSceneRefMetadataKey]),
+		}
 		resetGoalDependentsWithEvidence(&plan, producer.ID, "", "studio_review_changes", reviewReason)
 		render.Status = subtaskReady
 		render.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: reviewReason, By: "studio_review_changes"}

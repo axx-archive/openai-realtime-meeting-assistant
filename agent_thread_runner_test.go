@@ -279,17 +279,22 @@ func TestGroundedDeliverableUsesLongRequestWindow(t *testing.T) {
 
 func TestScoutChatThreadAttentionReasonIsClosedAndActionable(t *testing.T) {
 	for _, test := range []struct {
-		error string
-		want  string
+		metadata map[string]string
+		want     string
 	}{
-		{error: "OpenAI output rejected: max_output_truncation", want: "output_truncated"},
-		{error: "OpenAI output rejected: output_validation_error: missing sources", want: "quality_gate_failed"},
-		{error: "provider transport_error", want: "provider_unavailable"},
-		{error: "unexpected provider failure", want: "work_failed"},
-		{error: "", want: ""},
+		{metadata: map[string]string{"error": "OpenAI output rejected: max_output_truncation"}, want: "output_truncated"},
+		{metadata: map[string]string{"error": "OpenAI output rejected: output_validation_error: missing sources"}, want: "quality_gate_failed"},
+		{metadata: map[string]string{"goalBlocker": `subtask "context_snapshot" blocked after 2 revisions: context snapshot research authority is invalid: not one bounded comparative evidence lane`}, want: "research_scope_failed"},
+		{metadata: map[string]string{"goalBlocker": `subtask "evidence" stopped after an external-evidence format failure; the source gate stayed closed`}, want: "evidence_gate_failed"},
+		{metadata: map[string]string{"error": "provider transport_error"}, want: "provider_unavailable"},
+		{metadata: map[string]string{"error": "provider unavailable"}, want: "provider_unavailable"},
+		{metadata: map[string]string{"error": "saved artifact unavailable during rendered review"}, want: "work_failed"},
+		{metadata: map[string]string{"error": "render command timed out"}, want: "work_failed"},
+		{metadata: map[string]string{"error": "unexpected provider failure"}, want: "work_failed"},
+		{metadata: map[string]string{}, want: ""},
 	} {
-		if got := scoutChatThreadAttentionReason(map[string]string{"error": test.error}); got != test.want {
-			t.Fatalf("attention reason for %q=%q, want %q", test.error, got, test.want)
+		if got := scoutChatThreadAttentionReason(test.metadata); got != test.want {
+			t.Fatalf("attention reason for %v=%q, want %q", test.metadata, got, test.want)
 		}
 	}
 }

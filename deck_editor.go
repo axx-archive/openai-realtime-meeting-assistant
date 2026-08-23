@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -189,7 +188,7 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, fileFolderErrorStatus(errFileFolderNotFound), errFileFolderNotFound.Error())
 		return
 	}
-	if payload.ExpectedVersion < 1 || artifactVersion(prior) != payload.ExpectedVersion {
+	if payload.ExpectedVersion < 1 || payload.ExpectedVersion > artifactVersion(prior) {
 		writeDeckVersionConflict(w, prior)
 		return
 	}
@@ -203,22 +202,20 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 	var fileErr error
 	var internalCopyErr bool
 	sourceEntry := prior
-	guardErr := kanbanApp.withFinalExportAdmissionOperation(prior, func(current meetingMemoryEntry) error {
+	staleBranch := false
+	guardErr := kanbanApp.withAuthoredCopySourceOperation(prior, func(current meetingMemoryEntry) error {
 		sourceEntry = current
-		if artifactVersion(current) != payload.ExpectedVersion {
-			return fmt.Errorf("the deck changed; reopen the current revision")
+		currentSourceVersion := artifactVersion(current)
+		if payload.ExpectedVersion > currentSourceVersion {
+			return fmt.Errorf("the deck revision is newer than the current source")
 		}
+		staleBranch = payload.ExpectedVersion != currentSourceVersion
 		if validateErr := validateDeckDocument(payload.Deck, artifactAssetRefSet(current)); validateErr != nil {
 			return validateErr
 		}
-		if strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"])) != "" {
-			currentDeck, _, _, loadErr := loadDeckDocument(current)
-			if loadErr != nil || !reflect.DeepEqual(payload.Deck, currentDeck) {
-				return fmt.Errorf("review the current authored deck before saving an independent copy")
-			}
-		}
+		reviewBound := strings.TrimSpace(firstNonEmptyString(current.Metadata["goalId"], current.Metadata["goalParentId"])) != ""
 		var createErr error
-		copyEntry, createErr = createDeckEditorCopy(user, current, payload.Deck, payload.Title)
+		copyEntry, createErr = createDeckEditorCopy(user, current, payload.Deck, payload.Title, payload.ExpectedVersion, reviewBound)
 		if createErr != nil {
 			internalCopyErr = true
 			return createErr
@@ -244,16 +241,20 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
 		storedView := deckArtifactViewFromEntry(stored)
+		qualityState, canPublish, stable := kanbanApp.authoredResultFinalExportState(stored)
+		canPublish = stable && canPublish
+		_, aclCanExport := authorizedArtifactForActions(r.Context(), user, stored.ID, ACLReadContent, ACLExport)
 		writeAuthJSON(w, fileSaveErrorStatus(fileErr), map[string]any{
 			"ok": false, "partialSuccess": true,
 			"error":    "deck copy was created, but Files filing failed",
 			"artifact": storedView, "deck": payload.Deck,
+			"qualityState": qualityState, "canPresent": canPublish, "canExport": canPublish && aclCanExport,
 			"receipt": map[string]any{
 				"outcome": "copy_created_files_failed", "artifactId": stored.ID,
 				"artifactVersion": artifactVersion(stored), "contentSaved": true,
 				"filingCompleted": false, "savedToFiles": storedView.SavedToFiles,
 				"branchedFromArtifactVersion": payload.ExpectedVersion,
-				"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": false,
+				"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": staleBranch,
 				"retryable": true, "retryUrl": "/assistant/files/save", "retryMethod": http.MethodPost,
 				"fileName": normalizedFileName, "folderId": payload.FolderID,
 			},
@@ -261,19 +262,23 @@ func deckEditorCopyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stored, _ := kanbanApp.osArtifactByID(copyEntry.ID)
+	qualityState, canPublish, stable := kanbanApp.authoredResultFinalExportState(stored)
+	canPublish = stable && canPublish
+	_, aclCanExport := authorizedArtifactForActions(r.Context(), user, stored.ID, ACLReadContent, ACLExport)
 	broadcastSignedInKanbanEvent("file", file)
 	writeAuthJSON(w, http.StatusCreated, map[string]any{
 		"ok": true, "artifact": deckArtifactViewFromEntry(stored), "deck": payload.Deck, "file": file,
+		"qualityState": qualityState, "canPresent": canPublish, "canExport": canPublish && aclCanExport,
 		"receipt": map[string]any{
 			"outcome": "copy_created_and_filed", "artifactId": stored.ID,
 			"artifactVersion": artifactVersion(stored), "contentSaved": true, "savedToFiles": true,
 			"branchedFromArtifactVersion": payload.ExpectedVersion,
-			"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": false,
+			"sourceCurrentVersion":        artifactVersion(sourceEntry), "staleBranch": staleBranch,
 		},
 	})
 }
 
-func createDeckEditorCopy(user *userAccount, prior meetingMemoryEntry, deck deckDocument, title string) (meetingMemoryEntry, error) {
+func createDeckEditorCopy(user *userAccount, prior meetingMemoryEntry, deck deckDocument, title string, sourceVersion int, reviewBound bool) (meetingMemoryEntry, error) {
 	raw, err := json.Marshal(deck)
 	if err != nil || len(raw) > deckDocumentMaxBytes {
 		return meetingMemoryEntry{}, fmt.Errorf("deck document exceeds its storage bound")
@@ -317,20 +322,30 @@ func createDeckEditorCopy(user *userAccount, prior meetingMemoryEntry, deck deck
 	if user != nil {
 		owner = normalizeAccountEmail(user.Email)
 	}
+	currentSourceVersion := artifactVersion(prior)
 	metadata := map[string]string{
-		"title":                     strings.TrimSpace(title),
-		"type":                      artifactTypeHTMLDeck,
-		"source":                    "scout_thread",
-		"status":                    artifactStatusComplete,
-		"threadStatus":              artifactStatusComplete,
-		"copiedFromArtifactId":      prior.ID,
-		"copiedFromArtifactVersion": strconv.Itoa(artifactVersion(prior)),
-		deckSceneRefMetadataKey:     ref,
-		deckSchemaMetadataKey:       strconv.Itoa(deckDocumentSchemaVersion),
-		artifactAssetsMetadataKey:   string(assetsRaw),
-		"tenantId":                  strings.TrimSpace(prior.Metadata["tenantId"]),
-		"visibility":                firstNonEmptyString(strings.TrimSpace(prior.Metadata["visibility"]), "organization"),
-		"ownerEmail":                owner,
+		"title":                            strings.TrimSpace(title),
+		"type":                             artifactTypeHTMLDeck,
+		"source":                           "scout_thread",
+		"status":                           artifactStatusComplete,
+		"threadStatus":                     artifactStatusComplete,
+		"copiedFromArtifactId":             prior.ID,
+		"copiedFromArtifactVersion":        strconv.Itoa(sourceVersion),
+		"copiedFromCurrentArtifactVersion": strconv.Itoa(currentSourceVersion),
+		deckSceneRefMetadataKey:            ref,
+		deckSchemaMetadataKey:              strconv.Itoa(deckDocumentSchemaVersion),
+		artifactAssetsMetadataKey:          string(assetsRaw),
+		"tenantId":                         strings.TrimSpace(prior.Metadata["tenantId"]),
+		"visibility":                       firstNonEmptyString(strings.TrimSpace(prior.Metadata["visibility"]), "organization"),
+		"ownerEmail":                       owner,
+	}
+	if sourceVersion != currentSourceVersion {
+		metadata["copiedFromStaleRevision"] = "true"
+	}
+	if reviewBound {
+		metadata["goalParentId"] = strings.TrimSpace(firstNonEmptyString(prior.Metadata["goalId"], prior.Metadata["goalParentId"]))
+		metadata[authoredCopyReviewMetadataKey] = authoredCopyReviewPending
+		metadata[authoredCopyAdmissionRootMetadataKey] = strings.TrimSpace(firstNonEmptyString(prior.Metadata[authoredCopyAdmissionRootMetadataKey], prior.ID))
 	}
 	body := compileDeckDocumentHTML(deck, title)
 	createdBy := firstNonEmptyString(strings.TrimSpace(user.Name), owner)

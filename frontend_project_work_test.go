@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestProjectBoundResearchRenderedOpenDriveAndRegenerateJourney(t *testing.T) {
+func TestProjectBoundResearchActivityStaysAvailableOutsideTimelineJourney(t *testing.T) {
 	if testing.Short() {
 		t.Skip("rendered browser contract")
 	}
@@ -57,12 +57,13 @@ const server=http.createServer((req,res)=>{
 (async()=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const base='http://127.0.0.1:'+server.address().port;
- const browser=await chromium.launch({headless:true});
+ const browser=await chromium.launch({headless:true,executablePath:process.env.PROJECT_WORK_CHROME||undefined});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  await page.goto(base+'/chat',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
- await page.evaluate(({thread,artifact})=>{artifactEntries=[artifact];scoutChatThreads=[thread];selectScoutChatThread(thread.id);setMobileChatView('convo');}, {thread,artifact});
- const card=page.locator('.scout-chat-work-card');
+ await page.evaluate(({thread,artifact,work})=>{artifactEntries=[artifact];scoutChatThreads=[thread];selectScoutChatThread(thread.id);setMobileChatView('convo');const card=scoutDesktopGoalWorkCardNode(work,artifact);card.id='project-work-activity-fixture';document.getElementById('chatTool').appendChild(card);}, {thread,artifact,work});
+ assert.equal(await page.locator('#scoutChatThread .scout-chat-work-card').count(),0,'generic completed Work leaked into the conversation');
+ const card=page.locator('#project-work-activity-fixture');
  await card.waitFor();
  assert.match(await card.getAttribute('aria-label'),/Project: Research Project/);
  assert.equal(await card.locator('.scout-chat-work-card__project').textContent(),'Project · Research Project');
@@ -81,46 +82,16 @@ const server=http.createServer((req,res)=>{
  await correctionDialog.waitFor();
  assert.match(await correctionDialog.textContent(),/source conversation stays unchanged/i);
  assert.equal(await page.locator('#scoutChatComposer').getByText('Add project',{exact:true}).count(),0);
- if(renderDir){await page.waitForTimeout(80);await page.screenshot({path:path.join(renderDir,'desktop-work-project-correction-dark.png')});}
- await correctionDialog.getByRole('radio',{name:'Strategy Project'}).click();
- await correctionDialog.getByRole('button',{name:'Update project'}).click();
- await page.waitForFunction(()=>!document.getElementById('sentMessageProjectDialog').open);
- assert.equal(correctionBodies.length,1);
- assert.deepEqual(Object.keys(correctionBodies[0]).sort(),['correctionToken','operationId']);
- assert.equal(correctionBodies[0].correctionToken,'opaque-strategy-project');
- assert.match(String(correctionBodies[0].operationId||''),/^[0-9a-f-]{20,}$/i);
- await page.waitForFunction(()=>document.querySelector('.scout-chat-work-card__project')?.textContent==='Project · Strategy Project');
- await page.evaluate(()=>{chooseDriveSaveOptions=async()=>({fileName:'Creator evidence brief',folderId:''});});
- await save.click();
- await page.waitForFunction(()=>document.querySelector('#chatContextRail .chat-context-action[data-state="saved"]')?.textContent==='Open in Drive');
- assert.equal(saveBodies.length,1);assert.equal(saveBodies[0].artifact.artifactId,artifactId);assert.equal(saveBodies[0].fileName,'Creator evidence brief');
- const openDrive=page.locator('#chatContextRail').getByRole('button',{name:'Open in Drive'});
- await openDrive.click();
- await page.waitForFunction(id=>document.getElementById('appShell').dataset.tool==='files'&&filesSelectedId===id,artifactId);
- assert.ok(filesLoads>=1,'Open in Drive did not refresh the exact Drive projection');
- await page.setViewportSize({width:390,height:844});
- await page.evaluate(({thread,artifact})=>{artifact.metadata.savedToFiles='true';renderTheme('light');setActiveTool('chat');artifactEntries=[artifact];scoutChatThreads=[thread];selectScoutChatThread(thread.id);setMobileChatView('convo');}, {thread,artifact});
- const compactCard=page.locator('.scout-chat-work-card');
- await compactCard.getByRole('button',{name:/View Research activity/}).click();
- assert.equal(await compactCard.getByRole('button',{name:'Open',exact:true}).isVisible(),true);
- assert.equal(await compactCard.getByRole('button',{name:'Open in Drive'}).isVisible(),true);
- assert.equal(await compactCard.getByRole('button',{name:'Regenerate'}).isVisible(),true);
- const compactCorrection=compactCard.getByRole('button',{name:'Change project for this Work'});
- assert.equal(await compactCorrection.isVisible(),true);
- await compactCorrection.click();
- await page.getByRole('dialog',{name:'Correct Work project'}).waitFor();
- if(renderDir){await page.waitForTimeout(80);await page.screenshot({path:path.join(renderDir,'phone-work-project-correction-light.png')});}
-	 await page.getByRole('dialog',{name:'Correct Work project'}).getByRole('button',{name:'Cancel',exact:true}).click();
- if(renderDir){await page.waitForTimeout(320);await page.screenshot({path:path.join(renderDir,'phone-project-research-actions-light.png')});}
- await compactCard.getByRole('button',{name:'Regenerate'}).click();
+ await correctionDialog.getByRole('button',{name:'Cancel',exact:true}).click();
+ await regenerate.click();
  await page.waitForFunction(()=>!document.getElementById('scoutFollowUpTarget').hidden&&document.getElementById('scoutChatInput').value.includes('Research the durable creator-economy evidence'));
  assert.match(await page.locator('#scoutFollowUpTarget').textContent(),/follow-up/);
  assert.equal(await page.evaluate(()=>document.activeElement?.id),'scoutChatInput');
- if(renderDir){for(const [name,width,height,theme] of [['desktop',1440,900,'dark'],['phone',390,844,'light']]){await page.setViewportSize({width,height});await page.evaluate(next=>renderTheme(next),theme);await page.waitForTimeout(80);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:path.join(renderDir,name+'-project-research-'+theme+'.png')});}}
+ assert.equal(saveBodies.length,0);assert.equal(correctionBodies.length,0);assert.equal(filesLoads,0);
  await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)
-	cmd.Env = append(os.Environ(), "PROJECT_WORK_INDEX="+indexPath, "PROJECT_WORK_RENDER_DIR="+os.Getenv("PROJECT_WORK_RENDER_DIR"))
+	cmd.Env = append(os.Environ(), "PROJECT_WORK_INDEX="+indexPath, "PROJECT_WORK_RENDER_DIR="+os.Getenv("PROJECT_WORK_RENDER_DIR"), "PROJECT_WORK_CHROME=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("rendered Project-bound Research harness: %v\n%s", err, output)

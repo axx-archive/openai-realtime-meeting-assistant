@@ -300,13 +300,32 @@ type scoutChatWorkRecordRef struct {
 }
 
 func scoutChatThreadAttentionReason(metadata map[string]string) string {
-	value := strings.ToLower(strings.TrimSpace(metadata["error"]))
+	// Goal processes persist the authoritative failure on goalBlocker while
+	// ordinary workstreams use error. Fold both into a closed reason code so a
+	// client can explain the recovery without ever rendering stage ids, provider
+	// syntax, or validation internals verbatim.
+	value := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		metadata["goalBlocker"], metadata["error"],
+	}, " ")))
 	switch {
+	case strings.Contains(value, "bounded comparative evidence lane"),
+		strings.Contains(value, "authorized direct-evidence dimensions"),
+		strings.Contains(value, "research scope"):
+		return "research_scope_failed"
+	case strings.Contains(value, "external-evidence format failure"),
+		strings.Contains(value, "source gate stayed closed"),
+		strings.Contains(value, "evidence dossier"),
+		strings.Contains(value, "evidence admission"),
+		strings.Contains(value, "entailment"),
+		strings.Contains(value, "unsupported factual material"):
+		return "evidence_gate_failed"
 	case strings.Contains(value, "max_output_truncation"):
 		return "output_truncated"
 	case strings.Contains(value, "output_validation_error"):
 		return "quality_gate_failed"
-	case strings.Contains(value, "transport_error"), strings.Contains(value, "timeout"), strings.Contains(value, "unavailable"):
+	case strings.Contains(value, "provider_unavailable"),
+		strings.Contains(value, "provider unavailable"),
+		strings.Contains(value, "transport_error"):
 		return "provider_unavailable"
 	case value != "":
 		return "work_failed"

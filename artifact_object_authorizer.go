@@ -143,10 +143,8 @@ func (store *meetingMemoryStore) resolveArtifactHeaderSecurityLocked(header Arti
 	if threadID == origin || threadID == "" || store == nil {
 		return header
 	}
-	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
-			continue
-		}
+	if index, found := store.scoutChatEntryIndexByIDLocked(threadID); found {
+		entry := store.entries[index]
 		visibility := normalizeScoutChatVisibility(entry.Metadata["visibility"])
 		header.Visibility = visibility
 		if visibility == scoutChatVisibilityPrivate {
@@ -168,15 +166,14 @@ func (store *meetingMemoryStore) artifactOriginSecurityProjection(origin string)
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	for _, entry := range store.entries {
-		if entry.Kind == meetingMemoryKindScoutChat && entry.ID == threadID {
-			visibility := normalizeScoutChatVisibility(entry.Metadata["visibility"])
-			owner := ""
-			if visibility == scoutChatVisibilityPrivate {
-				owner = normalizeAccountEmail(entry.Metadata["ownerEmail"])
-			}
-			return visibility, owner, true
+	if index, found := store.scoutChatEntryIndexByIDLocked(threadID); found {
+		entry := store.entries[index]
+		visibility := normalizeScoutChatVisibility(entry.Metadata["visibility"])
+		owner := ""
+		if visibility == scoutChatVisibilityPrivate {
+			owner = normalizeAccountEmail(entry.Metadata["ownerEmail"])
 		}
+		return visibility, owner, true
 	}
 	return scoutChatVisibilityPrivate, "", true
 }
@@ -329,13 +326,14 @@ func (store *meetingMemoryStore) artifactAuthorizationHeaderByIDInternal(id stri
 	}
 	id = strings.TrimSpace(id)
 	store.mu.Lock()
-	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != id || (!includeHidden && memoryEntryHiddenFromRecall(entry)) {
-			continue
+	index, found := store.artifactEntryIndexByIDLocked(id)
+	if found {
+		entry := store.entries[index]
+		if includeHidden || !memoryEntryHiddenFromRecall(entry) {
+			header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
+			store.mu.Unlock()
+			return header, true
 		}
-		header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
-		store.mu.Unlock()
-		return header, true
 	}
 	store.mu.Unlock()
 	return ArtifactAuthorizationHeader{}, false
@@ -414,17 +412,19 @@ func (store *meetingMemoryStore) artifactSnapshotIfHeaderMatchesInternal(id stri
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	for _, entry := range store.entries {
-		if entry.Kind != meetingMemoryKindOSArtifact || entry.ID != strings.TrimSpace(id) || (!includeHidden && memoryEntryHiddenFromRecall(entry)) {
-			continue
-		}
-		current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
-		if !artifactAuthorizationHeaderEqual(authorized, current) {
-			return meetingMemoryEntry{}, false
-		}
-		return cloneMemoryEntry(entry), true
+	index, found := store.artifactEntryIndexByIDLocked(id)
+	if !found {
+		return meetingMemoryEntry{}, false
 	}
-	return meetingMemoryEntry{}, false
+	entry := store.entries[index]
+	if !includeHidden && memoryEntryHiddenFromRecall(entry) {
+		return meetingMemoryEntry{}, false
+	}
+	current := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, Metadata: entry.Metadata}))
+	if !artifactAuthorizationHeaderEqual(authorized, current) {
+		return meetingMemoryEntry{}, false
+	}
+	return cloneMemoryEntry(entry), true
 }
 
 // artifactEventSnapshot requires the caller's complete authorization header to

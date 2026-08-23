@@ -1604,8 +1604,13 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 	var resultIndex scoutChatResultProjectionIndex
 	var resultViewer *userAccount
 	if includeArtifactResults {
-		resultIndex = app.scoutChatResultIndex()
-		resultViewer = accountStore().findUser(normalizeAccountEmail(viewerEmail))
+		for _, message := range thread.Messages {
+			if scoutChatThreadRefMayExposeResult(message.Thread) {
+				resultIndex = app.scoutChatResultIndex()
+				resultViewer = accountStore().findUser(normalizeAccountEmail(viewerEmail))
+				break
+			}
+		}
 	}
 	if thread.Riff != nil {
 		projected.ConversationKind = "channel_riff"
@@ -1833,9 +1838,10 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 	if app == nil {
 		return index
 	}
-	// One store snapshot per thread projection keeps a large channel O(A+M),
-	// rather than scanning every artifact once for every work message.
-	artifacts := app.osArtifactsSnapshot(0)
+	// One body-free, directory-backed snapshot per thread projection keeps a
+	// large channel O(A+M), rather than scanning lifetime memory or retaining a
+	// multi-megabyte deck body merely to resolve a work card.
+	artifacts := app.memory.artifactMetadataSnapshot()
 	deckCandidates := map[string][]meetingMemoryEntry{}
 	documentCandidates := map[string][]meetingMemoryEntry{}
 	for _, artifact := range artifacts {
@@ -1883,7 +1889,13 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 				binding.Version = acceptedVersion
 				binding.Digest = acceptedDigest
 				binding.State = scoutChatResultApprovalEdited
-				if acceptedVersion == artifactVersion(accepted) && strings.EqualFold(acceptedDigest, artifactCapabilityDigest(accepted)) {
+				// The result index intentionally carries metadata only. Version is a
+				// provisional compatibility filter here; the selected full body is
+				// fetched and compared to acceptedDigest at the final viewer seam below.
+				// Older production rows minted metadata.contentDigest before the store
+				// added room/sitting scope, so treating that historical stamp as the
+				// accepted digest would falsely revoke an otherwise exact approval.
+				if acceptedVersion == artifactVersion(accepted) {
 					binding.State = scoutChatResultApprovalExact
 				}
 			}
@@ -2009,16 +2021,28 @@ func scoutChatDocumentBelongsToGoal(document meetingMemoryEntry, goalID string, 
 // the earlier goal plan. The current header is body-free; version + content
 // digest cover the goal plan and authored body used for result selection.
 func (app *kanbanBoardApp) scoutChatIndexedArtifactCurrent(indexed meetingMemoryEntry) bool {
+	_, current := app.scoutChatCurrentIndexedArtifact(indexed)
+	return current
+}
+
+// scoutChatCurrentIndexedArtifact upgrades one body-free directory row to its
+// exact current durable body. The directory is selection-only: workflows that
+// bind a content digest (for example a human's accepted deck tuple) must call
+// this seam rather than hashing the metadata projection with an empty body.
+func (app *kanbanBoardApp) scoutChatCurrentIndexedArtifact(indexed meetingMemoryEntry) (meetingMemoryEntry, bool) {
 	if app == nil || app.memory == nil || strings.TrimSpace(indexed.ID) == "" {
-		return false
+		return meetingMemoryEntry{}, false
 	}
 	current, found := app.memory.artifactAuthorizationHeaderByID(indexed.ID)
 	if !found {
-		return false
+		return meetingMemoryEntry{}, false
 	}
 	expected := artifactAuthorizationHeaderFromEntry(indexed)
-	return current.ContentRevision == expected.ContentRevision &&
-		strings.EqualFold(strings.TrimSpace(current.ContentDigest), strings.TrimSpace(expected.ContentDigest))
+	if current.ContentRevision != expected.ContentRevision ||
+		!strings.EqualFold(strings.TrimSpace(current.ContentDigest), strings.TrimSpace(expected.ContentDigest)) {
+		return meetingMemoryEntry{}, false
+	}
+	return app.memory.artifactSnapshotIfHeaderMatches(indexed.ID, current)
 }
 
 // projectScoutChatResultRef upgrades old and new work messages at the read

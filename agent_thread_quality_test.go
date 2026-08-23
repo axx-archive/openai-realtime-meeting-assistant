@@ -1806,11 +1806,64 @@ func TestExternalEvidenceEntailmentBindsExactCandidateAndIndependentProviderFetc
 func TestExternalEvidenceEntailmentRequestUsesAuthorityBoundNoSearchContract(t *testing.T) {
 	fixture := focusedEntailmentThreadForTest(t, "The official program has 4,200 opted-in creators in 2026.", "https://example.org/creator-program", "")
 	request := fixture.app.buildAgentThreadOpenAIRequest(fixture.thread, fixture.app.newAgentJob(fixture.thread), time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC))
-	if request.JSONSchema == nil || request.JSONSchema.Name != packagingStudioEntailmentContract || request.NormalizeOutput == nil || request.EnableWebSearch || request.MaxToolCalls != 0 {
+	if request.JSONSchema == nil || request.JSONSchema.Name != packagingStudioEntailmentContract || request.NormalizeOutput == nil || request.EnableWebSearch || request.MaxToolCalls != 0 || request.PreflightError != nil {
 		t.Fatalf("entailment request missing strict authority-bound no-search contract: %#v", request)
 	}
 	if !strings.Contains(request.Instructions, "authority-bound, bounded source windows") || !strings.Contains(request.Instructions, "must not infer support") || !strings.Contains(request.Instructions, "measure/unit fidelity") {
 		t.Fatalf("entailment instructions lost exact claim/source safeguards:\n%s", request.Instructions)
+	}
+	authority, err := authorizedExternalEvidenceEntailmentAuthority(fixture.app, fixture.thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, inputDigest, err := externalSourceSnapshotEnvelopeFromText(request.Input)
+	if err != nil || inputDigest != authority.SourceDigest {
+		t.Fatalf("provider input lost exact source snapshot: inputDigest=%q sourceDigest=%q err=%v", inputDigest, authority.SourceDigest, err)
+	}
+}
+
+func TestEntailmentGoalChildLaunchPreservesExactSourceSnapshot(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	_, sourceBody, sourceDigest, err := renderExternalSourceSnapshotEnvelope(externalSourceSnapshotEnvelope{
+		Schema: externalSourceSnapshotSchema,
+		Snapshots: []externalSourceSnapshot{{
+			CandidateID: strings.Repeat("a", 64), ResearchQuestion: "What is the exact program count?",
+			CandidateFact: "The program has 4,200  opted-in creators.", URL: "https://example.org/program",
+			SourceTitle: "Official program", Status: "fetch_failed", Note: "The source denied the independent fetch.",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := "Check the exact authority-bound source windows.\n\n" + sourceBody
+	thread, err := app.launchGoalAgentThreadScaffold("artifacts", query, scoutParticipantName, nil, agentThreadGoalSpec{
+		ParentGoalID: "goal-parent", SubtaskID: "evidence_entailment", OutputContract: packagingStudioEntailmentContract, Deliverable: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.Query != query || thread.Artifact.Metadata["threadQuery"] != query {
+		t.Fatal("entailment launch changed the byte-exact machine envelope")
+	}
+	_, launchedDigest, err := externalSourceSnapshotEnvelopeFromText(thread.Query)
+	if err != nil || launchedDigest != sourceDigest {
+		t.Fatalf("launched entailment snapshot digest=%q, want %q: %v", launchedDigest, sourceDigest, err)
+	}
+	if !strings.Contains(thread.Query, "4,200  opted-in") {
+		t.Fatal("entailment launch collapsed evidence whitespace inside the receipt-bound JSON")
+	}
+}
+
+func TestExternalEvidenceEntailmentPreflightRejectsChangedProviderSnapshot(t *testing.T) {
+	fixture := focusedEntailmentThreadForTest(t, "The official program has 4,200 opted-in creators in 2026.", "https://example.org/creator-program", "")
+	request := fixture.app.buildAgentThreadOpenAIRequest(fixture.thread, fixture.app.newAgentJob(fixture.thread), time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC))
+	if request.PreflightError != nil {
+		t.Fatal(request.PreflightError)
+	}
+	request.Input = strings.Replace(request.Input, "4,200 opted-in", "4,201 opted-in", 1)
+	request = configureExternalEvidenceV2Request(fixture.app, fixture.thread, request)
+	if request.PreflightError == nil || !strings.Contains(request.PreflightError.Error(), "provider request does not contain the exact authorized source snapshot") {
+		t.Fatalf("changed provider snapshot preflight error=%v", request.PreflightError)
 	}
 }
 

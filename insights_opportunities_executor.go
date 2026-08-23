@@ -1306,6 +1306,7 @@ func (store *meetingMemoryStore) commitInsightsOpportunitiesArtifact(ctx context
 		return InsightsOpportunitiesWorkspaceWriteReceipt{}, meetingMemoryEntry{}, false, err
 	}
 	store.entries = append(store.entries, entry)
+	store.indexMeetingEntryLocked(len(store.entries)-1, entry)
 	store.seen[artifactID] = struct{}{}
 	return InsightsOpportunitiesWorkspaceWriteReceipt{IdempotencyKey: idempotencyKey, ArtifactID: artifactID, ReportDigest: report.ReportDigest, WrittenAt: writtenAt}, cloneMemoryEntry(entry), true, nil
 }

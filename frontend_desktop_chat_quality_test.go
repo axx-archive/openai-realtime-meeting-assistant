@@ -659,3 +659,52 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 		}
 	}
 }
+
+func TestDesktopNeedsAttentionUsesClosedDurableRecoveryCopy(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	reason := functionBody(html, "function desktopWorkDurableAttentionReason(")
+	copy := functionBody(html, "function desktopWorkAttentionCopy(")
+	context := functionBody(html, "function renderDesktopWorkContext(")
+	terminal := functionBody(html, "function goalCardRenderTerminal(")
+	research := functionBody(html, "function updateScoutChatResearchNode(")
+	if reason == "" || copy == "" || context == "" || terminal == "" || research == "" {
+		t.Fatal("could not isolate desktop needs-attention recovery functions")
+	}
+	for _, want := range []string{
+		"plan?.blocker",
+		"artifact?.metadata?.goalBlocker",
+		"artifact?.metadata?.error",
+		"ref?.attentionReason",
+	} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("durable attention reason omitted %q", want)
+		}
+	}
+	for _, want := range []string{
+		"research_scope_failed",
+		"bounded comparative evidence lane",
+		"authorized direct-evidence dimensions",
+		"evidence_gate_failed",
+		"The evidence gate stayed closed",
+		"Retry will narrow the research scope",
+	} {
+		if !strings.Contains(copy, want) {
+			t.Errorf("closed recovery copy omitted %q", want)
+		}
+	}
+	if strings.Contains(copy, "value.includes('unavailable')") || strings.Contains(copy, "value.includes('timeout')") {
+		t.Fatal("generic unavailable/timeout text must not be mislabeled as a research-provider outage")
+	}
+	for label, body := range map[string]string{
+		"work context":  context,
+		"goal terminal": terminal,
+		"research card": research,
+	} {
+		if !strings.Contains(body, "desktopWorkDurableAttentionReason(") || !strings.Contains(body, "desktopWorkAttentionCopy(") {
+			t.Errorf("%s does not render from the closed durable recovery mapper", label)
+		}
+	}
+	if strings.Contains(terminal, "plan?.blocker ||") || strings.Contains(terminal, "m.blocker ||") {
+		t.Fatal("goal recovery card still renders an internal blocker verbatim")
+	}
+}

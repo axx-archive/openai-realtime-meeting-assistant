@@ -30,7 +30,7 @@ export const WEB_APP_URL = (
 ).replace(/\/$/, '');
 
 /**
- * Native private Realtime remains a build-time release gate. Build 73's
+ * Native private Realtime remains a build-time release gate. Build 74's
  * production profile enables the voice-first surface explicitly;
  * local and ad-hoc builds still stay off unless they opt in.
  */

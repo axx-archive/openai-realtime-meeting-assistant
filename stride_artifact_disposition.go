@@ -745,8 +745,10 @@ func (store *meetingMemoryStore) deleteOSArtifactWithProjectionIfDispositionRefM
 		Title:         firstNonEmptyString(strings.TrimSpace(removed.Metadata["title"]), "Artifact removed"),
 		OriginSurface: firstNonEmptyString(strings.TrimSpace(removed.Metadata["originSurface"]), strings.TrimSpace(removed.Metadata["originKind"]), "artifacts"), Actor: "system"})
 	store.entries = append(store.entries[:index], store.entries[index+1:]...)
+	store.rebuildMeetingEntryIndexesLocked()
 	if err := store.rewriteLocked(false); err != nil {
 		store.entries = append(store.entries[:index], append([]meetingMemoryEntry{removed}, store.entries[index:]...)...)
+		store.rebuildMeetingEntryIndexesLocked()
 		revokeArtifactDeletionProjection(projection)
 		return meetingMemoryEntry{}, artifactDeletionProjection{}, false, err
 	}

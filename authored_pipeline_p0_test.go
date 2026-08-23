@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -457,6 +458,109 @@ func TestPackagingStudioTerminalTailUsesOnlyExactRenderedAdmission(t *testing.T)
 	admittedDeck := mustArtifact(t, fixture.app, fixture.deck.ID)
 	if err := fixture.app.requireFinalExportAdmission(admittedDeck); err != nil {
 		t.Fatalf("exact verified presentation did not unlock final export: %v", err)
+	}
+}
+
+func TestAuthoritativeRenderedReviewRequeuesFailedAuthoredStageBeforeBlocking(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "authored-review-requeue-test"
+
+	previousGoalStart := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousGoalStart })
+	previousAgentStart := startAgentThreadAsync
+	launched := make(chan scoutAgentThread, 1)
+	startAgentThreadAsync = func(_ *kanbanBoardApp, thread scoutAgentThread) { launched <- thread }
+	t.Cleanup(func() { startAgentThreadAsync = previousAgentStart })
+
+	run, err := launchConversationOwnedGoalForTest(t, app, goalLaunchSpec{
+		Objective: "Decide whether the official program's 2026 opted-in creator count supports proceeding",
+		CreatedBy: "aj@shareability.com", ToolTemplate: documentReportProcessID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := mustGoalPlan(t, app, run.Artifact.ID)
+	engine := newGoalEngine(app)
+	var genericReviewerCalls atomic.Int32
+	engine.openAIResponder = func(context.Context, string, openAITextRequest) (string, error) {
+		genericReviewerCalls.Add(1)
+		return "", fmt.Errorf("generic reviewer must not run during authored-stage repair")
+	}
+	if err := engine.prepareGoalRoute(&plan, run.Artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := instantiateProcessPlan(documentReportDefinition(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	assignGoalRunners(&plan)
+
+	contextBody := externalEvidenceContextBodyForTest(t, plan, "What is the official program's 2026 opted-in creator count?", 1)
+	authorized, mode, err := authorizeExternalEvidenceResearchText(app, &plan, contextBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context snapshot", contextBody, scoutParticipantName, map[string]string{
+		"source": "process_stage", "goalParentId": run.Artifact.ID, "goalSubtaskId": "context_snapshot",
+		"processId": documentReportProcessID, "processStage": "context_snapshot", "processRole": processRoleSynthesizer,
+		"status": "complete", "threadStatus": "complete", "outputContract": documentReportResearchContextContract,
+		"researchMode": mode, "researchQuestionCount": strconv.Itoa(len(authorized.Questions)),
+		"researchQuestionAuthorityDigest": authorized.QuestionAuthorityDigest, "researchSourceAuthorityDigest": authorized.SourceAuthorityDigest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextStage := plan.subtaskByID("context_snapshot")
+	contextStage.Status, contextStage.ArtifactID = subtaskComplete, contextArtifact.ID
+	contextStage.Review = nil
+
+	const exactFailure = "context snapshot research authority is invalid: report context research questions do not define one bounded comparative evidence lane"
+	researchStage := plan.subtaskByID("external_research")
+	researchStage.Status = subtaskFailed
+	researchStage.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: exactFailure, By: "process_engine"}
+	plan.State = goalStateReview
+
+	engine.drive(context.Background(), &plan, run.Artifact.ID)
+
+	if plan.State != goalStateExecute || researchStage.Status != subtaskRunning || researchStage.Revisions != 1 || researchStage.Attempts != 1 {
+		t.Fatalf("authored failure bypassed bounded requeue: state=%q stage=%+v blocker=%q", plan.State, researchStage, plan.Blocker)
+	}
+	if researchStage.Review == nil || researchStage.Review.Reasons != exactFailure {
+		t.Fatalf("requeue lost exact revision guidance: %+v", researchStage.Review)
+	}
+	if genericReviewerCalls.Load() != 0 || contextStage.Status != subtaskComplete || contextStage.Review != nil {
+		t.Fatalf("authored repair re-reviewed completed upstream work: calls=%d context=%+v", genericReviewerCalls.Load(), contextStage)
+	}
+	select {
+	case child := <-launched:
+		if child.Artifact.Metadata["goalSubtaskId"] != "external_research" {
+			t.Fatalf("requeue launched subtask=%q, want external_research", child.Artifact.Metadata["goalSubtaskId"])
+		}
+	default:
+		t.Fatal("requeued authored stage was not dispatched")
+	}
+	persisted := mustGoalPlan(t, app, run.Artifact.ID)
+	if persisted.State != goalStateExecute || persisted.subtaskByID("external_research").Revisions != 1 || persisted.Blocker != "" {
+		t.Fatalf("durable authored repair state=%q stage=%+v blocker=%q", persisted.State, persisted.subtaskByID("external_research"), persisted.Blocker)
+	}
+}
+
+func TestAuthoritativeRenderedReviewBlocksOnlyAfterRevisionBudget(t *testing.T) {
+	plan := &goalPlan{ProcessID: documentReportProcessID, Subtasks: []goalSubtask{{
+		ID: "context_snapshot", Status: subtaskFailed, Revisions: goalMaxRevisions,
+		Review: &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "context snapshot research authority is invalid: drifts from authorized direct-evidence dimensions", By: "process_engine"},
+	}}}
+	engine := &goalEngine{}
+	if outcome := engine.repairFailedAuthoritativeSubtasks(plan); outcome != goalReviewOutcomeBlocked {
+		t.Fatalf("outcome=%v, want blocked after the bounded revision budget", outcome)
+	}
+	stage := plan.subtaskByID("context_snapshot")
+	if stage.Status != subtaskBlocked || stage.Revisions != goalMaxRevisions {
+		t.Fatalf("exhausted authored stage=%+v, want terminal blocked with unchanged budget", stage)
+	}
+	if !strings.Contains(plan.Blocker, "drifts from authorized direct-evidence dimensions") {
+		t.Fatalf("durable blocker lost the validation reason: %q", plan.Blocker)
 	}
 }
 

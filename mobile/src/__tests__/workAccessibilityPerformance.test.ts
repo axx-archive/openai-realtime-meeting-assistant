@@ -140,6 +140,7 @@ test('thread rows and work surfaces expose state without clipping large text or 
   assert.doesNotMatch(bubble, /<Text numberOfLines=\{2\} style=\{styles\.workQuery\}/u);
 
   const threadScreen = source('src/screens/ThreadScreen.tsx');
+  const activityPill = source('src/messaging/WorkActivityPill.tsx');
   const shell = source('src/navigation/NativeUniversalShell.tsx');
   const sheet = source('src/messaging/LongMessageSheet.tsx');
   assert.match(sheet, /accessibilityViewIsModal/u);
@@ -148,10 +149,11 @@ test('thread rows and work surfaces expose state without clipping large text or 
   assert.match(sheet, /maxFontSizeMultiplier=\{2\}/u);
   assert.match(bubble, /workDetailsTriggerRef/u);
   assert.match(bubble, /workSurfaceMaxFontSizeMultiplier = 2/u);
-  assert.match(threadScreen, /activeWorkTriggerRef/u);
-  assert.match(threadScreen, /activeWorkTextStacked/u);
-  assert.match(threadScreen, /activeWorkActionStacked: \{ alignSelf: "stretch", textAlign: "right" \}/u);
-  assert.match(threadScreen, /maxFontSizeMultiplier=\{1\.8\}/u);
+  assert.match(threadScreen, /<WorkActivityPill/u);
+  assert.match(activityPill, /accessibilityLabel="Dismiss work status"/u);
+  assert.match(activityPill, /accessibilityHint="Hides this update only for you/u);
+  assert.match(activityPill, /actionStacked: \{ alignSelf: 'stretch', textAlign: 'right' \}/u);
+  assert.match(activityPill, /maxFontSizeMultiplier=\{1\.8\}/u);
   assert.match(shell, /Platform\.isPad/u);
   assert.match(sheet, /accessibilityRole="header"/u);
 
