@@ -120,7 +120,7 @@ func TestFrontendPDFSelectionIsRevisionBound(t *testing.T) {
 			t.Errorf("artifactNewestPdfAsset missing %q", want)
 		}
 	}
-	waiter := functionBody(html, "async function waitForArtifactPdfAsset(artifactId, tries = 40, expectedBinding = null)")
+	waiter := functionBody(html, "async function waitForArtifactPdfAsset(artifactId, tries = 40, expectedBinding = null, renderSource = null)")
 	if !strings.Contains(waiter, "renderStatus === 'failed' || renderStatus === 'stale'") {
 		t.Fatal("PDF waiter does not fail fast for a stale source render")
 	}
@@ -129,5 +129,8 @@ func TestFrontendPDFSelectionIsRevisionBound(t *testing.T) {
 	}
 	if !strings.Contains(waiter, "assertArtifactExpectedBinding") {
 		t.Fatal("PDF waiter does not reject a changed artifact binding while polling")
+	}
+	if !strings.Contains(waiter, "artifactPdfMatchesExpectedRenderSuccessor") {
+		t.Fatal("PDF waiter does not recognize the exact completed v+1 render successor")
 	}
 }

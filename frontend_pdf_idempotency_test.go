@@ -15,7 +15,8 @@ func TestStudioPDFControlsKeepTruthfulResumableRenderingState(t *testing.T) {
 	}
 	html := string(raw)
 	for _, want := range []string{
-		"async function currentArtifactPdfAsset(artifactId)",
+		"async function currentArtifactPdfAsset(artifactId, expectedBinding = null)",
+		"artifactPdfMatchesExpectedRenderSuccessor",
 		"button.dataset.pdfPending = 'true'",
 		"Rendering · check",
 		"Rendering PDF · check",

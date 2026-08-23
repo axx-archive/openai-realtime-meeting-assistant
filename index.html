@@ -45080,14 +45080,21 @@ Wrap the entire export in one code block. After the code block, say whether the 
           }
 		  const expectedBinding = studioProjectExpectedBinding(project)
 		  let landed = await currentArtifactPdfAsset(result.artifactId, expectedBinding)
-          if (!landed?.pdf) {
-            const response = await fetch('/artifacts/export-pdf', {
+		  if (!landed?.pdf) {
+			const response = await fetch('/artifacts/export-pdf', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ artifactId: result.artifactId, expectedVersion: result.version, sceneRef })
-            })
-            const data = await response.json().catch(() => ({}))
-            if (!response.ok) throw new Error(data?.error || 'PDF export failed')
-			landed = await waitForArtifactPdfAsset(result.artifactId, 40, expectedBinding)
+			})
+			const data = await response.json().catch(() => ({}))
+			if (!response.ok) throw new Error(data?.error || 'PDF export failed')
+			const renderSource = {
+			  sourceVersion: Number(data?.sourceVersion || 0),
+			  sceneRef: String(data?.sceneRef || '')
+			}
+			if (renderSource.sourceVersion !== Number(result.version || 0) || renderSource.sceneRef !== sceneRef) {
+			  throw new Error('PDF export did not bind the exact file. Refresh the project before downloading.')
+			}
+			landed = await waitForArtifactPdfAsset(result.artifactId, 40, expectedBinding, renderSource)
           }
           if (!landed?.pdf) throw new Error('PDF is still rendering. Try again in a moment.')
           const fileName = studioDownloadFileName(landed.pdf.name || result.title || project.title, project.kind === 'presentation' ? 'presentation' : 'report', 'pdf')
@@ -54101,6 +54108,34 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		}
 	  }
 
+	  // A successful render attaches its exact-source PDF in one server-owned
+	  // metadata revision. Accept only that v+1 successor while polling the job
+	  // this client just started; every ordinary body/edit drift still fails
+	  // the expected result tuple above.
+	  function artifactPdfMatchesExpectedRenderSuccessor(entry, pdf, expectedBinding, renderSource) {
+		if (!entry || !pdf || !expectedBinding || !renderSource) return false
+		const metadata = entry.metadata || {}
+		const expectedVersion = Number(expectedBinding.version || 0)
+		const currentVersion = Number(metadata.artifactVersion || 0)
+		const sourceVersion = Number(renderSource.sourceVersion || 0)
+		const sceneRef = String(renderSource.sceneRef || '')
+		return String(entry.id || '') === String(expectedBinding.artifactId || '')
+		  && expectedVersion > 0
+		  && sourceVersion === expectedVersion
+		  && currentVersion === expectedVersion + 1
+		  && String(metadata.renderStatus || '').trim().toLowerCase() === 'complete'
+		  && !String(metadata.renderJobId || '').trim()
+		  && Number(metadata.renderSourceArtifactVersion || 0) === expectedVersion
+		  && Number(metadata.renderPdfSourceArtifactVersion || 0) === expectedVersion
+		  && Number(pdf.sourceArtifactVersion || 0) === expectedVersion
+		  && String(pdf.sourceSceneRef || '') === sceneRef
+		  && Number(metadata.renderPdfArtifactVersion || 0) === currentVersion
+		  && String(metadata.renderPdfAssetRef || '') === String(pdf.ref || '')
+		  && String(metadata.deckSceneRef || '') === sceneRef
+		  && String(metadata.renderSourceSceneRef || '') === sceneRef
+		  && String(metadata.renderPdfSourceSceneRef || '') === sceneRef
+	  }
+
 	  async function currentArtifactPdfAsset(artifactId, expectedBinding = null) {
         let fresh = null
         if (typeof fetchArtifactEntryById === 'function') {
@@ -54124,7 +54159,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // ride the artifact library refresh until the render callback lands the
       // pdf asset (or stamps renderStatus failed); ~2 minutes, then give up
       // quietly — the asset still lands via the normal refresh path later.
-	  async function waitForArtifactPdfAsset(artifactId, tries = 40, expectedBinding = null) {
+	  async function waitForArtifactPdfAsset(artifactId, tries = 40, expectedBinding = null, renderSource = null) {
         for (let attempt = 0; attempt < tries; attempt += 1) {
           await new Promise(resolve => window.setTimeout(resolve, 3000))
           // A deck/document may have fallen outside the newest-100 library
@@ -54139,7 +54174,6 @@ Wrap the entire export in one code block. After the code block, say whether the 
             fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
           }
 		  if (!fresh) continue
-		  assertArtifactExpectedBinding(fresh, expectedBinding)
           const renderStatus = String(fresh?.metadata?.renderStatus || '').trim().toLowerCase()
           if (renderStatus === 'failed' || renderStatus === 'stale') {
             throw new Error(String(fresh?.metadata?.renderError || '').trim() || (renderStatus === 'stale'
@@ -54147,7 +54181,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
               : 'PDF render failed'))
           }
           const pdf = artifactNewestPdfAsset(fresh)
-          if (pdf) return { entry: fresh, pdf }
+		  if (artifactEntryMatchesExpectedBinding(fresh, expectedBinding)) {
+			if (pdf) return { entry: fresh, pdf }
+			continue
+		  }
+		  if (artifactPdfMatchesExpectedRenderSuccessor(fresh, pdf, expectedBinding, renderSource)) {
+			return { entry: fresh, pdf }
+		  }
+		  assertArtifactExpectedBinding(fresh, expectedBinding)
         }
         return null
       }
