@@ -273,6 +273,7 @@ type ThreadMessageRowProps = {
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onOpenStudioProject: (projectId: string) => void;
   onOpenWorkAsset: (asset: ScoutResultAssetRef) => void;
   onResolveWorkCheckpoint: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
@@ -313,6 +314,7 @@ const ThreadMessageRow = React.memo(
     onOpenCatchUp,
     onOpenLongMessage,
     onOpenWorkArtifact,
+    onOpenStudioProject,
     onOpenWorkAsset,
     onResolveWorkCheckpoint,
     onChangeWorkProject,
@@ -384,6 +386,7 @@ const ThreadMessageRow = React.memo(
           resolvingProposal={resolvingProposal}
           onOpenLongMessage={onOpenLongMessage}
           onOpenWorkArtifact={onOpenWorkArtifact}
+          onOpenStudioProject={onOpenStudioProject}
           onOpenWorkAsset={onOpenWorkAsset}
           onResolveWorkCheckpoint={onResolveWorkCheckpoint}
           onChangeWorkProject={onChangeWorkProject}
@@ -433,6 +436,7 @@ const ThreadMessageRow = React.memo(
     previous.onOpenCatchUp === next.onOpenCatchUp &&
     previous.onOpenLongMessage === next.onOpenLongMessage &&
     previous.onOpenWorkArtifact === next.onOpenWorkArtifact &&
+    previous.onOpenStudioProject === next.onOpenStudioProject &&
     previous.onOpenWorkAsset === next.onOpenWorkAsset &&
     previous.onResolveWorkCheckpoint === next.onResolveWorkCheckpoint &&
     previous.onChangeWorkProject === next.onChangeWorkProject &&
@@ -2803,6 +2807,11 @@ export function ThreadScreen({ route, navigation }: Props) {
     },
     [],
   );
+  const openStudioProject = useCallback((projectId: string) => {
+    const normalizedId = projectId.trim();
+    if (!normalizedId) return;
+    navigation.navigate('WorkHome', { projectId: normalizedId });
+  }, [navigation]);
   const openWorkArtifact = useCallback(
     async (message: ScoutMessage, returnFocusHandle?: number) => {
       expandedMessageReturnFocusHandleRef.current = returnFocusHandle ?? null;
@@ -3057,8 +3066,8 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const resolveWorkCheckpoint = useCallback(
     (message: ScoutMessage, option: { id: string; label: string; action: string }) => {
-      const artifactId = String(message.thread?.artifactId ?? '').trim();
-      const checkpointId = String(message.thread?.checkpoint?.id ?? '').trim();
+      const artifactId = String(message.studioProject?.id ?? message.thread?.artifactId ?? '').trim();
+      const checkpointId = String(message.studioProject?.checkpoint?.id ?? message.thread?.checkpoint?.id ?? '').trim();
       if (!sessionToken || !artifactId || !checkpointId || !option.id) {
         setError('That decision is no longer available. Refresh the channel and try again.');
         return;
@@ -3312,16 +3321,23 @@ export function ThreadScreen({ route, navigation }: Props) {
       const status = String(message.thread?.status ?? "").trim().toLowerCase();
       const qualityState = String(message.thread?.resultQualityState ?? "").trim().toLowerCase();
       const resultArtifactID = String(message.thread?.resultArtifactId ?? "").trim();
+      const resultArtifactVersion = Number(message.thread?.resultArtifactVersion ?? message.work?.resultArtifactVersion ?? 0);
+      const resultArtifactDigest = String(message.thread?.resultArtifactDigest ?? message.work?.resultArtifactDigest ?? "").trim().toLowerCase();
       const reviewingChanges = qualityState === 'edited_after_admission';
+      const exactReviewBinding = Boolean(resultArtifactID)
+        && Number.isSafeInteger(resultArtifactVersion)
+        && resultArtifactVersion > 0
+        && /^[0-9a-f]{64}$/u.test(resultArtifactDigest);
       const retryable = ["failed", "error", "needs_attention", "rejected", "blocked"].includes(status);
-      const canContinue = message.thread?.resultCanContinue === true && (reviewingChanges || retryable);
+      const canContinue = message.thread?.resultCanContinue === true
+        && (reviewingChanges || retryable)
+        && (!reviewingChanges || exactReviewBinding);
       if (!sessionToken || !messageID || !goalID || mode !== "goal" || !canContinue || retryingGoalID) return;
       setRetryingGoalID(messageID);
       setError(null);
       try {
         if (reviewingChanges) {
-          if (!resultArtifactID) return;
-          await api.reviewEditedGoal(sessionToken, goalID, resultArtifactID);
+          await api.reviewEditedGoal(sessionToken, goalID, resultArtifactID, resultArtifactVersion, resultArtifactDigest);
         } else {
           await api.resumeGoal(sessionToken, goalID);
         }
@@ -3429,6 +3445,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onOpenCatchUp={openCatchUp}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onOpenStudioProject={openStudioProject}
         onOpenWorkAsset={openWorkAsset}
         onResolveWorkCheckpoint={resolveWorkCheckpoint}
         onChangeWorkProject={openWorkstreamCorrection}
@@ -3446,6 +3463,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       openMessageActions,
       openLongMessage,
       openWorkArtifact,
+      openStudioProject,
       openWorkAsset,
       resolveWorkCheckpoint,
       openWorkstreamCorrection,
@@ -3921,6 +3939,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onOpenStudioProject={openStudioProject}
         onOpenWorkAsset={openWorkAsset}
         onResolveWorkCheckpoint={resolveWorkCheckpoint}
         onChangeWorkProject={openWorkstreamCorrection}
@@ -4334,7 +4353,7 @@ export function ThreadScreen({ route, navigation }: Props) {
           </View>
         )}
 
-        {!editingMessage && currentWorkMessage && showCurrentWorkActivity ? (
+        {!editingMessage && currentWorkMessage && !currentWorkMessage.studioProject && showCurrentWorkActivity ? (
           <WorkActivityPill
             key={currentWorkSurfaceToken}
             message={currentWorkMessage}

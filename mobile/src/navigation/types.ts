@@ -10,14 +10,14 @@ export type RootStackParamList = {
   Canvas: undefined;
   Meet: undefined;
   Chat: undefined;
-  WorkHome: undefined;
+  WorkHome: { projectId?: string; rootRunId?: string } | undefined;
   NetworkHome: undefined;
   WorkSearchHome: undefined;
   YouHome: undefined;
   Deck: { segment?: DeckSegment } | undefined;
   Login: undefined;
   OSWeb: { path?: string; title?: string } | undefined;
-  DeckViewer: { artifactId: string; artifactVersion?: number; artifactDigest?: string; title?: string; desktopEditable: boolean };
+  DeckViewer: { artifactId: string; artifactVersion?: number; artifactDigest?: string; title?: string; desktopEditable: boolean; previewOnly?: boolean };
   Room: { roomId: string; title: string };
   CreateRoom: { displayMode?: 'sheet' | 'workstation' } | undefined;
   NewConversation: { displayMode?: 'sheet' | 'workstation' } | undefined;

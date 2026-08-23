@@ -92,13 +92,37 @@ func TestReviewChangesCarriesExactEditedDeckAssetsIntoDraftCompile(t *testing.T)
 	previousStart := startGoalFeedbackResumeAsync
 	startGoalFeedbackResumeAsync = func(func()) {}
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousStart })
-	reviewResponse := postArtifactAction(t, adminCookies, `{"id":`+strconv.Quote(fixture.parentID)+`,"action":"review_changes","resultArtifactId":`+strconv.Quote(copied.Artifact.ID)+`}`)
+	missingTuple := postArtifactAction(t, adminCookies, `{"id":`+strconv.Quote(fixture.parentID)+`,"action":"review_changes","resultArtifactId":`+strconv.Quote(copied.Artifact.ID)+`}`)
+	if missingTuple.Code != http.StatusBadRequest {
+		t.Fatalf("missing review tuple status=%d body=%s", missingTuple.Code, missingTuple.Body.String())
+	}
+	staleTuple := postArtifactAction(t, adminCookies, `{"id":`+strconv.Quote(fixture.parentID)+`,"action":"review_changes","resultArtifactId":`+strconv.Quote(copied.Artifact.ID)+`,"expectedResultVersion":`+strconv.Itoa(uploaded.Artifact.Version-1)+`,"expectedResultDigest":`+strconv.Quote(uploaded.Artifact.ContentDigest)+`}`)
+	if staleTuple.Code != http.StatusConflict {
+		t.Fatalf("stale review tuple status=%d body=%s", staleTuple.Code, staleTuple.Body.String())
+	}
+	priorReviewProbe := reviewChangesAfterBindingProbe
+	var raceErr error
+	reviewChangesAfterBindingProbe = func() {
+		current := mustArtifact(t, fixture.app, copied.Artifact.ID)
+		_, _, raceErr = fixture.app.updateOSArtifactWithMetadata(current.ID, "", current.Text, "AJ", map[string]string{"title": "Edited while review was starting"})
+		reviewChangesAfterBindingProbe = nil
+	}
+	t.Cleanup(func() { reviewChangesAfterBindingProbe = priorReviewProbe })
+	raceResponse := postArtifactAction(t, adminCookies, `{"id":`+strconv.Quote(fixture.parentID)+`,"action":"review_changes","resultArtifactId":`+strconv.Quote(copied.Artifact.ID)+`,"expectedResultVersion":`+strconv.Itoa(uploaded.Artifact.Version)+`,"expectedResultDigest":`+strconv.Quote(uploaded.Artifact.ContentDigest)+`}`)
+	if raceErr != nil {
+		t.Fatal(raceErr)
+	}
+	if raceResponse.Code != http.StatusBadRequest || !strings.Contains(raceResponse.Body.String(), "changed") {
+		t.Fatalf("concurrent review race status=%d body=%s", raceResponse.Code, raceResponse.Body.String())
+	}
+	reviewArtifact := mustArtifact(t, fixture.app, copied.Artifact.ID)
+	reviewResponse := postArtifactAction(t, adminCookies, `{"id":`+strconv.Quote(fixture.parentID)+`,"action":"review_changes","resultArtifactId":`+strconv.Quote(copied.Artifact.ID)+`,"expectedResultVersion":`+strconv.Itoa(artifactVersion(reviewArtifact))+`,"expectedResultDigest":`+strconv.Quote(artifactCapabilityDigest(reviewArtifact))+`}`)
 	if reviewResponse.Code != http.StatusAccepted {
 		t.Fatalf("review changes status=%d body=%s", reviewResponse.Code, reviewResponse.Body.String())
 	}
 	reopened := mustGoalPlan(t, fixture.app, fixture.parentID)
 	producer := reopened.subtaskByID("ship_deck")
-	if producer == nil || producer.ArtifactID != copied.Artifact.ID || producer.Review == nil || producer.Review.ArtifactVersion != uploaded.Artifact.Version || producer.Review.ArtifactDigest == "" || producer.Review.ArtifactSceneRef != uploaded.Artifact.SceneRef {
+	if producer == nil || producer.ArtifactID != copied.Artifact.ID || producer.Review == nil || producer.Review.ArtifactVersion != artifactVersion(reviewArtifact) || producer.Review.ArtifactDigest != artifactCapabilityDigest(reviewArtifact) || producer.Review.ArtifactSceneRef != uploaded.Artifact.SceneRef {
 		t.Fatalf("review did not bind exact edited revision: %+v", producer)
 	}
 

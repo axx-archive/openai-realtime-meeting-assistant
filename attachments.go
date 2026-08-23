@@ -1562,6 +1562,7 @@ func redactPrivateRiffPublicationMessage(message scoutChatMessageRecord) scoutCh
 	message.IntentOutcome = string(conversationIntentUnavailable)
 	message.Activity = nil
 	message.Thread = nil
+	message.StudioProject = nil
 	message.Work = nil
 	message.Proposal = nil
 	message.Choices = nil
@@ -1605,7 +1606,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 	var resultViewer *userAccount
 	if includeArtifactResults {
 		for _, message := range thread.Messages {
-			if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatWorkRefMayExposeResult(message.Work) {
+			if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatMessageMayExposeStudioProject(message) || scoutChatWorkRefMayExposeResult(message.Work) {
 				resultIndex = app.scoutChatResultIndex()
 				resultViewer = accountStore().findUser(normalizeAccountEmail(viewerEmail))
 				break
@@ -1678,6 +1679,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 				message.Sources = nil
 				message.IntentOutcome = string(conversationIntentUnavailable)
 				message.Thread = nil
+				message.StudioProject = nil
 				message.Work = nil
 				message.Proposal = nil
 				message.Choices = nil
@@ -1721,6 +1723,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 		}
 		if includeArtifactResults {
 			app.projectScoutChatResultRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
+			app.projectScoutChatStudioProjectRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
 			app.projectScoutChatWorkResultRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
 		}
 		projected.Messages[messageIndex].SourceOperationID = ""
@@ -1849,6 +1852,13 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 	if scoutChatResultIndexProbe != nil {
 		scoutChatResultIndexProbe()
 	}
+	if app == nil || app.memory == nil {
+		return scoutChatResultProjectionIndex{}
+	}
+	return app.scoutChatResultIndexFromArtifacts(app.memory.artifactMetadataSnapshot())
+}
+
+func (app *kanbanBoardApp) scoutChatResultIndexFromArtifacts(artifacts []meetingMemoryEntry) scoutChatResultProjectionIndex {
 	index := scoutChatResultProjectionIndex{
 		byID:                      map[string]meetingMemoryEntry{},
 		deckByGoal:                map[string]meetingMemoryEntry{},
@@ -1863,12 +1873,11 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 	// One body-free, directory-backed snapshot per thread projection keeps a
 	// large channel O(A+M), rather than scanning lifetime memory or retaining a
 	// multi-megabyte deck body merely to resolve a work card.
-	artifacts := app.memory.artifactMetadataSnapshot()
 	deckCandidates := map[string][]meetingMemoryEntry{}
 	documentCandidates := map[string][]meetingMemoryEntry{}
 	for _, artifact := range artifacts {
 		index.byID[artifact.ID] = artifact
-		if artifactType(artifact) == artifactTypeHTMLDeck && artifactIsHTMLDocument(artifact) {
+		if artifactType(artifact) == artifactTypeHTMLDeck {
 			goalID := ""
 			if strings.TrimSpace(artifact.Metadata["source"]) == "packaging_studio_ship" &&
 				strings.TrimSpace(artifact.Metadata["artifactContract"]) == packagingStudioDeckContract {
@@ -1904,7 +1913,7 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 				acceptedDigest = strings.TrimSpace(plan.Report.AcceptedResultArtifactDigest)
 			}
 		}
-		if accepted, ok := index.byID[acceptedID]; ok && scoutChatDeckBelongsToGoal(accepted, goal.ID) {
+		if accepted, ok := index.byID[acceptedID]; ok && scoutChatDeckMetadataBelongsToGoal(accepted, goal.ID) {
 			index.acceptedDeckByGoal[goal.ID] = accepted
 			binding := scoutChatAcceptedDeckBinding{State: scoutChatResultApprovalLegacy}
 			if acceptedVersion > 0 && acceptedDigest != "" {
@@ -1946,7 +1955,7 @@ func (app *kanbanBoardApp) scoutChatResultIndex() scoutChatResultProjectionIndex
 		// already reached verified terminal state).
 		if plan.State == goalStateBlocked {
 			salvageID := strings.TrimSpace(plan.Report.DeliverableArtifactID)
-			if salvage, ok := index.byID[salvageID]; ok && scoutChatDeckBelongsToGoal(salvage, goal.ID) {
+			if salvage, ok := index.byID[salvageID]; ok && scoutChatDeckMetadataBelongsToGoal(salvage, goal.ID) {
 				index.deckByGoal[goal.ID] = salvage
 			}
 		} else if ready, ok := scoutChatReadyDeckForGoal(index.byID, goal.ID, plan); ok {
@@ -1993,14 +2002,14 @@ func scoutChatReadyDeckForGoal(byID map[string]meetingMemoryEntry, goalID string
 	}
 	deckID := strings.TrimSpace(record.Metadata["deckArtifactId"])
 	deck, ok := byID[deckID]
-	if !ok || !scoutChatDeckBelongsToGoal(deck, goalID) {
+	if !ok || !scoutChatDeckMetadataBelongsToGoal(deck, goalID) {
 		return meetingMemoryEntry{}, false
 	}
 	return deck, true
 }
 
-func scoutChatDeckBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
-	if artifactType(deck) != artifactTypeHTMLDeck || !artifactIsHTMLDocument(deck) {
+func scoutChatDeckMetadataBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
+	if artifactType(deck) != artifactTypeHTMLDeck {
 		return false
 	}
 	shipForGoal := strings.TrimSpace(deck.Metadata["source"]) == "packaging_studio_ship" &&
@@ -2009,6 +2018,10 @@ func scoutChatDeckBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
 	childForGoal := strings.TrimSpace(deck.Metadata["source"]) == "scout_thread" &&
 		strings.TrimSpace(deck.Metadata["goalParentId"]) == goalID
 	return shipForGoal || childForGoal
+}
+
+func scoutChatDeckBelongsToGoal(deck meetingMemoryEntry, goalID string) bool {
+	return scoutChatDeckMetadataBelongsToGoal(deck, goalID) && artifactIsHTMLDocument(deck)
 }
 
 func scoutChatDocumentBelongsToGoal(document meetingMemoryEntry, goalID string, plan goalPlan) bool {
@@ -2043,8 +2056,16 @@ func scoutChatDocumentBelongsToGoal(document meetingMemoryEntry, goalID string, 
 // the earlier goal plan. The current header is body-free; version + content
 // digest cover the goal plan and authored body used for result selection.
 func (app *kanbanBoardApp) scoutChatIndexedArtifactCurrent(indexed meetingMemoryEntry) bool {
-	_, current := app.scoutChatCurrentIndexedArtifact(indexed)
-	return current
+	if app == nil || app.memory == nil || strings.TrimSpace(indexed.ID) == "" {
+		return false
+	}
+	current, found := app.memory.artifactAuthorizationHeaderByID(indexed.ID)
+	if !found {
+		return false
+	}
+	expected := artifactAuthorizationHeaderFromEntry(indexed)
+	return current.ContentRevision == expected.ContentRevision &&
+		strings.EqualFold(strings.TrimSpace(current.ContentDigest), strings.TrimSpace(expected.ContentDigest))
 }
 
 // scoutChatCurrentIndexedArtifact upgrades one body-free directory row to its
@@ -2074,6 +2095,12 @@ func (app *kanbanBoardApp) scoutChatCurrentIndexedArtifact(indexed meetingMemory
 // a later Scout artifact whose goalParentId is that exact goal. No title
 // sniffing and no cross-goal artifact search is allowed.
 func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer *userAccount, message *scoutChatMessageRecord, index scoutChatResultProjectionIndex) {
+	app.projectScoutChatResultRefWithPreview(ctx, viewer, message, index, true)
+}
+
+var scoutChatResultPreviewProbe func()
+
+func (app *kanbanBoardApp) projectScoutChatResultRefWithPreview(ctx context.Context, viewer *userAccount, message *scoutChatMessageRecord, index scoutChatResultProjectionIndex, includeBodyPreview bool) {
 	if message == nil || message.Thread == nil {
 		return
 	}
@@ -2113,7 +2140,7 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 			deck, ok = index.deckByGoal[artifact.ID]
 		}
 		if ok {
-			if !scoutChatDeckBelongsToGoal(deck, artifact.ID) {
+			if !scoutChatDeckMetadataBelongsToGoal(deck, artifact.ID) {
 				return
 			}
 			result = deck
@@ -2140,8 +2167,12 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	// to leave the system, so the channel projection must mirror the exact deck
 	// and final-export endpoints instead of treating admission as export ACL.
 	resultCanExportAuthority := app.artifactAuthorized(ctx, viewer, ACLExport, result)
+	resultDigest := strings.ToLower(strings.TrimSpace(result.Metadata[artifactContentDigestMetadataKey]))
+	if !isHexDigest(resultDigest) {
+		resultDigest = strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(result)))
+	}
 	if selectedAcceptedDeck && acceptedBinding.State == scoutChatResultApprovalExact &&
-		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, artifactCapabilityDigest(result))) {
+		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, resultDigest)) {
 		acceptedBinding.State = scoutChatResultApprovalEdited
 	}
 	if goalResult {
@@ -2166,13 +2197,19 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	resultCanPublish := true
 	if goalResult {
 		plan := index.goalPlanByID[artifact.ID]
-		resultQualityState, resultCanPublish, resultPublicationStable = app.authoredResultFinalExportState(result)
+		if plan.State == goalStateVerified {
+			resultQualityState, resultCanPublish, resultPublicationStable = app.authoredResultFinalExportState(result)
+		} else {
+			// Non-verified work is conservatively a draft by definition. Avoid the
+			// expensive rendered-admission witness scan until the goal can possibly
+			// own Present/export authority.
+			resultQualityState, resultCanPublish = authoredResultQualityDraftNeedsAttention, false
+		}
 		resultCanContinue = resultPublicationStable && resultCanEdit && app.artifactAuthorized(ctx, viewer, ACLWrite, artifact) && ((resultQualityState == authoredResultQualityDraftNeedsAttention && plan.State == goalStateBlocked) ||
 			(resultQualityState == authoredResultQualityEditedAfterAdmission && plan.State == goalStateVerified))
 	}
 	resultType := artifactType(result)
 	resultVersion := artifactVersion(result)
-	resultDigest := strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(result)))
 	if resultVersion < 1 || !isHexDigest(resultDigest) {
 		return
 	}
@@ -2200,7 +2237,12 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 			return
 		}
 		stampResult("Document")
-		ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
+		if includeBodyPreview {
+			if scoutChatResultPreviewProbe != nil {
+				scoutChatResultPreviewProbe()
+			}
+			ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
+		}
 		return
 	}
 
@@ -2494,6 +2536,14 @@ func scoutChatThreadRefMayExposeResult(ref *scoutChatThreadRef) bool {
 	}
 }
 
+func scoutChatThreadRefMayExposeStudioProject(ref *scoutChatThreadRef) bool {
+	return ref != nil && studioProjectKindForProcessID(ref.ProcessID) != "" && strings.TrimSpace(ref.ArtifactID) != ""
+}
+
+func scoutChatMessageMayExposeStudioProject(message scoutChatMessageRecord) bool {
+	return scoutChatThreadRefMayExposeStudioProject(message.Thread) || (message.Manifest != nil && strings.TrimSpace(message.Manifest.GoalID) != "")
+}
+
 func scoutChatWorkRefMayExposeResult(ref *scoutChatWorkRecordRef) bool {
 	if ref == nil || strings.TrimSpace(ref.ResultArtifactID) == "" || strings.TrimSpace(ref.ResultArtifactType) == "" || ref.ResultArtifactVersion < 1 || !isHexDigest(strings.ToLower(strings.TrimSpace(ref.ResultArtifactDigest))) {
 		return false
@@ -2599,7 +2649,7 @@ func clearScoutChatMessageResultRef(message *scoutChatMessageRecord) {
 
 func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, contexts ...context.Context) scoutChatMessageRecord {
 	var resultIndex *scoutChatResultProjectionIndex
-	if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatWorkRefMayExposeResult(message.Work) {
+	if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatMessageMayExposeStudioProject(message) || scoutChatWorkRefMayExposeResult(message.Work) {
 		index := app.scoutChatResultIndex()
 		resultIndex = &index
 	}
@@ -2640,6 +2690,7 @@ func (app *kanbanBoardApp) projectScoutChatMessageForViewerWithResultIndex(viewe
 	// paying for a store scan. Terminal events start from the same resultless
 	// baseline, then repopulate only an exact authorized current snapshot.
 	clearScoutChatMessageResultRef(&result)
+	result.StudioProject = nil
 	if resultIndex == nil {
 		clearScoutChatWorkResultRef(&result)
 	}
@@ -2649,6 +2700,14 @@ func (app *kanbanBoardApp) projectScoutChatMessageForViewerWithResultIndex(viewe
 			projectionContext = contexts[0]
 		}
 		app.projectScoutChatResultRef(projectionContext, accountStore().findUser(normalizeAccountEmail(viewerEmail)), &result, *resultIndex)
+		app.projectScoutChatStudioProjectRef(projectionContext, accountStore().findUser(normalizeAccountEmail(viewerEmail)), &result, *resultIndex)
+	}
+	if resultIndex != nil && result.Thread == nil && result.Manifest != nil {
+		projectionContext := context.Background()
+		if len(contexts) > 0 && contexts[0] != nil {
+			projectionContext = contexts[0]
+		}
+		app.projectScoutChatStudioProjectRef(projectionContext, accountStore().findUser(normalizeAccountEmail(viewerEmail)), &result, *resultIndex)
 	}
 	if resultIndex != nil && result.Work != nil {
 		projectionContext := context.Background()

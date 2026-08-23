@@ -1049,7 +1049,7 @@ func TestScoutChatRenderedPublishedDeckAdmissionTracksExactRevision(t *testing.T
 	startedReview := false
 	startGoalFeedbackResumeAsync = func(func()) { startedReview = true }
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousFeedbackStart })
-	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, editedCopy.ID))
+	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q,"expectedResultVersion":%d,"expectedResultDigest":%q}`, parent.ID, editedCopy.ID, editedCopy.Version, editedCopy.ContentDigest))
 	if review.Code != http.StatusAccepted {
 		t.Fatalf("review changes status=%d body=%s", review.Code, review.Body.String())
 	}
@@ -1230,7 +1230,11 @@ func TestAuthoredDocumentAdmissionRevokesPDFAfterEditAndReopensRenderedReview(t 
 	startedReview := false
 	startGoalFeedbackResumeAsync = func(func()) { startedReview = true }
 	t.Cleanup(func() { startGoalFeedbackResumeAsync = previousFeedbackStart })
-	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q}`, parent.ID, editedCopy.ID))
+	editedCopyEntry, found := fixture.app.osArtifactByID(editedCopy.ID)
+	if !found {
+		t.Fatal("edited document copy was not persisted")
+	}
+	review := postArtifactAction(t, adminCookies, fmt.Sprintf(`{"id":%q,"action":"review_changes","resultArtifactId":%q,"expectedResultVersion":%d,"expectedResultDigest":%q}`, parent.ID, editedCopy.ID, artifactVersion(editedCopyEntry), artifactCapabilityDigest(editedCopyEntry)))
 	if review.Code != http.StatusAccepted {
 		t.Fatalf("document review changes status=%d body=%s", review.Code, review.Body.String())
 	}

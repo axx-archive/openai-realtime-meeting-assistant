@@ -73,6 +73,39 @@ test('timeline keeps conversation, real decisions, and only the latest exact aut
   assert.equal(latestScoutWorkMessage(messages)?.id, 'deck-v2');
 });
 
+test('Studio conversation handoffs collapse to one quiet receipt per project', () => {
+  const receipt = (
+    id: string,
+    projectId: string,
+    status: NonNullable<ScoutMessage['studioProject']>['status'],
+  ): ScoutMessage => ({
+    id,
+    kind: 'thread',
+    role: 'scout',
+    text: 'Internal launch narration that the dedicated Studio owns.',
+    createdAt: `2026-08-22T12:00:0${id.length}Z`,
+    studioProject: {
+      id: projectId,
+      kind: 'presentation',
+      title: 'Like A Farmer — Field Guide',
+      status,
+      href: `/api/studio-projects/v1?id=${projectId}`,
+    },
+  });
+  const human = message('human-request');
+
+  assert.deepEqual(
+    compactThreadWorkMessages([
+      human,
+      receipt('started', 'studio-1', 'queued'),
+      receipt('running', 'studio-1', 'running'),
+      receipt('other', 'studio-2', 'needs_input'),
+      receipt('ready', 'studio-1', 'ready'),
+    ]).map(({ id }) => id),
+    ['human-request', 'other', 'ready'],
+  );
+});
+
 test('generic terminal cards join non-actionable stages in Activity while rich results remain in the timeline', () => {
   const hidden = message('hidden', {
     id: 'stage-1',

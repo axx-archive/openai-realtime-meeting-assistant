@@ -35,11 +35,72 @@ func TestDocumentStudioFrontendContract(t *testing.T) {
 		"data-doc-action=\"source\"",
 		"data-doc-action=\"pdf\"",
 		"data-doc-action=\"save-copy\"",
-		"openDocumentStudio(entry.id, stageTitle, { entry, qualityState: stageQualityState, canExport: stageCanExport })",
+		"openDocumentStudio(entry.id, stageTitle, { entry, expectedBinding, qualityState: stageQualityState, canExport: stageCanExport })",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("index.html missing Document Studio contract %q", want)
 		}
+	}
+}
+
+func TestDocumentStageEditPreservesExactStudioBindingAcrossRevisionRace(t *testing.T) {
+	if testing.Short() {
+		t.Skip("rendered browser contract")
+	}
+	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+	if _, err := os.Stat(chrome); err != nil {
+		t.Skip("system Chrome unavailable")
+	}
+	indexPath, err := filepath.Abs("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+const fs=require('fs');
+const http=require('http');
+const assert=require('assert/strict');
+const {chromium}=require('playwright');
+const html=fs.readFileSync(process.env.DOCUMENT_STUDIO_INDEX,'utf8');
+const artifactId='document-binding-race';
+const originalDigest='a'.repeat(64);
+const changedDigest='b'.repeat(64);
+let version=3;
+const artifact=()=>({id:artifactId,title:'Exact report',version,contentDigest:version===3?originalDigest:changedDigest,text:'# Exact report\n\nCurrent body.',status:'complete',metadata:{title:'Exact report',type:'markdown',status:'complete',threadStatus:'complete',artifactVersion:String(version),contentDigest:version===3?originalDigest:changedDigest}});
+const server=http.createServer((req,res)=>{
+ if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
+ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
+ if(req.url==='/artifacts?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({artifacts:[artifact()]}));}
+ if(req.url==='/artifacts/document?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),document:{schemaVersion:1,markdown:'# Exact report\n\nCurrent body.'},canWrite:true}));}
+ if(req.url==='/test/bump'&&req.method==='POST'){version=4;res.writeHead(204);return res.end();}
+ if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(404,{'content-type':'application/json'});return res.end('{}');}
+ res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
+});
+(async()=>{
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const base='http://127.0.0.1:'+server.address().port;
+ const browser=await chromium.launch({headless:true,executablePath:process.env.DOCUMENT_STUDIO_CHROME});
+ const page=await browser.newPage({viewport:{width:1280,height:800}});
+ await page.goto(base+'/',{waitUntil:'domcontentloaded'});
+ await page.waitForSelector('#appShell.is-authed');
+ const opened=await page.evaluate(({artifactId,originalDigest})=>openArtifactStage(artifactId,'Exact report',{expectedBinding:{artifactId,version:3,digest:originalDigest},canEdit:true,canExport:false}),{artifactId,originalDigest});
+ assert.equal(opened,true);
+ await page.waitForSelector('.artifact-stage');
+ await page.evaluate(()=>fetch('/test/bump',{method:'POST'}));
+ await page.getByRole('button',{name:'Edit document',exact:true}).click();
+ await page.waitForFunction(()=>document.getElementById('toastRegion')?.textContent?.includes('exact document changed'));
+ assert.equal(await page.locator('.document-editor').count(),0,'a newer document revision must not silently replace the selected Studio result');
+ assert.match(await page.locator('#toastRegion').innerText(),/exact document changed/i);
+ await browser.close();server.close();
+})().catch(error=>{console.error(error);server.close();process.exit(1)});`
+	cmd := exec.Command("node", "-e", script)
+	nodeModules := "/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules"
+	if _, err := os.Stat(filepath.Join(nodeModules, "playwright")); err != nil {
+		t.Skip("bundled Playwright unavailable")
+	}
+	cmd.Env = append(os.Environ(), "NODE_PATH="+nodeModules, "DOCUMENT_STUDIO_INDEX="+indexPath, "DOCUMENT_STUDIO_CHROME="+chrome)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("document exact-binding race: %v\n%s", err, output)
 	}
 }
 

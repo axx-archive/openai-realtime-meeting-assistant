@@ -77,6 +77,98 @@ export type HomeSnapshot = {
 
 export type HomeResponse = { ok: boolean; home: HomeSnapshot };
 
+export type StudioProjectKind = 'presentation' | 'document';
+export type StudioProjectStatus =
+  | 'queued'
+  | 'running'
+  | 'needs_input'
+  | 'needs_attention'
+  | 'ready'
+  | 'stopped';
+
+export type StudioProjectPhase = {
+  id: 'brief' | 'build' | 'polish' | 'ready' | string;
+  label: string;
+  status: 'complete' | 'active' | 'upcoming' | StudioProjectStatus | string;
+};
+
+export type StudioProjectCheckpoint = {
+  id: string;
+  stageId: string;
+  question: string;
+  options?: Array<{
+    id: string;
+    label: string;
+    action: 'proceed' | 'revise' | 'hold' | string;
+  }>;
+};
+
+export type StudioProjectResult = {
+  artifactId: string;
+  type: string;
+  version: number;
+  digest: string;
+  title: string;
+  preview?: string;
+  assets?: ScoutResultAssetRef[];
+  table?: ScoutResultTableRef;
+  workbook?: ScoutResultWorkbookRef;
+  approvalState?: string;
+  qualityState?: string;
+  /** False only for exact standalone work that predates rendered-review management. */
+  reviewManaged?: boolean;
+  canEdit: boolean;
+  canContinue: boolean;
+  canPresent: boolean;
+  canExport: boolean;
+};
+
+/** Viewer-authorized projection over one canonical Presentation or Research root. */
+export type StudioProject = {
+  schemaVersion: 1;
+  id: string;
+  kind: StudioProjectKind;
+  title: string;
+  revision: number;
+  status: StudioProjectStatus;
+  progressPercent: number;
+  phase: string;
+  phases: StudioProjectPhase[];
+  createdAt: string;
+  updatedAt: string;
+  rootRunId: string;
+  rootArtifactId: string;
+  href: string;
+  source?: { threadId: string; kind?: string };
+  companyProject?: { id: string; title?: string };
+  result?: StudioProjectResult;
+  checkpoint?: StudioProjectCheckpoint;
+  canRename: boolean;
+};
+
+export type StudioProjectsResponse = {
+  ok: boolean;
+  projects: StudioProject[];
+  hasMore: boolean;
+  nextBefore?: string;
+};
+
+export type StudioProjectResponse = {
+  ok: boolean;
+  project: StudioProject;
+};
+
+/** Quiet conversation handoff into the dedicated Studio Work surface. */
+export type ScoutStudioProjectRef = {
+  id: string;
+  kind: StudioProjectKind;
+  title: string;
+  status: StudioProjectStatus;
+  href: string;
+  /** Viewer-gated human decision. Raw goal checkpoints never drive Studio UI. */
+  checkpoint?: StudioProjectCheckpoint;
+};
+
 export type MeetingRecordSourceRef = {
   segmentId: string;
   revision: string;
@@ -600,6 +692,7 @@ export type ScoutMessage = {
     basis?: string;
   };
   thread?: ScoutWorkThreadRef;
+  studioProject?: ScoutStudioProjectRef;
   work?: ScoutWorkRecordRef;
   image?: ScoutImageRef;
   imageGeneration?: ScoutImageGeneration;

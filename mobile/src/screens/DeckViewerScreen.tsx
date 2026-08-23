@@ -14,9 +14,9 @@ import { SymbolView } from 'expo-symbols';
 import { WebView } from 'react-native-webview';
 
 import { api } from '../api/client';
-import { buildApiUrl } from '../api/requestHelpers';
+import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
 import { useAuth } from '../auth/AuthContext';
-import { API_BASE_URL } from '../config';
+import { API_BASE_URL, NATIVE_CLIENT_HEADER } from '../config';
 import {
   DECK_PREVIEW_NAVIGATION_JS,
   deckPreviewNavigationCommand,
@@ -28,7 +28,7 @@ import {
 import type { RootStackParamList } from '../navigation/types';
 import { Glass } from '../theme/glass';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
-import { nativeDeckFrame, nativeDeckRenderPath } from '../artifacts/nativeDeckViewer';
+import { nativeDeckFrame, nativeDeckPreviewPath, nativeDeckRenderPath } from '../artifacts/nativeDeckViewer';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DeckViewer'>;
 
@@ -78,6 +78,15 @@ export function DeckViewerScreen({ route, navigation }: Props) {
       setError('This exact presentation is unavailable.');
       return () => { active = false; };
     }
+    if (route.params.previewOnly === true) {
+      const previewPath = nativeDeckPreviewPath(route.params.artifactId, artifactVersion, artifactDigest);
+      if (!previewPath) {
+        setError('This exact presentation draft is unavailable.');
+      } else {
+        setDeckUrl(buildApiUrl(API_BASE_URL, previewPath));
+      }
+      return () => { active = false; };
+    }
     void api.artifactRenderToken(sessionToken, route.params.artifactId, hasExpectedBinding ? { version: artifactVersion, digest: artifactDigest } : undefined)
       .then((response) => {
         if (!active) return;
@@ -92,7 +101,7 @@ export function DeckViewerScreen({ route, navigation }: Props) {
         if (active) setError('This presentation could not be opened.');
       });
     return () => { active = false; };
-  }, [resetNavigation, retryNonce, route.params.artifactDigest, route.params.artifactId, route.params.artifactVersion, sessionToken]);
+  }, [resetNavigation, retryNonce, route.params.artifactDigest, route.params.artifactId, route.params.artifactVersion, route.params.previewOnly, sessionToken]);
 
   const navigateSlide = useCallback((direction: 'previous' | 'next') => {
     const target = deckPreviewNavigationTarget(navigationRef.current, direction);
@@ -119,7 +128,7 @@ export function DeckViewerScreen({ route, navigation }: Props) {
           <Text accessibilityRole="header" maxFontSizeMultiplier={1.6} numberOfLines={1} style={styles.title}>
             {title}
           </Text>
-          <Text style={styles.subtitle}>PRESENTATION</Text>
+          <Text style={styles.subtitle}>{route.params.previewOnly === true ? 'DRAFT PREVIEW' : 'PRESENTATION'}</Text>
         </View>
         {route.params.desktopEditable === true ? (
           <View accessibilityLabel="Editing is available on desktop" style={styles.desktopBadge}>
@@ -172,7 +181,10 @@ export function DeckViewerScreen({ route, navigation }: Props) {
               setSupportMultipleWindows={false}
               showsHorizontalScrollIndicator={false}
               showsVerticalScrollIndicator={false}
-              source={{ uri: deckUrl }}
+              source={route.params.previewOnly === true ? {
+                uri: deckUrl,
+                headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken, { Accept: 'text/html' }),
+              } : { uri: deckUrl }}
               style={[styles.webView, !ready && styles.webViewHidden]}
             />
           ) : null}

@@ -1642,6 +1642,8 @@ func (app *kanbanBoardApp) finalizeCodexRunnerResult(existing meetingMemoryEntry
 	return artifact, actions, nil
 }
 
+var reviewChangesAfterBindingProbe func()
+
 func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1679,10 +1681,12 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 		// option. The server binds it to the selected opaque option; it never
 		// changes the option's action or target.
 		CheckpointNote string `json:"checkpointNote"`
-		// ResultArtifactID binds review_changes to the exact edited result. The
-		// server revalidates its revision and ACL before reopening only the
-		// deterministic rendered-admission tail.
-		ResultArtifactID string `json:"resultArtifactId"`
+		// The full result tuple binds review_changes to exactly what the user saw.
+		// Artifact IDs are stable across native Studio saves, so the version and
+		// capability digest are required to reject an unseen concurrent edit.
+		ResultArtifactID      string `json:"resultArtifactId"`
+		ExpectedResultVersion int    `json:"expectedResultVersion"`
+		ExpectedResultDigest  string `json:"expectedResultDigest"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read artifact action")
@@ -1844,10 +1848,22 @@ func artifactRunnerActionHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resultID := strings.TrimSpace(payload.ResultArtifactID)
+		expectedResultDigest := strings.ToLower(strings.TrimSpace(payload.ExpectedResultDigest))
+		if payload.ExpectedResultVersion < 1 || !isHexDigest(expectedResultDigest) {
+			writeAuthError(w, http.StatusBadRequest, "the exact edited result version and digest are required")
+			return
+		}
 		result, resultExists := authorizedArtifactForActions(r.Context(), user, resultID, ACLReadContent, ACLWrite)
 		if resultID == "" || !resultExists {
 			writeAuthError(w, http.StatusNotFound, "edited result not found")
 			return
+		}
+		if artifactVersion(result) != payload.ExpectedResultVersion || !strings.EqualFold(artifactCapabilityDigest(result), expectedResultDigest) {
+			writeAuthError(w, http.StatusConflict, "the edited result changed — reopen it before starting review")
+			return
+		}
+		if reviewChangesAfterBindingProbe != nil {
+			reviewChangesAfterBindingProbe()
 		}
 		thread, reviewErr := kanbanApp.reviewEditedAuthoredResult(artifact, result, user.Name)
 		if reviewErr != nil {

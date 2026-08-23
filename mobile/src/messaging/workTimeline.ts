@@ -183,7 +183,10 @@ function primaryResultKey(work: ScoutWorkThreadRef | undefined): string {
  */
 export function compactThreadWorkMessages(messages: readonly ScoutMessage[]): ScoutMessage[] {
   const latestResultIndex = new Map<string, number>();
+  const latestStudioProjectIndex = new Map<string, number>();
   messages.forEach((message, index) => {
+    const studioProjectId = String(message.studioProject?.id ?? '').trim();
+    if (studioProjectId) latestStudioProjectIndex.set(studioProjectId, index);
     const key = workMessageHasPrimaryResult(message)
       ? primaryResultKey(message.thread)
       : governedWorkHasRichResult(message)
@@ -193,6 +196,8 @@ export function compactThreadWorkMessages(messages: readonly ScoutMessage[]): Sc
   });
 
   return messages.filter((message, index) => {
+    const studioProjectId = String(message.studioProject?.id ?? '').trim();
+    if (studioProjectId) return latestStudioProjectIndex.get(studioProjectId) === index;
     const kind = String(message.kind ?? '').trim().toLowerCase();
     if (isGovernedWorkMessage(message)) {
       if (!governedWorkHasRichResult(message)) return false;

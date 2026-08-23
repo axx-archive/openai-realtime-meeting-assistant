@@ -1038,6 +1038,14 @@ func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThre
 		if contract := processDeliverableContract(process); contract != "" {
 			metadata["artifactContract"] = contract
 		}
+		// Authored presentation/report goals are also the canonical Studio
+		// Project roots. These fields add only user-facing title revision state;
+		// kind and lifecycle continue to derive from the pinned process + plan.
+		if studioProjectKindForProcessID(process.ID) != "" {
+			metadata["studioSchemaVersion"] = strconv.Itoa(studioProjectSchemaVersion)
+			metadata["studioTitle"] = boundedStudioProjectTitle(firstNonEmptyString(spec.WorkLabel, objective))
+			metadata["studioRevision"] = "1"
+		}
 	}
 	if label := strings.TrimSpace(spec.WorkLabel); label != "" {
 		metadata["workLabel"] = label

@@ -788,6 +788,10 @@ type scoutChatMessageRecord struct {
 	Reactions []scoutChatMessageReaction `json:"reactions,omitempty"`
 	ReplyTo   *scoutChatReplyRef         `json:"replyTo,omitempty"`
 	Thread    *scoutChatThreadRef        `json:"thread,omitempty"`
+	// StudioProject is a viewer-derived quiet handoff for authored
+	// presentations and reports. The durable Thread ref remains intact for old
+	// clients and reconciliation; this receipt is never a second lifecycle.
+	StudioProject *scoutChatStudioProjectRef `json:"studioProject,omitempty"`
 	// Work is a governed result projection, separate from an in-flight agent
 	// thread and from the canonical professional Work Record. Clients render it
 	// as one compact completed-work card with stage, provenance, artifact, and
@@ -2530,7 +2534,7 @@ func conversationWorkReplayCard(userMessage scoutChatMessageRecord, launched sco
 		ID:   "scout-chat-message-work-" + sha256Hex([]byte(userMessage.ID + "\x00" + launched.ID))[:24],
 		Kind: "thread", Role: "scout", AuthorName: scoutParticipantName,
 		IntentOutcome: string(conversationIntentStartPrivateWork), CausedByMessageID: userMessage.ID,
-		Text:      firstNonEmptyString(strings.TrimSpace(label), "Private work") + " started — progress and the finished result will stay in this conversation",
+		Text:      studioProjectLaunchCopy(launched.Artifact.Metadata["processId"], firstNonEmptyString(strings.TrimSpace(label), "Private work")),
 		CreatedAt: createdAt.Format(time.RFC3339Nano),
 		Thread: &scoutChatThreadRef{
 			ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
@@ -3412,7 +3416,7 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				ID:        fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()),
 				Kind:      "thread",
 				Role:      "scout",
-				Text:      process.Title + " launched — the staged process is running; it will park here at each human checkpoint",
+				Text:      studioProjectLaunchCopy(process.ID, process.Title),
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 				Thread: &scoutChatThreadRef{
 					ID:           goalThread.ID,
@@ -7528,7 +7532,7 @@ func deliverScoutChatThreadMetadata(thread scoutChatThreadRecord) {
 // public broadcast and the private owner-targeted delivery.
 func (app *kanbanBoardApp) scoutChatThreadUpdatePayload(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, contexts ...context.Context) map[string]any {
 	var resultIndex *scoutChatResultProjectionIndex
-	if scoutChatThreadRefMayExposeResult(message.Thread) {
+	if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatMessageMayExposeStudioProject(message) || scoutChatWorkRefMayExposeResult(message.Work) {
 		index := app.scoutChatResultIndex()
 		resultIndex = &index
 	}
@@ -7557,7 +7561,7 @@ func (app *kanbanBoardApp) broadcastScoutChatThreadUpdate(thread scoutChatThread
 		// targeted union once per roster account so each event receives its own
 		// exact ACL/read/write projection. Ordinary channel messages keep the
 		// single organization broadcast fast path.
-		if scoutChatThreadRefMayExposeResult(message.Thread) {
+		if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatMessageMayExposeStudioProject(message) || scoutChatWorkRefMayExposeResult(message.Work) {
 			resultIndex := app.scoutChatResultIndex()
 			for _, viewerEmail := range accountStore().accountEmails() {
 				sendKanbanEventToUser(viewerEmail, "chat_thread", app.scoutChatThreadUpdatePayloadWithResultIndex(viewerEmail, thread, message, &resultIndex))
@@ -7570,7 +7574,7 @@ func (app *kanbanBoardApp) broadcastScoutChatThreadUpdate(thread scoutChatThread
 		return
 	}
 	var resultIndex *scoutChatResultProjectionIndex
-	if scoutChatThreadRefMayExposeResult(message.Thread) {
+	if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatMessageMayExposeStudioProject(message) || scoutChatWorkRefMayExposeResult(message.Work) {
 		index := app.scoutChatResultIndex()
 		resultIndex = &index
 	}

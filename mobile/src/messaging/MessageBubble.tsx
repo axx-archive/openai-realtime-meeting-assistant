@@ -37,6 +37,7 @@ import {
   governedWorkResultArtifactKind,
   workResultArtifactKind,
 } from './workTimeline';
+import { studioProjectKindLabel, studioProjectStatusLabel } from '../work/studioProjectModel';
 
 /**
  * Detect the artifact kind from a work message for inline rendering.
@@ -142,6 +143,7 @@ export type MessageBubbleProps = {
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onOpenStudioProject?: (projectId: string) => void;
   onOpenWorkAsset?: (asset: ScoutResultAssetRef) => void;
   onResolveWorkCheckpoint?: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject?: (message: ScoutMessage, returnFocusHandle?: number) => void;
@@ -329,6 +331,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetryReply,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onOpenStudioProject,
   onOpenWorkAsset,
   onResolveWorkCheckpoint,
   onChangeWorkProject,
@@ -357,6 +360,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const workProjectTriggerRef = useRef<View>(null);
   const projectTriggerRef = useRef<View>(null);
   const lifecycle = scoutReplyLifecyclePresentation(message);
+  const studioProject = message.studioProject;
   const workThread = workThreadPresentation(message);
   const explicitResultArtifactId = String(workThread?.ref.resultArtifactId ?? '').trim();
   const authoredResultQuality = String(workThread?.resultQualityState ?? '').trim().toLowerCase();
@@ -367,8 +371,16 @@ export const MessageBubble = React.memo(function MessageBubble({
   const authoredResultAdmitted = managedAuthoredResult
     && authoredResultQuality === 'admitted';
   const authoredResultNeedsAttention = managedAuthoredResult && !authoredResultAdmitted;
+  const resultArtifactVersion = Number(workThread?.ref.resultArtifactVersion ?? 0);
+  const resultArtifactDigest = String(workThread?.ref.resultArtifactDigest ?? '').trim().toLowerCase();
+  const exactEditedReviewBinding = authoredResultQuality !== 'edited_after_admission' || (
+    Number.isSafeInteger(resultArtifactVersion)
+    && resultArtifactVersion > 0
+    && /^[0-9a-f]{64}$/u.test(resultArtifactDigest)
+  );
   const actionableAuthoredDraft = authoredResultNeedsAttention
-    && workThread?.ref.resultCanContinue === true;
+    && workThread?.ref.resultCanContinue === true
+    && exactEditedReviewBinding;
   const failedGoal = Boolean(
     (workThread?.failed || actionableAuthoredDraft)
     && !workThread.governedRecord
@@ -460,6 +472,62 @@ export const MessageBubble = React.memo(function MessageBubble({
     transform: [{ translateX: timestampReveal.interpolate({ inputRange: [0, 1], outputRange: [0, -68] }) }],
   }), [timestampReveal]);
   const timestampOpacity = useMemo(() => ({ opacity: timestampReveal }), [timestampReveal]);
+
+  if (studioProject) {
+    const statusLabel = studioProjectStatusLabel(studioProject.status);
+    const kindLabel = studioProjectKindLabel(studioProject.kind);
+    const studioCheckpoint = studioProject.status === 'needs_input' && studioProject.checkpoint?.question && (studioProject.checkpoint.options?.length ?? 0) > 0
+      ? studioProject.checkpoint
+      : null;
+    return (
+      <View style={[styles.row, showAuthor && styles.rowNewAuthor]}>
+        <Animated.View pointerEvents="none" style={[styles.timestampWrap, timestampOpacity]}>
+          <Text style={styles.time}>{timeLabel}</Text>
+        </Animated.View>
+        <Animated.View style={[styles.stack, styles.stackWork, styles.studioReceiptStack, translated]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${kindLabel} Studio. ${studioProject.title}. ${statusLabel}. Open project.`}
+            accessibilityHint="Opens this work in Studio"
+            onPress={() => onOpenStudioProject?.(studioProject.id)}
+            style={({ pressed }) => [styles.studioReceipt, pressed && styles.studioReceiptPressed]}
+          >
+            <View style={styles.studioReceiptIcon}>
+              <SymbolView name={studioProject.kind === 'presentation' ? 'rectangle.stack.fill' : 'doc.text.fill'} tintColor={colors.emberText} size={17} />
+            </View>
+            <View style={styles.studioReceiptCopy}>
+              <Text style={styles.studioReceiptEyebrow}>SCOUT · {kindLabel.toUpperCase()}</Text>
+              <Text maxFontSizeMultiplier={1.6} numberOfLines={2} style={styles.studioReceiptTitle}>{studioProject.title}</Text>
+              <Text style={styles.studioReceiptStatus}>{statusLabel}</Text>
+            </View>
+            <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
+          </Pressable>
+          {studioCheckpoint ? (
+            <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
+              <View style={styles.checkpointStatusRow}>
+                <SymbolView name="person.crop.circle.badge.questionmark" tintColor={colors.emberText} size={16} />
+                <Text style={styles.checkpointKicker}>Scout needs your decision</Text>
+              </View>
+              <Text style={styles.checkpointQuestion}>{studioCheckpoint.question}</Text>
+              <View style={styles.checkpointChoices}>
+                {(studioCheckpoint.options ?? []).map((option) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={option.label}
+                    key={option.id}
+                    onPress={() => onResolveWorkCheckpoint?.(message, option)}
+                    style={({ pressed }) => [styles.checkpointChoice, pressed && styles.studioReceiptPressed]}
+                  >
+                    <Text style={styles.checkpointChoiceText}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          ) : null}
+        </Animated.View>
+      </View>
+    );
+  }
 
   if (!body && files.length === 0 && !lifecycle && !workThread && !generatedImage) return null;
 
@@ -679,7 +747,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                     ? 'Your saved changes need a fresh rendered review before this version can be presented or exported.'
                     : workThread.attentionCopy || 'Scout saved the best current draft, but it has not passed the final quality review.'}</Text>
                   <View style={styles.workResultActions}>
-                    {workThread.ref.resultCanContinue === true ? <Pressable accessibilityRole="button" accessibilityLabel={authoredResultQuality === 'edited_after_admission' ? 'Review saved changes' : 'Continue draft review'} accessibilityState={{ disabled: retryingFailedWork }} disabled={retryingFailedWork} onPress={retryFailedWork} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, retryingFailedWork && styles.workResultDisabled]}>
+                    {workThread.ref.resultCanContinue === true && exactEditedReviewBinding ? <Pressable accessibilityRole="button" accessibilityLabel={authoredResultQuality === 'edited_after_admission' ? 'Review saved changes' : 'Continue draft review'} accessibilityState={{ disabled: retryingFailedWork }} disabled={retryingFailedWork} onPress={retryFailedWork} style={({ pressed }) => [styles.workResultAction, pressed && styles.workResultPressed, retryingFailedWork && styles.workResultDisabled]}>
                       {retryingFailedWork ? <ActivityIndicator color={colors.emberText} size="small" /> : <SymbolView name="arrow.clockwise" tintColor={colors.emberText} size={14} />}
                       <Text style={styles.workResultActionText}>{retryingFailedWork ? 'Starting…' : authoredResultQuality === 'edited_after_admission' ? 'Review changes' : 'Continue'}</Text>
                     </Pressable> : null}
@@ -1139,6 +1207,14 @@ const styles = StyleSheet.create({
   stackOwn: { alignItems: 'flex-end' },
   bubble: { paddingHorizontal: space[4], paddingVertical: 10, borderRadius: radius.lg, gap: 2 },
   bubbleWork: { width: '100%', maxWidth: 720, alignSelf: 'stretch' },
+  studioReceipt: { width: '100%', minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.xl, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1, ...shadow[1] },
+  studioReceiptStack: { gap: space[2] },
+  studioReceiptPressed: { opacity: 0.82, transform: [{ scale: 0.96 }] },
+  studioReceiptIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, backgroundColor: colors.emberSoft },
+  studioReceiptCopy: { flex: 1, minWidth: 0 },
+  studioReceiptEyebrow: { ...type.label, color: colors.emberText },
+  studioReceiptTitle: { ...type.bodyMedium, marginTop: 2, color: colors.text1 },
+  studioReceiptStatus: { ...type.caption, marginTop: 1, color: colors.text2 },
   richWorkResult: { width: '100%', gap: space[3] },
   checkpointCard: { gap: space[3], padding: space[4], borderRadius: radius.lg, backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember },
   checkpointStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },

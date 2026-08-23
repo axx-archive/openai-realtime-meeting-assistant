@@ -16,6 +16,7 @@ import { LoginScreen } from '../screens/LoginScreen';
 import { MeetScreen } from '../screens/MeetScreen';
 import { OSWebScreen } from '../screens/OSWebScreen';
 import { DeckViewerScreen } from '../screens/DeckViewerScreen';
+import { WorkHubScreen } from '../screens/WorkHubScreen';
 import { RoomScreen } from '../screens/RoomScreen';
 import { CreateRoomScreen } from '../screens/CreateRoomScreen';
 import { ChannelRiffScreen, ThreadScreen } from '../screens/ThreadScreen';
@@ -54,7 +55,6 @@ import {
 } from './nativeShellModel';
 import {
   NetworkHomeScreen,
-  WorkHomeScreen,
   WorkSearchHomeScreen,
   YouHomeScreen,
 } from '../screens/NativeShellScreens';
@@ -277,7 +277,7 @@ export function RootNavigator() {
             <Stack.Screen name="Canvas" component={CanvasScreen} />
             <Stack.Screen name="Meet" component={MeetScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
-            <Stack.Screen name="WorkHome" component={WorkHomeScreen} />
+            <Stack.Screen name="WorkHome" component={WorkHubScreen} />
             <Stack.Screen name="NetworkHome" component={NetworkHomeScreen} />
             <Stack.Screen name="WorkSearchHome" component={WorkSearchHomeScreen} />
             <Stack.Screen name="YouHome" component={YouHomeScreen} />
@@ -355,7 +355,7 @@ export function RootNavigator() {
             />
             {/* Legacy Board deep links land in Work. The old filing-system UI
                 is no longer mounted, while its persisted history remains. */}
-            <Stack.Screen name="Board" component={WorkHomeScreen} />
+            <Stack.Screen name="Board" component={WorkHubScreen} />
             <Stack.Screen name="Intelligence" component={IntelligenceScreen} />
             <Stack.Screen name="Memory" component={MemoryScreen} />
             <Stack.Screen name="Meetings" component={MeetingsScreen} />

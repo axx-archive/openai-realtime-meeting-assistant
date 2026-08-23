@@ -55,7 +55,7 @@ test('Meeting Record opens only exact Project or successor-artifact Work destina
 	assert.match(screen, /navigation\.navigate\('Files', \{ fileId: openId \}\)/u);
 	assert.doesNotMatch(screen, /navigation\.navigate\('WorkHome'\)/u);
 	assert.match(navigationTypes, /Board: \{ cardId\?: string \} \| undefined/u);
-	assert.match(navigator, /name="Board" component=\{WorkHomeScreen\}/u);
+	assert.match(navigator, /name="Board" component=\{WorkHubScreen\}/u);
 	assert.doesNotMatch(navigator, /component=\{BoardScreen\}/u);
 });
 

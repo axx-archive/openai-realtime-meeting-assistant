@@ -9255,6 +9255,362 @@
         color: var(--on-accent);
       }
 
+      /* ── Work studios: one calm project surface for decks and reports ── */
+      .studio-projects {
+        max-width: 1480px;
+        gap: 22px;
+      }
+      .studio-projects__head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: var(--sp-4);
+      }
+      .studio-projects__workspace {
+        min-height: min(720px, calc(100dvh - 190px));
+        display: grid;
+        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        overflow: hidden;
+        border: 1px solid var(--line-1);
+        border-radius: 28px;
+        background: color-mix(in srgb, var(--surface-1) 96%, transparent);
+        box-shadow: var(--glass-highlight), var(--shadow-1);
+      }
+      .studio-projects__library {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 16px;
+        border-right: 1px solid var(--line-1);
+        background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+      }
+      .studio-projects__search {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 13px;
+        border: 1px solid var(--line-1);
+        border-radius: 14px;
+        background: var(--surface-1);
+        color: var(--text-3);
+        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+      }
+      .studio-projects__search:focus-within {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+      .studio-projects__search input {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body);
+      }
+      .studio-projects__list {
+        min-height: 0;
+        flex: 1;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
+      }
+      .studio-projects__group + .studio-projects__group { margin-top: 20px; }
+      .studio-projects__group-title {
+        margin: 0 8px 8px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: .09em;
+        text-transform: uppercase;
+      }
+      .studio-project-row {
+        width: 100%;
+        min-height: 76px;
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 11px;
+        padding: 10px;
+        border: 1px solid transparent;
+        border-radius: 16px;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .studio-project-row:hover { background: var(--surface-1); }
+      .studio-project-row:active { transform: scale(.96); }
+      .studio-project-row.is-selected {
+        border-color: color-mix(in srgb, var(--ember) 22%, var(--line-1));
+        background: color-mix(in srgb, var(--ember) 8%, var(--surface-1));
+      }
+      .studio-project-row__icon {
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--ember) 10%, var(--surface-3));
+        color: color-mix(in srgb, var(--ember) 75%, var(--text-1));
+      }
+      .studio-project-row__icon svg { width: 18px; height: 18px; }
+      .studio-project-row__copy { min-width: 0; display: grid; gap: 4px; }
+      .studio-project-row__title {
+        overflow: hidden;
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .studio-project-row__meta,
+      .studio-project-row__time {
+        color: var(--text-3);
+        font: var(--type-label);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .studio-project-row__meta { overflow: hidden; text-overflow: ellipsis; }
+      .studio-project-row__percent {
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        font-variant-numeric: tabular-nums;
+      }
+      .studio-projects__detail {
+        min-width: 0;
+        overflow-y: auto;
+        padding: clamp(24px, 4vw, 58px);
+      }
+      .studio-project-empty {
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+        text-align: center;
+      }
+      .studio-project-empty__inner { max-width: 460px; display: grid; justify-items: center; gap: 14px; }
+      .studio-project-empty__mark {
+        width: 58px;
+        height: 58px;
+        display: grid;
+        place-items: center;
+        border-radius: 18px;
+        background: color-mix(in srgb, var(--ember) 9%, var(--surface-2));
+        color: color-mix(in srgb, var(--ember) 72%, var(--text-1));
+      }
+      .studio-project-empty h3 { margin: 0; color: var(--text-1); font: var(--type-title-2); letter-spacing: var(--track-title-2); }
+      .studio-project-empty p { margin: 0; color: var(--text-2); font: var(--type-body); line-height: 1.55; text-wrap: balance; }
+      .studio-project-detail { max-width: 920px; margin: 0 auto; display: grid; gap: 28px; }
+      .studio-project-detail__back { display: none; }
+      .studio-project-detail__eyebrow {
+        margin: 0 0 10px;
+        color: color-mix(in srgb, var(--ember) 76%, var(--text-2));
+        font: var(--type-label);
+        letter-spacing: .1em;
+        text-transform: uppercase;
+      }
+      .studio-project-detail__title-row { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+      .studio-project-detail__title { margin: 0; color: var(--text-1); font: var(--type-title-1); letter-spacing: var(--track-title-1); text-wrap: balance; }
+      .studio-project-status {
+        flex: none;
+        min-height: 30px;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 11px;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-2);
+        font: var(--type-label-lg);
+        white-space: nowrap;
+      }
+      .studio-project-status[data-status="ready"] { background: var(--live-soft); color: var(--live); }
+      .studio-project-status[data-status="needs_input"],
+      .studio-project-status[data-status="needs_attention"] { background: var(--danger-soft); color: var(--danger); }
+      .studio-project-status__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .studio-project-detail__meta { margin: 9px 0 0; color: var(--text-3); font: var(--type-caption); }
+      .studio-project-phases {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 7px;
+      }
+      .studio-project-phase { display: grid; gap: 8px; min-width: 0; }
+      .studio-project-phase__line { height: 4px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+      .studio-project-phase.is-complete .studio-project-phase__line,
+      .studio-project-phase.is-active .studio-project-phase__line { background: color-mix(in srgb, var(--ember) 72%, var(--text-1)); }
+      .studio-project-phase__label { color: var(--text-3); font: var(--type-label); }
+      .studio-project-phase.is-active .studio-project-phase__label,
+      .studio-project-phase.is-complete .studio-project-phase__label { color: var(--text-1); }
+      .studio-project-deliverable {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-items: start;
+        gap: 20px;
+        min-height: 142px;
+        padding: 24px;
+        border: 1px solid var(--line-1);
+        border-radius: 22px;
+        background: var(--surface-2);
+      }
+      .studio-project-deliverable__copy { min-width: 0; display: grid; gap: 8px; }
+      .studio-project-deliverable__kicker { margin: 0; color: var(--text-3); font: var(--type-label); letter-spacing: .09em; text-transform: uppercase; }
+      .studio-project-deliverable__title { margin: 0; color: var(--text-1); font: var(--type-title-3); overflow-wrap: anywhere; }
+      .studio-project-deliverable__meta { margin: 0; color: var(--text-2); font: var(--type-caption); }
+      .studio-project-detail__actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; }
+      .studio-project-detail__actions .btn--ghost { border-color: var(--line-2); background: var(--surface-1); }
+      .studio-project-decision {
+        display: grid;
+        gap: 18px;
+        padding: 24px;
+        border: 1px solid color-mix(in srgb, var(--ember) 38%, var(--line-1));
+        border-radius: 22px;
+        background: color-mix(in srgb, var(--ember) 7%, var(--surface-2));
+      }
+      .studio-project-decision__kicker {
+        margin: 0;
+        color: color-mix(in srgb, var(--ember) 82%, var(--text-1));
+        font: var(--type-label);
+        letter-spacing: .09em;
+        text-transform: uppercase;
+      }
+      .studio-project-decision__question {
+        max-width: 760px;
+        margin: 7px 0 0;
+        color: var(--text-1);
+        font: var(--type-title-3);
+        letter-spacing: var(--track-title-3);
+        text-wrap: balance;
+      }
+      .studio-project-decision__choices { display: flex; flex-wrap: wrap; gap: 9px; }
+      .studio-project-decision__choice {
+        min-height: 42px;
+        border: 1px solid var(--line-2);
+        border-radius: var(--r-full);
+        padding: 0 16px;
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+      }
+      .studio-project-decision__choice[data-action="proceed"] { border-color: transparent; background: var(--text-1); color: var(--surface-1); }
+      .studio-project-decision__choice[data-action="hold"] { background: transparent; color: var(--text-2); }
+      .studio-project-decision__choice:active { transform: scale(.96); }
+      .studio-project-decision__choice:disabled { opacity: .46; cursor: wait; }
+      .studio-project-decision__revision {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: end;
+        padding-top: 16px;
+        border-top: 1px solid var(--line-1);
+      }
+      .studio-project-decision__revision-field { display: grid; gap: 7px; }
+      .studio-project-decision__revision-field label { color: var(--text-3); font: var(--type-label); }
+      .studio-project-decision__revision-field textarea {
+        min-height: 78px;
+        resize: vertical;
+        border: 1px solid var(--line-2);
+        border-radius: 14px;
+        padding: 12px 14px;
+        background: var(--surface-1);
+        color: var(--text-1);
+        font: var(--type-caption);
+        outline: 0;
+      }
+      .studio-project-decision__revision-field textarea:focus { border-color: color-mix(in srgb, var(--ember) 62%, var(--line-2)); }
+      .studio-project-context {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 18px;
+        padding-top: 20px;
+        border-top: 1px solid var(--line-1);
+        color: var(--text-3);
+        font: var(--type-caption);
+      }
+      .studio-project-context button {
+        border: 0;
+        padding: 0;
+        background: none;
+        color: var(--text-2);
+        font: inherit;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        cursor: pointer;
+      }
+      .studio-projects__loading,
+      .studio-projects__error { padding: 20px 10px; color: var(--text-3); font: var(--type-caption); text-align: center; }
+      .studio-projects__error { color: var(--danger); }
+	  .studio-projects__load-more {
+		width: calc(100% - 16px);
+		min-height: 42px;
+		margin: 18px 8px 4px;
+		border: 1px solid var(--line-1);
+		border-radius: var(--r-full);
+		background: var(--surface-1);
+		color: var(--text-2);
+		font: var(--type-caption-medium);
+		cursor: pointer;
+	  }
+	  .studio-projects__load-more:active { transform: scale(.96); }
+	  .studio-projects__load-more:disabled { opacity: .56; cursor: wait; }
+
+      @media (max-width: 980px) {
+        .studio-projects__workspace { grid-template-columns: minmax(0, 1fr); overflow: visible; }
+        .studio-projects__library { border-right: 0; border-bottom: 1px solid var(--line-1); }
+        .studio-projects__detail { min-height: 520px; }
+        .studio-project-decision__revision { grid-template-columns: minmax(0, 1fr); }
+        .studio-project-decision__revision .btn { justify-self: start; }
+      }
+
+	  @media (max-width: 640px) {
+		.studio-projects__workspace {
+		  min-height: 0;
+		  display: block;
+		  overflow: visible;
+		}
+		.studio-projects__library { display: none; border: 0; }
+		.studio-projects__workspace.is-library-view .studio-projects__library {
+		  min-height: min(620px, calc(100dvh - 210px));
+		  display: flex;
+		}
+		.studio-projects__workspace.is-library-view .studio-projects__detail { display: none; }
+		.studio-project-detail { gap: 16px; }
+		.studio-projects__detail {
+		  min-height: min(620px, calc(100dvh - 210px));
+		  overflow: visible;
+		  padding: 20px 20px calc(124px + env(safe-area-inset-bottom));
+		  scroll-padding-bottom: calc(124px + env(safe-area-inset-bottom));
+		}
+		.studio-project-detail__back {
+		  width: max-content;
+		  min-height: 34px;
+		  display: inline-flex;
+		  align-items: center;
+		  gap: 7px;
+		  border: 0;
+		  padding: 0;
+		  background: transparent;
+		  color: var(--text-2);
+		  font: var(--type-caption-medium);
+		  cursor: pointer;
+		}
+		.studio-project-detail__back svg { width: 16px; height: 16px; }
+		.studio-project-detail__back:active { transform: scale(.96); }
+		.studio-project-detail__head { order: 0; }
+		.studio-project-deliverable { order: 1; padding: 18px; gap: 16px; }
+		.studio-project-decision { order: 1; }
+		.studio-project-phases { order: 2; }
+		.studio-project-context { order: 3; }
+		.studio-project-detail__actions {
+		  order: -1;
+		  display: grid;
+		  grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.studio-project-detail__actions .btn { width: 100%; min-height: 44px; padding-inline: 10px; }
+	  }
+
       @media (max-width: 980px) {
         .office-hero {
           grid-template-columns: minmax(0, 1fr);
@@ -12388,6 +12744,65 @@
       .chat-rich__table tr:last-child td {
         border-bottom: none;
       }
+
+	  .scout-studio-receipt-group {
+		width: min(620px, calc(100% - 18px));
+		display: grid;
+		gap: 8px;
+		margin: 6px 0;
+	  }
+	  .scout-studio-receipt {
+		width: 100%;
+        min-height: 52px;
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) auto 18px;
+        align-items: center;
+        gap: 10px;
+		margin: 0;
+        padding: 8px 11px;
+        border: 1px solid var(--line-1);
+        border-radius: 16px;
+        background: color-mix(in srgb, var(--surface-2) 84%, transparent);
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+      .scout-studio-receipt:hover {
+        border-color: color-mix(in srgb, var(--ember) 22%, var(--line-1));
+        background: color-mix(in srgb, var(--ember) 6%, var(--surface-2));
+      }
+      .scout-studio-receipt:active { transform: scale(.96); }
+      .scout-studio-receipt__icon {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 11px;
+        background: color-mix(in srgb, var(--ember) 11%, var(--surface-3));
+        color: color-mix(in srgb, var(--ember) 75%, var(--text-1));
+      }
+      .scout-studio-receipt__icon svg { width: 17px; height: 17px; }
+      .scout-studio-receipt__copy { min-width: 0; display: grid; gap: 2px; }
+      .scout-studio-receipt__title { overflow: hidden; color: var(--text-1); font: var(--type-caption-medium); text-overflow: ellipsis; white-space: nowrap; }
+      .scout-studio-receipt__kind,
+      .scout-studio-receipt__status { color: var(--text-3); font: var(--type-label); white-space: nowrap; }
+      .scout-studio-receipt__status[data-status="ready"] { color: var(--live); }
+      .scout-studio-receipt__status[data-status="needs_input"],
+      .scout-studio-receipt__status[data-status="needs_attention"] { color: var(--danger); }
+      .scout-studio-receipt__chevron { color: var(--text-3); font-size: 18px; }
+	  .studio-project-decision--chat {
+		gap: 12px;
+		padding: 16px;
+		border-radius: 16px;
+		background: color-mix(in srgb, var(--ember) 5%, var(--surface-2));
+	  }
+	  .studio-project-decision--chat .studio-project-decision__question {
+		margin-top: 5px;
+		font: var(--type-body-medium);
+		letter-spacing: var(--track-text);
+		text-wrap: pretty;
+	  }
 
       /* inline chat deck viewer — first-class cover appearance (not a cheap card).
          The thumbnail IS the cover of the package: a 16:9 hero showing the first
@@ -33836,6 +34251,17 @@
         height: 1px;
         background: linear-gradient(90deg, transparent, var(--line-2), transparent);
       }
+      .pd1-primary-nav__studio-wrap {
+        display: grid;
+        gap: 2px;
+      }
+      .pd1-primary-nav__studio-wrap .pd1-primary-nav__item {
+        color: color-mix(in srgb, var(--ember) 70%, var(--text-2));
+      }
+      .pd1-primary-nav__studio-wrap .pd1-primary-nav__item[aria-current="page"] {
+        color: var(--text-1);
+        background: color-mix(in srgb, var(--ember) 12%, var(--surface-2));
+      }
       .pd1-primary-nav__external {
         position: relative;
         display: grid;
@@ -34576,7 +35002,19 @@
             <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h8c1.1 0 2 .9 2 2v1"/><path d="M5 6h10c1.1 0 2 .9 2 2v1"/><path d="M3 9h10c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2v-8c0-1.1.9-2 2-2Z"/></svg>
             <span>Files</span>
           </button>
-          <span class="pd1-primary-nav__external-wrap">
+          <span class="pd1-primary-nav__external-wrap pd1-primary-nav__studio-wrap" aria-label="Work studios">
+            <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Recent work" aria-current="false" title="Recents" tabindex="-1">
+              <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8"/><path d="M4 4v5h5"/></svg>
+              <span>Recents</span>
+            </button>
+            <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Presentations" aria-label="Presentations" aria-current="false" title="Presentations" tabindex="-1">
+              <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 22h8M12 18v4M8 9h8M8 13h5"/></svg>
+              <span>Presentations</span>
+            </button>
+            <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Research" aria-label="Research" aria-current="false" title="Research" tabindex="-1">
+              <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h5M8 12h8M8 16h5"/></svg>
+              <span>Research</span>
+            </button>
             <a id="contentStudioRailLink" class="pd1-primary-nav__external" href="https://kino.grok.me" aria-label="Open Content Studio" aria-haspopup="dialog" aria-controls="contentStudioDrawer" aria-expanded="false" title="Content Studio">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="3.5" y="4.5" width="17" height="15" rx="3"></rect>
@@ -34587,11 +35025,6 @@
               <span class="pd1-primary-nav__external-label" aria-hidden="true">Content Studio</span>
             </a>
           </span>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1">
-            <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 10h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/></svg>
-            <span>Work</span>
-            <svg class="pd1-primary-nav__disclosure stride-mark" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 3 3 3-3 3"/></svg>
-          </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Network" aria-label="Network" aria-current="false" tabindex="-1">
             <svg class="stride-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="17" r="2.5"/><circle cx="19" cy="17" r="2.5"/><path d="M10.2 6.8 6.8 14.5M13.8 6.8l3.4 7.7M7.5 17h9"/></svg>
             <span>Network</span>
@@ -35679,42 +36112,37 @@
 
         <!-- Agent apps — first-class OS workspaces backed by artifact generation -->
         <section id="researchTool" class="agent-tool" data-agent-tool="research" aria-label="Research">
-          <div class="agent-tool__inner">
-            <header class="agent-tool__head">
+          <div class="agent-tool__inner studio-projects">
+            <header class="studio-projects__head">
               <div>
-                <p class="agent-tool__eyebrow">research app</p>
-                <h2 class="agent-tool__title">turn a question into a brief</h2>
-                <p class="agent-tool__meta">Scout frames the claim, evidence plan, counterargument, and recommendation, then saves the output as a durable artifact.</p>
+                <p class="agent-tool__eyebrow">work studios</p>
+                <h2 id="studioProjectsTitle" class="agent-tool__title">Recent work</h2>
+                <p id="studioProjectsMeta" class="agent-tool__meta">Presentations and research stay organized from brief to final file.</p>
               </div>
-              <button class="btn btn--ghost" type="button" data-open-assistant-mode="research">Open assistant</button>
+              <button id="studioNewWithScout" class="btn btn--primary" type="button">New with Scout</button>
             </header>
-            <!-- Research is a staged team run, driven by the real agent thread/artifact
-                 state. The launcher form below carries the pinned data-agent-tool-form
-                 marker and feeds Scout, but the visible surface is the 4-stage flow. -->
+            <div id="studioProjectsWorkspace" class="studio-projects__workspace">
+              <aside class="studio-projects__library" aria-label="Studio projects">
+                <label class="studio-projects__search" aria-label="Search work">
+                  <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/></svg>
+                  <input id="studioProjectSearch" type="search" autocomplete="off" placeholder="Search work" aria-label="Search work">
+                </label>
+                <div id="studioProjectList" class="studio-projects__list" aria-live="polite"></div>
+              </aside>
+              <section id="studioProjectDetail" class="studio-projects__detail" aria-live="polite"></section>
+            </div>
+            <!-- Compatibility launcher remains available to older assistant-mode contracts. -->
             <form class="research-launcher" data-agent-tool-form="research" hidden aria-hidden="true">
               <span class="agent-composer__status" data-agent-status="research">ready</span>
               <textarea class="agent-composer__input" data-agent-input="research" rows="2" autocomplete="off" aria-label="Research question" hidden></textarea>
-              <button type="button" data-agent-template="research" data-template-text="Research the highest-leverage first customer segment for a meeting intelligence OS. Compare executive weekly reviews, product leadership standups, and sales pipeline calls. Include buying trigger, data needed, proof plan, risks, and recommendation." hidden>First segment</button>
+              <button type="button" data-agent-template="research" data-template-text="Research the highest-leverage first customer segment for a meeting intelligence OS." hidden>First segment</button>
               <button class="btn btn--primary" type="submit" data-agent-submit="research" hidden>Create research brief</button>
             </form>
-            <div class="research-workspace">
-              <aside class="research-library" aria-label="Research jobs">
-                <div class="research-library__head">
-                  <div>
-                    <p class="research-library__eyebrow">research library</p>
-                    <h3 class="research-library__title">saved jobs</h3>
-                  </div>
-                  <span id="researchArtifactCount" class="research-library__count">0</span>
-                </div>
-                <label class="research-library__search" aria-label="Search research jobs">
-                  <svg class="research-library__search-icon stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/>
-                  </svg>
-                  <input id="researchArtifactSearch" class="research-library__search-input" type="search" autocomplete="off" placeholder="search research…" aria-label="Search research jobs">
-                </label>
-                <div id="researchArtifactList" class="research-library__list"></div>
-              </aside>
-              <div class="research-stage" data-research-stage></div>
+            <div hidden aria-hidden="true">
+              <span id="researchArtifactCount">0</span>
+              <input id="researchArtifactSearch" type="search">
+              <div id="researchArtifactList"></div>
+              <div data-research-stage></div>
             </div>
           </div>
         </section>
@@ -36962,9 +37390,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
       const artifactAdminEmail = 'aj@shareability.com'
-      const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Files', 'Work', 'Network', 'Work Search', 'You'])
-      const PD1_CORE_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Files'])
-      const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Chat: '/chat', Files: '/files', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })
+      const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Files', 'Work', 'Presentations', 'Research', 'Network', 'Work Search', 'You'])
+      const PD1_CORE_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Files', 'Work', 'Presentations', 'Research'])
+      const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Chat: '/chat', Files: '/files', Work: '/work', Presentations: '/presentations', Research: '/research', Network: '/network', 'Work Search': '/work-search', You: '/you' })
       /* auth state — the session itself lives in an HttpOnly cookie the
          server owns; authedUser mirrors GET /auth/me for UI decisions. */
       let authedUser = null
@@ -37819,12 +38247,33 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const researchArtifactSearch = document.getElementById('researchArtifactSearch')
       const researchArtifactList = document.getElementById('researchArtifactList')
       const researchArtifactCount = document.getElementById('researchArtifactCount')
+      const studioProjectsTitle = document.getElementById('studioProjectsTitle')
+      const studioProjectsMeta = document.getElementById('studioProjectsMeta')
+      const studioProjectsWorkspace = document.getElementById('studioProjectsWorkspace')
+      const studioProjectSearch = document.getElementById('studioProjectSearch')
+      const studioProjectList = document.getElementById('studioProjectList')
+      const studioProjectDetail = document.getElementById('studioProjectDetail')
+      const studioNewWithScout = document.getElementById('studioNewWithScout')
 
       let cards = []
       let memoryEntries = []
       let artifactEntries = []
       let artifactQuery = ''
       let researchQuery = ''
+      let studioProjects = []
+      let studioProjectFilter = 'all'
+      let studioProjectQuery = ''
+      let selectedStudioProjectId = ''
+	      let studioProjectsMobileLibraryOpen = true
+	      let studioProjectsETag = ''
+	      let studioProjectsLoading = false
+	      let studioProjectsAppending = false
+	      let studioProjectsAppendQueued = false
+	      let studioProjectsError = ''
+	      let studioProjectsHasMore = false
+	      let studioProjectsNextBefore = ''
+	      let studioProjectDeepLinkUnavailable = ''
+	      let studioProjectsRefreshTimer = 0
       let selectedArtifactId = ''
       let artifactEditMode = false
       let artifactStatusTimer = 0
@@ -39060,12 +39509,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
         })
       })
       pd1DestinationButtons.forEach(button => {
-        button.addEventListener('click', event => {
+        button.addEventListener('click', () => {
           const destination = button.dataset.pd1Destination
-          if (destination === 'Work' && appShell.dataset.pd1Destination === 'Work') {
-            setWorkToolMenuOpen(workToolMenu.hidden, { focusFirst: event.detail === 0 })
-            return
-          }
           // A deliberate rail tap owns the transition even when the user taps
           // the already-current destination; dismiss any open overlay then.
           // Background auth/path reconciliation uses the default below and
@@ -44374,6 +44819,641 @@ Wrap the entire export in one code block. After the code block, say whether the 
       strideMarketplaceTab?.addEventListener('click', () => selectStrideTeamPanel('marketplace'))
       strideWorkTab?.addEventListener('click', () => selectStrideTeamPanel('work'))
 
+      function studioProjectStatusLabel(status) {
+        return ({ queued: 'Queued', running: 'In progress', needs_input: 'Needs you', needs_attention: 'Needs attention', ready: 'Ready', stopped: 'Stopped' })[String(status || '')] || 'In progress'
+      }
+
+      function studioProjectKindLabel(kind) {
+        return kind === 'presentation' ? 'Presentation' : 'Research report'
+      }
+
+      function studioProjectRelativeTime(raw) {
+        const value = new Date(String(raw || '')).getTime()
+        if (!Number.isFinite(value)) return ''
+        const seconds = Math.max(0, Math.floor((Date.now() - value) / 1000))
+        if (seconds < 45) return 'now'
+        const minutes = Math.floor(seconds / 60)
+        if (minutes < 60) return `${minutes}m`
+        const hours = Math.floor(minutes / 60)
+        if (hours < 24) return `${hours}h`
+        const days = Math.floor(hours / 24)
+        if (days < 7) return `${days}d`
+        return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      }
+
+      function filteredStudioProjects() {
+        const query = studioProjectQuery.trim().toLowerCase()
+        return studioProjects.filter(project => {
+          if (studioProjectFilter !== 'all' && project?.kind !== studioProjectFilter) return false
+          if (!query) return true
+          return `${project?.title || ''} ${studioProjectKindLabel(project?.kind)} ${project?.status || ''}`.toLowerCase().includes(query)
+        })
+      }
+
+      function studioProjectSubtitle() {
+        const visible = filteredStudioProjects()
+        const active = visible.filter(project => ['queued', 'running', 'needs_input', 'needs_attention'].includes(String(project?.status || ''))).length
+        if (studioProjectsLoading && !studioProjects.length) return 'Loading work…'
+        if (studioProjectsError) return 'Work is temporarily unavailable'
+        if (!visible.length) return studioProjectFilter === 'presentation' ? 'No presentations yet' : (studioProjectFilter === 'document' ? 'No research yet' : 'No work yet')
+        return active ? `${visible.length} projects · ${active} active` : `${visible.length} projects`
+      }
+
+      function studioProjectIcon(kind) {
+        const icon = bfEl('span', 'studio-project-row__icon')
+        icon.innerHTML = kind === 'presentation'
+          ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"></rect><path d="M8 22h8M12 18v4M8 9h8M8 13h5"></path></svg>'
+          : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h10l4 4v14H5z"></path><path d="M15 3v5h5M8 12h8M8 16h5"></path></svg>'
+        return icon
+      }
+
+      function studioProjectEmptyNode(options = {}) {
+        const empty = bfEl('div', 'studio-project-empty')
+        const inner = bfEl('div', 'studio-project-empty__inner')
+        const mark = bfEl('span', 'studio-project-empty__mark')
+        mark.appendChild(studioProjectIcon(studioProjectFilter === 'document' ? 'document' : 'presentation').firstElementChild)
+        const title = bfEl('h3', '', options.title || (studioProjectQuery ? 'Nothing matches that search' : 'Start with Scout'))
+        const body = bfEl('p', '', options.body || (studioProjectFilter === 'presentation'
+          ? 'Ask Scout for a presentation. The project will appear here while the brief, story, design, and final files come together.'
+          : studioProjectFilter === 'document'
+            ? 'Ask Scout for research or a report. The work stays here from evidence gathering through a polished, editable document.'
+            : 'Presentations and research appear here as quiet, durable projects instead of filling the conversation with process cards.'))
+        inner.append(mark, title, body)
+		if (!studioProjectQuery && !options.hideAction) {
+          const start = bfEl('button', 'btn btn--primary', 'New with Scout')
+          start.type = 'button'
+          start.addEventListener('click', startStudioProjectWithScout)
+          inner.appendChild(start)
+        }
+        empty.appendChild(inner)
+        return empty
+      }
+
+      function studioProjectRowNode(project) {
+        const row = bfEl('button', 'studio-project-row')
+        row.type = 'button'
+        row.dataset.projectId = String(project.id || '')
+        row.classList.toggle('is-selected', String(project.id || '') === selectedStudioProjectId)
+        row.setAttribute('aria-pressed', String(project.id || '') === selectedStudioProjectId ? 'true' : 'false')
+        row.appendChild(studioProjectIcon(project.kind))
+        const copy = bfEl('span', 'studio-project-row__copy')
+        copy.append(
+          bfEl('span', 'studio-project-row__title', project.title || 'Untitled work'),
+          bfEl('span', 'studio-project-row__meta', `${studioProjectStatusLabel(project.status)} · ${studioProjectKindLabel(project.kind)}`)
+        )
+        const edge = bfEl('span', 'studio-project-row__copy')
+        edge.append(
+          bfEl('span', 'studio-project-row__percent', project.status === 'ready' ? 'Done' : `${Math.max(0, Math.min(100, Number(project.progressPercent || 0)))}%`),
+          bfEl('span', 'studio-project-row__time', studioProjectRelativeTime(project.updatedAt))
+        )
+        row.append(copy, edge)
+        row.addEventListener('click', () => selectStudioProject(project.id))
+        return row
+      }
+
+      function renderStudioProjectList(projects) {
+        studioProjectList?.replaceChildren()
+        if (!studioProjectList) return
+        if (studioProjectsLoading && !studioProjects.length) {
+          studioProjectList.appendChild(bfEl('p', 'studio-projects__loading', 'Loading your work…'))
+          return
+        }
+        if (studioProjectsError && !studioProjects.length) {
+          studioProjectList.appendChild(bfEl('p', 'studio-projects__error', studioProjectsError))
+          return
+        }
+        if (!projects.length) {
+          studioProjectList.appendChild(bfEl('p', 'studio-projects__loading', studioProjectQuery ? 'No matching work' : 'No projects yet'))
+          return
+        }
+        const groups = [
+          ['Needs you', project => ['needs_input', 'needs_attention'].includes(project.status)],
+          ['In progress', project => ['queued', 'running'].includes(project.status)],
+          ['Recent', project => ['ready', 'stopped'].includes(project.status)]
+        ]
+        groups.forEach(([label, match]) => {
+          const items = projects.filter(match)
+          if (!items.length) return
+          const group = bfEl('section', 'studio-projects__group')
+          group.appendChild(bfEl('h3', 'studio-projects__group-title', label))
+          items.forEach(project => group.appendChild(studioProjectRowNode(project)))
+          studioProjectList.appendChild(group)
+        })
+		if (studioProjectsHasMore && !studioProjectQuery) {
+		  const loadMore = bfEl('button', 'studio-projects__load-more', studioProjectsAppending ? 'Loading…' : 'Load older')
+		  loadMore.type = 'button'
+		  loadMore.disabled = studioProjectsAppending
+		  loadMore.addEventListener('click', () => loadStudioProjects({ append: true }))
+		  studioProjectList.appendChild(loadMore)
+		}
+      }
+
+      function studioProjectAction(label, primary, handler) {
+        const button = bfEl('button', `btn ${primary ? 'btn--primary' : 'btn--ghost'}`, label)
+        button.type = 'button'
+        button.addEventListener('click', handler)
+        return button
+      }
+
+      function studioProjectExpectedBinding(project) {
+        const result = project?.result || {}
+        return { artifactId: String(result.artifactId || ''), version: Number(result.version || 0), digest: String(result.digest || '').trim().toLowerCase() }
+      }
+
+	  function studioProjectResultCapabilityCopy(project) {
+		const result = project?.result || {}
+		const noun = project?.kind === 'presentation' ? 'presentation' : 'research report'
+		const capabilities = [`${result.canEdit === true ? 'Editable' : 'View-only'} ${noun}`]
+		if (project?.kind === 'presentation' && result.canPresent === true) capabilities.push('Present')
+		if (result.canExport === true) capabilities.push(project?.kind === 'presentation' ? 'PowerPoint and PDF' : 'PDF')
+		return capabilities.join(' · ')
+	  }
+
+      async function openStudioProjectResult(project, mode) {
+        const result = project?.result
+        if (!result?.artifactId) return false
+        const expectedBinding = studioProjectExpectedBinding(project)
+        if (project.kind === 'presentation') {
+          if (mode === 'present') {
+            try {
+              const payload = await verifiedStudioResultPayload(project)
+              return openDeckPresentation(result.artifactId, result.title || project.title, payload)
+            } catch (error) {
+              showToast({ text: error?.message || 'This presentation changed. Refresh the project.', kind: 'note' })
+              return false
+            }
+          }
+          return openDeckStudio(result.artifactId, result.title || project.title, {
+            expectedBinding, qualityState: result.qualityState, canPresent: result.canPresent === true, canExport: result.canExport === true
+          })
+        }
+        if (mode === 'edit') {
+          return openDocumentStudio(result.artifactId, result.title || project.title, {
+            expectedBinding, qualityState: result.qualityState, canExport: result.canExport === true
+          })
+        }
+        return openArtifactStage(result.artifactId, result.title || project.title, {
+          expectedBinding, canEdit: result.canEdit === true, canExport: result.canExport === true, qualityState: result.qualityState
+        })
+      }
+
+      async function verifiedStudioResultPayload(project) {
+        const result = project?.result
+        if (!result?.artifactId) throw new Error('The final file is not ready yet')
+        const route = project.kind === 'presentation' ? 'deck' : 'document'
+        const response = await fetch(`/artifacts/${route}?id=${encodeURIComponent(result.artifactId)}`, { cache: 'no-store' })
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok || (project.kind === 'presentation' ? !payload?.deck : !payload?.document)) throw new Error(payload?.error || 'The final file could not be opened')
+        if (String(payload?.artifact?.id || result.artifactId) !== String(result.artifactId) || Number(payload?.artifact?.version || 0) !== Number(result.version || 0) || String(payload?.artifact?.contentDigest || '').trim().toLowerCase() !== String(result.digest || '').trim().toLowerCase()) {
+          throw new Error('This exact file changed. Refresh the project before downloading.')
+        }
+        return payload
+      }
+
+      function triggerStudioBlobDownload(blob, name) {
+        const href = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.href = href
+        link.download = name
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        window.setTimeout(() => URL.revokeObjectURL(href), 2000)
+      }
+
+      async function downloadStudioProjectResult(project, format, button) {
+        if (project?.result?.canExport !== true) {
+          showToast({ text: 'Final downloads become available after the work passes review.', kind: 'note' })
+          return
+        }
+        const idle = button?.textContent || format.toUpperCase()
+        if (button) { button.disabled = true; button.textContent = 'Preparing…' }
+        try {
+          const payload = await verifiedStudioResultPayload(project)
+          const result = project.result
+          const sceneRef = String(payload?.artifact?.sceneRef || '').trim()
+          if (format === 'pptx') {
+            if (project.kind !== 'presentation') throw new Error('PowerPoint is available for presentations')
+            const response = await fetch('/artifacts/export-pptx', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: result.artifactId, expectedVersion: result.version, sceneRef })
+            })
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({}))
+              throw new Error(error?.error || 'PowerPoint export failed')
+            }
+            const fileName = studioDownloadFileName(result.title || project.title, 'presentation', 'pptx')
+            const blob = await response.blob()
+            if (!nativeStudioDownload({ kind: 'deck', format: 'pptx', artifactId: result.artifactId, fileName, expectedVersion: result.version, sceneRef })) triggerStudioBlobDownload(blob, fileName)
+            showToast({ text: 'PowerPoint downloaded', kind: 'done' })
+            return
+          }
+		  const expectedBinding = studioProjectExpectedBinding(project)
+		  let landed = await currentArtifactPdfAsset(result.artifactId, expectedBinding)
+          if (!landed?.pdf) {
+            const response = await fetch('/artifacts/export-pdf', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ artifactId: result.artifactId, expectedVersion: result.version, sceneRef })
+            })
+            const data = await response.json().catch(() => ({}))
+            if (!response.ok) throw new Error(data?.error || 'PDF export failed')
+			landed = await waitForArtifactPdfAsset(result.artifactId, 40, expectedBinding)
+          }
+          if (!landed?.pdf) throw new Error('PDF is still rendering. Try again in a moment.')
+          const fileName = studioDownloadFileName(landed.pdf.name || result.title || project.title, project.kind === 'presentation' ? 'presentation' : 'report', 'pdf')
+          const href = artifactBlobUrl({ ...landed.pdf, name: fileName })
+          if (!nativeStudioDownload({ kind: project.kind === 'presentation' ? 'deck' : 'document', format: 'pdf', artifactId: result.artifactId, fileName, url: href })) {
+            const link = document.createElement('a'); link.href = href; link.download = fileName; document.body.appendChild(link); link.click(); link.remove()
+          }
+          showToast({ text: 'PDF downloaded', kind: 'done' })
+        } catch (error) {
+          showToast({ text: error?.message || 'Download failed', kind: 'error' })
+        } finally {
+          if (button) { button.disabled = false; button.textContent = idle }
+        }
+      }
+
+      async function renameStudioProject(project) {
+        if (!project?.canRename) return
+        const title = window.prompt('Name this project', project.title || '')
+        if (!title || title.trim() === String(project.title || '').trim()) return
+        try {
+          const response = await fetch('/api/studio-projects/v1', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: project.id, title: title.trim(), expectedRevision: project.revision })
+          })
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload?.project) throw new Error(payload?.error || 'Project could not be renamed')
+          studioProjects = studioProjects.map(candidate => candidate.id === project.id ? payload.project : candidate)
+          studioProjectsETag = ''
+          renderStudioProjects()
+          showToast({ text: 'Project renamed', kind: 'done' })
+        } catch (error) {
+          showToast({ text: error?.message || 'Project could not be renamed', kind: 'error' })
+          loadStudioProjects({ force: true })
+        }
+      }
+
+      async function openStudioProjectSource(project) {
+        const threadId = String(project?.source?.threadId || '').trim()
+        if (!threadId) return
+        selectPD1Destination('Chat')
+		const known = scoutChatThreads.some(thread => String(thread?.id || '') === threadId)
+		if (known) selectScoutChatThread(threadId)
+		const hydrated = await hydrateScoutChatThread(threadId).catch(() => null)
+		if (!hydrated) {
+		  showToast({ text: 'That source conversation is no longer available.', kind: 'note' })
+		  return
+		}
+		selectScoutChatThread(threadId)
+      }
+
+      function studioProjectStructuredCheckpoint(project) {
+        const checkpoint = project?.checkpoint
+        const options = Array.isArray(checkpoint?.options) ? checkpoint.options.filter(option => String(option?.id || '').trim() && String(option?.label || '').trim()) : []
+        if (project?.status !== 'needs_input' || !String(checkpoint?.id || '').trim() || !String(checkpoint?.question || '').trim() || !options.length) return null
+        return { ...checkpoint, options }
+      }
+
+      function studioProjectResultIsFinal(project) {
+		const result = project?.result
+		if (!result?.artifactId || project?.status !== 'ready' || result.canContinue === true) return false
+		const qualityState = String(result.qualityState || '').trim().toLowerCase()
+		return result.reviewManaged === false ? qualityState === '' : qualityState === 'admitted'
+	  }
+
+      async function resolveStudioProjectCheckpoint(project, checkpoint, option, button, checkpointNote = '') {
+        const card = button?.closest('.studio-project-decision')
+        const controls = card ? Array.from(card.querySelectorAll('button, textarea')) : []
+        const idle = button?.textContent || option.label
+        controls.forEach(control => { control.disabled = true })
+        if (button) button.textContent = 'Saving…'
+        try {
+          const { ok, data } = await submitCheckpointOption(project.rootArtifactId, checkpoint.id, option.id, checkpointNote)
+          if (!ok) throw new Error(data?.error || 'Scout could not record that decision')
+		  showToast({ text: 'Decision sent to Scout', kind: 'done' })
+		  studioProjectsETag = ''
+		  await loadStudioProjects({ force: true })
+		  if (card?.closest('.scout-studio-receipt-group')) await loadScoutChatThreads({ onlyIfChanged: false })
+        } catch (error) {
+          showToast({ text: error?.message || 'Scout could not record that decision', kind: 'error' })
+          controls.forEach(control => { control.disabled = false })
+          if (button) button.textContent = idle
+        }
+      }
+
+      async function continueStudioProjectResult(project, button) {
+		const result = project?.result
+		if (!project?.rootArtifactId || result?.canContinue !== true || !result?.artifactId) return
+		const reviewChanges = String(result.qualityState || '').trim().toLowerCase() === 'edited_after_admission'
+		const actionLabel = reviewChanges ? 'Review changes' : 'Continue review'
+		if (button) {
+		  button.disabled = true
+		  button.textContent = reviewChanges ? 'Starting review…' : 'Continuing…'
+		}
+		try {
+		  const response = await postAuthJSON('/artifacts/action', reviewChanges
+			? { id: project.rootArtifactId, action: 'review_changes', resultArtifactId: result.artifactId, expectedResultVersion: Number(result.version || 0), expectedResultDigest: String(result.digest || '').trim().toLowerCase() }
+			: { id: project.rootArtifactId, action: 'resume' })
+		  if (!response?.ok) throw new Error(response?.data?.error || 'Scout could not continue this draft.')
+		  showToast({ text: reviewChanges ? 'Changes sent back through review' : 'Scout is continuing the review', kind: 'done' })
+		  studioProjectsETag = ''
+		  await loadStudioProjects({ force: true })
+		} catch (error) {
+		  showToast({ text: error?.message || 'Scout could not continue this draft.', kind: 'error' })
+		  if (button) {
+			button.disabled = false
+			button.textContent = actionLabel
+		  }
+		}
+	  }
+
+      function studioProjectDecisionNode(project, checkpoint) {
+        const card = bfEl('section', 'studio-project-decision')
+        card.setAttribute('aria-label', 'Decision needed')
+        const copy = bfEl('div', 'studio-project-decision__copy')
+        copy.append(
+          bfEl('p', 'studio-project-decision__kicker', 'Scout needs your call'),
+          bfEl('h4', 'studio-project-decision__question', checkpoint.question)
+        )
+        const choices = bfEl('div', 'studio-project-decision__choices')
+        checkpoint.options.forEach(option => {
+          const action = String(option.action || 'proceed').trim() || 'proceed'
+          const button = bfEl('button', 'studio-project-decision__choice', option.label)
+          button.type = 'button'
+          button.dataset.action = action
+          button.addEventListener('click', () => {
+            if (action !== 'revise') {
+              resolveStudioProjectCheckpoint(project, checkpoint, option, button)
+              return
+            }
+            let form = card.querySelector('.studio-project-decision__revision')
+            if (form) {
+              form.querySelector('textarea')?.focus()
+              return
+            }
+            form = bfEl('div', 'studio-project-decision__revision')
+            const field = bfEl('div', 'studio-project-decision__revision-field')
+            const label = bfEl('label', '', 'Changes for Scout')
+            const textarea = document.createElement('textarea')
+            textarea.placeholder = 'Say what should improve and what must stay unchanged…'
+            label.htmlFor = `studio-checkpoint-note-${String(project.id || '').replace(/[^a-zA-Z0-9_-]/g, '')}`
+            textarea.id = label.htmlFor
+            field.append(label, textarea)
+            const send = studioProjectAction('Send changes', true, () => {
+              resolveStudioProjectCheckpoint(project, checkpoint, option, send, textarea.value.trim())
+            })
+            form.append(field, send)
+            card.appendChild(form)
+            textarea.focus()
+          })
+          choices.appendChild(button)
+        })
+        card.append(copy, choices)
+        return card
+      }
+
+      function renderStudioProjectDetail(project) {
+        studioProjectDetail?.replaceChildren()
+        if (!studioProjectDetail) return
+        if (!project) {
+          studioProjectDetail.appendChild(studioProjectEmptyNode())
+          return
+        }
+        const root = bfEl('article', 'studio-project-detail')
+		const back = bfEl('button', 'studio-project-detail__back')
+		back.type = 'button'
+		back.setAttribute('aria-label', `Back to ${studioProjectFilter === 'presentation' ? 'presentations' : studioProjectFilter === 'document' ? 'research' : 'work'}`)
+		back.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg><span>All projects</span>'
+		back.addEventListener('click', () => {
+		  studioProjectsMobileLibraryOpen = true
+		  selectStudioProject('')
+		})
+		root.appendChild(back)
+        const head = bfEl('header', 'studio-project-detail__head')
+        head.appendChild(bfEl('p', 'studio-project-detail__eyebrow', studioProjectKindLabel(project.kind)))
+        const titleRow = bfEl('div', 'studio-project-detail__title-row')
+        titleRow.appendChild(bfEl('h3', 'studio-project-detail__title', project.title || 'Untitled work'))
+        const status = bfEl('span', 'studio-project-status')
+        status.dataset.status = String(project.status || 'running')
+        status.append(bfEl('span', 'studio-project-status__dot'), document.createTextNode(studioProjectStatusLabel(project.status)))
+        titleRow.appendChild(status)
+        head.append(titleRow, bfEl('p', 'studio-project-detail__meta', `${Math.max(0, Math.min(100, Number(project.progressPercent || 0)))}% · Updated ${studioProjectRelativeTime(project.updatedAt)}`))
+        root.appendChild(head)
+
+        const phases = bfEl('div', 'studio-project-phases')
+        ;(Array.isArray(project.phases) ? project.phases : []).forEach(phase => {
+          const item = bfEl('div', 'studio-project-phase')
+          item.classList.toggle('is-complete', phase.status === 'complete')
+          item.classList.toggle('is-active', !['complete', 'upcoming'].includes(phase.status))
+          item.append(bfEl('span', 'studio-project-phase__line'), bfEl('span', 'studio-project-phase__label', phase.label || phase.id))
+          phases.appendChild(item)
+        })
+        root.appendChild(phases)
+
+        const structuredCheckpoint = studioProjectStructuredCheckpoint(project)
+        if (structuredCheckpoint) root.appendChild(studioProjectDecisionNode(project, structuredCheckpoint))
+
+        const deliverable = bfEl('section', 'studio-project-deliverable')
+        const deliverableCopy = bfEl('div', 'studio-project-deliverable__copy')
+		const resultReady = Boolean(project?.result?.artifactId)
+		const finalReady = studioProjectResultIsFinal(project)
+		const needsAttention = project.status === 'needs_attention'
+		deliverableCopy.append(
+		  bfEl('p', 'studio-project-deliverable__kicker', finalReady ? 'Final deliverable' : resultReady ? 'Draft available · review needed' : project.status === 'needs_input' ? 'A decision is needed' : needsAttention ? 'Scout needs attention' : 'Scout is working'),
+		  bfEl('h4', 'studio-project-deliverable__title', resultReady ? (project.result.title || project.title) : project.status === 'needs_input' ? (structuredCheckpoint ? 'Waiting for your decision' : 'Review the open question with Scout') : needsAttention ? 'Help Scout move this forward' : `${studioProjectStatusLabel(project.status)} · ${project.phase || 'brief'}`),
+		  bfEl('p', 'studio-project-deliverable__meta', resultReady ? `${studioProjectResultCapabilityCopy(project)}${finalReady ? '' : project.result.canContinue === true ? ' · Revise and return to review' : ' · Review before presenting or downloading'}` : structuredCheckpoint ? 'Choose above and Scout will continue from this exact point.' : needsAttention ? 'Open the source conversation to review what is blocking the work.' : 'This project will update here as the work advances.')
+		)
+        const actions = bfEl('div', 'studio-project-detail__actions')
+        if (resultReady) {
+		  if (project.result.canContinue === true) {
+			const reviewChanges = String(project.result.qualityState || '').trim().toLowerCase() === 'edited_after_admission'
+			const continueAction = studioProjectAction(reviewChanges ? 'Review changes' : 'Continue review', true, () => continueStudioProjectResult(project, continueAction))
+			actions.appendChild(continueAction)
+		  }
+          if (project.kind === 'presentation' && project.result.canPresent === true) actions.appendChild(studioProjectAction('Present', true, () => openStudioProjectResult(project, 'present')))
+          if (project.result.canEdit === true) actions.appendChild(studioProjectAction('Edit', project.kind !== 'presentation', () => openStudioProjectResult(project, 'edit')))
+          if (project.kind === 'document') actions.appendChild(studioProjectAction('Open', project.result.canEdit !== true, () => openStudioProjectResult(project, 'open')))
+          if (project.result.canExport === true && project.kind === 'presentation') {
+            const pptx = studioProjectAction('PowerPoint', false, () => downloadStudioProjectResult(project, 'pptx', pptx))
+            actions.appendChild(pptx)
+          }
+          if (project.result.canExport === true) {
+            const pdf = studioProjectAction('PDF', false, () => downloadStudioProjectResult(project, 'pdf', pdf))
+            actions.appendChild(pdf)
+          }
+        } else if (!structuredCheckpoint && project.source?.threadId) {
+          actions.appendChild(studioProjectAction(project.status === 'needs_input' ? 'Review with Scout' : 'Open conversation', true, () => openStudioProjectSource(project)))
+        }
+        deliverable.append(deliverableCopy, actions)
+        if (resultReady || !structuredCheckpoint) root.appendChild(deliverable)
+
+        const context = bfEl('footer', 'studio-project-context')
+        if (project.source?.threadId) {
+          const source = bfEl('button', '', 'Source conversation')
+          source.type = 'button'
+          source.addEventListener('click', () => openStudioProjectSource(project))
+          context.appendChild(source)
+        }
+        if (project.companyProject?.title) context.appendChild(bfEl('span', '', `Project · ${project.companyProject.title}`))
+        if (project.canRename) {
+          const rename = bfEl('button', '', 'Rename')
+          rename.type = 'button'
+          rename.addEventListener('click', () => renameStudioProject(project))
+          context.appendChild(rename)
+        }
+        root.appendChild(context)
+        studioProjectDetail.appendChild(root)
+      }
+
+      function selectStudioProject(id, options = {}) {
+        selectedStudioProjectId = String(id || '')
+		if (selectedStudioProjectId) studioProjectsMobileLibraryOpen = false
+		if (studioProjectDeepLinkUnavailable && studioProjectDeepLinkUnavailable !== selectedStudioProjectId) studioProjectDeepLinkUnavailable = ''
+        if (options.updateURL !== false && appShell.dataset.tool === 'research') {
+          const url = new URL(location.href)
+          if (selectedStudioProjectId) url.searchParams.set('project', selectedStudioProjectId)
+          else url.searchParams.delete('project')
+          history.replaceState({ view: 'pd1', destination: appShell.dataset.pd1Destination }, '', `${url.pathname}${url.search}${url.hash}`)
+        }
+        renderStudioProjects()
+      }
+
+	  function canonicalizeStudioProjectRoute(project) {
+		if (!project?.id) return
+		const canonicalDestination = project.kind === 'presentation' ? 'Presentations' : 'Research'
+		const currentDestination = location.pathname === '/presentations' ? 'Presentations' : (location.pathname === '/research' ? 'Research' : 'Work')
+		if (currentDestination === 'Work' || currentDestination === canonicalDestination) return
+		const canonical = new URL(String(project.href || (project.kind === 'presentation' ? '/presentations' : '/research')), location.origin)
+		history.replaceState({ view: 'pd1', destination: canonicalDestination }, '', `${canonical.pathname}${canonical.search}`)
+		studioProjectFilter = project.kind
+		syncPD1Destination(canonicalDestination)
+	  }
+
+      function renderStudioProjects() {
+        if (!studioProjectList || !studioProjectDetail) return
+        const destination = appShell.dataset.pd1Destination
+        studioProjectFilter = destination === 'Presentations' ? 'presentation' : (destination === 'Research' ? 'document' : studioProjectFilter)
+        if (destination === 'Work') studioProjectFilter = 'all'
+        const titles = studioProjectFilter === 'presentation'
+          ? ['Presentations', 'Decks stay here from brief to final presentation.']
+          : studioProjectFilter === 'document'
+            ? ['Research', 'Reports stay here from evidence gathering to an editable final document.']
+            : ['Recent work', 'Presentations and research stay organized from brief to final file.']
+        if (studioProjectsTitle) studioProjectsTitle.textContent = titles[0]
+        if (studioProjectsMeta) studioProjectsMeta.textContent = titles[1]
+		const projects = filteredStudioProjects()
+		const compactStudio = window.matchMedia('(max-width: 640px)').matches
+		const unavailableSelected = Boolean(studioProjectDeepLinkUnavailable) && studioProjectDeepLinkUnavailable === selectedStudioProjectId
+		if (!projects.some(project => String(project.id || '') === selectedStudioProjectId) && !unavailableSelected && (!compactStudio || !studioProjectsMobileLibraryOpen)) selectedStudioProjectId = projects[0]?.id || ''
+		studioProjectsWorkspace?.classList.toggle('is-library-view', compactStudio && studioProjectsMobileLibraryOpen)
+		renderStudioProjectList(projects)
+		if (studioProjectDeepLinkUnavailable && studioProjectDeepLinkUnavailable === selectedStudioProjectId) {
+		  studioProjectDetail.replaceChildren(studioProjectEmptyNode({
+			title: 'This project is not available',
+			body: 'It may have been removed, or you may no longer have access.',
+			hideAction: true
+		  }))
+		} else {
+		  renderStudioProjectDetail(projects.find(project => String(project.id || '') === selectedStudioProjectId) || null)
+		}
+        syncToolTopbar()
+        window.clearTimeout(studioProjectsRefreshTimer)
+		if (appShell.dataset.tool === 'research' && studioProjects.some(project => ['queued', 'running', 'needs_input', 'needs_attention'].includes(project.status))) {
+		  studioProjectsRefreshTimer = window.setTimeout(() => loadStudioProjects({ onlyIfChanged: true }), 6000)
+		}
+      }
+
+      async function loadStudioProjects(options = {}) {
+		const append = options.append === true
+		if (!authedUser) return
+		if (append && (!studioProjectsHasMore || !studioProjectsNextBefore)) return
+		if (append && studioProjectsAppending) return
+		if (append && studioProjectsLoading) {
+		  studioProjectsAppendQueued = true
+		  return
+		}
+		if (!append && (studioProjectsLoading || studioProjectsAppending)) return
+		if (append) studioProjectsAppending = true
+		else studioProjectsLoading = true
+		studioProjectsError = ''
+        renderStudioProjects()
+        try {
+          const headers = {}
+		  if (!append && !options.force && options.onlyIfChanged && studioProjectsETag) headers['If-None-Match'] = studioProjectsETag
+		  const params = new URLSearchParams({ limit: '200' })
+		  if (append) params.set('before', studioProjectsNextBefore)
+		  const response = await fetch(`/api/studio-projects/v1?${params.toString()}`, { cache: 'no-store', headers })
+          if (response.status === 304) return
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok || !Array.isArray(payload?.projects)) throw new Error(payload?.error || 'Work could not be loaded')
+		  if (append) {
+			const incoming = new Map(payload.projects.map(project => [String(project?.id || ''), project]))
+			studioProjects = [...studioProjects.filter(project => !incoming.has(String(project?.id || ''))), ...payload.projects]
+		  } else {
+			studioProjects = payload.projects
+			studioProjectsETag = response.headers.get('ETag') || ''
+		  }
+		  studioProjectsHasMore = payload.hasMore === true
+		  studioProjectsNextBefore = studioProjectsHasMore ? String(payload.nextBefore || '') : ''
+          const requestedID = new URL(location.href).searchParams.get('project') || ''
+		  if (!append && requestedID && !studioProjects.some(project => String(project.id || '') === requestedID)) {
+			const exact = await fetch(`/api/studio-projects/v1?id=${encodeURIComponent(requestedID)}`, { cache: 'no-store' })
+			const exactPayload = await exact.json().catch(() => ({}))
+			if (exact.ok && exactPayload?.project?.id) {
+			  const exactProject = exactPayload.project
+			  studioProjects = [exactProject, ...studioProjects]
+			  canonicalizeStudioProjectRoute(exactProject)
+			  studioProjectDeepLinkUnavailable = ''
+			} else {
+			  studioProjectDeepLinkUnavailable = requestedID
+			  selectedStudioProjectId = requestedID
+			}
+		  }
+		  if (requestedID && studioProjects.some(project => String(project.id || '') === requestedID)) {
+			studioProjectDeepLinkUnavailable = ''
+			selectedStudioProjectId = requestedID
+			studioProjectsMobileLibraryOpen = false
+			canonicalizeStudioProjectRoute(studioProjects.find(project => String(project.id || '') === requestedID))
+		  }
+		  if (!requestedID) studioProjectDeepLinkUnavailable = ''
+        } catch (error) {
+          studioProjectsError = error?.message || 'Work could not be loaded'
+		} finally {
+		  if (append) studioProjectsAppending = false
+		  else studioProjectsLoading = false
+		  renderStudioProjects()
+		  if (!append && studioProjectsAppendQueued) {
+			studioProjectsAppendQueued = false
+			void loadStudioProjects({ append: true })
+		  }
+		}
+      }
+
+      async function startStudioProjectWithScout() {
+        selectPD1Destination('Chat')
+        let thread = scoutChatThreads.find(candidate => !chatThreadIsChannel(candidate) && !privateRiffThread(candidate))
+        if (!thread) {
+          try { thread = await createScoutChatThreadOnServer('Scout', 'private') } catch (error) {
+            showToast({ text: error?.message || 'Could not open Scout', kind: 'error' })
+            return
+          }
+        }
+        if (thread?.id) selectScoutChatThread(thread.id)
+        if (scoutChatInput) {
+          scoutChatInput.value = studioProjectFilter === 'document' ? 'Research and write a report about ' : 'Create a presentation about '
+          scoutChatInput.dispatchEvent(new Event('input', { bubbles: true }))
+          scoutChatInput.focus()
+          scoutChatInput.setSelectionRange(scoutChatInput.value.length, scoutChatInput.value.length)
+        }
+      }
+
+      studioProjectSearch?.addEventListener('input', () => {
+        studioProjectQuery = studioProjectSearch.value
+        renderStudioProjects()
+      })
+      studioNewWithScout?.addEventListener('click', startStudioProjectWithScout)
+
       /* ---------- tool routing (glass & ink shell) ----------
          data-tool on #appShell names the active tool. It coexists with the
          meeting state machine (is-in-room / is-board-expanded / stage modes):
@@ -44404,7 +45484,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function syncPD1Destination(destination) {
         const next = pd1DestinationAllowed(destination) ? destination : 'Home'
         appShell.dataset.pd1Destination = next
-        const workContext = next === 'Work'
+        const workContext = ['Work', 'Presentations', 'Research'].includes(next)
         const shellVisible = appShell.classList.contains('is-authed') && !appShell.classList.contains('is-guest')
         toolRail.hidden = !shellVisible
         toolRail.inert = !shellVisible
@@ -44483,6 +45563,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncPD1Destination('Files')
           return true
         }
+        if (destination === 'Work' || destination === 'Presentations' || destination === 'Research') {
+          clearPD1DestinationSurface()
+          studioProjectFilter = destination === 'Presentations' ? 'presentation' : (destination === 'Research' ? 'document' : 'all')
+          setActiveTool('research', { history: false })
+          syncPD1Destination(destination)
+          loadStudioProjects({ onlyIfChanged: true })
+          renderStudioProjects()
+          return true
+        }
         return false
       }
       window.selectPD1Destination = selectPD1Destination
@@ -44497,7 +45586,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncPD1Destination(pathDestination)
           return
         }
-        const toolDestination = tool === 'office' ? 'Home' : (tool === 'room' ? 'Video' : (tool === 'chat' ? 'Chat' : (tool === 'files' ? 'Files' : 'Work')))
+        const toolDestination = tool === 'office' ? 'Home' : (tool === 'room' ? 'Video' : (tool === 'chat' ? 'Chat' : (tool === 'files' ? 'Files' : (tool === 'research' ? 'Work' : 'Work'))))
         syncPD1Destination(toolDestination)
       }
 
@@ -44560,6 +45649,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
           loadMeetingsForMemory()
         } else if (tool === 'files') {
           loadFilesSurface()
+        } else if (tool === 'research') {
+          loadStudioProjects({ onlyIfChanged: true })
+          renderStudioProjects()
         } else if (tool === 'network') {
           // Route rendering owns the server projection; the global shell owns
           // navigation, organization context, and product identity.
@@ -44646,7 +45738,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           case 'team':
             return 'named coworkers · human-approved authority'
           case 'research':
-            return `${agentArtifacts('research').length} briefs · saved artifacts`
+            return studioProjectSubtitle()
           case 'design':
             return `${agentArtifacts('design').length} kickoffs · saved artifacts`
           case 'grill':
@@ -44713,7 +45805,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           room: 'Rooms',
           chat: 'Chat',
           artifacts: 'Intelligence',
-          research: 'Research',
+          research: appShell.dataset.pd1Destination === 'Presentations' ? 'Presentations' : (appShell.dataset.pd1Destination === 'Research' ? 'Research' : 'Recent work'),
           design: 'Design',
           grill: 'Grill mode',
           board: 'Board',
@@ -46385,7 +47477,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        if (!deckContext && !artifactIsHTMLDeck(entry) && String(entry?.metadata?.type || '').trim() !== 'workbook' && String(entry.text || '').trim() && options?.canEdit !== false && options?.hideEdit !== true) {
 	          const editDocument = bfEl('button', 'artifact-stage__pdf-btn', 'Edit document')
 	          editDocument.type = 'button'
-	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry, qualityState: stageQualityState, canExport: stageCanExport }))
+	          editDocument.addEventListener('click', () => openDocumentStudio(entry.id, stageTitle, { entry, expectedBinding, qualityState: stageQualityState, canExport: stageCanExport }))
 	          headActions.appendChild(editDocument)
 	        }
         const currentPdfAsset = artifactNewestPdfAsset(entry)
@@ -49732,6 +50824,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
           showToast({ text: error?.message || 'Deck editor is unavailable', kind: 'error' })
           return false
         }
+        const expectedBinding = options?.expectedBinding && typeof options.expectedBinding === 'object' ? options.expectedBinding : null
+        if (expectedBinding) {
+          const expectedVersion = Number(expectedBinding.version || 0)
+          const expectedDigest = String(expectedBinding.digest || '').trim().toLowerCase()
+          if (String(expectedBinding.artifactId || '').trim() !== artifactId || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1 || !/^[0-9a-f]{64}$/.test(expectedDigest) ||
+            String(payload?.artifact?.id || artifactId).trim() !== artifactId || Number(payload?.artifact?.version || 0) !== expectedVersion || String(payload?.artifact?.contentDigest || '').trim().toLowerCase() !== expectedDigest) {
+            showToast({ text: 'This exact presentation changed. Refresh the project before editing.', kind: 'note' })
+            return false
+          }
+        }
         if (payload?.canWrite !== true) {
           showToast({ text: String(payload?.writeBlockedReason || 'This deck is view-only. You can still present it.'), kind: 'note' })
           return false
@@ -51948,7 +53050,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			qualityState: projectedQualityState,
 			canEdit: options.canEdit,
 			canPresent: options.canPresent,
-			canExport: options.canExport
+			canExport: options.canExport,
+			expectedBinding
           })
         })
         presentBtn.addEventListener('click', present)
@@ -52944,7 +54047,24 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // Read the exact authorized artifact before starting or retrying a PDF.
       // If a callback landed between the editor's previous poll and this click,
       // the ready asset wins and no stale-version POST is necessary.
-      async function currentArtifactPdfAsset(artifactId) {
+	  function artifactEntryMatchesExpectedBinding(entry, expectedBinding) {
+		if (!expectedBinding) return true
+		const expectedID = String(expectedBinding.artifactId || '')
+		const expectedVersion = Number(expectedBinding.version || 0)
+		const expectedDigest = String(expectedBinding.digest || '').trim().toLowerCase()
+		if (!expectedID || expectedVersion < 1 || !/^[0-9a-f]{64}$/.test(expectedDigest)) return false
+		return String(entry?.id || '') === expectedID
+		  && Number(entry?.metadata?.artifactVersion || 0) === expectedVersion
+		  && String(entry?.metadata?.contentDigest || '').trim().toLowerCase() === expectedDigest
+	  }
+
+	  function assertArtifactExpectedBinding(entry, expectedBinding) {
+		if (expectedBinding && !artifactEntryMatchesExpectedBinding(entry, expectedBinding)) {
+		  throw new Error('This exact file changed. Refresh the project before downloading.')
+		}
+	  }
+
+	  async function currentArtifactPdfAsset(artifactId, expectedBinding = null) {
         let fresh = null
         if (typeof fetchArtifactEntryById === 'function') {
           fresh = await fetchArtifactEntryById(artifactId, { refresh: true })
@@ -52952,7 +54072,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           if (typeof loadArtifacts === 'function') await loadArtifacts()
           fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === String(artifactId || ''))
         }
-        if (!fresh) return null
+		if (!fresh) return null
+		assertArtifactExpectedBinding(fresh, expectedBinding)
         const renderStatus = String(fresh?.metadata?.renderStatus || '').trim().toLowerCase()
         if (renderStatus === 'failed' || renderStatus === 'stale') {
           throw new Error(String(fresh?.metadata?.renderError || '').trim() || (renderStatus === 'stale'
@@ -52966,7 +54087,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // ride the artifact library refresh until the render callback lands the
       // pdf asset (or stamps renderStatus failed); ~2 minutes, then give up
       // quietly — the asset still lands via the normal refresh path later.
-      async function waitForArtifactPdfAsset(artifactId, tries = 40) {
+	  async function waitForArtifactPdfAsset(artifactId, tries = 40, expectedBinding = null) {
         for (let attempt = 0; attempt < tries; attempt += 1) {
           await new Promise(resolve => window.setTimeout(resolve, 3000))
           // A deck/document may have fallen outside the newest-100 library
@@ -52980,7 +54101,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
             if (typeof loadArtifacts === 'function') await loadArtifacts()
             fresh = (typeof artifactEntries !== 'undefined' ? artifactEntries : []).find(candidate => String(candidate?.id || '') === artifactId)
           }
-          if (!fresh) continue
+		  if (!fresh) continue
+		  assertArtifactExpectedBinding(fresh, expectedBinding)
           const renderStatus = String(fresh?.metadata?.renderStatus || '').trim().toLowerCase()
           if (renderStatus === 'failed' || renderStatus === 'stale') {
             throw new Error(String(fresh?.metadata?.renderError || '').trim() || (renderStatus === 'stale'
@@ -65678,7 +66800,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			} : null
 			if (!hydrated?.id) return null
 			const index = scoutChatThreads.findIndex(thread => String(thread?.id || '') === id)
-			if (index < 0) return null
+			if (index < 0) {
+			  // A durable Studio deep link can point outside the bounded newest-thread
+			  // index. The exact endpoint already enforced viewer access; insert that
+			  // one hydrated conversation instead of turning a valid source into a dead link.
+			  const inserted = upsertScoutChatThread(hydrated, { select: false, complete: true })
+			  if (activeScoutThreadId === id) renderActiveScoutThread({ forceBottom: true, progressiveNavigation: true })
+			  return inserted
+			}
 			const current = scoutChatThreads[index]
 			if (scoutChatThreadRevisionCompare(current?.updatedAt, hydrated.updatedAt) > 0) {
 			  retryRevision = scoutChatThreadRevisionKey(current?.updatedAt)
@@ -72067,7 +73196,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-image, .scout-chat-image-pending, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-history-loading, .scout-chat-history-control, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-image, .scout-chat-image-pending, .scout-studio-receipt-group, .scout-studio-receipt, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-history-loading, .scout-chat-history-control, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -73027,7 +74156,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		        return { artifact, resultArtifact, resultArtifactCurrent, resultDocument, structuredResult, richResult, checkpoint, receiptExact }
 	      }
 
-	      function scoutManifestHasRichDeck(message) {
+      function scoutManifestHasRichDeck(message) {
 	        const manifest = message?.manifest || {}
 	        if (String(manifest.status || '') === 'held') return false
 	        return (Array.isArray(manifest.deliverables) ? manifest.deliverables : []).some(deliverable => {
@@ -73035,9 +74164,61 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const entry = artifactId ? artifactEntries.find(candidate => String(candidate?.id || '') === artifactId) : null
 	          return String(deliverable?.badge || '').toLowerCase() === 'deck' || deliverable?.present === true || Boolean(entry && artifactIsHTMLDeck(entry))
 	        })
-	      }
+      }
+
+      function scoutStudioReceiptIsLatest(message) {
+        const id = String(message?.studioProject?.id || '').trim()
+        if (!id) return false
+        const messages = Array.isArray(selectedScoutChatThread()?.messages) ? selectedScoutChatThread().messages : []
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+          const candidate = messages[index]
+          if (String(candidate?.studioProject?.id || '').trim() !== id) continue
+          return candidate === message || (String(candidate?.id || '') && String(candidate.id) === String(message?.id || ''))
+        }
+        return true
+      }
+
+      function openStudioProjectReceipt(project) {
+        if (!project?.id) return
+        selectedStudioProjectId = String(project.id)
+		studioProjectsMobileLibraryOpen = false
+        studioProjectFilter = project.kind === 'presentation' ? 'presentation' : 'document'
+        selectPD1Destination(project.kind === 'presentation' ? 'Presentations' : 'Research')
+        loadStudioProjects({ onlyIfChanged: true })
+        renderStudioProjects()
+      }
+
+      function scoutStudioReceiptNode(message) {
+        const project = message?.studioProject || {}
+		const group = bfEl('div', 'scout-studio-receipt-group')
+        const node = bfEl('button', 'scout-studio-receipt')
+        node.type = 'button'
+        node.dataset.messageId = String(message?.id || '')
+        node.dataset.studioProjectId = String(project.id || '')
+        node.setAttribute('aria-label', `Open ${project.title || studioProjectKindLabel(project.kind)} in ${project.kind === 'presentation' ? 'Presentations' : 'Research'}`)
+        const icon = bfEl('span', 'scout-studio-receipt__icon')
+        icon.appendChild(studioProjectIcon(project.kind).firstElementChild)
+        const copy = bfEl('span', 'scout-studio-receipt__copy')
+        copy.append(
+          bfEl('span', 'scout-studio-receipt__title', project.title || studioProjectKindLabel(project.kind)),
+          bfEl('span', 'scout-studio-receipt__kind', project.kind === 'presentation' ? 'Presentations' : 'Research')
+        )
+        const status = bfEl('span', 'scout-studio-receipt__status', studioProjectStatusLabel(project.status))
+        status.dataset.status = String(project.status || 'running')
+        node.append(icon, copy, status, bfEl('span', 'scout-studio-receipt__chevron', '›'))
+        node.addEventListener('click', () => openStudioProjectReceipt(project))
+		group.appendChild(node)
+		const checkpoint = studioProjectStructuredCheckpoint(project)
+		if (checkpoint) {
+		  const decision = studioProjectDecisionNode({ ...project, rootArtifactId: project.id }, checkpoint)
+		  decision.classList.add('studio-project-decision--chat')
+		  group.appendChild(decision)
+		}
+		return group
+      }
 
 	      function scoutChatRecordBelongsInTimeline(message) {
+	        if (message?.studioProject?.id) return true
 	        const kind = String(message?.kind || 'message')
 	        if (kind === 'message' || kind === 'image') return true
 	        if (kind === 'proposal' && message?.proposal) {
@@ -73068,6 +74249,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function scoutChatRecordRendersInTimeline(message) {
+	        if (message?.studioProject?.id) return scoutStudioReceiptIsLatest(message)
 	        return scoutChatRecordBelongsInTimeline(message) && !scoutProcessThreadHasArtifactReceipt(message)
 	      }
 
@@ -73107,6 +74289,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          appendScoutChatNode(daybreak)
 	        }
 	        if (msgTs) feedPrevMsgTs = msgTs
+	        if (message?.studioProject?.id) {
+	          runlogMarkerGoalId = ''
+	          feedPrevMsgKey = ''
+	          return scoutStudioReceiptNode(message)
+	        }
 	        if (recordKind === 'proposal' && message.proposal) {
 	          runlogMarkerGoalId = ''
 	          feedPrevMsgKey = ''
@@ -76454,8 +77641,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (message?.thread?.resultCanContinue !== true) return null
 	        const goalId = String(message?.thread?.artifactId || '').trim()
 		const resultId = String(message?.thread?.resultArtifactId || '').trim()
+		const resultVersion = Number(message?.thread?.resultArtifactVersion || 0)
+		const resultDigest = String(message?.thread?.resultArtifactDigest || '').trim().toLowerCase()
 	        if (!goalId) return null
 		const reviewChanges = authoredResultQualityState(message) === 'edited_after_admission'
+		if (reviewChanges && (!resultId || !Number.isInteger(resultVersion) || resultVersion < 1 || !/^[0-9a-f]{64}$/.test(resultDigest))) return null
 		const actionLabel = reviewChanges ? 'Review changes' : label
 	        const button = bfEl('button', 'scout-authored-result__continue', actionLabel)
 	        button.type = 'button'
@@ -76465,7 +77655,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          button.textContent = reviewChanges ? 'Starting review…' : 'Continuing…'
 	          try {
 			const response = await postAuthJSON('/artifacts/action', reviewChanges
-			  ? { id: goalId, action: 'review_changes', resultArtifactId: resultId }
+			  ? { id: goalId, action: 'review_changes', resultArtifactId: resultId, expectedResultVersion: resultVersion, expectedResultDigest: resultDigest }
 			  : { id: goalId, action: 'resume' })
 	            if (!response?.ok) throw new Error(response?.data?.error || 'Could not continue this draft.')
 	            button.textContent = reviewChanges ? 'Reviewing changes…' : 'Resuming review…'

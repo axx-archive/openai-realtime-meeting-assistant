@@ -432,10 +432,15 @@ type meetingMemoryStore struct {
 	// ledger for each header/body fence made one dense channel O(messages *
 	// lifetime rows). Both indexes are rebuilt with the other in-memory indexes
 	// after deletion/reload and advanced by every ordinary append.
-	artifactIndexes    []int
-	artifactIndexByID  map[string]int
-	scoutChatIndexByID map[string]int
-	indexedEntryCount  int
+	artifactIndexes   []int
+	artifactIndexByID map[string]int
+	// studioArtifactIndexes is the narrow, incrementally maintained subset
+	// needed to project Presentations/Research roots and their exact results.
+	// Studio polling must never clone the lifetime artifact directory.
+	studioArtifactIndexes   []int
+	studioArtifactIndexByID map[string]int
+	scoutChatIndexByID      map[string]int
+	indexedEntryCount       int
 	// artifactEntryVisitHook is a test-only observation seam. It is invoked for
 	// every durable row inspected by the directory-backed result projection and
 	// exact authorization lookup, and is nil in production.
@@ -673,6 +678,8 @@ func (store *meetingMemoryStore) reloadVisibleMemoryGenerationLocked() error {
 func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
 	store.artifactIndexes = nil
 	store.artifactIndexByID = map[string]int{}
+	store.studioArtifactIndexes = nil
+	store.studioArtifactIndexByID = map[string]int{}
 	store.scoutChatIndexByID = map[string]int{}
 	store.indexedEntryCount = 0
 	store.meetingEntryIndexes = map[string][]int{}
@@ -703,6 +710,28 @@ func (store *meetingMemoryStore) indexMeetingEntryLocked(index int, entry meetin
 			store.artifactIndexes = append(store.artifactIndexes, index)
 		}
 		store.artifactIndexByID[entry.ID] = index
+		priorStudioIndex, wasStudioArtifact := store.studioArtifactIndexByID[entry.ID]
+		if studioProjectProjectionRelevantEntry(entry) {
+			if wasStudioArtifact {
+				for position, candidate := range store.studioArtifactIndexes {
+					if candidate == priorStudioIndex {
+						store.studioArtifactIndexes[position] = index
+						break
+					}
+				}
+			} else {
+				store.studioArtifactIndexes = append(store.studioArtifactIndexes, index)
+			}
+			store.studioArtifactIndexByID[entry.ID] = index
+		} else if wasStudioArtifact {
+			for position, candidate := range store.studioArtifactIndexes {
+				if candidate == priorStudioIndex {
+					store.studioArtifactIndexes = append(store.studioArtifactIndexes[:position], store.studioArtifactIndexes[position+1:]...)
+					break
+				}
+			}
+			delete(store.studioArtifactIndexByID, entry.ID)
+		}
 	}
 	if entry.Kind == meetingMemoryKindScoutChat && strings.TrimSpace(entry.ID) != "" {
 		if store.scoutChatIndexByID == nil {
@@ -807,6 +836,7 @@ func (store *meetingMemoryStore) rebuildMeetingEntryIndexesIfChangedLocked(previ
 	if strings.TrimSpace(previous.Metadata["meetingId"]) != strings.TrimSpace(next.Metadata["meetingId"]) ||
 		previous.Kind != next.Kind || digestEntryKey(previous) != digestEntryKey(next) ||
 		digestEntryCurrent(previous) != digestEntryCurrent(next) || memoryEntryRelevance(previous) != memoryEntryRelevance(next) ||
+		studioProjectProjectionRelevantEntry(previous) != studioProjectProjectionRelevantEntry(next) ||
 		previous.CreatedAt != next.CreatedAt || previous.Metadata[digestSpanStartMetadataKey] != next.Metadata[digestSpanStartMetadataKey] ||
 		previous.Metadata[digestSpanEndMetadataKey] != next.Metadata[digestSpanEndMetadataKey] || previous.Metadata[digestDayMetadataKey] != next.Metadata[digestDayMetadataKey] {
 		store.rebuildMeetingEntryIndexesLocked()
@@ -2110,6 +2140,43 @@ func (store *meetingMemoryStore) artifactMetadataSnapshot() []meetingMemoryEntry
 		result = append(result, meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata})
 	}
 	return result
+}
+
+// studioProjectProjectionSnapshot returns only canonical Studio roots plus the
+// goal-bound records/results needed to resolve their exact deliverables. The
+// subset is maintained on every artifact revision, so a six-second active-work
+// poll is proportional to Studio work rather than years of unrelated files.
+func (store *meetingMemoryStore) studioProjectProjectionSnapshot() []artifactListAuthorizationCandidate {
+	if store == nil {
+		return nil
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	candidates := make([]artifactListAuthorizationCandidate, 0, len(store.studioArtifactIndexes))
+	for _, index := range store.studioArtifactIndexes {
+		if index < 0 || index >= len(store.entries) {
+			continue
+		}
+		if store.artifactEntryVisitHook != nil {
+			store.artifactEntryVisitHook()
+		}
+		entry := store.entries[index]
+		if entry.Kind != meetingMemoryKindOSArtifact || memoryEntryHiddenFromRecall(entry) || !studioProjectProjectionRelevantEntry(entry) {
+			continue
+		}
+		metadata := make(map[string]string, len(entry.Metadata))
+		for key, value := range entry.Metadata {
+			metadata[key] = value
+		}
+		metadata["type"] = artifactType(entry)
+		projected := meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
+		header := store.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(projected))
+		candidates = append(candidates, artifactListAuthorizationCandidate{Entry: projected, Header: header})
+	}
+	return candidates
 }
 
 // artifactEntryIndexByIDLocked resolves one exact current artifact row. Caller

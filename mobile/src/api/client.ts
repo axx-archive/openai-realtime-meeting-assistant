@@ -45,6 +45,9 @@ import type {
   PrivateRiffPublishResponse,
   PrivateRiffSelectionPublishResponse,
   PrivateRiffSharePreviewResponse,
+  StudioProjectKind,
+  StudioProjectResponse,
+  StudioProjectsResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -717,10 +720,12 @@ export const api = {
     sessionToken: string,
     id: string,
     resultArtifactId: string,
+    expectedResultVersion: number,
+    expectedResultDigest: string,
   ): Promise<{ ok: boolean; replayed?: boolean }> {
     return request('/artifacts/action', {
       method: 'POST',
-      body: { id, action: 'review_changes', resultArtifactId },
+      body: { id, action: 'review_changes', resultArtifactId, expectedResultVersion, expectedResultDigest },
       sessionToken,
     });
   },
@@ -1003,6 +1008,42 @@ export const api = {
     sessionToken: string,
   ): Promise<ScoutThreadsResponse> {
     return request<ScoutThreadsResponse>('/assistant/chat-threads?view=index', {
+      sessionToken,
+    });
+  },
+
+  studioProjects(
+    sessionToken: string,
+    options: { kind?: StudioProjectKind; before?: string; limit?: number } = {},
+  ): Promise<StudioProjectsResponse> {
+    const query = [
+      options.kind ? `kind=${encodeURIComponent(options.kind)}` : '',
+      options.before ? `before=${encodeURIComponent(options.before)}` : '',
+      options.limit ? `limit=${encodeURIComponent(String(options.limit))}` : '',
+    ].filter(Boolean).join('&');
+    return request<StudioProjectsResponse>(`/api/studio-projects/v1${query ? `?${query}` : ''}`, {
+      sessionToken,
+    });
+  },
+
+  studioProject(
+    sessionToken: string,
+    id: string,
+  ): Promise<StudioProjectResponse> {
+    const normalizedId = id.trim();
+    if (!normalizedId) return Promise.reject(new Error('That Studio project is invalid.'));
+    return request<StudioProjectResponse>(`/api/studio-projects/v1?id=${encodeURIComponent(normalizedId)}`, {
+      sessionToken,
+    });
+  },
+
+  renameStudioProject(
+    sessionToken: string,
+    body: { id: string; title: string; expectedRevision: number },
+  ): Promise<StudioProjectResponse> {
+    return request<StudioProjectResponse>('/api/studio-projects/v1', {
+      method: 'PATCH',
+      body,
       sessionToken,
     });
   },

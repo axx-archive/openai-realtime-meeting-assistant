@@ -23,10 +23,11 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.STUDIO_DEEPLINK_INDEX,'utf8');
 const deckId='deck-deep-link';
 const documentId='document-deep-link';
+const documentDigest='e'.repeat(64);
 const requests=[];
 const deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#15191f'},slides:[{id:'cover',background:'#15191f',notes:'Opening note.',elements:[{id:'headline',type:'text',x:160,y:160,width:1180,height:220,z:2,opacity:1,rotation:0,text:'Deep-link proof',fontSize:82,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.05,letterSpacing:'normal'}]}]};
 const deckArtifact={id:deckId,title:'Deep-link deck',version:2,savedToFiles:true,metadata:{title:'Deep-link deck',type:'html_deck',savedToFiles:'true',artifactVersion:'2'}};
-const documentArtifact={id:documentId,title:'Insights report',version:3,savedToFiles:true,metadata:{title:'Insights report',type:'markdown',savedToFiles:'true',artifactVersion:'3'}};
+const documentArtifact={id:documentId,title:'Insights report',version:3,contentDigest:documentDigest,savedToFiles:true,metadata:{title:'Insights report',type:'markdown',savedToFiles:'true',artifactVersion:'3',contentDigest:documentDigest}};
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){
@@ -149,14 +150,15 @@ const count=kind=>requests.filter(request=>request.kind===kind).length;
   // A completed Markdown ResultArtifact is a bounded, first-class document in
   // the feed. Its two direct actions reach the reader and native editor; a
   // process artifact without resultArtifactId never enters this function.
-  await desktop.evaluate(({documentId})=>{
-    const artifact={id:documentId,title:'Insights report',text:'# Insights report\n\n## Opportunity\n\nA western-culture engagement network can turn distributed creator trust into on-demand launch energy.\n\n## Signal table\n\n| Signal | What it suggests | Decision use |\n|---|---|---|\n| Distributed creator trust across regional communities | Thousands of creators can coordinate around experience launches without flattening their individual voices | Test a measured activation cohort before scaling the network |\n| On-demand posting moments | Concentrated release windows can create useful reach while preserving source attribution | Define opt-in briefs, disclosure rules, and outcome instrumentation |\n\n## Proof points\n\nThe report separates measured evidence from assumptions.',version:3,metadata:{title:'Insights report',type:'markdown',status:'complete',mode:'report',artifactVersion:'3'}};
-    const message={id:'document-result-message',kind:'thread',thread:{artifactId:'goal-document',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultTitle:'Insights report',resultCanEdit:true}};
+  await desktop.evaluate(({documentId,documentDigest})=>{
+    const digest=documentDigest;
+    const artifact={id:documentId,title:'Insights report',text:'# Insights report\n\n## Opportunity\n\nA western-culture engagement network can turn distributed creator trust into on-demand launch energy.\n\n## Signal table\n\n| Signal | What it suggests | Decision use |\n|---|---|---|\n| Distributed creator trust across regional communities | Thousands of creators can coordinate around experience launches without flattening their individual voices | Test a measured activation cohort before scaling the network |\n| On-demand posting moments | Concentrated release windows can create useful reach while preserving source attribution | Define opt-in briefs, disclosure rules, and outcome instrumentation |\n\n## Proof points\n\nThe report separates measured evidence from assumptions.',version:3,metadata:{title:'Insights report',type:'markdown',status:'complete',mode:'report',artifactVersion:'3',contentDigest:digest}};
+    const message={id:'document-result-message',kind:'thread',thread:{artifactId:'goal-document',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultArtifactVersion:3,resultArtifactDigest:digest,resultTitle:'Insights report',resultCanEdit:true}};
     artifactEntries=[artifact];
     scoutChatThreads=[{id:'document-result-thread',messages:[message]}];
     activeScoutThreadId='document-result-thread';
     document.body.appendChild(scoutMarkdownDocumentRefRecordNode(message,artifact));
-  },{documentId});
+  },{documentId,documentDigest});
   const documentResult=desktop.locator('.scout-chat-document-result');
   await documentResult.waitFor({state:'visible'});
   assert.equal(await documentResult.getByRole('heading',{name:'Insights report'}).count(),1);

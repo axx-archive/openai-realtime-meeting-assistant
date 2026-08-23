@@ -13,8 +13,11 @@ test('blocked goal retry posts the exact root resume action and reloads without 
   const retryGoalBody = screenSource.match(/const retryGoal = useCallback\([\s\S]*?const beginRegenerateWorkArtifact/u)?.[0] ?? '';
 
   assert.match(clientSource, /resumeGoal\([\s\S]*?request\('\/artifacts\/action',[\s\S]*?body: \{ id, action: 'resume' \}/u);
-  assert.match(clientSource, /reviewEditedGoal\([\s\S]*?body: \{ id, action: 'review_changes', resultArtifactId \}/u);
+  assert.match(clientSource, /reviewEditedGoal\([\s\S]*?body: \{ id, action: 'review_changes', resultArtifactId, expectedResultVersion, expectedResultDigest \}/u);
   assert.match(retryGoalBody, /goalID = String\(message\.thread\?\.artifactId/u);
+  assert.match(retryGoalBody, /resultArtifactVersion = Number\(message\.thread\?\.resultArtifactVersion/u);
+  assert.match(retryGoalBody, /resultArtifactDigest = String\(message\.thread\?\.resultArtifactDigest/u);
+  assert.match(retryGoalBody, /await api\.reviewEditedGoal\(sessionToken, goalID, resultArtifactID, resultArtifactVersion, resultArtifactDigest\)/u);
   assert.match(retryGoalBody, /await api\.resumeGoal\(sessionToken, goalID\)/u);
   assert.match(retryGoalBody, /await load\(\)/u);
   assert.doesNotMatch(retryGoalBody, /followUpArtifact|setRegenerateWorkTarget|RegenerateWorkSheet/u);
@@ -33,7 +36,7 @@ test('blocked goal retry posts the exact root resume action and reloads without 
   try {
     const { api } = await import('../api/client');
     await api.resumeGoal('native-session', 'goal-root-123');
-    await api.reviewEditedGoal('native-session', 'goal-root-123', 'edited-deck-456');
+    await api.reviewEditedGoal('native-session', 'goal-root-123', 'edited-deck-456', 7, 'd'.repeat(64));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -42,7 +45,7 @@ test('blocked goal retry posts the exact root resume action and reloads without 
   assert.equal(requests[0].init?.method, 'POST');
   assert.deepEqual(JSON.parse(String(requests[0].init?.body)), { id: 'goal-root-123', action: 'resume' });
   assert.equal((requests[0].init?.headers as Record<string, string>).Authorization, 'Bearer native-session');
-  assert.deepEqual(JSON.parse(String(requests[1].init?.body)), { id: 'goal-root-123', action: 'review_changes', resultArtifactId: 'edited-deck-456' });
+  assert.deepEqual(JSON.parse(String(requests[1].init?.body)), { id: 'goal-root-123', action: 'review_changes', resultArtifactId: 'edited-deck-456', expectedResultVersion: 7, expectedResultDigest: 'd'.repeat(64) });
 });
 
 test('goal drafts use resume while standalone research keeps regenerate', async () => {
@@ -106,6 +109,7 @@ test('goal drafts use resume while standalone research keeps regenerate', async 
     id: 'edited-goal',
     thread: {
       ...goal.thread, status: 'complete', resultQualityState: 'edited_after_admission', resultCanContinue: true,
+      resultArtifactVersion: 7, resultArtifactDigest: 'd'.repeat(64),
     },
   };
   await act(async () => {
@@ -116,6 +120,14 @@ test('goal drafts use resume while standalone research keeps regenerate', async 
   assert.equal(renderer!.root.findByType('InlineArtifactPreview' as any).props.onPresent, undefined);
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Review saved changes' }).props.onPress(); });
   assert.deepEqual({ resumed, regenerated }, { resumed: 2, regenerated: 0 });
+
+  await act(async () => {
+    renderer!.update(React.createElement(MessageBubble as React.ComponentType<any>, {
+      message: { ...editedGoal, id: 'unbound-edited-goal', thread: { ...editedGoal.thread, resultArtifactDigest: undefined } },
+      own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal, ...callbacks,
+    }));
+  });
+  assert.equal(renderer!.root.findAllByProps({ accessibilityLabel: 'Review saved changes' }).length, 0);
 
   const research = {
     id: 'failed-research', kind: 'thread', role: 'scout', text: 'Research needs attention.', createdAt: '2026-08-21T15:01:00Z',

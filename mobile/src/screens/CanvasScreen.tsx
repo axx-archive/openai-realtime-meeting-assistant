@@ -383,6 +383,10 @@ export function CanvasScreen() {
   const continuityItems = home.continuity.filter((item) => item.kind !== 'live-meeting');
 
   const openContinuity = useCallback((item: (typeof home.continuity)[number]) => {
+    if (item.workId && (item.kind === 'active-work' || item.kind === 'needs-you')) {
+      navigation.navigate('WorkHome', { rootRunId: item.workId });
+      return;
+    }
     const destination = item.destination;
     if (destination.route === 'alerts') {
       navigation.navigate('Alerts');

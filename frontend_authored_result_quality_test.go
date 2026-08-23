@@ -26,12 +26,24 @@ const documentId='blocked-document';
 const standaloneDeckId='standalone-deck';
 const standaloneDocumentId='standalone-document';
 const admittedDocumentId='admitted-document';
+const deckDigest='1'.repeat(64);
+const documentDigest='2'.repeat(64);
+const standaloneDeckDigest='3'.repeat(64);
+const standaloneDocumentDigest='4'.repeat(64);
 const deck={schemaVersion:1,width:1920,height:1080,slides:[{id:'cover',background:'#15191f',elements:[{id:'title',type:'text',x:160,y:160,width:1200,height:220,z:1,opacity:1,rotation:0,text:'Working deck',fontSize:84,fontFamily:'Arial',fontWeight:700,color:'#ffffff',textAlign:'left',lineHeight:1.05,letterSpacing:'normal'}]}]};
 const actions=[];
 const server=http.createServer((req,res)=>{
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/readyz'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,checks:{agents:{renderRunner:{heartbeatOK:true}}}}));}
+  if(req.url.startsWith('/artifacts?id=')){
+    const id=new URL(req.url,'http://127.0.0.1').searchParams.get('id');
+    const rows={
+      [deckId]:{id:deckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Working deck',type:'html_deck',status:'complete',artifactVersion:'2',contentDigest:deckDigest}},
+      [documentId]:{id:documentId,text:'# Working report\n\nA useful draft that still needs review.',metadata:{title:'Working report',type:'markdown',status:'complete',artifactVersion:'3',contentDigest:documentDigest}}
+    };
+    const artifact=rows[id];res.writeHead(artifact?200:404,{'content-type':'application/json'});return res.end(JSON.stringify({artifacts:artifact?[artifact]:[]}));
+  }
   if(req.url.startsWith('/artifacts/final-export-capability')){
     const id=new URL(req.url,'http://127.0.0.1').searchParams.get('id');
     const versions={[deckId]:2,[documentId]:3,[standaloneDeckId]:1,[standaloneDocumentId]:1,[admittedDocumentId]:1};
@@ -41,13 +53,13 @@ const server=http.createServer((req,res)=>{
     if(id===deckId){setTimeout(respond,100);return;}respond();return;
   }
   if(req.url==='/artifacts/deck?id='+deckId&&req.method==='GET'){
-    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:deckId,title:'Working deck',version:2},deck,canWrite:true,qualityState:'draft_needs_attention',canPresent:false,canExport:false}));
+    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:deckId,title:'Working deck',version:2,contentDigest:deckDigest},deck,canWrite:true,qualityState:'draft_needs_attention',canPresent:false,canExport:false}));
   }
   if(req.url==='/artifacts/deck?id='+standaloneDeckId&&req.method==='GET'){
-    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:standaloneDeckId,title:'Standalone deck',version:1},deck,canWrite:true,qualityState:'',canPresent:true,canExport:true}));
+    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:standaloneDeckId,title:'Standalone deck',version:1,contentDigest:standaloneDeckDigest},deck,canWrite:true,qualityState:'',canPresent:true,canExport:true}));
   }
   if((req.url==='/artifacts/document?id='+documentId||req.url==='/artifacts/document?id='+standaloneDocumentId)&&req.method==='GET'){
-    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:documentId,title:'Working report',version:3},document:{schemaVersion:1,markdown:'# Working report\n\nA useful draft that still needs review.'},canWrite:true,qualityState:'draft_needs_attention',canExport:false}));
+    res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:documentId,title:'Working report',version:3,contentDigest:documentDigest},document:{schemaVersion:1,markdown:'# Working report\n\nA useful draft that still needs review.'},canWrite:true,qualityState:'draft_needs_attention',canExport:false}));
   }
   if(req.url==='/artifacts/action'&&req.method==='POST'){
     let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{actions.push(JSON.parse(body));res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));});return;
@@ -61,27 +73,27 @@ const server=http.createServer((req,res)=>{
   const page=await browser.newPage({viewport:{width:1440,height:1000}});
   await page.goto('http://127.0.0.1:'+server.address().port,{waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
-  await page.evaluate(({deckId,documentId,standaloneDeckId,standaloneDocumentId,admittedDocumentId})=>{
+  await page.evaluate(({deckId,documentId,standaloneDeckId,standaloneDocumentId,admittedDocumentId,deckDigest,documentDigest,standaloneDeckDigest,standaloneDocumentDigest})=>{
     const pdfAsset=(ref,name)=>({ref,kind:'pdf',mime:'application/pdf',name});
     const deckPdf='b'.repeat(64), documentPdf='a'.repeat(64), standaloneDeckPdf='c'.repeat(64), standaloneDocumentPdf='d'.repeat(64), admittedDocumentPdf='e'.repeat(64);
-    const deckArtifact={id:deckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Working deck',type:'html_deck',status:'complete',artifactVersion:'2',assets:JSON.stringify([pdfAsset(deckPdf,'working-deck.pdf')]),renderPdfArtifactVersion:'2',renderPdfAssetRef:deckPdf}};
-    const documentArtifact={id:documentId,text:'# Working report\n\nA useful draft that still needs review.',metadata:{title:'Working report',type:'markdown',status:'complete',artifactVersion:'3',assets:JSON.stringify([pdfAsset(documentPdf,'working-report.pdf')]),renderPdfArtifactVersion:'3',renderPdfAssetRef:documentPdf}};
-    const standaloneDeckArtifact={id:standaloneDeckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Standalone deck',type:'html_deck',status:'complete',artifactVersion:'1',assets:JSON.stringify([pdfAsset(standaloneDeckPdf,'standalone-deck.pdf')])}};
-    const standaloneDocumentArtifact={id:standaloneDocumentId,text:'# Standalone report\n\nA complete ordinary document.',metadata:{title:'Standalone report',type:'markdown',status:'complete',artifactVersion:'1',assets:JSON.stringify([pdfAsset(standaloneDocumentPdf,'standalone-report.pdf')])}};
+    const deckArtifact={id:deckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Working deck',type:'html_deck',status:'complete',artifactVersion:'2',contentDigest:deckDigest,assets:JSON.stringify([pdfAsset(deckPdf,'working-deck.pdf')]),renderPdfArtifactVersion:'2',renderPdfAssetRef:deckPdf}};
+    const documentArtifact={id:documentId,text:'# Working report\n\nA useful draft that still needs review.',metadata:{title:'Working report',type:'markdown',status:'complete',artifactVersion:'3',contentDigest:documentDigest,assets:JSON.stringify([pdfAsset(documentPdf,'working-report.pdf')]),renderPdfArtifactVersion:'3',renderPdfAssetRef:documentPdf}};
+    const standaloneDeckArtifact={id:standaloneDeckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Standalone deck',type:'html_deck',status:'complete',artifactVersion:'1',contentDigest:standaloneDeckDigest,assets:JSON.stringify([pdfAsset(standaloneDeckPdf,'standalone-deck.pdf')])}};
+    const standaloneDocumentArtifact={id:standaloneDocumentId,text:'# Standalone report\n\nA complete ordinary document.',metadata:{title:'Standalone report',type:'markdown',status:'complete',artifactVersion:'1',contentDigest:standaloneDocumentDigest,assets:JSON.stringify([pdfAsset(standaloneDocumentPdf,'standalone-report.pdf')])}};
     const admittedDocumentArtifact={id:admittedDocumentId,text:'# Admitted report\n\nA reviewed document.',metadata:{title:'Admitted report',type:'markdown',status:'complete',artifactVersion:'1',assets:JSON.stringify([pdfAsset(admittedDocumentPdf,'admitted-report.pdf')])}};
-    const deckMessage={id:'deck-result',kind:'thread',thread:{artifactId:'deck-goal',mode:'goal',goalStatus:'needs_attention',resultArtifactId:deckId,resultArtifactType:'html_deck',resultTitle:'Working deck',resultQualityState:'draft_needs_attention',resultCanEdit:true,resultCanContinue:true,resultCanPresent:false,resultCanExport:false}};
-    const documentMessage={id:'document-result',kind:'thread',thread:{artifactId:'document-goal',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultTitle:'Working report',resultQualityState:'draft_needs_attention',resultCanEdit:true,resultCanContinue:true,resultCanPresent:false,resultCanExport:false}};
-    const standaloneDeckMessage={id:'standalone-deck-result',kind:'thread',thread:{artifactId:standaloneDeckId,mode:'presentation',goalStatus:'complete',resultArtifactId:standaloneDeckId,resultArtifactType:'html_deck',resultTitle:'Standalone deck',resultCanEdit:true,resultCanContinue:false,resultCanPresent:true,resultCanExport:true}};
-    const standaloneDocumentMessage={id:'standalone-document-result',kind:'thread',thread:{artifactId:standaloneDocumentId,mode:'research',goalStatus:'complete',resultArtifactId:standaloneDocumentId,resultArtifactType:'markdown',resultTitle:'Standalone report',resultCanEdit:true,resultCanContinue:false,resultCanPresent:false,resultCanExport:true}};
+    const deckMessage={id:'deck-result',kind:'thread',thread:{artifactId:'deck-goal',mode:'goal',goalStatus:'needs_attention',resultArtifactId:deckId,resultArtifactType:'html_deck',resultArtifactVersion:2,resultArtifactDigest:deckDigest,resultTitle:'Working deck',resultQualityState:'draft_needs_attention',resultCanEdit:true,resultCanContinue:true,resultCanPresent:false,resultCanExport:false}};
+    const documentMessage={id:'document-result',kind:'thread',thread:{artifactId:'document-goal',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultArtifactVersion:3,resultArtifactDigest:documentDigest,resultTitle:'Working report',resultQualityState:'draft_needs_attention',resultCanEdit:true,resultCanContinue:true,resultCanPresent:false,resultCanExport:false}};
+    const standaloneDeckMessage={id:'standalone-deck-result',kind:'thread',thread:{artifactId:standaloneDeckId,mode:'presentation',goalStatus:'complete',resultArtifactId:standaloneDeckId,resultArtifactType:'html_deck',resultArtifactVersion:1,resultArtifactDigest:standaloneDeckDigest,resultTitle:'Standalone deck',resultCanEdit:true,resultCanContinue:false,resultCanPresent:true,resultCanExport:true}};
+    const standaloneDocumentMessage={id:'standalone-document-result',kind:'thread',thread:{artifactId:standaloneDocumentId,mode:'research',goalStatus:'complete',resultArtifactId:standaloneDocumentId,resultArtifactType:'markdown',resultArtifactVersion:1,resultArtifactDigest:standaloneDocumentDigest,resultTitle:'Standalone report',resultCanEdit:true,resultCanContinue:false,resultCanPresent:false,resultCanExport:true}};
     artifactEntries=[deckArtifact,documentArtifact,standaloneDeckArtifact,standaloneDocumentArtifact,admittedDocumentArtifact];
     scoutChatThreads=[{id:'quality-thread',messages:[deckMessage,documentMessage,standaloneDeckMessage,standaloneDocumentMessage]}];
     activeScoutThreadId='quality-thread';
     document.body.append(scoutHTMLDeckRefRecordNode(deckMessage,deckArtifact),scoutMarkdownDocumentRefRecordNode(documentMessage,documentArtifact));
     document.body.append(scoutHTMLDeckRefRecordNode(standaloneDeckMessage,standaloneDeckArtifact),scoutMarkdownDocumentRefRecordNode(standaloneDocumentMessage,standaloneDocumentArtifact));
-    const editedNote=authoredResultQualityNote({thread:{artifactId:'edited-goal',resultArtifactId:'edited-deck',resultQualityState:'edited_after_admission',resultCanContinue:true}},'presentation');
+    const editedNote=authoredResultQualityNote({thread:{artifactId:'edited-goal',resultArtifactId:'edited-deck',resultArtifactVersion:5,resultArtifactDigest:'f'.repeat(64),resultQualityState:'edited_after_admission',resultCanContinue:true}},'presentation');
     editedNote.id='edited-result-quality';
     document.body.append(editedNote);
-  },{deckId,documentId,standaloneDeckId,standaloneDocumentId,admittedDocumentId});
+  },{deckId,documentId,standaloneDeckId,standaloneDocumentId,admittedDocumentId,deckDigest,documentDigest,standaloneDeckDigest,standaloneDocumentDigest});
 
   const deckResult=page.locator('[data-result-artifact-id="'+deckId+'"]');
   await deckResult.waitFor({state:'visible'});
@@ -178,7 +190,7 @@ const server=http.createServer((req,res)=>{
   await editedQuality.getByRole('button',{name:'Review changes',exact:true}).evaluate(node=>node.click());
   await page.waitForFunction(()=>{const buttons=Array.from(document.querySelectorAll('.scout-authored-result__continue'));return buttons.length===3&&buttons.filter(node=>/Resuming review/.test(node.textContent)).length===2;});
   await page.waitForFunction(()=>/Reviewing changes/.test(document.querySelector('#edited-result-quality')?.textContent||''));
-  assert.deepEqual(actions,[{id:'deck-goal',action:'resume'},{id:'document-goal',action:'resume'},{id:'edited-goal',action:'review_changes',resultArtifactId:'edited-deck'}]);
+  assert.deepEqual(actions,[{id:'deck-goal',action:'resume'},{id:'document-goal',action:'resume'},{id:'edited-goal',action:'review_changes',resultArtifactId:'edited-deck',expectedResultVersion:5,expectedResultDigest:'f'.repeat(64)}]);
 
   await browser.close();server.close();
 })().catch(error=>{console.error(error);server.close();process.exit(1)});`
