@@ -38,20 +38,21 @@ type documentStudioDocument struct {
 }
 
 type documentStudioArtifactView struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Type         string `json:"type"`
-	Version      int    `json:"version"`
-	GoalID       string `json:"goalId,omitempty"`
-	UpdatedAt    string `json:"updatedAt,omitempty"`
-	SavedToFiles bool   `json:"savedToFiles"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Type          string `json:"type"`
+	Version       int    `json:"version"`
+	ContentDigest string `json:"contentDigest"`
+	GoalID        string `json:"goalId,omitempty"`
+	UpdatedAt     string `json:"updatedAt,omitempty"`
+	SavedToFiles  bool   `json:"savedToFiles"`
 }
 
 func documentStudioView(entry meetingMemoryEntry) documentStudioArtifactView {
 	return documentStudioArtifactView{
 		ID: entry.ID, Title: strings.TrimSpace(entry.Metadata["title"]), Type: artifactType(entry),
 		GoalID:  strings.TrimSpace(firstNonEmptyString(entry.Metadata["goalId"], entry.Metadata["goalParentId"])),
-		Version: artifactVersion(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
+		Version: artifactVersion(entry), ContentDigest: artifactCapabilityDigest(entry), UpdatedAt: strings.TrimSpace(entry.Metadata["updatedAt"]),
 		SavedToFiles: strings.EqualFold(strings.TrimSpace(entry.Metadata["savedToFiles"]), "true"),
 	}
 }

@@ -9260,6 +9260,9 @@
         max-width: 1480px;
         gap: 22px;
       }
+      .agent-tool__inner.studio-projects {
+        width: min(1480px, 100%);
+      }
       .studio-projects__head {
         display: flex;
         align-items: end;
@@ -9278,6 +9281,7 @@
       }
       .studio-projects__library {
         min-width: 0;
+        min-height: 0;
         display: flex;
         flex-direction: column;
         gap: 14px;
@@ -9380,7 +9384,10 @@
       }
       .studio-projects__detail {
         min-width: 0;
+        min-height: 0;
         overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
         padding: clamp(24px, 4vw, 58px);
       }
       .studio-project-empty {
@@ -9426,7 +9433,7 @@
         white-space: nowrap;
       }
       .studio-project-status[data-status="ready"] { background: var(--live-soft); color: var(--live); }
-      .studio-project-status[data-status="needs_input"],
+      .studio-project-status[data-status="needs_input"] { background: var(--ember-soft); color: var(--ember-text); }
       .studio-project-status[data-status="needs_attention"] { background: var(--danger-soft); color: var(--danger); }
       .studio-project-status__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
       .studio-project-detail__meta { margin: 9px 0 0; color: var(--text-3); font: var(--type-caption); }
@@ -9555,6 +9562,28 @@
 	  }
 	  .studio-projects__load-more:active { transform: scale(.96); }
 	  .studio-projects__load-more:disabled { opacity: .56; cursor: wait; }
+
+      @media (min-width: 981px) {
+        /* The Studio is a canvas, not a long document. Bound it to the tool
+           viewport so a large library cannot push the selected project out
+           of sight; the library and detail pane own their scrolling. */
+        #appShell.is-authed[data-tool="research"] #researchTool {
+          overflow: hidden;
+        }
+        .agent-tool__inner.studio-projects {
+          height: 100%;
+          min-height: 0;
+          align-self: stretch;
+          grid-template-rows: auto minmax(0, 1fr);
+        }
+        .studio-projects__workspace {
+          min-height: 0;
+          height: 100%;
+        }
+        .studio-projects__library {
+          overflow: hidden;
+        }
+      }
 
       @media (max-width: 980px) {
         .studio-projects__workspace { grid-template-columns: minmax(0, 1fr); overflow: visible; }
@@ -44927,7 +44956,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
           return
         }
         const groups = [
-          ['Needs you', project => ['needs_input', 'needs_attention'].includes(project.status)],
+          ['Needs you', project => project.status === 'needs_input'],
+          ['Needs attention', project => project.status === 'needs_attention'],
           ['In progress', project => ['queued', 'running'].includes(project.status)],
           ['Recent', project => ['ready', 'stopped'].includes(project.status)]
         ]
@@ -73868,10 +73898,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // this pass re-mounts only the ones this thread's messages (or its
 	        // own ghost launches) own; nothing typed inside them is lost
 	        scoutChatThread.querySelectorAll('.goalcard').forEach(node => node.remove())
-		if (thread && thread.messagesLoaded !== true) {
+	        if (thread && thread.messagesLoaded !== true) {
 		  syncChatConvoHeader()
 		  renderScoutChatDestination()
 		  renderScoutChatConversationLoading()
+		  // The indicator belongs to the selected conversation. Clear the prior
+		  // thread's projection while this one is still hydrating so a delivered
+		  // result can never flash beneath an unrelated request.
+		  syncDesktopActiveWorkIndicator()
+		  syncDesktopOpenChatContext()
 		  return
 		}
 	        const priorSeenAt = desktopChatLayoutQuery.matches && thread?.id
@@ -76455,7 +76490,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (!message?.thread) return
 	          const status = String(message.thread.status || '').trim().toLowerCase()
 	          if (!status) return
-	          const runId = String(message.thread.id || message.id || '').trim()
+	          // Anonymous artifact receipts are internal stage records, not work
+	          // roots. Falling back to their message id lets a completed stage
+	          // (for example, "Understand the brief") overwrite the canonical
+	          // root's needs-attention state with a false Delivered pill.
+	          const runId = String(message.thread.id || '').trim()
 	          if (!runId) return
 	          newestByRun.delete(runId)
 	          newestByRun.set(runId, message)

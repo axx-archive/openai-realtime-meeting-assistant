@@ -116,7 +116,7 @@ func TestDocumentStudioGETPatchAndConflict(t *testing.T) {
 		Document documentStudioDocument     `json:"document"`
 		CanWrite bool                       `json:"canWrite"`
 	}
-	if json.Unmarshal(get.Body.Bytes(), &loaded) != nil || !loaded.CanWrite || loaded.Document.Markdown != artifact.Text {
+	if json.Unmarshal(get.Body.Bytes(), &loaded) != nil || !loaded.CanWrite || loaded.Document.Markdown != artifact.Text || loaded.Artifact.ContentDigest != artifactCapabilityDigest(artifact) {
 		t.Fatalf("GET response=%s", get.Body.String())
 	}
 	body, _ := json.Marshal(map[string]any{

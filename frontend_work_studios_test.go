@@ -43,8 +43,18 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 	if !strings.Contains(html, `.scout-studio-receipt`) || !strings.Contains(html, `scout-studio-receipt__status`) {
 		t.Fatal("chat does not have the quiet Studio receipt surface")
 	}
-	if !strings.Contains(html, `['Needs you', project =>`) || !strings.Contains(html, `['In progress', project =>`) || !strings.Contains(html, `['Recent', project =>`) {
-		t.Fatal("Studio work is not grouped into the three customer-facing states")
+	if !strings.Contains(html, `['Needs you', project => project.status === 'needs_input']`) || !strings.Contains(html, `['Needs attention', project => project.status === 'needs_attention']`) || !strings.Contains(html, `['In progress', project =>`) || !strings.Contains(html, `['Recent', project =>`) {
+		t.Fatal("Studio work does not separate decisions, recovery, active work, and recent files")
+	}
+	for _, marker := range []string{
+		`.agent-tool__inner.studio-projects`,
+		`grid-template-rows: auto minmax(0, 1fr)`,
+		`.studio-projects__library {`,
+		`overscroll-behavior: contain`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("Studio bounded-pane contract missing %q", marker)
+		}
 	}
 	if strings.Contains(pd1Slice(t, html, `<span class="pd1-primary-nav__external-wrap pd1-primary-nav__studio-wrap"`, `</span>`), `aria-haspopup="menu"`) {
 		t.Fatal("the Studio rail regressed into the retired Work flyout")
@@ -119,7 +129,33 @@ const server=http.createServer((req,res)=>{
  await page.click('#pd1PrimaryNav [data-pd1-destination="Research"]');
 	await page.waitForFunction(()=>location.pathname==='/research'&&document.querySelectorAll('#studioProjectList .studio-project-row').length===3);
  assert.equal(await page.locator('#studioProjectsTitle').innerText(),'Research');
- assert.deepEqual(await page.locator('.studio-projects__group-title').allTextContents(),['Needs you','In progress']);
+ assert.deepEqual(await page.locator('.studio-projects__group-title').allTextContents(),['Needs you','Needs attention','In progress']);
+ const bounded=await page.evaluate(()=>{
+   const tool=document.querySelector('#researchTool');
+   const workspace=document.querySelector('.studio-projects__workspace');
+   const list=document.querySelector('.studio-projects__list');
+   const detail=document.querySelector('.studio-projects__detail');
+   const group=list.querySelector('.studio-projects__group:last-of-type');
+   for(let index=0;index<36;index+=1){const clone=group.querySelector('.studio-project-row').cloneNode(true);clone.dataset.projectId='overflow-'+index;group.appendChild(clone);}
+   const workspaceRect=workspace.getBoundingClientRect();
+   return{
+     toolOverflow:getComputedStyle(tool).overflowY,
+     listOverflow:getComputedStyle(list).overflowY,
+     detailOverflow:getComputedStyle(detail).overflowY,
+     workspaceBottom:workspaceRect.bottom,
+     viewportBottom:innerHeight,
+     listClient:list.clientHeight,
+     listScroll:list.scrollHeight,
+     toolClient:tool.clientHeight,
+     toolScroll:tool.scrollHeight
+   };
+ });
+ assert.equal(bounded.toolOverflow,'hidden',JSON.stringify(bounded));
+ assert.equal(bounded.listOverflow,'auto',JSON.stringify(bounded));
+ assert.equal(bounded.detailOverflow,'auto',JSON.stringify(bounded));
+ assert.ok(bounded.workspaceBottom<=bounded.viewportBottom+1,JSON.stringify(bounded));
+ assert.ok(bounded.listScroll>bounded.listClient,JSON.stringify(bounded));
+ assert.ok(bounded.toolScroll<=bounded.toolClient+1,JSON.stringify(bounded));
  await page.click('.studio-project-row[data-project-id="doc-needs"]');
  assert.equal(await page.locator('.studio-project-decision__question').innerText(),'Which audience should anchor the report?');
  assert.deepEqual(await page.locator('.studio-project-decision__choice').allInnerTexts(),['Operators and brand leaders','Change the audience','Hold for now']);

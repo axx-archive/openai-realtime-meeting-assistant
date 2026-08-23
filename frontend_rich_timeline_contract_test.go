@@ -262,11 +262,34 @@ const server=http.createServer((req,res)=>{
     syncDesktopActiveWorkIndicator();
     const compactPresentationPill=chatWorkIndicatorText.textContent;
     artifactEntries=[];
-    const blockedWithoutArtifact={id:'blocked-without-artifact',kind:'thread',thread:{id:'blocked-run',artifactId:'missing-artifact',mode:'goal',processId:'packaging_studio',outputFamily:'Presentation',status:'blocked'}};
-    scoutChatThreads=[{id:'blocked-thread',messages:[blockedWithoutArtifact]}];activeScoutThreadId='blocked-thread';
-    syncDesktopActiveWorkIndicator();
-    const blockedWithoutArtifactPill=chatWorkIndicatorText.textContent;
-    const asset=(ref,kind,mime,name)=>({ref:ref.repeat(64),kind,mime,name});
+	    const blockedWithoutArtifact={id:'blocked-without-artifact',kind:'thread',thread:{id:'blocked-run',artifactId:'missing-artifact',mode:'goal',processId:'packaging_studio',outputFamily:'Presentation',status:'blocked'}};
+	    scoutChatThreads=[{id:'blocked-thread',messages:[blockedWithoutArtifact]}];activeScoutThreadId='blocked-thread';
+	    syncDesktopActiveWorkIndicator();
+	    const blockedWithoutArtifactPill=chatWorkIndicatorText.textContent;
+	    const failedStudioRoot={id:'failed-studio-root',kind:'os_artifact',text:'# Failed presentation root',metadata:{title:'Failed presentation root',mode:'goal',processId:'packaging_studio',status:'needs_attention',threadStatus:'needs_attention',progressPercent:'9',goalPlan:JSON.stringify({processId:'packaging_studio',state:'needs_attention',subtasks:[{id:'context_snapshot',title:'Understand the brief',status:'failed'}]})}};
+	    const completedInternalStage={id:'completed-internal-stage',kind:'os_artifact',text:'# Internal brief',metadata:{title:'Understand the brief',status:'complete',threadStatus:'complete',goalParentId:failedStudioRoot.id,processStage:'context_snapshot'}};
+	    const failedStudioMessage={id:'failed-studio-message',kind:'thread',studioProject:{id:failedStudioRoot.id,kind:'presentation',title:'Failed presentation root',status:'needs_attention',href:'/presentations?project='+failedStudioRoot.id},thread:{id:'failed-studio-run',rootRunId:'failed-studio-run',artifactId:failedStudioRoot.id,mode:'goal',processId:'packaging_studio',outputFamily:'Presentation',status:'error',progressPercent:9}};
+	    const anonymousInternalStage={id:'internal-stage-receipt',kind:'artifact',text:'Understand the brief is saved — needs attention: synthesizer output',thread:{id:'',artifactId:completedInternalStage.id,status:'needs_attention'}};
+	    artifactEntries=[failedStudioRoot,completedInternalStage];
+	    scoutChatThreads=[{id:'failed-studio-thread',messagesLoaded:true,messages:[failedStudioMessage,anonymousInternalStage]}];activeScoutThreadId='failed-studio-thread';
+	    syncDesktopActiveWorkIndicator();
+	    const internalStageTruth={owned:scoutOwnedActivityMessage([failedStudioMessage,anonymousInternalStage])?.id,pill:chatWorkIndicatorText.textContent,actions:chatWorkIndicatorActions.childElementCount};
+	    artifactEntries=[deck];
+	    const deliveredThread={id:'delivered-before-switch',messagesLoaded:true,messages:[messages.deck]};
+	    const unloadedThread={id:'indicator-loading',messagesLoaded:false};
+	    scoutChatThreads=[deliveredThread,unloadedThread];activeScoutThreadId=deliveredThread.id;
+	    syncDesktopActiveWorkIndicator();
+	    const deliveredBeforeSwitch=chatWorkIndicatorText.textContent;
+	    chatWorkIndicatorActions.appendChild(bfEl('button','chat-work-indicator__action-button','stale action'));
+	    chatWorkIndicatorActions.hidden=false;
+	    scoutChatThreadRequests.set(unloadedThread.id,Promise.resolve(null));
+	    selectScoutChatThread(unloadedThread.id);
+	    const unloadedSwitch={hidden:chatWorkIndicator.hidden,messageId:chatWorkIndicator.dataset.messageId||'',actions:chatWorkIndicatorActions.childElementCount,actionsHidden:chatWorkIndicatorActions.hidden};
+	    scoutChatThreadRequests.delete(unloadedThread.id);
+	    unloadedThread.messagesLoaded=true;unloadedThread.messages=[failedStudioMessage,anonymousInternalStage];artifactEntries=[failedStudioRoot,completedInternalStage];
+	    renderActiveScoutThread();
+	    const hydratedAfterSwitch=chatWorkIndicatorText.textContent;
+	    const asset=(ref,kind,mime,name)=>({ref:ref.repeat(64),kind,mime,name});
     const structuredMessages={
       imageV1:{id:'image-v1',kind:'thread',thread:{id:'image-run',rootRunId:'image-run',mode:'work',status:'complete',resultArtifactId:'image-result',resultArtifactType:'image',resultArtifactVersion:2,resultArtifactDigest:'1'.repeat(64),resultTitle:'Campaign hero',resultAssets:[asset('a','image','image/png','hero.png')]}},
       imageV2:{id:'image-v2',kind:'thread',thread:{id:'image-run',rootRunId:'image-run',mode:'work',status:'complete',resultArtifactId:'image-result',resultArtifactType:'image',resultArtifactVersion:3,resultArtifactDigest:'2'.repeat(64),resultTitle:'Campaign hero final',resultAssets:[asset('b','image','image/png','hero-final.png')]}},
@@ -289,7 +312,7 @@ const server=http.createServer((req,res)=>{
     const nameOnlyOwned=scoutOwnedActivityMessage([rootV2,nameOnlyChild]);
     const governedDirect={id:'governed-latest',kind:'work_record',work:{id:'record',runId:'governed-run',rootRunId:'governed-run',title:'New governed work',status:'running',workerName:'Scout'}};
     const governedOwned=scoutOwnedActivityMessage([structuredMessages.imageV2,governedDirect]);
-    return {visible,rendered,families,phaseLabels,phaseStages,activePill,failedPill,compactPresentationPill,blockedWithoutArtifactPill,sidecarDefault,sidecarInspected,structured,owned:{id:owned?.id,status:owned?.thread?.status},nameOnlyOwned:nameOnlyOwned?.id,governedOwned:governedOwned?.id};
+	    return {visible,rendered,families,phaseLabels,phaseStages,activePill,failedPill,compactPresentationPill,blockedWithoutArtifactPill,internalStageTruth,deliveredBeforeSwitch,unloadedSwitch,hydratedAfterSwitch,sidecarDefault,sidecarInspected,structured,owned:{id:owned?.id,status:owned?.thread?.status},nameOnlyOwned:nameOnlyOwned?.id,governedOwned:governedOwned?.id};
   });
   assert.deepEqual(result.visible,{status:false,launch:false,answer:true,failed:false,stage:false,workRecord:false,governedResult:false,pendingProposal:true,resolvedProposal:false,checkpoint:true,deck:true,doc:true});
   assert.equal(result.rendered.status.children,0);
@@ -312,8 +335,12 @@ const server=http.createServer((req,res)=>{
   assert.deepEqual(result.phaseStages.documentReview,['document_jury','rendered_admission','publish']);
   assert.equal(result.activePill,'Document · Phase 2/4 · 42%');
   assert.equal(result.failedPill,'Document · Needs attention');
-  assert.equal(result.compactPresentationPill,'Presentation · Phase 2/4 · 38%');
-  assert.equal(result.blockedWithoutArtifactPill,'Presentation · Needs attention');
+	  assert.equal(result.compactPresentationPill,'Presentation · Phase 2/4 · 38%');
+	  assert.equal(result.blockedWithoutArtifactPill,'Presentation · Needs attention');
+	  assert.deepEqual(result.internalStageTruth,{owned:'failed-studio-message',pill:'Presentation · Needs attention',actions:0},'an internal completed stage cannot claim that the failed presentation was delivered');
+	  assert.equal(result.deliveredBeforeSwitch,'Presentation · Delivered');
+	  assert.deepEqual(result.unloadedSwitch,{hidden:true,messageId:'',actions:0,actionsHidden:true},'thread navigation must clear the prior conversation status before hydration');
+	  assert.equal(result.hydratedAfterSwitch,'Presentation · Needs attention');
   assert.match(result.sidecarDefault.text,/Frame/);
   assert.match(result.sidecarDefault.text,/Build/);
   assert.match(result.sidecarDefault.text,/Compose/);

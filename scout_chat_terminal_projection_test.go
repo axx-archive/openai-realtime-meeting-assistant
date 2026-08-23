@@ -374,6 +374,20 @@ func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandalon
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Native edits in older production rows could leave metadata.contentDigest
+	// behind even though the current body-bound capability digest had advanced.
+	// Studio receipts must bind the current authorized body, never that stale
+	// compatibility stamp.
+	app.memory.mu.Lock()
+	for _, artifactID := range []string{standalone.ID, standaloneDeck.ID} {
+		artifactIndex, found := app.memory.artifactEntryIndexByIDLocked(artifactID)
+		if !found {
+			app.memory.mu.Unlock()
+			t.Fatalf("standalone artifact %s disappeared", artifactID)
+		}
+		app.memory.entries[artifactIndex].Metadata[artifactContentDigestMetadataKey] = strings.Repeat("0", 64)
+	}
+	app.memory.mu.Unlock()
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{
 		{ID: "stage", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "stage-run", Mode: "artifacts", Status: "complete", ArtifactID: stage.ID}},
 		{ID: "child", Kind: "thread", Role: "scout", Thread: &scoutChatThreadRef{ID: "research-child", Mode: "research", Status: "complete", ArtifactID: child.ID}},
@@ -385,14 +399,14 @@ func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandalon
 		t.Fatalf("internal artifacts became rich results: stage=%+v child=%+v", projected.Messages[0].Thread, projected.Messages[1].Thread)
 	}
 	ref := projected.Messages[2].Thread
-	if ref.ResultArtifactID != standalone.ID || ref.ResultArtifactType != artifactTypeMarkdown || !strings.Contains(ref.ResultPreview, "channel-facing document paragraph") || len(ref.ResultPreview) > 1200 {
+	if ref.ResultArtifactID != standalone.ID || ref.ResultArtifactType != artifactTypeMarkdown || ref.ResultArtifactDigest != artifactCapabilityDigest(standalone) || !strings.Contains(ref.ResultPreview, "channel-facing document paragraph") || len(ref.ResultPreview) > 1200 {
 		t.Fatalf("standalone terminal projection=%+v", ref)
 	}
 	if ref.ResultQualityState != "" || !ref.ResultCanEdit || ref.ResultCanContinue || ref.ResultCanPresent || !ref.ResultCanExport {
 		t.Fatalf("standalone document lost ordinary Studio capabilities: %+v", ref)
 	}
 	deckRef := projected.Messages[3].Thread
-	if deckRef.ResultArtifactID != standaloneDeck.ID || deckRef.ResultArtifactType != artifactTypeHTMLDeck || deckRef.ResultQualityState != "" || !deckRef.ResultCanEdit || deckRef.ResultCanContinue || !deckRef.ResultCanPresent || !deckRef.ResultCanExport {
+	if deckRef.ResultArtifactID != standaloneDeck.ID || deckRef.ResultArtifactType != artifactTypeHTMLDeck || deckRef.ResultArtifactDigest != artifactCapabilityDigest(standaloneDeck) || deckRef.ResultQualityState != "" || !deckRef.ResultCanEdit || deckRef.ResultCanContinue || !deckRef.ResultCanPresent || !deckRef.ResultCanExport {
 		t.Fatalf("standalone deck lost ordinary Studio capabilities: %+v", deckRef)
 	}
 	exportDeniedAuthorizer := &surfaceRecordingArtifactAuthorizer{allow: func(action ACLAction, _ meetingMemoryEntry) bool {

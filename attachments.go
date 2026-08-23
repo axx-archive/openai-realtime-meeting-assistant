@@ -2167,10 +2167,12 @@ func (app *kanbanBoardApp) projectScoutChatResultRefWithPreview(ctx context.Cont
 	// to leave the system, so the channel projection must mirror the exact deck
 	// and final-export endpoints instead of treating admission as export ACL.
 	resultCanExportAuthority := app.artifactAuthorized(ctx, viewer, ACLExport, result)
-	resultDigest := strings.ToLower(strings.TrimSpace(result.Metadata[artifactContentDigestMetadataKey]))
-	if !isHexDigest(resultDigest) {
-		resultDigest = strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(result)))
-	}
+	// The editor and export endpoints bind the current capability digest. An
+	// older metadata.contentDigest can survive a later native edit, so exposing
+	// that historical stamp here would make a Ready Studio project reject its
+	// own exact current file. The authorized body snapshot above is current; bind
+	// its canonical capability digest directly.
+	resultDigest := strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(result)))
 	if selectedAcceptedDeck && acceptedBinding.State == scoutChatResultApprovalExact &&
 		(acceptedBinding.Version != artifactVersion(result) || !strings.EqualFold(acceptedBinding.Digest, resultDigest)) {
 		acceptedBinding.State = scoutChatResultApprovalEdited
