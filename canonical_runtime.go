@@ -52,10 +52,31 @@ type CanonicalRuntime struct {
 	checkpointValid     bool
 	checkpointHighWater uint64
 	checkpointSourceSHA string
+	captureErr          error
+
+	reconcileQuietWindow   time.Duration
+	reconcileMaxLatency    time.Duration
+	reconcileAttemptTarget uint64
+	reconcileAttemptAt     time.Time
+	reconcileLastAt        time.Time
+	reconcileLastDuration  time.Duration
+	reconcileLastOutcome   string
+	reconcileSuperseded    uint64
+
+	// Deterministic test seams. Production leaves both nil.
+	reconcileAfterTarget       func()
+	mutationAfterLegacyPublish func()
 
 	healthErr error
 	lastOK    time.Time
 }
+
+const (
+	canonicalReconcileQuietWindow = 500 * time.Millisecond
+	canonicalReconcileMaxLatency  = 5 * time.Second
+)
+
+var errCanonicalReconcileSuperseded = errors.New("canonical reconcile superseded by a newer mutation")
 
 type CanonicalRuntimeSnapshot struct {
 	Mode                string                          `json:"mode"`
@@ -77,6 +98,12 @@ type CanonicalRuntimeSnapshot struct {
 	OutboxKnown         bool                            `json:"outboxKnown"`
 	CheckpointValid     bool                            `json:"checkpointValid"`
 	CheckpointHighWater uint64                          `json:"checkpointHighWater"`
+	ReconcileAttempt    uint64                          `json:"reconcileAttemptHighWater"`
+	ReconcileAttemptAt  string                          `json:"reconcileAttemptAt,omitempty"`
+	ReconcileLastAt     string                          `json:"reconcileLastAt,omitempty"`
+	ReconcileDurationMS int64                           `json:"reconcileDurationMs"`
+	ReconcileOutcome    string                          `json:"reconcileOutcome,omitempty"`
+	ReconcileSuperseded uint64                          `json:"reconcileSuperseded"`
 	BrainProjection     BrainProjectionRuntimeStatus    `json:"brainProjection"`
 	CatchUpPublication  CatchUpPublicationRuntimeStatus `json:"catchUpPublication"`
 }
@@ -400,7 +427,10 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	}
 	mode := CanonicalMode(modeText)
 	dataDir := filepath.Dir(meetingMemoryPath())
-	runtime := &CanonicalRuntime{mode: mode, dataDir: dataDir, tenantID: canonicalTenantID(), lastOK: time.Now().UTC()}
+	runtime := &CanonicalRuntime{
+		mode: mode, dataDir: dataDir, tenantID: canonicalTenantID(), lastOK: time.Now().UTC(),
+		reconcileQuietWindow: canonicalReconcileQuietWindow, reconcileMaxLatency: canonicalReconcileMaxLatency,
+	}
 	if mode == CanonicalModeOff {
 		configureProductionBrainProjectionRuntime(runtime)
 		setCanonicalRuntime(runtime)
@@ -798,6 +828,14 @@ func (runtime *CanonicalRuntime) mutateFile(ctx context.Context, family, path st
 }
 
 func (runtime *CanonicalRuntime) mutateFileLocked(ctx context.Context, family, path string, before []byte, beforeExists bool, after []byte, deleted bool, mutate func() error) error {
+	if runtime.captureErr != nil {
+		// Once a visible legacy generation cannot be bound to a durable capture
+		// terminal, no later covered generation may enter the chain. A restart
+		// reopens the spool and proves the pending generation from legacy state
+		// before writes become eligible again.
+		runtime.healthErr = runtime.captureErr
+		return fmt.Errorf("canonical capture integrity is unresolved; covered mutation rejected before prepare: %w", runtime.captureErr)
+	}
 	beforeDigest := ""
 	if beforeExists {
 		beforeDigest = sha256Hex(before)
@@ -813,9 +851,11 @@ func (runtime *CanonicalRuntime) mutateFileLocked(ctx context.Context, family, p
 		if errors.Is(err, ErrDurableReplaceAmbiguous) {
 			visible, visibleErr := os.ReadFile(path)
 			if visibleErr == nil && sha256Hex(visible) == afterDigest {
+				if runtime.mutationAfterLegacyPublish != nil {
+					runtime.mutationAfterLegacyPublish()
+				}
 				if _, commitErr := runtime.spool.Commit(mutationID); commitErr != nil {
-					runtime.healthErr = fmt.Errorf("ambiguous legacy publication resolved to after-state but canonical commit failed: %w", commitErr)
-					return runtime.healthErr
+					return runtime.latchCaptureFailureLocked(fmt.Errorf("ambiguous legacy publication resolved to after-state but canonical commit failed: %w", commitErr))
 				}
 				runtime.markDirtyLocked()
 				return err
@@ -826,23 +866,36 @@ func (runtime *CanonicalRuntime) mutateFileLocked(ctx context.Context, family, p
 			}
 			// Neither generation is provable. Leave the prepare pending so boot
 			// recovery freezes this family instead of inventing an outcome.
-			runtime.healthErr = fmt.Errorf("ambiguous legacy publication has unrecognized visible state: %w", err)
-			return err
+			return runtime.latchCaptureFailureLocked(fmt.Errorf("ambiguous legacy publication has unrecognized visible state: %w", err))
 		}
 		if _, abortErr := runtime.spool.Abort(mutationID); abortErr != nil {
-			runtime.healthErr = fmt.Errorf("legacy mutation failed (%v), canonical abort failed: %w", err, abortErr)
+			return runtime.latchCaptureFailureLocked(fmt.Errorf("legacy mutation failed (%v), canonical abort failed: %w", err, abortErr))
 		}
 		return err
+	}
+	if runtime.mutationAfterLegacyPublish != nil {
+		runtime.mutationAfterLegacyPublish()
 	}
 	if _, err := runtime.spool.Commit(mutationID); err != nil {
 		// A durable local commit marker is mandatory in both shadow and required
 		// modes; never report success after losing the capture chain.
-		runtime.healthErr = fmt.Errorf("legacy mutation committed but canonical commit failed: %w", err)
-		return runtime.healthErr
+		return runtime.latchCaptureFailureLocked(fmt.Errorf("legacy mutation committed but canonical commit failed: %w", err))
 	}
 	runtime.markDirtyLocked()
 	runtime.markSuccessLocked()
 	return nil
+}
+
+func (runtime *CanonicalRuntime) latchCaptureFailureLocked(err error) error {
+	if err == nil {
+		return nil
+	}
+	if runtime.captureErr == nil {
+		runtime.captureErr = err
+	}
+	runtime.checkpointValid = false
+	runtime.healthErr = runtime.captureErr
+	return runtime.captureErr
 }
 
 func (runtime *CanonicalRuntime) prepareFailureOrShadow(err error, mutate func() error) error {
@@ -954,28 +1007,30 @@ func (runtime *CanonicalRuntime) reconcileLoop() {
 	var lastErr error
 	for {
 		if retry == 0 {
+			if !runtime.waitForReconcileWindow() {
+				return
+			}
+		} else {
+			delay := canonicalReconcileRetryDelay(retry, lastErr)
+			timer := time.NewTimer(delay)
 			select {
 			case <-runtime.reconcileStop:
+				timer.Stop()
 				return
 			case <-runtime.reconcileCtx.Done():
+				timer.Stop()
 				return
-			case <-runtime.reconcileSignal:
+			case <-timer.C:
 			}
-		}
-		delay := canonicalReconcileRetryDelay(retry, lastErr)
-		timer := time.NewTimer(delay)
-		select {
-		case <-runtime.reconcileStop:
-			timer.Stop()
-			return
-		case <-runtime.reconcileCtx.Done():
-			timer.Stop()
-			return
-		case <-timer.C:
 		}
 		if err := runtime.Reconcile(runtime.reconcileCtx); err != nil {
 			if errors.Is(err, context.Canceled) || runtime.reconcileCtx.Err() != nil {
 				return
+			}
+			if errors.Is(err, errCanonicalReconcileSuperseded) {
+				retry = 0
+				lastErr = nil
+				continue
 			}
 			retry++
 			lastErr = err
@@ -983,6 +1038,48 @@ func (runtime *CanonicalRuntime) reconcileLoop() {
 		}
 		retry = 0
 		lastErr = nil
+	}
+}
+
+func (runtime *CanonicalRuntime) waitForReconcileWindow() bool {
+	select {
+	case <-runtime.reconcileStop:
+		return false
+	case <-runtime.reconcileCtx.Done():
+		return false
+	case <-runtime.reconcileSignal:
+	}
+	quiet := runtime.reconcileQuietWindow
+	if quiet <= 0 {
+		quiet = canonicalReconcileQuietWindow
+	}
+	maximum := runtime.reconcileMaxLatency
+	if maximum < quiet {
+		maximum = quiet
+	}
+	quietTimer := time.NewTimer(quiet)
+	maximumTimer := time.NewTimer(maximum)
+	defer quietTimer.Stop()
+	defer maximumTimer.Stop()
+	for {
+		select {
+		case <-runtime.reconcileStop:
+			return false
+		case <-runtime.reconcileCtx.Done():
+			return false
+		case <-maximumTimer.C:
+			return true
+		case <-quietTimer.C:
+			return true
+		case <-runtime.reconcileSignal:
+			if !quietTimer.Stop() {
+				select {
+				case <-quietTimer.C:
+				default:
+				}
+			}
+			quietTimer.Reset(quiet)
+		}
 	}
 }
 
@@ -1139,6 +1236,19 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	runtime.reconcileMu.Lock()
 	defer runtime.reconcileMu.Unlock()
 	target := runtime.takeReconcileTarget()
+	attemptStarted := time.Now().UTC()
+	outcome := "failed"
+	runtime.recordReconcileAttempt(target, attemptStarted)
+	defer func() { runtime.recordReconcileOutcome(target, attemptStarted, outcome) }()
+	runtime.mu.Lock()
+	captureErr := runtime.captureErr
+	runtime.mu.Unlock()
+	if captureErr != nil {
+		return fmt.Errorf("canonical capture integrity is unresolved: %w", captureErr)
+	}
+	if runtime.reconcileAfterTarget != nil {
+		runtime.reconcileAfterTarget()
+	}
 	// Reading the committed set validates the complete local chain through the
 	// target high-water before reconstructing logical object identities.
 	for _, fact := range runtime.spool.CommittedFacts() {
@@ -1187,14 +1297,18 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
+	if runtime.captureErr != nil {
+		runtime.healthErr = runtime.captureErr
+		return fmt.Errorf("canonical capture integrity changed during reconcile: %w", runtime.captureErr)
+	}
 	if runtime.dirtyHighWater != target {
 		// The import may have safely observed newer state, but its checkpoint
 		// cannot claim a spool high-water that changed underneath it. A queued
 		// signal will reconcile the newer stable boundary without ever blocking
 		// covered legacy writes for the duration of this full scan.
 		runtime.signalReconcileLocked()
-		runtime.markSuccessLocked()
-		return nil
+		outcome = "superseded"
+		return fmt.Errorf("%w: target=%d dirty=%d", errCanonicalReconcileSuperseded, target, runtime.dirtyHighWater)
 	}
 	if err := writeFileAtomicallyDurable(runtime.checkpointPath(), encoded, 0o600); err != nil {
 		runtime.healthErr = fmt.Errorf("persist canonical reconcile checkpoint: %w", err)
@@ -1205,7 +1319,27 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	runtime.checkpointHighWater = target
 	runtime.checkpointSourceSHA = sourceDigest
 	runtime.markSuccessLocked()
+	outcome = "checkpointed"
 	return nil
+}
+
+func (runtime *CanonicalRuntime) recordReconcileAttempt(target uint64, started time.Time) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.reconcileAttemptTarget = target
+	runtime.reconcileAttemptAt = started
+}
+
+func (runtime *CanonicalRuntime) recordReconcileOutcome(target uint64, started time.Time, outcome string) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	runtime.reconcileAttemptTarget = target
+	runtime.reconcileLastAt = time.Now().UTC()
+	runtime.reconcileLastDuration = runtime.reconcileLastAt.Sub(started)
+	runtime.reconcileLastOutcome = outcome
+	if outcome == "superseded" {
+		runtime.reconcileSuperseded++
+	}
 }
 
 func (runtime *CanonicalRuntime) drainCanonicalImportOutbox(ctx context.Context) error {
@@ -1436,6 +1570,10 @@ func (runtime *CanonicalRuntime) markSuccess() {
 }
 
 func (runtime *CanonicalRuntime) markSuccessLocked() {
+	if runtime.captureErr != nil {
+		runtime.healthErr = runtime.captureErr
+		return
+	}
 	runtime.healthErr = nil
 	runtime.lastOK = time.Now().UTC()
 }
@@ -1478,6 +1616,16 @@ func canonicalRuntimeSnapshot() CanonicalRuntimeSnapshot {
 	snapshot.OutboxOldestSeconds = runtime.outboxOldestSeconds
 	snapshot.CheckpointValid = runtime.checkpointValid
 	snapshot.CheckpointHighWater = runtime.checkpointHighWater
+	snapshot.ReconcileAttempt = runtime.reconcileAttemptTarget
+	if !runtime.reconcileAttemptAt.IsZero() {
+		snapshot.ReconcileAttemptAt = runtime.reconcileAttemptAt.Format(time.RFC3339Nano)
+	}
+	if !runtime.reconcileLastAt.IsZero() {
+		snapshot.ReconcileLastAt = runtime.reconcileLastAt.Format(time.RFC3339Nano)
+	}
+	snapshot.ReconcileDurationMS = runtime.reconcileLastDuration.Milliseconds()
+	snapshot.ReconcileOutcome = runtime.reconcileLastOutcome
+	snapshot.ReconcileSuperseded = runtime.reconcileSuperseded
 	sort.Strings(snapshot.FrozenFamilies)
 	snapshot.CoveredFamilies, snapshot.UncoveredFamilies = canonicalRuntimeCoverage()
 	outboxHealthy := runtime.postgres == nil || (snapshot.OutboxKnown && snapshot.OutboxPending == 0 && snapshot.OutboxFailed == 0)

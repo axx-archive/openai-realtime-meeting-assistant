@@ -78,6 +78,15 @@ type CanonicalImportPlan struct {
 	TestedPrincipals []string
 }
 
+// canonicalImportPlanApplier is an optional store optimization for the legacy
+// importer. A production store can compare the deterministic import event set
+// in bulk and append only missing generations, while proof stores retain the
+// simple per-event path below. Implementations must preserve Append's exact
+// retry/conflict semantics; this is only a query/DML optimization.
+type canonicalImportPlanApplier interface {
+	ApplyCanonicalImportPlan(context.Context, CanonicalImportPlan) error
+}
+
 // CanonicalImportGrant is the explicit migration ACL attached to one imported
 // object. Revision is zero for metadata-only access and the exact immutable
 // content revision for content access.
@@ -298,6 +307,9 @@ func applyCanonicalLegacyAccess(object *CanonicalImportedObject, orgPrincipals [
 func (plan CanonicalImportPlan) Apply(ctx context.Context, store CanonicalEventStore) error {
 	if store == nil {
 		return errors.New("canonical event store is required")
+	}
+	if applier, ok := store.(canonicalImportPlanApplier); ok {
+		return applier.ApplyCanonicalImportPlan(ctx, plan)
 	}
 	for _, event := range plan.Events {
 		if _, err := store.Append(ctx, event); err != nil {

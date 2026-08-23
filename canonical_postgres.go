@@ -572,34 +572,260 @@ func (store *PostgresCanonicalStore) Events(ctx context.Context) ([]CanonicalEve
 	return events, nil
 }
 
+const canonicalImportPrefetchBatchSize = 2048
+
+// ApplyCanonicalImportPlan preserves Append's validation and conflict rules,
+// but avoids re-running its point lookups for every deterministic import event
+// already present. The bounded set read is tenant-scoped; missing events still
+// travel through Append so concurrent writers and aggregate/idempotency
+// conflicts retain the same transactional behavior.
+func (store *PostgresCanonicalStore) ApplyCanonicalImportPlan(ctx context.Context, plan CanonicalImportPlan) error {
+	if store == nil || store.pool == nil {
+		return ErrCanonicalStoreUnhealthy
+	}
+	if strings.TrimSpace(plan.TenantID) == "" {
+		return errors.New("canonical import plan tenant is required")
+	}
+	candidates := make([]CanonicalEvent, 0, len(plan.Events))
+	candidatesByID := make(map[uuid.UUID]CanonicalEvent, len(plan.Events))
+	for _, raw := range plan.Events {
+		event := normalizeCanonicalPostgresEvent(raw)
+		if event.TenantID != plan.TenantID {
+			return fmt.Errorf("canonical import event %s tenant mismatch", event.EventID)
+		}
+		if err := event.Validate(store.registry); err != nil {
+			return fmt.Errorf("validate canonical import %s/%s v%d: %w", event.AggregateType, event.AggregateID, event.AggregateVersion, err)
+		}
+		if prior, duplicate := candidatesByID[event.EventID]; duplicate {
+			equal, err := canonicalEventsIdempotentlyEqual(prior, event)
+			if err != nil {
+				return err
+			}
+			if !equal {
+				return fmt.Errorf("canonical import event %s: %w", event.EventID, ErrCanonicalIdempotencyConflict)
+			}
+			continue
+		}
+		candidatesByID[event.EventID] = event
+		candidates = append(candidates, event)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	existingByID := make(map[uuid.UUID]CanonicalEvent, len(candidates))
+	for start := 0; start < len(candidates); start += canonicalImportPrefetchBatchSize {
+		end := start + canonicalImportPrefetchBatchSize
+		if end > len(candidates) {
+			end = len(candidates)
+		}
+		ids := make([]uuid.UUID, end-start)
+		for index := start; index < end; index++ {
+			ids[index-start] = candidates[index].EventID
+		}
+		rows, err := store.pool.Query(ctx, `SELECT `+canonicalEventSelectColumns+`
+			FROM canonical_events WHERE tenant_id=$1 AND event_id=ANY($2::uuid[]) ORDER BY sequence`, plan.TenantID, ids)
+		if err != nil {
+			return fmt.Errorf("prefetch canonical import events: %w", err)
+		}
+		for rows.Next() {
+			event, scanErr := scanCanonicalEvent(rows)
+			if scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("scan canonical import event: %w", scanErr)
+			}
+			existingByID[event.EventID] = event
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return fmt.Errorf("prefetch canonical import events: %w", err)
+		}
+		rows.Close()
+	}
+
+	for _, event := range candidates {
+		if existing, found := existingByID[event.EventID]; found {
+			equal, err := canonicalEventsIdempotentlyEqual(existing, event)
+			if err != nil {
+				return err
+			}
+			if !equal {
+				return fmt.Errorf("canonical import %s/%s v%d event %s: %w", event.AggregateType, event.AggregateID, event.AggregateVersion, event.EventID, ErrCanonicalIdempotencyConflict)
+			}
+			continue
+		}
+		if _, err := store.Append(ctx, event); err != nil {
+			return fmt.Errorf("append canonical import %s/%s v%d event %s: %w", event.AggregateType, event.AggregateID, event.AggregateVersion, event.EventID, err)
+		}
+	}
+	return nil
+}
+
+type canonicalImportObjectRef struct {
+	family   string
+	objectID string
+}
+
+type canonicalImportProjectionState struct {
+	stateRevision   int64
+	aclVersion      int64
+	contentRevision int64
+}
+
+type canonicalExpectedImportGrant struct {
+	id          uuid.UUID
+	objectType  string
+	objectID    string
+	aclVersion  int64
+	revision    *int64
+	subjectType string
+	subjectID   string
+	action      string
+	roomID      string
+}
+
+func (grant canonicalExpectedImportGrant) revisionValue() any {
+	if grant.revision == nil {
+		return nil
+	}
+	return *grant.revision
+}
+
+type canonicalStoredImportGrant struct {
+	id          uuid.UUID
+	objectType  string
+	objectID    string
+	aclVersion  int64
+	revision    pgtype.Int8
+	subjectType string
+	subjectID   string
+	action      string
+	roomID      string
+	sittingID   string
+	expiresAt   pgtype.Timestamptz
+	revokedAt   pgtype.Timestamptz
+	conditions  []byte
+}
+
+func canonicalImportGrantMatches(stored canonicalStoredImportGrant, expected canonicalExpectedImportGrant) bool {
+	if stored.id != expected.id || stored.objectType != expected.objectType || stored.objectID != expected.objectID ||
+		stored.aclVersion != expected.aclVersion || stored.subjectType != expected.subjectType ||
+		stored.subjectID != expected.subjectID || stored.action != expected.action || stored.roomID != expected.roomID ||
+		stored.sittingID != "" || stored.expiresAt.Valid || stored.revokedAt.Valid || stored.revision.Valid != (expected.revision != nil) {
+		return false
+	}
+	if expected.revision != nil && stored.revision.Int64 != *expected.revision {
+		return false
+	}
+	var conditions map[string]any
+	return json.Unmarshal(stored.conditions, &conditions) == nil && conditions != nil && len(conditions) == 0
+}
+
 // SyncImportGrants replaces only grants owned by the canonical importer. It
 // never touches human/admin grants, and runs as one transaction so parity
-// cannot observe a half-migrated principal set.
+// cannot observe a half-migrated principal set. Projection and importer-owned
+// grant state are loaded in bounded set queries; unchanged rows cause no DML.
 func (store *PostgresCanonicalStore) SyncImportGrants(ctx context.Context, plan CanonicalImportPlan) error {
 	if store == nil || store.pool == nil {
 		return ErrCanonicalStoreUnhealthy
 	}
-	expectedACLVersions := make(map[string]int64, len(plan.Events))
-	for _, event := range plan.Events {
-		expectedACLVersions[event.AggregateType+"\x00"+event.AggregateID] = event.ACLVersion
+	if strings.TrimSpace(plan.TenantID) == "" {
+		return errors.New("canonical import plan tenant is required")
 	}
+	expectedEvents := make(map[string]CanonicalEvent, len(plan.Events))
+	for _, event := range plan.Events {
+		if event.TenantID != plan.TenantID || event.AggregateVersion < 1 || event.ACLVersion < 1 {
+			return fmt.Errorf("invalid canonical import event binding for %s/%s", event.AggregateType, event.AggregateID)
+		}
+		key := event.AggregateType + "\x00" + event.AggregateID
+		if _, duplicate := expectedEvents[key]; duplicate {
+			return fmt.Errorf("duplicate canonical import event binding for %s/%s", event.AggregateType, event.AggregateID)
+		}
+		expectedEvents[key] = event
+	}
+	objectsByKey := make(map[string]CanonicalImportedObject, len(plan.Objects))
+	refs := make([]canonicalImportObjectRef, 0, len(plan.Objects))
+	for _, object := range plan.Objects {
+		if strings.TrimSpace(object.Family) == "" || strings.TrimSpace(object.ObjectID) == "" || object.AggregateVersion < 1 {
+			return errors.New("canonical import plan contains an invalid object binding")
+		}
+		key := object.Family + "\x00" + object.ObjectID
+		if _, duplicate := objectsByKey[key]; duplicate {
+			return fmt.Errorf("duplicate canonical import object binding for %s/%s", object.Family, object.ObjectID)
+		}
+		event, found := expectedEvents[key]
+		if !found || event.AggregateVersion != object.AggregateVersion || event.EventID != object.EventID {
+			return fmt.Errorf("canonical import object/event mismatch for %s/%s", object.Family, object.ObjectID)
+		}
+		objectsByKey[key] = object
+		refs = append(refs, canonicalImportObjectRef{family: object.Family, objectID: object.ObjectID})
+	}
+	if len(expectedEvents) != len(objectsByKey) {
+		return errors.New("canonical import plan contains an event without an object binding")
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].family != refs[j].family {
+			return refs[i].family < refs[j].family
+		}
+		return refs[i].objectID < refs[j].objectID
+	})
+
 	tx, err := store.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	for _, object := range plan.Objects {
-		var currentACLVersion, currentContentRevision int64
-		if err := tx.QueryRow(ctx, `SELECT acl_version,content_revision FROM objects
-			WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3 FOR UPDATE`, plan.TenantID, object.Family, object.ObjectID).
-			Scan(&currentACLVersion, &currentContentRevision); err != nil {
-			return fmt.Errorf("resolve imported ACL object %s/%s: %w", object.Family, object.ObjectID, err)
+
+	projections := make(map[string]canonicalImportProjectionState, len(refs))
+	for start := 0; start < len(refs); start += canonicalImportPrefetchBatchSize {
+		end := start + canonicalImportPrefetchBatchSize
+		if end > len(refs) {
+			end = len(refs)
 		}
-		expectedACLVersion, found := expectedACLVersions[object.Family+"\x00"+object.ObjectID]
-		if !found || expectedACLVersion < 1 || currentACLVersion != expectedACLVersion {
-			return fmt.Errorf("imported ACL version mismatch for %s/%s: projection=%d plan=%d", object.Family, object.ObjectID, currentACLVersion, expectedACLVersion)
+		families := make([]string, end-start)
+		objectIDs := make([]string, end-start)
+		for index := start; index < end; index++ {
+			families[index-start] = refs[index].family
+			objectIDs[index-start] = refs[index].objectID
 		}
-		expectedIDs := make([]uuid.UUID, 0, len(object.ImportGrants))
+		rows, queryErr := tx.Query(ctx, `SELECT o.object_type,o.object_id,o.state_revision,o.acl_version,o.content_revision
+			FROM objects o JOIN unnest($2::text[],$3::text[]) AS wanted(object_type,object_id)
+			ON wanted.object_type=o.object_type AND wanted.object_id=o.object_id
+			WHERE o.tenant_id=$1 ORDER BY o.object_type,o.object_id FOR UPDATE OF o`, plan.TenantID, families, objectIDs)
+		if queryErr != nil {
+			return fmt.Errorf("prefetch imported ACL objects: %w", queryErr)
+		}
+		for rows.Next() {
+			var family, objectID string
+			var state canonicalImportProjectionState
+			if scanErr := rows.Scan(&family, &objectID, &state.stateRevision, &state.aclVersion, &state.contentRevision); scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("scan imported ACL object: %w", scanErr)
+			}
+			projections[family+"\x00"+objectID] = state
+		}
+		if queryErr := rows.Err(); queryErr != nil {
+			rows.Close()
+			return fmt.Errorf("prefetch imported ACL objects: %w", queryErr)
+		}
+		rows.Close()
+	}
+
+	expectedGrants := make(map[uuid.UUID]canonicalExpectedImportGrant)
+	for _, ref := range refs {
+		key := ref.family + "\x00" + ref.objectID
+		object := objectsByKey[key]
+		projection, found := projections[key]
+		if !found {
+			return fmt.Errorf("resolve imported ACL object %s/%s: %w", object.Family, object.ObjectID, pgx.ErrNoRows)
+		}
+		event := expectedEvents[key]
+		if projection.stateRevision != object.AggregateVersion {
+			return fmt.Errorf("imported state revision mismatch for %s/%s: projection=%d plan=%d", object.Family, object.ObjectID, projection.stateRevision, object.AggregateVersion)
+		}
+		if projection.aclVersion != event.ACLVersion {
+			return fmt.Errorf("imported ACL version mismatch for %s/%s: projection=%d plan=%d", object.Family, object.ObjectID, projection.aclVersion, event.ACLVersion)
+		}
 		for _, grant := range object.ImportGrants {
 			if !validACLAction(grant.Action) || strings.TrimSpace(grant.SubjectID) == "" {
 				return fmt.Errorf("invalid imported grant for %s/%s", object.Family, object.ObjectID)
@@ -608,7 +834,7 @@ func (store *PostgresCanonicalStore) SyncImportGrants(ctx context.Context, plan 
 			switch grant.SubjectKind {
 			case ACLSubjectTeam:
 				if grant.SubjectPrincipalKind != "" {
-					return fmt.Errorf("team import grant cannot carry a principal kind")
+					return errors.New("team import grant cannot carry a principal kind")
 				}
 			case ACLSubjectPrincipal:
 				if !validACLPrincipalKind(grant.SubjectPrincipalKind) || grant.SubjectPrincipalKind == ACLPrincipalGuest || grant.SubjectPrincipalKind == ACLPrincipalService || grant.SubjectPrincipalKind == ACLPrincipalCapability {
@@ -618,40 +844,123 @@ func (store *PostgresCanonicalStore) SyncImportGrants(ctx context.Context, plan 
 			default:
 				return fmt.Errorf("invalid imported grant subject kind %q", grant.SubjectKind)
 			}
-			var revision any
+			var revisionValue any
+			var revision *int64
 			if grant.Action == ACLReadContent {
-				if grant.Revision < 1 || grant.Revision != currentContentRevision {
+				if grant.Revision < 1 || grant.Revision != projection.contentRevision {
 					return fmt.Errorf("imported content grant revision mismatch for %s/%s", object.Family, object.ObjectID)
 				}
-				revision = currentContentRevision
+				current := projection.contentRevision
+				revision = &current
+				revisionValue = current
 			} else if grant.Revision != 0 {
-				return fmt.Errorf("metadata import grant must not bind a content revision")
+				return errors.New("metadata import grant must not bind a content revision")
 			}
 			grantID := uuid.NewSHA1(canonicalImportNamespace, []byte(strings.Join([]string{
 				"legacy-import-grant-v1", plan.TenantID, object.Family, object.ObjectID,
-				fmt.Sprint(currentACLVersion), fmt.Sprint(revision), subjectType, grant.SubjectID, string(grant.Action),
+				fmt.Sprint(projection.aclVersion), fmt.Sprint(revisionValue), subjectType, grant.SubjectID, string(grant.Action),
 			}, "\x1f")))
-			expectedIDs = append(expectedIDs, grantID)
-			if _, err := tx.Exec(ctx, `INSERT INTO object_grants (
-				grant_id,tenant_id,object_type,object_id,acl_version,revision,subject_type,subject_id,action,
-				room_id,sitting_id,granted_by_type,granted_by_id,conditions
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULL,'service','canonical-import','{}'::jsonb)
-			ON CONFLICT (grant_id) DO UPDATE SET acl_version=EXCLUDED.acl_version,revision=EXCLUDED.revision,
-				subject_type=EXCLUDED.subject_type,subject_id=EXCLUDED.subject_id,action=EXCLUDED.action,
-				room_id=EXCLUDED.room_id,sitting_id=NULL,revoked_at=NULL,conditions=EXCLUDED.conditions`,
-				grantID, plan.TenantID, object.Family, object.ObjectID, currentACLVersion, revision, subjectType, grant.SubjectID, string(grant.Action), object.RoomID); err != nil {
-				return err
+			if _, duplicate := expectedGrants[grantID]; duplicate {
+				return fmt.Errorf("duplicate imported grant for %s/%s", object.Family, object.ObjectID)
+			}
+			expectedGrants[grantID] = canonicalExpectedImportGrant{
+				id: grantID, objectType: object.Family, objectID: object.ObjectID, aclVersion: projection.aclVersion,
+				revision: revision, subjectType: subjectType, subjectID: grant.SubjectID, action: string(grant.Action), roomID: object.RoomID,
 			}
 		}
-		if len(expectedIDs) == 0 {
-			if _, err := tx.Exec(ctx, `DELETE FROM object_grants WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3
-				AND granted_by_type='service' AND granted_by_id='canonical-import'`, plan.TenantID, object.Family, object.ObjectID); err != nil {
-				return err
+	}
+
+	storedGrants := make(map[uuid.UUID]canonicalStoredImportGrant)
+	for start := 0; start < len(refs); start += canonicalImportPrefetchBatchSize {
+		end := start + canonicalImportPrefetchBatchSize
+		if end > len(refs) {
+			end = len(refs)
+		}
+		families := make([]string, end-start)
+		objectIDs := make([]string, end-start)
+		for index := start; index < end; index++ {
+			families[index-start] = refs[index].family
+			objectIDs[index-start] = refs[index].objectID
+		}
+		rows, queryErr := tx.Query(ctx, `SELECT g.grant_id::text,g.object_type,g.object_id,g.acl_version,g.revision,
+			g.subject_type,g.subject_id,g.action,COALESCE(g.room_id,''),COALESCE(g.sitting_id,''),g.expires_at,g.revoked_at,g.conditions
+			FROM object_grants g JOIN unnest($2::text[],$3::text[]) AS wanted(object_type,object_id)
+			ON wanted.object_type=g.object_type AND wanted.object_id=g.object_id
+			WHERE g.tenant_id=$1 AND g.granted_by_type='service' AND g.granted_by_id='canonical-import'
+			ORDER BY g.object_type,g.object_id,g.grant_id FOR UPDATE OF g`, plan.TenantID, families, objectIDs)
+		if queryErr != nil {
+			return fmt.Errorf("prefetch canonical importer grants: %w", queryErr)
+		}
+		for rows.Next() {
+			var id string
+			var stored canonicalStoredImportGrant
+			if scanErr := rows.Scan(&id, &stored.objectType, &stored.objectID, &stored.aclVersion, &stored.revision,
+				&stored.subjectType, &stored.subjectID, &stored.action, &stored.roomID, &stored.sittingID,
+				&stored.expiresAt, &stored.revokedAt, &stored.conditions); scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("scan canonical importer grant: %w", scanErr)
 			}
-		} else if _, err := tx.Exec(ctx, `DELETE FROM object_grants WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3
-			AND granted_by_type='service' AND granted_by_id='canonical-import' AND NOT (grant_id = ANY($4::uuid[]))`,
-			plan.TenantID, object.Family, object.ObjectID, expectedIDs); err != nil {
-			return err
+			stored.id, queryErr = uuid.Parse(id)
+			if queryErr != nil {
+				rows.Close()
+				return fmt.Errorf("parse canonical importer grant: %w", queryErr)
+			}
+			storedGrants[stored.id] = stored
+		}
+		if queryErr := rows.Err(); queryErr != nil {
+			rows.Close()
+			return fmt.Errorf("prefetch canonical importer grants: %w", queryErr)
+		}
+		rows.Close()
+	}
+
+	upserts := make([]canonicalExpectedImportGrant, 0)
+	for id, expected := range expectedGrants {
+		stored, found := storedGrants[id]
+		if !found || !canonicalImportGrantMatches(stored, expected) {
+			upserts = append(upserts, expected)
+		}
+	}
+	sort.Slice(upserts, func(i, j int) bool { return upserts[i].id.String() < upserts[j].id.String() })
+	staleIDs := make([]uuid.UUID, 0)
+	for id := range storedGrants {
+		if _, retained := expectedGrants[id]; !retained {
+			staleIDs = append(staleIDs, id)
+		}
+	}
+	sort.Slice(staleIDs, func(i, j int) bool { return staleIDs[i].String() < staleIDs[j].String() })
+
+	for _, grant := range upserts {
+		command, execErr := tx.Exec(ctx, `INSERT INTO object_grants (
+			grant_id,tenant_id,object_type,object_id,acl_version,revision,subject_type,subject_id,action,
+			room_id,sitting_id,granted_by_type,granted_by_id,conditions
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NULLIF($10,''),NULL,'service','canonical-import','{}'::jsonb)
+		ON CONFLICT (grant_id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id,object_type=EXCLUDED.object_type,
+			object_id=EXCLUDED.object_id,acl_version=EXCLUDED.acl_version,revision=EXCLUDED.revision,
+			subject_type=EXCLUDED.subject_type,subject_id=EXCLUDED.subject_id,action=EXCLUDED.action,
+			room_id=EXCLUDED.room_id,sitting_id=NULL,expires_at=NULL,revoked_at=NULL,conditions=EXCLUDED.conditions
+		WHERE object_grants.granted_by_type='service' AND object_grants.granted_by_id='canonical-import'`,
+			grant.id, plan.TenantID, grant.objectType, grant.objectID, grant.aclVersion, grant.revisionValue(),
+			grant.subjectType, grant.subjectID, grant.action, grant.roomID)
+		if execErr != nil {
+			return fmt.Errorf("sync canonical importer grant %s: %w", grant.id, execErr)
+		}
+		if command.RowsAffected() != 1 {
+			return fmt.Errorf("canonical importer grant %s conflicts with a non-importer grant", grant.id)
+		}
+	}
+	for start := 0; start < len(staleIDs); start += canonicalImportPrefetchBatchSize {
+		end := start + canonicalImportPrefetchBatchSize
+		if end > len(staleIDs) {
+			end = len(staleIDs)
+		}
+		command, execErr := tx.Exec(ctx, `DELETE FROM object_grants WHERE tenant_id=$1 AND grant_id=ANY($2::uuid[])
+			AND granted_by_type='service' AND granted_by_id='canonical-import'`, plan.TenantID, staleIDs[start:end])
+		if execErr != nil {
+			return fmt.Errorf("delete stale canonical importer grants: %w", execErr)
+		}
+		if command.RowsAffected() != int64(end-start) {
+			return errors.New("canonical importer grants changed during synchronization")
 		}
 	}
 	return tx.Commit(ctx)
