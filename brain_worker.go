@@ -189,6 +189,18 @@ func (app *kanbanBoardApp) produceMeetingBrainWriteUp(ctx context.Context, apiKe
 	if sequence, ok := entryCaptureSequence(rawTranscripts[len(rawTranscripts)-1]); ok {
 		metadata[meetingBrainCaptureMetadataKey] = strconv.FormatUint(sequence, 10)
 	}
+	if sourceDigest := meetingFinalizationSourceDigestFromContext(ctx); sourceDigest != "" {
+		metadata[meetingFinalizationSourceDigestMetadataKey] = sourceDigest
+		metadata[meetingFinalizationOutputRevisionMetadataKey] = "1"
+		metadata[meetingFinalizationOutputDigestMetadataKey] = sha256Hex([]byte(text))
+	}
+	// Close finalization deliberately runs after the room has released its live
+	// meeting id. Pin the derived Brain to the ended sitting carried by the
+	// finalization context; otherwise appendEntry would lazily mint/stamp the
+	// successor and the resumable receipt could never discover its own output.
+	if meetingID := meetingFinalizationMeetingIDFromContext(ctx); meetingID != "" {
+		metadata["meetingId"] = meetingID
+	}
 	metadata = applyAmbientDerivedScope(metadata, transcripts)
 	// §6.4 provenance (inclusion RATIFIED 2026-07-09): a write-up over a
 	// listen-only sitting's transcripts carries the origin stamp — the rollups

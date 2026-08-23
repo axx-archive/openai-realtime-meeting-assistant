@@ -103,6 +103,26 @@ type renderRunnerJob struct {
 
 type renderRunnerJobStore struct {
 	dir string
+
+	// terminalJobs is deliberately only a negative scan cache: once a complete
+	// or failed payload has been decoded successfully, claimNext may skip that
+	// exact immutable file generation. Non-terminal jobs are never cached, so a
+	// queued, running, or stale job is still examined on every poll. The cache
+	// is process-local and disposable; durable truth remains the queue files.
+	terminalJobsMu sync.Mutex
+	terminalJobs   map[string]renderRunnerJobFileIdentity
+	readFile       func(string) ([]byte, error)
+}
+
+// renderRunnerJobFileIdentity binds a cached terminal verdict to one exact
+// directory entry generation. Atomic replacement changes the inode; ordinary
+// rewrites change the size and/or nanosecond mtime. Device is included so an
+// unusual remount cannot make an inode from another filesystem look equal.
+type renderRunnerJobFileIdentity struct {
+	Device      uint64
+	Inode       uint64
+	Size        int64
+	ModTimeNano int64
 }
 
 // renderPDFJobBinding is the idempotency identity for one editable artifact
@@ -266,7 +286,11 @@ func serverRenderKindForArtifact(artifact meetingMemoryEntry) string {
 }
 
 func newRenderRunnerJobStore(dir string) *renderRunnerJobStore {
-	return &renderRunnerJobStore{dir: filepath.Clean(strings.TrimSpace(dir))}
+	return &renderRunnerJobStore{
+		dir:          filepath.Clean(strings.TrimSpace(dir)),
+		terminalJobs: make(map[string]renderRunnerJobFileIdentity),
+		readFile:     os.ReadFile,
+	}
 }
 
 func (store *renderRunnerJobStore) enqueue(job renderRunnerJob) (renderRunnerJob, error) {
@@ -313,14 +337,35 @@ func (store *renderRunnerJobStore) claimNext(runnerID string) (*renderRunnerJob,
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].Name() < entries[j].Name()
 	})
+	visibleJobs := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		visibleJobs[entry.Name()] = struct{}{}
+	}
+	store.pruneTerminalJobs(visibleJobs)
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		job, err := store.read(entry.Name())
+		identity, err := renderRunnerJobIdentity(store.dir, entry.Name())
+		if err != nil {
+			store.forgetTerminalJob(entry.Name())
+			return nil, err
+		}
+		if store.hasTerminalJob(entry.Name(), identity) {
+			continue
+		}
+		store.forgetTerminalJob(entry.Name())
+		job, stableIdentity, err := store.readStable(entry.Name(), identity)
 		if err != nil {
 			return nil, err
+		}
+		if job.Status == renderJobStatusComplete || job.Status == renderJobStatusFailed {
+			store.rememberTerminalJob(entry.Name(), stableIdentity)
+			continue
 		}
 		if job.Status != renderJobStatusQueued {
 			continue
@@ -370,7 +415,11 @@ func writeRenderRunnerJobAtomically(path string, job renderRunnerJob) error {
 
 func (store *renderRunnerJobStore) read(filename string) (*renderRunnerJob, error) {
 	path := filepath.Join(store.dir, filepath.Base(filename))
-	raw, err := os.ReadFile(path)
+	readFile := store.readFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+	raw, err := readFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read render runner job: %w", err)
 	}
@@ -379,6 +428,80 @@ func (store *renderRunnerJobStore) read(filename string) (*renderRunnerJob, erro
 		return nil, fmt.Errorf("decode render runner job %s: %w", filepath.Base(filename), err)
 	}
 	return &job, nil
+}
+
+// readStable prevents a terminal verdict read across an atomic replacement
+// from being cached under the wrong file generation. Queue writes are atomic,
+// so a single retry is enough for the ordinary replacement race; persistent
+// churn fails visibly and is retried on the next poll without poisoning the
+// cache.
+func (store *renderRunnerJobStore) readStable(filename string, before renderRunnerJobFileIdentity) (*renderRunnerJob, renderRunnerJobFileIdentity, error) {
+	const maxAttempts = 2
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		job, err := store.read(filename)
+		if err != nil {
+			return nil, renderRunnerJobFileIdentity{}, err
+		}
+		after, err := renderRunnerJobIdentity(store.dir, filename)
+		if err != nil {
+			return nil, renderRunnerJobFileIdentity{}, err
+		}
+		if before == after {
+			return job, after, nil
+		}
+		before = after
+	}
+	return nil, renderRunnerJobFileIdentity{}, fmt.Errorf("render runner job %s changed while being read", filepath.Base(filename))
+}
+
+func renderRunnerJobIdentity(dir string, filename string) (renderRunnerJobFileIdentity, error) {
+	path := filepath.Join(dir, filepath.Base(filename))
+	info, err := os.Stat(path)
+	if err != nil {
+		return renderRunnerJobFileIdentity{}, fmt.Errorf("stat render runner job: %w", err)
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || stat == nil {
+		return renderRunnerJobFileIdentity{}, fmt.Errorf("stat render runner job %s: inode identity unavailable", filepath.Base(filename))
+	}
+	return renderRunnerJobFileIdentity{
+		Device:      uint64(stat.Dev),
+		Inode:       uint64(stat.Ino),
+		Size:        info.Size(),
+		ModTimeNano: info.ModTime().UnixNano(),
+	}, nil
+}
+
+func (store *renderRunnerJobStore) hasTerminalJob(filename string, identity renderRunnerJobFileIdentity) bool {
+	store.terminalJobsMu.Lock()
+	defer store.terminalJobsMu.Unlock()
+	cached, ok := store.terminalJobs[filepath.Base(filename)]
+	return ok && cached == identity
+}
+
+func (store *renderRunnerJobStore) rememberTerminalJob(filename string, identity renderRunnerJobFileIdentity) {
+	store.terminalJobsMu.Lock()
+	defer store.terminalJobsMu.Unlock()
+	if store.terminalJobs == nil {
+		store.terminalJobs = make(map[string]renderRunnerJobFileIdentity)
+	}
+	store.terminalJobs[filepath.Base(filename)] = identity
+}
+
+func (store *renderRunnerJobStore) forgetTerminalJob(filename string) {
+	store.terminalJobsMu.Lock()
+	defer store.terminalJobsMu.Unlock()
+	delete(store.terminalJobs, filepath.Base(filename))
+}
+
+func (store *renderRunnerJobStore) pruneTerminalJobs(visible map[string]struct{}) {
+	store.terminalJobsMu.Lock()
+	defer store.terminalJobsMu.Unlock()
+	for filename := range store.terminalJobs {
+		if _, ok := visible[filename]; !ok {
+			delete(store.terminalJobs, filename)
+		}
+	}
 }
 
 // reusableBoundJob returns the one queued/running job whose durable source

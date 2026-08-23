@@ -22,11 +22,13 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	xhtml "golang.org/x/net/html"
 )
 
 const (
 	packagingStudioProcessID                 = "packaging_studio"
-	packagingStudioCurrentVersion            = 7
+	packagingStudioCurrentVersion            = 8
 	packagingStudioHistoricalRelaunchMessage = "This presentation was started with an earlier Packaging Studio authority contract. Relaunch it with the current process; historical work remains available for inspection, but no pre-authority imagery or evidence will be reused."
 )
 
@@ -267,7 +269,7 @@ func packagingStudioDefinition() ProcessDefinition {
 		ID: packagingStudioProcessID, Version: packagingStudioCurrentVersion, Title: "Packaging Studio",
 		Description: "Turn a direct request and authorized company context into a researched-when-needed, reviewed, editable presentation.",
 		Group:       toolGroupProcesses, Authority: toolAuthorityWorkspaceWrite,
-		ImplementationRevision: "packaging_studio.runtime.v7.scoped-evidence-image-authority.v2",
+		ImplementationRevision: "packaging_studio.runtime.v8.premium-design-contract.v1",
 		Budgets:                ProcessBudgets{MaxSubtasks: 20, MaxTokens: 62000, WallClock: 25 * time.Minute},
 		Stages: []ProcessStage{
 			{
@@ -315,21 +317,22 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID: "write", Title: "Write the deck", Role: processRoleSynthesizer, Internal: internal,
 				InputFrom: []string{"context_snapshot", "evidence", "story_architects"},
 				PromptBody: strings.Join([]string{
-					"Write the final deck_copy_v3 as exactly one JSON object with a slides array containing exactly the slide_count in the brief; when the direct request omitted a count, choose the shortest count that tells the story completely and record the inference.",
-					"For each slide provide slide_id, purpose, headline, optional kicker, visible copy, evidence/source label, speaker intent, transition, and presenter_note. One claim per slide; use only deck_ready_claims.",
+					"Write the final deck_copy_v3 as exactly one JSON object. The root has slides and slide_count_inference, plus only the four scoped-evidence root fields when the evidence law requires them. slides contains exactly the slide_count in the brief; when the direct request omitted a count, choose the shortest count that tells the story completely and record that inference in slide_count_inference, otherwise use an empty string.",
+					"Every slide has exactly slide_id, slide_kind, thesis, turn, headline, kicker, body, proof, evidence_label, source_label, speaker_intent, transition, presenter_note, claim_ids, and claim_renderings, plus statement_type only when the forward-statement law requires it. slide_kind is cover, normal, evidence, or close. turn is open, frame, reveal, prove, contrast, decide, or close. thesis exactly equals headline. proof is empty unless body is one admitted proof rendering, in which case proof exactly equals body. claim_ids and claim_renderings are arrays with at most one admitted claim.",
+					"SPARSITY CONTRACT: the cover has headline plus at most one short kicker, no body/proof/evidence/source furniture, at most 16 total visible words, and no more than 12 headline words. A normal or close slide has one headline plus at most ONE of kicker or body, no more than two primary visible text groups, at most 28 primary words, and at most 36 visible words including decision-useful evidence furniture. An evidence slide has no kicker, one headline, one proof body, optional compact evidence/source labels, and at most 44 visible words. Evidence/source labels are empty unless one admitted claim materially changes the decision; source_label requires evidence_label. Do not add eyebrow copy, quote piles, decision strips, repeated section labels, or decorative text furniture.",
 					"Keep presenter_note proportional to the slide's speaking job: use a natural 10-45 second note when it adds context, a brief transition note or an empty string when it does not, and [BEAT] only when a deliberate pause materially improves delivery. Never add filler to satisfy a duration or marker. The note owns parables and emotional turns; the slide owns numbers. Never speak a figure absent from its slide. A note that speaks a material claim must render the same approved display claim verbatim and carry the same claim id as its slide.",
 					"Every slide object containing a material number, currency, percentage, date, external URL, or externally verifiable superlative must carry sibling claim_ids and claim_renderings arrays copied exactly from the admitted evidence row. Render the approved display claim verbatim in the fact-bearing visible string; keep the full exact source sentence in source metadata and never place claim metadata itself in visible copy.",
 					processForwardStatementPromptLaw,
-					"Write in a specific human spoken register. Remove AI tells: throat-clearing, generic superlatives, slogan stacks, symmetrical filler, 'not just X but Y', empty abstraction, and invented quotes. No em dashes in client-facing copy. Keep normal slides under 45 visible words.",
+					"Write in a specific human spoken register. Remove AI tells: throat-clearing, generic superlatives, slogan stacks, symmetrical filler, 'not just X but Y', empty abstraction, and invented quotes. No em dashes in client-facing copy. Every headline must land in one spoken breath.",
 					studioSourceLanguageLaw,
 				}, "\n"), OutputContract: "deck_copy_v3",
 			},
 			{
 				ID: "gate", Title: "Stress-test the story and copy", Role: processRoleGate, Internal: internal,
 				InputFrom:  []string{"write", "context_snapshot", "evidence", "story_architects"},
-				PromptBody: "Score Audience decision fit, Story causality, Evidence integrity, Human voice, Slide-count fidelity, and Source-language fidelity. Every weak score must name an executable repair. Do not accept unverified numbers, generic AI cadence, or a structurally correct outline that lacks a persuasive turn. " + studioSourceLanguageLaw,
+				PromptBody: "Score Audience decision fit, Story causality, Evidence integrity, Human voice, Sparsity, Presentation-distance legibility, Slide-count fidelity, and Source-language fidelity. Every weak score must name an executable repair. Do not accept unverified numbers, generic AI cadence, competing theses, more than two primary text groups, or a structurally correct outline that lacks a persuasive turn. " + studioSourceLanguageLaw,
 				GateSpec: &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "write", HoldOnFailure: true, Dimensions: []string{
-					"Audience decision fit", "Story causality", "Evidence integrity", "Human voice", "Slide-count fidelity", "Source-language fidelity",
+					"Audience decision fit", "Story causality", "Evidence integrity", "Human voice", "Sparsity", "Presentation-distance legibility", "Slide-count fidelity", "Source-language fidelity",
 				}},
 			},
 			{
@@ -338,7 +341,8 @@ func packagingStudioDefinition() ProcessDefinition {
 				PromptBody: strings.Join([]string{
 					"You are the ONE art director for this presentation. Lock one shared sample_content set by choosing one to three exact slide_id values from deck_copy_v3 that collectively exercise the cover, evidence, and image-led beat when those jobs exist. Candidate systems never receive different copy or different sample slides.",
 					"When context_snapshot.brand_assets contains at least one exact supplied asset or brand rule, mode is extend and you create exactly ONE faithful extension candidate. Do not stage a fake competition around an already explicit direction. Otherwise mode is develop and you create TWO OR THREE genuinely distinct candidate systems against the identical root sample_slide_ids.",
-					"Return exactly one fenced JSON object and no prose. It has exactly mode, sample_slide_ids, and candidates. mode is develop or extend. sample_slide_ids is the shared array of one to three unique exact deck_copy_v3 slide ids. candidates is an array of exact objects with candidate_id, strategy, visual_system, and identity. candidate_id is a unique lowercase snake_case id. identity has exactly palette, type, spacing, grid, graphic_motif, image_treatment, data_viz_treatment, and refusals, all non-empty. The cover is one powerful idea with one focal hierarchy, not a subtitle pile or generic AI gradient.",
+					"Return exactly one fenced JSON object and no prose. It has exactly mode, sample_slide_ids, and candidates. mode is develop or extend. sample_slide_ids is the shared array of one to three unique exact deck_copy_v3 slide ids. candidates is an array of exact objects with candidate_id, strategy, visual_system, and identity. candidate_id is a unique lowercase snake_case id. strategy is exactly typography_first, evidence_led, image_led, or balanced_editorial. visual_system is exactly editorial_restraint, cinematic_documentary, modern_minimal, tactile_fieldwork, or graphic_precision.",
+					"identity has exactly palette, type, spacing, grid, graphic_motif, image_treatment, data_viz_treatment, and refusals. palette is exactly background=#RRGGBB;foreground=#RRGGBB;accent=#RRGGBB;surface=#RRGGBB;muted=#RRGGBB. type is exactly heading=<family>;body=<family>;accent=<family>, where every family is modern_grotesk, editorial_serif, humanist_sans, geometric_sans, condensed_sans, or monospace_accent. spacing is airy, balanced, or compact. grid is editorial_12, modular_12, split_6_6, or single_axis. graphic_motif is none, rules, frames, bands, circles, or blocks. image_treatment is natural_editorial, cinematic_low_key, bright_documentary, restrained_monochrome, or tactile_film. data_viz_treatment is direct_labels, large_number, aligned_comparison, or minimal_chart. refusals is a comma-separated list of two to six unique exact tokens from gradients, glass, decorative_charts, logos, trademarks, tiny_type, generic_ai_motifs, dense_copy. The cover is one powerful idea with one focal hierarchy, not a subtitle pile or generic AI gradient.",
 				}, "\n"), OutputContract: packagingStudioIdentityCandidatesContract,
 			},
 			{
@@ -365,9 +369,10 @@ func packagingStudioDefinition() ProcessDefinition {
 				PromptBody: strings.Join([]string{
 					"You are the decision editor. Read the one art-director candidate record and the active review record. Select exactly one existing candidate_id; never merge, rename, or rewrite its strategy, visual_system, or identity tokens. Explain the selection briefly, then direct imagery only where it performs an emotional or explanatory job type and evidence cannot.",
 					"Zero images is a valid deliberately typographic deck; default to one to three purposeful images, use no more than four, and reserve at most one full-bleed crescendo. Ledger and number slides carry none.",
-					"Every named depiction of a real person, place, product, venue, or brand must be authority-bound. A claim-bound shot sets depiction_kind to claim, depiction_entity to one complete exact named entity in an admitted Claim ID from the evidence dossier, and depiction_ref to that Claim ID. A supplied-asset shot sets depiction_kind to asset, copies the complete exact same entity carried by the trusted user-image filename into depiction_entity, and copies that exact brand_assets source_ref into depiction_ref. Never use a shorter alias. Subject/place must name that exact entity and no shot field may introduce another real person, place, product, venue, or brand. The server rebuilds the provider prompt from only the admitted entity and controlled art-direction fields; generic source prose, a different entity's file, a stale file, or extra named prose never grants or reaches image authority. When exact same-entity authority is unavailable, force a generic non-identifying image: depiction_kind generic, empty depiction_entity, depiction_ref, and place, and a subject beginning exactly 'non-identifying ' with no proper name, logo, trademark, distinctive venue, or recognizable product.",
+					"Every named depiction of a real person, place, product, venue, or brand must be authority-bound. A claim-bound shot sets depiction_kind to claim, depiction_entity to one complete exact named entity in an admitted Claim ID from the evidence dossier, and depiction_ref to that Claim ID. A supplied-asset shot sets depiction_kind to asset, copies the complete exact same entity carried by the trusted user-image filename into depiction_entity, and copies that exact brand_assets source_ref into depiction_ref. Never use a shorter alias. For either named kind, subject is exactly 'authorized depiction of <depiction_entity>' and place is either empty or that same exact entity. No shot field may introduce another real person, place, product, venue, or brand. The server rebuilds the provider prompt from only the admitted entity and controlled art-direction fields; generic source prose, a different entity's file, a stale file, or extra named prose never grants or reaches image authority. When exact same-entity authority is unavailable, force a generic non-identifying image: depiction_kind generic and empty depiction_entity, depiction_ref, and place.",
 					"Return exactly one fenced JSON object and no prose. The object has exactly selected_candidate_id, selection_rationale, strategy, visual_system, identity, and shots. Copy strategy, visual_system, and every identity token exactly from the selected candidate. identity has exactly palette, type, spacing, grid, graphic_motif, image_treatment, data_viz_treatment, and refusals.",
-					"shots is an array of zero to four objects. Every shot has exactly fig, slide_id, slot, subject, composition, temperature, treatment, aspect, caption, place, why, depiction_kind, depiction_entity, and depiction_ref. fig is a unique positive integer. slide_id exactly matches deck_copy_v3. slot is bleed or plate; aspect is landscape, portrait, or square. Use at most one bleed, natural color, honest geography, and copy-safe negative space.",
+					"shots is an array of zero to four objects. Every shot has exactly fig, slide_id, slot, subject, composition, temperature, treatment, aspect, caption, place, why, depiction_kind, depiction_entity, and depiction_ref. fig is a unique positive integer. slide_id exactly matches deck_copy_v3. slot is bleed or plate; aspect is landscape, portrait, or square. composition is exactly wide_negative_space_left, wide_negative_space_right, centered_subject, close_detail, top_down, low_angle, or panoramic. temperature is joy, focus, drama, warmth, calm, energy, wonder, resolve, intimacy, confidence, or tension. treatment is exactly natural_editorial, cinematic_low_key, bright_documentary, restrained_monochrome, or tactile_film. why is exactly opening_tension, human_scale, evidence_texture, emotional_crescendo, transition, closing_resolve, or explanatory_context. caption is an empty string; the server authors it.",
+					"For generic shots, subject is exactly one of non-identifying people in motion, non-identifying hands at work, unbranded objects in use, unbranded tools and materials, anonymous crowd without recognizable faces, rural landscape without identifying landmarks, urban landscape without identifying landmarks, empty interior without identifiers, abstract natural texture, food and drink without branding, animals without identifying marks, or documentary detail without identifying text; place, depiction_entity, and depiction_ref are empty. Named claim/asset shots still require the exact authority-bound entity fields. Use at most one bleed and reserve copy-safe negative space.",
 				}, "\n"), OutputContract: packagingStudioIdentityDirectionContract,
 			},
 			{
@@ -378,9 +383,10 @@ func packagingStudioDefinition() ProcessDefinition {
 				ID: "layout_plan", Title: "Compose every slide", Role: processRoleWriter, Mode: "artifacts", Internal: internal,
 				InputFrom: []string{"identity", "write", "evidence", "imagery_generate"},
 				PromptBody: strings.Join([]string{
-					"Create layout_plan_v3 after copy and identity are locked. For every slide specify a 1920x1080 scene with composition type, background, grid, and element ids/types/x/y/width/height/z/typography/alignment/opacity. Tie imagery to crop, focal point, and copy-safe space.",
+					"Create layout_plan_v3 after copy and identity are locked. Return exactly one JSON object with visual_identity, slides, and only the four scoped-evidence root fields when required. visual_identity has exactly selected_candidate_id, strategy, visual_system, and tokens; copy all four exactly from the canonical identity, and tokens is the exact eight-field identity object. Every slide has exactly slide_id, slide_kind, composition, background, grid, and elements. Copy slide_id and slide_kind exactly from deck_copy_v3. background must be one selected palette #RRGGBB color and grid exactly equals the selected identity grid token. " + packagingStudioGridPrompt(),
+					"Every meaningful scene element appears exactly once in elements; the later HTML may add only one server-style page-number or slide-number counter. Every element has id, type, x, y, width, height, z, opacity, and rotation. Text elements additionally have exactly text, copy_role, typography, claim_ids, and claim_renderings, plus statement_type only on its exact fact-bearing text. copy_role is headline, kicker, body, evidence, source, or counter and must match the locked field. typography has exactly font_token, font_family, font_size, font_weight, line_height, letter_spacing, alignment, and color. Use the selected heading token for headlines, body token for body/source, and accent token for kicker/evidence/counter. Resolve font_token to font_family with this exact server map: " + packagingStudioFontResolutionPrompt() + ". Image elements additionally have fig, fit, crop, and focal_point; fig must be one exact generated placement on its directed slide, fit is cover or contain, crop is center, top, bottom, left, right, faces, or safe_area, and focal_point is exactly {\"x\":0..1,\"y\":0..1}. Shape elements additionally have shape, fill, stroke, and stroke_width. Do not omit geometry and do not invent visible copy: every non-counter text element maps one-to-one to one locked visible deck-copy string.",
 					studioCompositionRhythmLaw,
-					"Use a radically simple cover, legible evidence furniture, and no overflow or accidental collision. Return structured JSON; do not rewrite copy. Preserve each fact-bearing string, visible forward label, statement_type, claim_ids, and claim_renderings exactly from deck copy on that same text-element object; geometry numbers are structural and need no evidence annotation. " + processForwardStatementPromptLaw,
+					"Use a radically simple cover, the deck-copy density limits, minimum 52px headlines (72px on the cover), minimum 28px primary copy, minimum 18px source furniture, legible evidence furniture, and no overflow or accidental collision. Mark every intentional overlap in the HTML on BOTH participating elements; otherwise keep 24px between text boxes. Do not rewrite copy. Preserve each fact-bearing string, visible forward label, statement_type, claim_ids, and claim_renderings exactly from deck copy on that same text-element object; geometry numbers are structural and need no evidence annotation. " + processForwardStatementPromptLaw,
 				}, "\n"),
 				OutputContract: "layout_plan_v3",
 			},
@@ -399,9 +405,9 @@ func packagingStudioDefinition() ProcessDefinition {
 			},
 			{
 				ID: "quality_gate", Title: "Hold or repair the presentation", Role: processRoleGate, Internal: internal,
-				InputFrom:  []string{"ship_deck", "slide_jury"},
-				PromptBody: "Score Render completeness, Text fit, Hierarchy, Layout craft, Brand coherence, Image purpose, Copy fidelity, and Presentation-distance legibility. Use the jury's page-level findings. Pass only when the actual rendered deck is ready; otherwise return executable repairs for ship_deck.",
-				GateSpec: &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "ship_deck", HoldOnFailure: true, Dimensions: []string{
+				InputFrom:  []string{"write", "layout_plan", "ship_deck", "slide_jury"},
+				PromptBody: "Score Render completeness, Text fit, Hierarchy, Layout craft, Brand coherence, Image purpose, Copy fidelity, and Presentation-distance legibility. Use the jury's page-level findings. Pass only when the actual rendered deck is ready. Copy/headline defects route to locked deck_copy_v3 ownership; composition/type/crop/spacing defects route to layout_plan and rebuild every downstream render. Never ask ship_deck to rewrite locked copy or repair authored composition. Structural ship-only failures remain at ship_deck.",
+				GateSpec: &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 2, RepairTarget: "layout_plan", HoldOnFailure: true, Dimensions: []string{
 					"Render completeness", "Text fit", "Hierarchy", "Layout craft", "Brand coherence", "Image purpose", "Copy fidelity", "Presentation-distance legibility",
 				}},
 			},
@@ -417,12 +423,12 @@ func packagingStudioDefinition() ProcessDefinition {
 // readable while the strict native-editor and print contracts remain exact.
 func packagingStudioDeckWriterPrompt() string {
 	return strings.Join([]string{
-		"Produce one complete self-contained HTML document beginning <!doctype html>, with all CSS inline and no external references except data: URIs used for embedded imagery. Use the locked copy and layout plan exactly; do not rewrite during rendering.",
-		"Include this exact chassis style in <head>: <style>\n" + strings.TrimSpace(packagingDeckChassisCSS) + "\n</style>. Put every <section class=\"pg\"> inside one <div id=\"stage\">, add class on to the first slide, and give every section data-deck-slide=\"the exact deck_copy_v3 slide_id\".",
-		"Every meaningful text, image, and shape needs a stable data-deck-element and data-deck-type plus inline absolute left/top/width/height/z-index/opacity/rotation in 1920x1080 coordinates. Text also needs inline family, size, weight, line-height, tracking, alignment, and color. Shapes need fill/stroke; images need object-fit. No overflow, clipping, off-canvas elements, or accidental intersections; mark only intentional overlap data-deck-overlap=\"allow\".",
+		"Produce one complete self-contained inert HTML document beginning <!doctype html>. The exact shell is <html><head> followed only by an optional <meta charset=\"utf-8\">, optional plain-text <title>, and the required chassis <style>; then <body>. Do not emit script, noscript, template, base, refresh, link, custom JavaScript, event handlers, or external references. Use the locked copy and layout plan exactly; do not rewrite during rendering.",
+		"Include this exact chassis style in <head>: <style>\n" + strings.TrimSpace(packagingDeckChassisCSS) + "\n</style>. It is the ONLY stylesheet: put every aesthetic, geometry, typography, and visibility property directly on its exact mapped element so the native lock and browser output cannot diverge. Scout later injects generated pixels as data: URIs only into the exact server-owned div.ph inline pixel node. Put every <section class=\"pg\"> inside one <div id=\"stage\">, add class on to the first slide, and give every section data-deck-slide=\"the exact deck_copy_v3 slide_id\". On #stage copy the locked visual_identity exactly into data-deck-identity-candidate, -strategy, -system, -palette, -type, -spacing, -grid, -motif, -image-treatment, -data-viz, and -refusals attributes.",
+		"Every meaningful text, image, and shape needs a stable data-deck-element and data-deck-type plus the exact required inline contract: position:absolute; pixel left/top/width/height; integer z-index from 0 upward; opacity above zero; and exactly one rotate(...deg) transform in 1920x1080 coordinates. Text also needs inline family, pixel size, numeric weight, .8-2 line-height, tracking from -.05em to .25em (or -4px to 20px), alignment, and hex color. Keep visible text directly inside its mapped element; only an attribute-free <br> is allowed below it, because nested markup creates an unreviewed typography layer. HTML div shapes use exactly one hex background or background-color and, when needed, border:<stroke_width>px solid <stroke>; images need margin:0, object-fit, and exact percentage object-position. No overflow, clipping, off-canvas elements, hidden ancestors, or accidental intersections; mark only intentional overlap data-deck-overlap=\"allow\".",
 		"Keep authored text inside the 96px safe zone. The only exception is non-copy typographic furniture deliberately reaching an edge: mark it data-deck-furniture=\"background\" (or \"full-bleed\") AND aria-hidden=\"true\". That marker never excuses off-canvas geometry, empty text, copy drift, or accidental collisions.",
-		"Use the identity tokens and a 12-column grid to create varied, presentation-distance compositions, not a document in the upper-left. Keep a minimum 96px safe zone. " + studioCompositionRhythmLaw + " Keep one claim and no more than 45 client-facing words on a normal slide. Make metrics large, comparisons aligned, evidence sourced, and the cover radically simple.",
-		"FULL-BLEED LAW: for generated imagery, create only matching native-importable <figure class=\"image-plate fig-N\"> plates with a div.ph; never invent image URLs. For a directed full bleed, add class \"bleed\" and use left:0;top:0;width:1920px;height:1080px with a purposeful scrim behind copy. If imagery was skipped, produce a deliberately typographic deck.",
+		"Use the exact selected grid geometry from layout_plan_v3 to create varied, presentation-distance compositions, not a document in the upper-left. " + packagingStudioGridPrompt() + " Keep a minimum 96px safe zone. " + studioCompositionRhythmLaw + " Keep one claim and no more than 45 client-facing words on a normal slide. Make metrics large, comparisons aligned, evidence sourced, and the cover radically simple.",
+		"FULL-BLEED LAW: for generated imagery, create only matching native-importable <figure class=\"image-plate fig-N\"> plates with a div.ph; never invent image URLs. Every figure must include margin:0 in its exact inline contract so browser/PDF and native geometry agree. Copy layout image metadata onto that exact figure as data-deck-fig=\"N\", data-deck-crop, data-deck-focal-x, and data-deck-focal-y, and render the focal point as object-position:<x*100>% <y*100>%. For a directed full bleed, add class \"bleed\" and use left:0;top:0;width:1920px;height:1080px with a purposeful scrim behind copy. A directed plate may not silently become full bleed. If imagery was skipped, produce a deliberately typographic deck with no image element.",
 		"Put each non-empty matching presenter_note from the locked deck copy in <div class=\"notes\" hidden>. Preserve [BEAT] only when the locked note uses it; do not invent a pause marker. Do not add custom JavaScript or presenter chrome; the native presenter owns navigation and presentation.",
 		"CLAIM-AUTHORITY LAW: do not add or paraphrase factual copy. For every slide carrying a material number, currency, percentage, date, external URL, or externally verifiable superlative, render the approved display claim verbatim in its fact-bearing text element and place <!-- stride-claim:<claim id> --> inside that same <section class=\"pg\">. Preserve the marker in presenter notes too when they speak the fact. The full exact source sentence remains in dossier/source metadata. Page counters and scene geometry are structural, not claims.",
 		processForwardStatementPromptLaw,
@@ -1062,6 +1068,81 @@ type packagingStudioIdentityReview struct {
 
 var packagingStudioIdentityCandidateIDPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$`)
 
+var (
+	packagingStudioPalettePattern = regexp.MustCompile(`(?i)^background=#[0-9a-f]{6};foreground=#[0-9a-f]{6};accent=#[0-9a-f]{6};surface=#[0-9a-f]{6};muted=#[0-9a-f]{6}$`)
+	packagingStudioTypePattern    = regexp.MustCompile(`^heading=([a-z_]+);body=([a-z_]+);accent=([a-z_]+)$`)
+)
+
+var packagingStudioIdentityEnums = map[string][]string{
+	"strategy":           {"typography_first", "evidence_led", "image_led", "balanced_editorial"},
+	"visual_system":      {"editorial_restraint", "cinematic_documentary", "modern_minimal", "tactile_fieldwork", "graphic_precision"},
+	"font_family":        {"modern_grotesk", "editorial_serif", "humanist_sans", "geometric_sans", "condensed_sans", "monospace_accent"},
+	"spacing":            {"airy", "balanced", "compact"},
+	"grid":               {"editorial_12", "modular_12", "split_6_6", "single_axis"},
+	"graphic_motif":      {"none", "rules", "frames", "bands", "circles", "blocks"},
+	"image_treatment":    {"natural_editorial", "cinematic_low_key", "bright_documentary", "restrained_monochrome", "tactile_film"},
+	"data_viz_treatment": {"direct_labels", "large_number", "aligned_comparison", "minimal_chart"},
+	"refusal":            {"gradients", "glass", "decorative_charts", "logos", "trademarks", "tiny_type", "generic_ai_motifs", "dense_copy"},
+	"composition":        {"wide_negative_space_left", "wide_negative_space_right", "centered_subject", "close_detail", "top_down", "low_angle", "panoramic"},
+	"temperature":        {"joy", "focus", "drama", "warmth", "calm", "energy", "wonder", "resolve", "intimacy", "confidence", "tension"},
+	"why":                {"opening_tension", "human_scale", "evidence_texture", "emotional_crescendo", "transition", "closing_resolve", "explanatory_context"},
+}
+
+var packagingStudioGenericSubjects = []string{
+	"non-identifying people in motion",
+	"non-identifying hands at work",
+	"unbranded objects in use",
+	"unbranded tools and materials",
+	"anonymous crowd without recognizable faces",
+	"rural landscape without identifying landmarks",
+	"urban landscape without identifying landmarks",
+	"empty interior without identifiers",
+	"abstract natural texture",
+	"food and drink without branding",
+	"animals without identifying marks",
+	"documentary detail without identifying text",
+}
+
+func packagingStudioClosedEnum(value, field string) bool {
+	return slices.Contains(packagingStudioIdentityEnums[field], strings.TrimSpace(value))
+}
+
+func validatePackagingStudioIdentityTokens(tokens imageryIdentityTokens, label string) error {
+	if !packagingStudioPalettePattern.MatchString(tokens.Palette) {
+		return fmt.Errorf("%s palette must use the exact five-role #RRGGBB grammar", label)
+	}
+	typeMatch := packagingStudioTypePattern.FindStringSubmatch(tokens.Type)
+	if len(typeMatch) != 4 {
+		return fmt.Errorf("%s type must use the exact heading/body/accent grammar", label)
+	}
+	for _, family := range typeMatch[1:] {
+		if !packagingStudioClosedEnum(family, "font_family") {
+			return fmt.Errorf("%s type contains unsupported font family %q", label, family)
+		}
+	}
+	for field, value := range map[string]string{
+		"spacing": tokens.Spacing, "grid": tokens.Grid, "graphic_motif": tokens.GraphicMotif,
+		"image_treatment": tokens.ImageTreatment, "data_viz_treatment": tokens.DataVizTreatment,
+	} {
+		if !packagingStudioClosedEnum(value, field) {
+			return fmt.Errorf("%s %s contains unsupported token %q", label, field, value)
+		}
+	}
+	refusals := strings.Split(tokens.Refusals, ",")
+	if len(refusals) < 2 || len(refusals) > 6 {
+		return fmt.Errorf("%s refusals must contain two to six closed tokens", label)
+	}
+	seen := map[string]bool{}
+	for _, refusal := range refusals {
+		refusal = strings.TrimSpace(refusal)
+		if !packagingStudioClosedEnum(refusal, "refusal") || seen[refusal] {
+			return fmt.Errorf("%s refusals contains unsupported or repeated token %q", label, refusal)
+		}
+		seen[refusal] = true
+	}
+	return nil
+}
+
 func exactIdentityObjectKeys(object map[string]any, required []string, label string) error {
 	if len(object) != len(required) {
 		return fmt.Errorf("%s must contain exactly %s", label, strings.Join(required, ", "))
@@ -1117,6 +1198,36 @@ func strictFencedJSONObject(body, label string) (map[string]any, error) {
 }
 
 func parseIdentityTokens(raw any, label string) (imageryIdentityTokens, error) {
+	identity, ok := raw.(map[string]any)
+	if !ok {
+		return imageryIdentityTokens{}, fmt.Errorf("%s must be an object", label)
+	}
+	keys := []string{"palette", "type", "spacing", "grid", "graphic_motif", "image_treatment", "data_viz_treatment", "refusals"}
+	if err := exactIdentityObjectKeys(identity, keys, label); err != nil {
+		return imageryIdentityTokens{}, err
+	}
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		value, err := identityDirectionString(identity, key, label, false)
+		if err != nil {
+			return imageryIdentityTokens{}, err
+		}
+		values[key] = value
+	}
+	tokens := imageryIdentityTokens{
+		Palette: values["palette"], Type: values["type"], Spacing: values["spacing"], Grid: values["grid"],
+		GraphicMotif: values["graphic_motif"], ImageTreatment: values["image_treatment"],
+		DataVizTreatment: values["data_viz_treatment"], Refusals: values["refusals"],
+	}
+	if err := validatePackagingStudioIdentityTokens(tokens, label); err != nil {
+		return imageryIdentityTokens{}, err
+	}
+	return tokens, nil
+}
+
+// parseLegacyIdentityTokens keeps the frozen v5 zero-image contract readable.
+// It is never admitted into current layout or provider prompts.
+func parseLegacyIdentityTokens(raw any, label string) (imageryIdentityTokens, error) {
 	identity, ok := raw.(map[string]any)
 	if !ok {
 		return imageryIdentityTokens{}, fmt.Errorf("%s must be an object", label)
@@ -1205,12 +1316,12 @@ func parsePackagingStudioIdentityCandidates(body string, slideIDs map[string]str
 			return packagingStudioIdentityCandidates{}, fmt.Errorf("%s candidate_id must be a unique lowercase snake_case id", label)
 		}
 		strategy, err := identityDirectionString(candidateObject, "strategy", label, false)
-		if err != nil {
-			return packagingStudioIdentityCandidates{}, err
+		if err != nil || !packagingStudioClosedEnum(strategy, "strategy") {
+			return packagingStudioIdentityCandidates{}, fmt.Errorf("%s strategy is not an admitted closed token", label)
 		}
 		visualSystem, err := identityDirectionString(candidateObject, "visual_system", label, false)
-		if err != nil {
-			return packagingStudioIdentityCandidates{}, err
+		if err != nil || !packagingStudioClosedEnum(visualSystem, "visual_system") {
+			return packagingStudioIdentityCandidates{}, fmt.Errorf("%s visual_system is not an admitted closed token", label)
 		}
 		identity, err := parseIdentityTokens(candidateObject["identity"], label+" identity")
 		if err != nil {
@@ -1304,11 +1415,15 @@ func parsePackagingStudioIdentityReview(body string, candidates packagingStudioI
 	return doc, nil
 }
 
-var packagingStudioGenericNamedSignalPattern = regexp.MustCompile(`[A-Z][a-z]|(?:https?://|www\.|@|™|®|\blogo\b|\btrademark\b)`)
+var packagingStudioUnsafeDirectionPattern = regexp.MustCompile("(?i)(?:https?://|www\\.|@|™|®|```|<[^>]*>|\\b(?:ignore|disregard|override|system prompt|developer message|instructions?)\\b)")
 
 // parseImageryDirection validates the strict v6 identity_direction_v4 shape.
 // Authority membership is checked separately against the exact current plan.
 func parseImageryDirection(body string, slideIDs map[string]struct{}) (imageryDirectionDoc, error) {
+	return parseImageryDirectionWithServerFields(body, slideIDs, false)
+}
+
+func parseImageryDirectionWithServerFields(body string, slideIDs map[string]struct{}, serverFields bool) (imageryDirectionDoc, error) {
 	root, err := strictFencedJSONObject(body, packagingStudioIdentityDirectionContract)
 	if err != nil {
 		return imageryDirectionDoc{}, err
@@ -1327,8 +1442,14 @@ func parseImageryDirection(body string, slideIDs map[string]struct{}) (imageryDi
 	if doc.Strategy, err = identityDirectionString(root, "strategy", packagingStudioIdentityDirectionContract, false); err != nil {
 		return imageryDirectionDoc{}, err
 	}
+	if !packagingStudioClosedEnum(doc.Strategy, "strategy") {
+		return imageryDirectionDoc{}, fmt.Errorf("%s strategy is not an admitted closed token", packagingStudioIdentityDirectionContract)
+	}
 	if doc.VisualSystem, err = identityDirectionString(root, "visual_system", packagingStudioIdentityDirectionContract, false); err != nil {
 		return imageryDirectionDoc{}, err
+	}
+	if !packagingStudioClosedEnum(doc.VisualSystem, "visual_system") {
+		return imageryDirectionDoc{}, fmt.Errorf("%s visual_system is not an admitted closed token", packagingStudioIdentityDirectionContract)
 	}
 	if doc.Identity, err = parseIdentityTokens(root["identity"], packagingStudioIdentityDirectionContract+" identity"); err != nil {
 		return imageryDirectionDoc{}, err
@@ -1337,6 +1458,11 @@ func parseImageryDirection(body string, slideIDs map[string]struct{}) (imageryDi
 	if !ok {
 		return imageryDirectionDoc{}, fmt.Errorf("%s shots must be an array", packagingStudioIdentityDirectionContract)
 	}
+	// Preserve an authored empty array as an empty array. Canonical identity
+	// records are byte-bound downstream; allowing [] to decode to nil would
+	// re-encode as null and make a zero-imagery canonical receipt impossible to
+	// validate against itself.
+	doc.Shots = make([]imageryDirectionShot, 0, len(rawShots))
 	if len(rawShots) > packagingStudioImageryMaxShots {
 		return imageryDirectionDoc{}, fmt.Errorf("%s has %d shots; maximum is %d", packagingStudioIdentityDirectionContract, len(rawShots), packagingStudioImageryMaxShots)
 	}
@@ -1362,13 +1488,13 @@ func parseImageryDirection(body string, slideIDs map[string]struct{}) (imageryDi
 		for key, target := range map[string]*string{
 			"slide_id": &shot.SlideID, "slot": &shot.Slot, "subject": &shot.Subject, "composition": &shot.Composition,
 			"temperature": &shot.Temperature, "treatment": &shot.Treatment, "aspect": &shot.Aspect,
-			"caption": &shot.Caption, "why": &shot.Why, "depiction_kind": &shot.DepictionKind,
+			"why": &shot.Why, "depiction_kind": &shot.DepictionKind,
 		} {
 			if *target, err = identityDirectionString(shotObject, key, label, false); err != nil {
 				return imageryDirectionDoc{}, err
 			}
 		}
-		for key, target := range map[string]*string{"place": &shot.Place, "depiction_entity": &shot.DepictionEntity, "depiction_ref": &shot.DepictionRef} {
+		for key, target := range map[string]*string{"caption": &shot.Caption, "place": &shot.Place, "depiction_entity": &shot.DepictionEntity, "depiction_ref": &shot.DepictionRef} {
 			if *target, err = identityDirectionString(shotObject, key, label, true); err != nil {
 				return imageryDirectionDoc{}, err
 			}
@@ -1389,17 +1515,33 @@ func parseImageryDirection(body string, slideIDs map[string]struct{}) (imageryDi
 		if !oneOf(shot.Aspect, "landscape", "portrait", "square") {
 			return imageryDirectionDoc{}, fmt.Errorf("%s aspect must be landscape, portrait, or square", label)
 		}
+		if !packagingStudioClosedEnum(shot.Composition, "composition") ||
+			!packagingStudioClosedEnum(shot.Temperature, "temperature") ||
+			!packagingStudioClosedEnum(shot.Treatment, "image_treatment") ||
+			!packagingStudioClosedEnum(shot.Why, "why") {
+			return imageryDirectionDoc{}, fmt.Errorf("%s carries unsupported composition, temperature, treatment, or purpose", label)
+		}
+		if !serverFields && shot.Caption != "" {
+			return imageryDirectionDoc{}, fmt.Errorf("%s caption must be empty; the server authors captions", label)
+		}
+		for _, field := range []string{shot.Subject, shot.Place, shot.DepictionEntity, shot.DepictionRef} {
+			if packagingStudioUnsafeDirectionPattern.MatchString(field) {
+				return imageryDirectionDoc{}, fmt.Errorf("%s contains a URL, markup, or instruction-shaped text", label)
+			}
+		}
 		if !oneOf(shot.DepictionKind, "generic", "claim", "asset") {
 			return imageryDirectionDoc{}, fmt.Errorf("%s depiction_kind must be generic, claim, or asset", label)
 		}
 		if shot.DepictionKind == "generic" {
-			if shot.DepictionEntity != "" || shot.DepictionRef != "" || shot.Place != "" || !strings.HasPrefix(shot.Subject, "non-identifying ") || packagingStudioGenericNamedSignalPattern.MatchString(shot.Subject+" "+shot.Composition) {
+			if shot.DepictionEntity != "" || shot.DepictionRef != "" || shot.Place != "" || !slices.Contains(packagingStudioGenericSubjects, shot.Subject) {
 				return imageryDirectionDoc{}, fmt.Errorf("%s generic depiction must be non-identifying, unnamed, unbranded, and unplaced", label)
 			}
 		} else if shot.DepictionEntity == "" || shot.DepictionRef == "" {
 			return imageryDirectionDoc{}, fmt.Errorf("%s named depiction requires depiction_entity and depiction_ref", label)
 		} else if shot.DepictionEntity, err = packagingStudioProviderSafeDepictionEntity(shot.DepictionEntity); err != nil {
 			return imageryDirectionDoc{}, fmt.Errorf("%s %w", label, err)
+		} else if shot.Subject != "authorized depiction of "+shot.DepictionEntity || (shot.Place != "" && !packagingStudioIdentityWordsEqual(shot.Place, shot.DepictionEntity)) {
+			return imageryDirectionDoc{}, fmt.Errorf("%s named depiction subject/place must contain only the exact authority-bound entity", label)
 		}
 		doc.Shots = append(doc.Shots, shot)
 	}
@@ -2107,19 +2249,16 @@ func packagingStudioClaimNamesExactEntity(claim, entity string) bool {
 }
 
 func packagingStudioSafeTemperature(value string) string {
-	lower := strings.ToLower(canonicalEvidenceText(value))
-	for _, temperature := range []string{"joy", "focus", "drama", "warmth", "calm", "energy", "wonder", "resolve", "intimacy", "confidence", "tension"} {
-		if packagingStudioContainsIdentityWords(lower, temperature) {
-			return temperature
-		}
+	value = strings.TrimSpace(value)
+	if packagingStudioClosedEnum(value, "temperature") {
+		return value
 	}
-	return "poised"
+	return "calm"
 }
 
-// packagingStudioServerBoundNamedShot removes every model-authored semantic
-// field that could introduce a second identity. The exact authorized entity is
-// the only real-world identity allowed to reach image generation or downstream
-// layout. Structural placement remains intact.
+// packagingStudioServerBoundNamedShot keeps only the closed, validated art
+// direction while replacing the identity-bearing fields with the exact
+// admitted entity. No model-authored prose reaches the provider boundary.
 func packagingStudioServerBoundNamedShot(shot imageryDirectionShot) imageryDirectionShot {
 	entity := canonicalEvidenceText(shot.DepictionEntity)
 	place := ""
@@ -2127,24 +2266,17 @@ func packagingStudioServerBoundNamedShot(shot imageryDirectionShot) imageryDirec
 		place = entity
 	}
 	shot.Subject = "authorized depiction of " + entity
-	shot.Composition = "single authorized subject with copy-safe negative space"
 	shot.Temperature = packagingStudioSafeTemperature(shot.Temperature)
-	shot.Treatment = "natural editorial photography with restrained grain"
 	shot.Caption = fmt.Sprintf("FIG. %d — %s", shot.Fig, entity)
 	shot.Place = place
-	shot.Why = "supports the slide's directed emotional beat without introducing another identity"
 	shot.DepictionEntity = entity
 	return shot
 }
 
 func packagingStudioServerBoundGenericShot(shot imageryDirectionShot) imageryDirectionShot {
-	shot.Subject = "non-identifying people and/or unbranded objects in an unspecified setting"
-	shot.Composition = "single generic subject with copy-safe negative space"
 	shot.Temperature = packagingStudioSafeTemperature(shot.Temperature)
-	shot.Treatment = "natural editorial photography with restrained grain"
 	shot.Caption = fmt.Sprintf("FIG. %d — editorial image", shot.Fig)
 	shot.Place = ""
-	shot.Why = "supports the slide's directed emotional beat without depicting an identifiable entity"
 	shot.DepictionEntity = ""
 	shot.DepictionRef = ""
 	return shot
@@ -2239,26 +2371,18 @@ func canonicalPackagingStudioIdentityDirection(doc imageryDirectionDoc, selected
 	if !isHexDigest(selectedCandidateDigest) {
 		return "", fmt.Errorf("canonical visual identity direction has no exact selected-candidate receipt")
 	}
-	// Candidate prose is useful for selection but is not itself visual-identity
-	// authority. Persist one curated, provider-safe design system so a candidate
-	// name, style reference, palette label, or rationale cannot reintroduce a
-	// second brand/place after the per-shot authority gate. The exact selected
-	// candidate remains proven by the producing-stage validation and its source
-	// artifact; downstream stages receive only this canonical execution record.
-	doc.SelectedCandidateID = "server_bound_" + selectedCandidateDigest[:16]
-	doc.SelectionRationale = "Selected through the bound visual-direction review and normalized to the server-owned execution system."
-	doc.Strategy = "Let typography carry proof; use authority-bound editorial imagery only for purposeful emotional or explanatory turns."
-	doc.VisualSystem = packagingStudioProviderVisualSystem
-	doc.Identity = imageryIdentityTokens{
-		Palette:          "warm paper, ink black, and one controlled clay accent",
-		Type:             "bold modern grotesk with a restrained editorial serif",
-		Spacing:          "8px base rhythm with generous presentation-distance whitespace",
-		Grid:             "12-column grid with asymmetric editorial compositions",
-		GraphicMotif:     "thin evidence rules, disciplined crop frames, and quiet page furniture",
-		ImageTreatment:   "natural full-color editorial photography with restrained grain and copy-safe negative space",
-		DataVizTreatment: "direct labels, honest scales, and no decorative legends",
-		Refusals:         "no gradients, glass, generic AI motifs, decorative charts, logos, trademarks, or unbound identities",
+	// Strategy, visual-system, and identity tokens are closed data rather than
+	// prose, so they remain useful to layout/ship. Selection rationale is prose
+	// and is replaced with a deterministic receipt sentence.
+	if !packagingStudioIdentityCandidateIDPattern.MatchString(doc.SelectedCandidateID) ||
+		!packagingStudioClosedEnum(doc.Strategy, "strategy") ||
+		!packagingStudioClosedEnum(doc.VisualSystem, "visual_system") {
+		return "", fmt.Errorf("canonical visual identity contains unsupported selection tokens")
 	}
+	if err := validatePackagingStudioIdentityTokens(doc.Identity, "canonical visual identity"); err != nil {
+		return "", err
+	}
+	doc.SelectionRationale = "Selected by the bound visual-direction review; closed identity tokens preserved for composition."
 	for index, shot := range doc.Shots {
 		if shot.DepictionKind == "claim" || shot.DepictionKind == "asset" {
 			entity, err := packagingStudioProviderSafeDepictionEntity(shot.DepictionEntity)
@@ -2294,10 +2418,13 @@ func validateCanonicalPackagingStudioIdentityDirection(app *kanbanBoardApp, plan
 		return imageryDirectionDoc{}, err
 	}
 	matches := 0
+	var selected *packagingStudioIdentityCandidate
 	for _, candidate := range candidates.Candidates {
 		raw, marshalErr := json.Marshal(candidate)
 		if marshalErr == nil && sha256Hex(raw) == selectedDigest {
 			matches++
+			candidateCopy := candidate
+			selected = &candidateCopy
 		}
 	}
 	if matches != 1 {
@@ -2307,9 +2434,12 @@ func validateCanonicalPackagingStudioIdentityDirection(app *kanbanBoardApp, plan
 	if err != nil {
 		return imageryDirectionDoc{}, err
 	}
-	doc, err := parseImageryDirection(body, slideIDs)
+	doc, err := parseImageryDirectionWithServerFields(body, slideIDs, true)
 	if err != nil {
 		return imageryDirectionDoc{}, err
+	}
+	if selected == nil || doc.SelectedCandidateID != selected.CandidateID || doc.Strategy != selected.Strategy || doc.VisualSystem != selected.VisualSystem || doc.Identity != selected.Identity {
+		return imageryDirectionDoc{}, fmt.Errorf("canonical visual identity no longer matches its exact selected candidate")
 	}
 	needClaims, needAssets := false, false
 	for _, shot := range doc.Shots {
@@ -2345,16 +2475,69 @@ func validateCanonicalPackagingStudioIdentityDirection(app *kanbanBoardApp, plan
 	return doc, nil
 }
 
+func packagingStudioProviderComposition(token, aspect string) string {
+	phrases := map[string]string{
+		"wide_negative_space_left":  "wide " + aspect + " frame with the subject on the right and clean negative space on the left",
+		"wide_negative_space_right": "wide " + aspect + " frame with the subject on the left and clean negative space on the right",
+		"centered_subject":          "centered " + aspect + " frame with one unmistakable focal subject",
+		"close_detail":              "tight documentary detail in a " + aspect + " frame",
+		"top_down":                  "controlled top-down " + aspect + " frame",
+		"low_angle":                 "restrained low-angle " + aspect + " frame",
+		"panoramic":                 "panoramic " + aspect + " frame with one clear focal plane",
+	}
+	return phrases[token]
+}
+
+func packagingStudioProviderTreatment(token string) string {
+	phrases := map[string]string{
+		"natural_editorial":     "natural editorial photography, honest color, restrained grain",
+		"cinematic_low_key":     "cinematic low-key photography, controlled shadows, restrained saturation",
+		"bright_documentary":    "bright documentary photography, true color, candid texture",
+		"restrained_monochrome": "restrained monochrome editorial photography with tonal separation",
+		"tactile_film":          "tactile filmic photography, subtle grain, natural material detail",
+	}
+	return phrases[token]
+}
+
+func packagingStudioProviderPurpose(token string) string {
+	phrases := map[string]string{
+		"opening_tension":     "establish the opening tension without decoration",
+		"human_scale":         "make the idea tangible at human scale",
+		"evidence_texture":    "give the evidence physical texture without implying a new fact",
+		"emotional_crescendo": "carry the story's emotional crescendo",
+		"transition":          "create a purposeful visual transition",
+		"closing_resolve":     "land the closing resolve with restraint",
+		"explanatory_context": "clarify the setting without inventing evidence",
+	}
+	return phrases[token]
+}
+
+func packagingStudioProviderVisualSystemFor(doc imageryDirectionDoc) string {
+	systems := map[string]string{
+		"editorial_restraint":   "Restrained editorial photography with disciplined hierarchy and generous negative space.",
+		"cinematic_documentary": "Cinematic documentary photography with a single focal beat and controlled tonal contrast.",
+		"modern_minimal":        "Modern minimal photography with precise geometry, clean light, and very little visual noise.",
+		"tactile_fieldwork":     "Tactile documentary field photography with honest materials and lived-in detail.",
+		"graphic_precision":     "Graphically precise editorial photography with strong shapes and deliberate copy-safe space.",
+	}
+	return strings.TrimSpace(systems[doc.VisualSystem] + " " + packagingStudioProviderTreatment(doc.Identity.ImageTreatment) + ". " + packagingStudioProviderVisualSystem)
+}
+
 // imageryShots maps every validated art-direction field into the provider
 // request. Named values are revalidated at this last pre-spend boundary and
 // appear only as explicitly delimited, untrusted entity data.
 func (doc imageryDirectionDoc) imageryShots() ([]imageryShot, error) {
 	shots := make([]imageryShot, 0, len(doc.Shots))
 	for index, shot := range doc.Shots {
+		if !oneOf(shot.Slot, "bleed", "plate") || !oneOf(shot.Aspect, "landscape", "portrait", "square") ||
+			!packagingStudioClosedEnum(shot.Composition, "composition") || !packagingStudioClosedEnum(shot.Temperature, "temperature") ||
+			!packagingStudioClosedEnum(shot.Treatment, "image_treatment") || !packagingStudioClosedEnum(shot.Why, "why") {
+			return nil, fmt.Errorf("provider imagery shot %d has incomplete or unsupported closed art direction", index+1)
+		}
 		title := fmt.Sprintf("FIG. %d — editorial image", shot.Fig)
-		subject := "non-identifying people and/or unbranded objects in an unspecified setting"
-		composition := "Composition: editorial " + shot.Aspect + " framing with one clear focal plane and copy-safe negative space."
-		editorialJob := "Editorial job: create the requested emotional beat without depicting an identifiable entity."
+		subject := "Photograph only this closed generic subject: " + shot.Subject + "."
+		composition := "Composition: " + packagingStudioProviderComposition(shot.Composition, shot.Aspect)
+		editorialJob := "Editorial job: " + packagingStudioProviderPurpose(shot.Why)
 		place := ""
 		authorityInstruction := "Depict only generic, non-identifying people and/or unbranded objects in an unspecified setting. No recognizable person, named place, logo, trademark, distinctive venue, branded product, trade dress, or identifying text. This restriction overrides any conflicting style reference."
 		if shot.DepictionKind == "claim" || shot.DepictionKind == "asset" {
@@ -2381,6 +2564,8 @@ func (doc imageryDirectionDoc) imageryShots() ([]imageryShot, error) {
 			}, "\n")
 		} else if shot.DepictionKind != "generic" {
 			return nil, fmt.Errorf("provider imagery shot %d has unsupported depiction_kind %q", index+1, shot.DepictionKind)
+		} else if !slices.Contains(packagingStudioGenericSubjects, shot.Subject) || shot.Place != "" || shot.DepictionEntity != "" || shot.DepictionRef != "" {
+			return nil, fmt.Errorf("provider imagery shot %d is not an exact closed generic depiction", index+1)
 		}
 		shots = append(shots, imageryShot{
 			Fig: shot.Fig, Title: title, Temperature: packagingStudioSafeTemperature(shot.Temperature), Place: place,
@@ -2393,7 +2578,7 @@ func (doc imageryDirectionDoc) imageryShots() ([]imageryShot, error) {
 				// could otherwise smuggle an unrelated brand or instruction through
 				// an otherwise authority-bound shot.
 				"Deck placement: " + shot.Slot + " slot.",
-				"Directed treatment: natural full-color editorial photography with restrained grain.",
+				"Directed treatment: " + packagingStudioProviderTreatment(shot.Treatment) + ".",
 				"Directed aspect: " + shot.Aspect + ".",
 				editorialJob,
 			}, "\n"),
@@ -2503,7 +2688,7 @@ func packagingStudioFrozenV5Contract(plan *goalPlan) bool {
 // validatePackagingStudioV5TypographicIdentity is the only historical-v5
 // imagery admission path. Frozen v5 authored identity_direction_v3, which has
 // no exact claim/asset depiction authority. Its schema remains readable for an
-// intentional zero-shot typographic deck, but any shot requires a current v7
+// intentional zero-shot typographic deck, but any shot requires a current v8
 // relaunch before provider spend.
 func validatePackagingStudioV5TypographicIdentity(body string) (string, error) {
 	object, err := strictFencedJSONObject(body, "identity_direction_v3")
@@ -2520,7 +2705,7 @@ func validatePackagingStudioV5TypographicIdentity(body string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := parseIdentityTokens(object["identity"], "identity_direction_v3 identity"); err != nil {
+	if _, err := parseLegacyIdentityTokens(object["identity"], "identity_direction_v3 identity"); err != nil {
 		return "", err
 	}
 	shots, ok := object["shots"].([]any)
@@ -2608,11 +2793,9 @@ func compilePackagingStudioImagery(app *kanbanBoardApp, plan *goalPlan, parentID
 			}
 		}
 		if packagingStudioIdentityAuthorityContract(plan) {
-			// Provider prompts must not inherit free-form identity prose. The deck
-			// may use its locked visual system, but image generation receives only
-			// this server-owned photographic contract plus the exact authorized
-			// entity (if any) assembled in imageryShots.
-			visualSystem = packagingStudioProviderVisualSystem
+			// Provider prompts inherit only closed identity tokens mapped to
+			// server-authored phrases plus the exact authorized entity (if any).
+			visualSystem = packagingStudioProviderVisualSystemFor(identityDirection)
 		}
 	} else {
 		// The immutable v2 definition owns a standalone direction artifact with a
@@ -2718,6 +2901,14 @@ func injectStudioDeckImagery(app *kanbanBoardApp, plan *goalPlan, deckHTML strin
 		return deckHTML, "Imagery: none placed — the package is typographic.", nil
 	}
 
+	lockedPresentation := map[int]deckImage{}
+	if packagingStudioPremiumDesignContract(plan) {
+		var err error
+		lockedPresentation, err = packagingStudioDeckImagePresentations(deckHTML)
+		if err != nil {
+			return deckHTML, "", err
+		}
+	}
 	images := make([]deckImage, 0, len(placements))
 	unreadable := 0
 	for _, p := range placements {
@@ -2726,43 +2917,108 @@ func injectStudioDeckImagery(app *kanbanBoardApp, plan *goalPlan, deckHTML strin
 			unreadable++
 			continue
 		}
-		images = append(images, deckImage{Fig: p.Fig, DataURI: dataURI})
+		image := deckImage{Fig: p.Fig, DataURI: dataURI}
+		if packagingStudioPremiumDesignContract(plan) {
+			presentation, ok := lockedPresentation[p.Fig]
+			if !ok {
+				return deckHTML, "", fmt.Errorf("premium deck has no exact rendered crop/focal presentation for generated FIG %d", p.Fig)
+			}
+			image.Fit, image.Crop = presentation.Fit, presentation.Crop
+			image.FocalX, image.FocalY, image.PresentationLocked = presentation.FocalX, presentation.FocalY, true
+		}
+		images = append(images, image)
 	}
-	augmented, note := applyDeckImagery(deckHTML, images, len(placements), unreadable)
-	return augmented, note, nil
+	if packagingStudioPremiumDesignContract(plan) && unreadable > 0 {
+		return deckHTML, "", fmt.Errorf("premium deck could not materialize %d of %d locked image blobs", unreadable, len(placements))
+	}
+	return applyDeckImagery(deckHTML, images, len(placements), unreadable)
 }
 
 // deckImage is one resolved image ready to inline: its stable FIG and the
 // base64 data: URI.
 type deckImage struct {
-	Fig     int
-	DataURI string
+	Fig                int
+	DataURI            string
+	Fit                string
+	Crop               string
+	FocalX             float64
+	FocalY             float64
+	PresentationLocked bool
 }
 
-// applyDeckImagery injects a <style> block mapping each image to its .fig-N .ph
-// slot and returns the augmented deck HTML plus a disclosure note. Pure and
-// testable: an image whose .fig-N slot the writer never built is disclosed as a
-// missing slot; unreadable counts blobs that could not be loaded upstream.
-func applyDeckImagery(deckHTML string, images []deckImage, generated int, unreadable int) (string, string) {
+func packagingStudioDeckImagePresentations(deckHTML string) (map[int]deckImage, error) {
+	source, err := parsePackagingGeneratedSceneSource(deckHTML)
+	if err != nil {
+		return nil, fmt.Errorf("read premium deck image presentation: %w", err)
+	}
+	presentations := make(map[int]deckImage, len(source.ImageFig))
+	for elementID, rawFig := range source.ImageFig {
+		fig, err := strconv.Atoi(strings.TrimSpace(rawFig))
+		if err != nil || fig < 1 {
+			return nil, fmt.Errorf("premium deck image %q has an invalid FIG", elementID)
+		}
+		if _, duplicate := presentations[fig]; duplicate {
+			return nil, fmt.Errorf("premium deck repeats rendered presentation for FIG %d", fig)
+		}
+		fit := strings.TrimSpace(source.ImageFit[elementID])
+		crop := strings.TrimSpace(source.ImageCrop[elementID])
+		if !oneOf(fit, "cover", "contain") || !oneOf(crop, "center", "top", "bottom", "left", "right", "faces", "safe_area") {
+			return nil, fmt.Errorf("premium deck FIG %d has no closed fit/crop presentation", fig)
+		}
+		x, xerr := packagingStudioFocalCoordinate(source.ImageFocalX[elementID])
+		y, yerr := packagingStudioFocalCoordinate(source.ImageFocalY[elementID])
+		positionX, positionY, positionErr := packagingStudioObjectPosition(source.ImagePosition[elementID])
+		if xerr != nil || yerr != nil || positionErr != nil || math.Abs(positionX-x) > packagingGeneratedSceneEpsilon || math.Abs(positionY-y) > packagingGeneratedSceneEpsilon {
+			return nil, fmt.Errorf("premium deck FIG %d has no exact focal presentation", fig)
+		}
+		presentations[fig] = deckImage{Fig: fig, Fit: fit, Crop: crop, FocalX: x, FocalY: y, PresentationLocked: true}
+	}
+	return presentations, nil
+}
+
+// applyDeckImagery materializes each image at its .fig-N .ph slot. Historical
+// decks retain their disclosed stylesheet lane; premium decks fail closed and
+// put server-derived bytes directly on the one empty locked pixel node so the
+// rendered scene, native editor, and PPTX cannot disagree.
+func applyDeckImagery(deckHTML string, images []deckImage, generated int, unreadable int) (string, string, error) {
 	var rules []string
 	placed, missingSlot := 0, 0
 	for _, img := range images {
 		figClass := fmt.Sprintf("fig-%d", img.Fig)
-		rules = append(rules, fmt.Sprintf(".%s .ph{background-image:url(%s);background-size:cover;background-position:center}", figClass, img.DataURI))
+		if img.PresentationLocked {
+			var inserted bool
+			var err error
+			deckHTML, inserted, err = applyLockedDeckImageryInline(deckHTML, img)
+			if err != nil {
+				return deckHTML, "", err
+			}
+			if inserted {
+				placed++
+			} else {
+				return deckHTML, "", fmt.Errorf("premium deck is missing the one empty server-owned pixel slot for FIG %d", img.Fig)
+			}
+			continue
+		}
+		selector := "." + figClass + " .ph"
+		fit, position := "cover", "center"
+		rules = append(rules, fmt.Sprintf("%s{position:absolute!important;inset:0!important;width:100%%!important;height:100%%!important;display:block!important;visibility:visible!important;opacity:1!important;background-image:url(%s)!important;background-size:%s!important;background-position:%s!important;background-repeat:no-repeat!important}", selector, img.DataURI, fit, position))
 		if strings.Contains(deckHTML, figClass) {
 			placed++
 		} else {
 			missingSlot++
 		}
 	}
-	if len(rules) == 0 {
+	if len(rules) == 0 && placed == 0 {
 		if generated > 0 {
-			return deckHTML, fmt.Sprintf("Imagery: %d image(s) generated but none could be inlined (blobs unreadable) — disclosed; the deck ships typographic.", generated)
+			return deckHTML, fmt.Sprintf("Imagery: %d image(s) generated but none could be inlined (blobs unreadable) — disclosed; the deck ships typographic.", generated), nil
 		}
-		return deckHTML, "Imagery: none placed — the package is typographic."
+		return deckHTML, "Imagery: none placed — the package is typographic.", nil
 	}
-	style := "<style id=\"bonfire-imagery\">" + strings.Join(rules, "\n") + "</style>"
-	augmented := insertIntoDocumentHead(deckHTML, style)
+	augmented := deckHTML
+	if len(rules) > 0 {
+		style := "<style id=\"bonfire-imagery\">" + strings.Join(rules, "\n") + "</style>"
+		augmented = insertIntoDocumentHead(deckHTML, style)
+	}
 	note := fmt.Sprintf("Imagery: %d image(s) inlined as data: URIs at their .fig-N slots.", placed)
 	if missingSlot > 0 {
 		note += fmt.Sprintf(" %d generated image(s) had no matching slot in the deck (disclosed).", missingSlot)
@@ -2770,7 +3026,52 @@ func applyDeckImagery(deckHTML string, images []deckImage, generated int, unread
 	if unreadable > 0 {
 		note += fmt.Sprintf(" %d image blob(s) were unreadable and skipped (disclosed).", unreadable)
 	}
-	return augmented, note
+	return augmented, note, nil
+}
+
+// Premium imagery is embedded on the sole locked .ph node itself. This keeps
+// the pixel source in the same DOM subtree whose asset ref, fit, crop, focal
+// point, and geometry are validated and removes a stylesheet-cascade surface
+// where a later author rule could paint different pixels than native/PPTX.
+func applyLockedDeckImageryInline(deckHTML string, image deckImage) (string, bool, error) {
+	doc, err := xhtml.Parse(strings.NewReader(deckHTML))
+	if err != nil {
+		return deckHTML, false, fmt.Errorf("parse premium deck for FIG %d materialization: %w", image.Fig, err)
+	}
+	figClass := fmt.Sprintf("fig-%d", image.Fig)
+	var targets []*xhtml.Node
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node.Type == xhtml.ElementNode && legacyNodeHasClass(node, figClass) && legacyNodeAttr(node, "data-deck-crop") == image.Crop {
+			targets = append(targets, node)
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	if len(targets) != 1 {
+		return deckHTML, false, nil
+	}
+	var placeholders []*xhtml.Node
+	for child := targets[0].FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode && strings.EqualFold(child.Data, "div") && legacyNodeHasClass(child, "ph") {
+			placeholders = append(placeholders, child)
+		}
+	}
+	if len(placeholders) != 1 {
+		return deckHTML, false, nil
+	}
+	if strings.TrimSpace(legacyNodeAttr(placeholders[0], "style")) != "" {
+		return deckHTML, false, fmt.Errorf("premium deck FIG %d pixel slot must be empty before server materialization", image.Fig)
+	}
+	style := fmt.Sprintf("position:absolute;inset:0;width:100%%;height:100%%;display:block;visibility:visible;opacity:1;background-image:url(%s);background-size:%s;background-position:%s%% %s%%;background-repeat:no-repeat", image.DataURI, image.Fit, deckCSSNumber(image.FocalX*100), deckCSSNumber(image.FocalY*100))
+	placeholders[0].Attr = append(placeholders[0].Attr, xhtml.Attribute{Key: "style", Val: style})
+	var rendered strings.Builder
+	if err := xhtml.Render(&rendered, doc); err != nil {
+		return deckHTML, false, fmt.Errorf("render premium deck FIG %d materialization: %w", image.Fig, err)
+	}
+	return rendered.String(), true, nil
 }
 
 // packagingStudioQualityGateReview is the deterministic admission record in
@@ -2792,6 +3093,28 @@ type packagingStudioQualityGateReview struct {
 func (review packagingStudioQualityGateReview) repairLines() []string {
 	lines := make([]string, 0, len(review.Repairs))
 	for _, repair := range review.Repairs {
+		for _, fix := range repair.Fixes {
+			lines = append(lines, fmt.Sprintf("%s slide %d: %s", repair.Owner, repair.Page, fix))
+		}
+	}
+	return lines
+}
+
+func (review packagingStudioQualityGateReview) repairTarget() string {
+	for _, repair := range review.Repairs {
+		if repair.Owner == "write" {
+			return "write"
+		}
+	}
+	return "layout_plan"
+}
+
+func (review packagingStudioQualityGateReview) repairLinesForOwner(owner string) []string {
+	lines := []string{}
+	for _, repair := range review.Repairs {
+		if repair.Owner != owner {
+			continue
+		}
 		for _, fix := range repair.Fixes {
 			lines = append(lines, fmt.Sprintf("slide %d: %s", repair.Page, fix))
 		}
@@ -2955,16 +3278,16 @@ func decodeSlideJuryRepairs(raw string, blockingPages []int) ([]slideJuryRepair,
 	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &repairs); err != nil || len(repairs) == 0 {
 		return nil, fmt.Errorf("needs_changes scoreboard has no structured repair fixes")
 	}
-	if len(repairs) != len(blockingPages) {
-		return nil, fmt.Errorf("slide jury repair pages do not match the blocking pages")
-	}
 	total := 0
 	seenPages := map[int]bool{}
+	seenOwners := map[string]bool{}
 	for _, repair := range repairs {
-		if repair.Page < 1 || seenPages[repair.Page] || !slices.Contains(blockingPages, repair.Page) || len(repair.Fixes) == 0 {
+		key := fmt.Sprintf("%d:%s", repair.Page, repair.Owner)
+		if repair.Page < 1 || seenOwners[key] || !slices.Contains(blockingPages, repair.Page) || !oneOf(repair.Owner, "write", "layout_plan") || len(repair.Fixes) == 0 {
 			return nil, fmt.Errorf("slide jury repair pages do not match the blocking pages")
 		}
 		seenPages[repair.Page] = true
+		seenOwners[key] = true
 		seenFixes := map[string]bool{}
 		for _, fix := range repair.Fixes {
 			fix = strings.TrimSpace(fix)
@@ -2978,7 +3301,15 @@ func decodeSlideJuryRepairs(raw string, blockingPages []int) ([]slideJuryRepair,
 	if total == 0 || total > slideJuryRepairFixMaxCount {
 		return nil, fmt.Errorf("slide jury repair fixes exceed the bounded repair budget")
 	}
-	slices.SortFunc(repairs, func(a, b slideJuryRepair) int { return a.Page - b.Page })
+	if len(seenPages) != len(blockingPages) {
+		return nil, fmt.Errorf("slide jury repair pages do not match the blocking pages")
+	}
+	slices.SortFunc(repairs, func(a, b slideJuryRepair) int {
+		if a.Page != b.Page {
+			return a.Page - b.Page
+		}
+		return strings.Compare(a.Owner, b.Owner)
+	})
 	return repairs, nil
 }
 
@@ -3045,16 +3376,15 @@ func resolvePublishedPackagingStudioQuality(app *kanbanBoardApp, plan *goalPlan,
 
 // --- The SLIDE JURY stage -----------------------------------------------------
 
-// compilePackagingStudioSlideJury is the slide_jury stage's ProcessCompileFunc
-// (Wave 5 item 21): the optional vision jury AFTER the SHIP compile. It runs
+// compilePackagingStudioSlideJury is the slide_jury stage's ProcessCompileFunc.
+// It is the required rendered admission review after candidate compilation. It runs
 // only when the deck's PDF export completed and page images exist — the render
 // callback persists them as {kind: image} assets (persistRenderPageImageAssets)
 // — waiting a bounded window for the in-flight export. Every degraded path
-// (keyless, sidecar absent, export timed out or failed, the jury panel itself
-// erroring) is a DISCLOSED skip in the stage record, never a blocked ship: the
-// jury is advisory. On success the merged scoreboard files as slide_jury_v1
-// and lands as revision notes on the findings record — NOT an auto-revise; the
-// founder sees the scoreboard at ship approval and decides what to apply.
+// (keyless, sidecar absent, export timeout/failure, panel failure) records
+// needs_attention; the downstream gate cannot admit or publish the deck. On
+// success the exact seat scorecards deterministically route executable repairs
+// to deck-copy or layout ownership before another render.
 func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parentID string, _ ProcessStage) (string, map[string]string, error) {
 	if app == nil || plan == nil {
 		return "", nil, fmt.Errorf("the slide jury stage has no app/plan to read")
@@ -3093,7 +3423,8 @@ func compilePackagingStudioSlideJury(app *kanbanBoardApp, plan *goalPlan, parent
 	defer cancel()
 	jury, err := runSlideJury(ctx, app, parentID, deck)
 	if err != nil {
-		// Advisory stage: a failed panel is disclosed, never a blocked ship.
+		// Persist needs_attention so the final gate fails closed without turning a
+		// transient provider miss into an uninspectable stage crash.
 		return skip("the jury panel failed: " + compactAssistantLine(err.Error()))
 	}
 

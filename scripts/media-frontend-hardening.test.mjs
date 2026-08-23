@@ -786,6 +786,7 @@ test('a signal callback queued on an old socket no-ops after chain reset and rep
     activeJoin: { roomId: 'office', passcode: '' },
     guestMode: false,
     ws: null,
+    roomRecordingSocketConfirmed: false,
     signalChain: oldGate,
     pc: oldPeer,
     accessState: { textContent: '' },
@@ -794,6 +795,7 @@ test('a signal callback queued on an old socket no-ops after chain reset and rep
     ensureEndpointId: () => 'endpoint-test',
     console: { warn() {} },
     setLog() {},
+    syncRoomTranscriptionPill() {},
     handleSignal: async () => { handled += 1 },
     handleRoomWebSocketClose() {},
     refreshAuthState() {}
@@ -1069,6 +1071,600 @@ test('local-track attachment uses the captured peer and stops after context loss
   assert.deepEqual(firstSender.calls, [videoTrack])
   assert.equal(transceivers[0].direction, 'recvonly')
   assert.deepEqual(secondSender.calls, [])
+})
+
+test('canonical participant playback renders muted first, then keeps A/V unified while clones stay video-only', async () => {
+  class MediaStream {
+    constructor(tracks = []) { this.tracks = tracks.slice() }
+    getTracks() { return this.tracks.slice() }
+    getAudioTracks() { return this.tracks.filter(track => track.kind === 'audio') }
+    getVideoTracks() { return this.tracks.filter(track => track.kind === 'video') }
+  }
+  const people = ['Caitlyn', 'Tyler', 'Erick']
+  const videos = new Map()
+  const monitors = new Map()
+  const remoteVideoTracksByParticipant = new Map()
+  const remoteStreamsByParticipant = new Map()
+  const pendingRemotePlaybackElements = new Set()
+  const remoteAudiblePlaybackReceipts = new Map()
+  const removedAudio = []
+  const playbackStates = []
+  let attachmentRevision = 0
+  const track = (id, kind) => ({ id, kind, readyState: 'live' })
+  for (const name of people) {
+    const videoTrack = track(`${name}-video`, 'video')
+    const audioTrack = track(`${name}-audio`, 'audio')
+    const video = {
+      tagName: 'VIDEO',
+      dataset: { participant: name, remotePlayback: 'muted' },
+      srcObject: new MediaStream([videoTrack]),
+      muted: true,
+      defaultMuted: true,
+      volume: 0,
+      isConnected: true,
+      play() {
+        playbackStates.push({ name, muted: this.muted, tracks: this.srcObject?.getTracks?.().map(candidate => candidate.id) || [] })
+        return Promise.resolve()
+      }
+    }
+    const oldAudio = {
+      isConnected: true,
+      srcObject: new MediaStream([audioTrack]),
+      pause() {},
+      remove() { this.isConnected = false; removedAudio.push(name) }
+    }
+    videos.set(name, video)
+    remoteVideoTracksByParticipant.set(name, videoTrack)
+    const monitor = {
+      name,
+      track: audioTrack,
+      audio: oldAudio,
+      ownsAudioElement: true,
+      stream: new MediaStream([audioTrack])
+    }
+    monitors.set(name, monitor)
+  }
+
+  const harness = compileFunctions([
+    'liveTrack',
+    'mediaStreamTrackSignature',
+    'syncedRemotePlaybackStream',
+    'remoteAVPlaybackPath',
+    'configureRemotePlaybackElement',
+    'removeOwnedAudioElement',
+    'clearRemoteAudiblePlaybackReceipt',
+    'remoteAudiblePlaybackReceiptIsCurrent',
+    'publishRemoteAudiblePlaybackBlocked',
+    'attemptRemoteAudiblePlayback',
+    'startRemoteCanonicalAVPlayback',
+    'configureRemoteCanonicalAVPlayback',
+    'shouldUseSyncedRemoteAudioPlayback',
+    'promoteAudioMonitorToVideo',
+    'videoPlaybackStreamForElement'
+  ], {
+    MediaStream,
+    remoteVideoElementForParticipant: name => videos.get(name) || null,
+    remoteVideoTracksByParticipant,
+    remoteStreamsByParticipant,
+    pendingRemotePlaybackElements,
+    remoteAudiblePlaybackReceipts,
+    audioMonitors: monitors,
+    remoteAudiblePlaybackGeneration: 0,
+    setVideoElementStream(element, stream) {
+      element.srcObject = stream
+      element.dataset.videoAttachmentRevision = String(++attachmentRevision)
+    },
+    playRemoteMedia() {},
+    syncRoomAudioPlaybackState() {},
+    notifyRoomAudioBlocked() {},
+    roomAudioUnlockNoticeIntervalMs: 8000,
+    console: { warn() {} },
+    safariBrowser: false,
+    window: { requestAnimationFrame(callback) { callback() } }
+  })
+
+  assert.equal(harness.shouldUseSyncedRemoteAudioPlayback(), true)
+  for (const name of people) {
+    const monitor = monitors.get(name)
+    assert.equal(harness.promoteAudioMonitorToVideo(name, monitor, name), true)
+    const video = videos.get(name)
+    assert.equal(video.muted, true, `${name} must establish visual playback while muted`)
+    assert.equal(video.dataset.remotePlayback, 'synced', name)
+    assert.deepEqual(video.srcObject.getTracks().map(candidate => candidate.id).sort(), [`${name}-audio`, `${name}-video`], name)
+    assert.equal(harness.remoteAVPlaybackPath(monitor, video), 'unified', name)
+    assert.equal(remoteStreamsByParticipant.get(name), video.srcObject, name)
+    await waitForCondition(() => video.dataset.remoteAudibleState === 'audible', `${name} audible promotion`)
+    assert.equal(video.muted, false, name)
+    assert.equal(video.defaultMuted, false, name)
+    assert.equal(video.volume, 1, name)
+
+    // PiP, board, stage, and presenter surfaces receive the same participant
+    // stream but never a second audible/decode path.
+    const pipVideo = { tagName: 'VIDEO', dataset: {} }
+    const pipStream = harness.videoPlaybackStreamForElement(pipVideo, video.srcObject)
+    assert.deepEqual(pipStream.getTracks().map(candidate => candidate.id), [`${name}-video`], name)
+
+    // SPA navigation may move or hide surfaces, but re-promoting an unchanged
+    // canonical element is a no-op rather than a detach/re-attach.
+    const stableStream = video.srcObject
+    assert.equal(harness.promoteAudioMonitorToVideo(name, monitor, name), false)
+    assert.equal(video.srcObject, stableStream, name)
+  }
+  assert.deepEqual(removedAudio.sort(), people.slice().sort())
+  assert.ok(playbackStates.some(state => state.muted && state.tracks.some(id => id.endsWith('-video'))), 'a visual-first muted play must happen')
+})
+
+test('WebKit keeps muted video rendering and only a trusted gesture promotes the exact current owner', async () => {
+  class MediaStream {
+    constructor(tracks = []) { this.tracks = tracks.slice() }
+    getTracks() { return this.tracks.slice() }
+    getAudioTracks() { return this.tracks.filter(track => track.kind === 'audio') }
+    getVideoTracks() { return this.tracks.filter(track => track.kind === 'video') }
+  }
+  const deferred = () => {
+    let resolve
+    let reject
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+    return { promise, resolve, reject }
+  }
+  const videoTrack = { id: 'Tim-video', kind: 'video', readyState: 'live' }
+  const oldAudioTrack = { id: 'Tim-audio-old', kind: 'audio', readyState: 'live' }
+  const newAudioTrack = { id: 'Tim-audio-new', kind: 'audio', readyState: 'live' }
+  const attempts = []
+  const video = {
+    tagName: 'VIDEO',
+    dataset: { participant: 'Tim', remotePlayback: 'muted' },
+    srcObject: new MediaStream([videoTrack]),
+    muted: true,
+    defaultMuted: true,
+    volume: 0,
+    isConnected: true,
+    play() {
+      const attempt = deferred()
+      attempts.push({ ...attempt, muted: this.muted, tracks: this.srcObject.getTracks().map(track => track.id) })
+      return attempt.promise
+    }
+  }
+  const oldHiddenAudio = {
+    isConnected: true,
+    srcObject: new MediaStream([oldAudioTrack]),
+    pause() {},
+    remove() { this.isConnected = false }
+  }
+  const audioMonitors = new Map()
+  const pendingRemotePlaybackElements = new Set()
+  const remoteAudiblePlaybackReceipts = new Map()
+  const remoteVideoTracksByParticipant = new Map([['Tim', videoTrack]])
+  const remoteStreamsByParticipant = new Map()
+  let attachmentRevision = 0
+  const notifications = []
+  const oldMonitor = {
+    name: 'Tim',
+    track: oldAudioTrack,
+    audio: oldHiddenAudio,
+    ownsAudioElement: true,
+    stream: oldHiddenAudio.srcObject,
+    playbackGeneration: 1
+  }
+  audioMonitors.set('stable-mid', oldMonitor)
+
+  const harness = compileFunctions([
+    'liveTrack',
+    'mediaStreamTrackSignature',
+    'syncedRemotePlaybackStream',
+    'remoteAVPlaybackPath',
+    'removeOwnedAudioElement',
+    'clearRemoteAudiblePlaybackReceipt',
+    'remoteAudiblePlaybackReceiptIsCurrent',
+    'publishRemoteAudiblePlaybackBlocked',
+    'attemptRemoteAudiblePlayback',
+    'startRemoteCanonicalAVPlayback',
+    'configureRemoteCanonicalAVPlayback',
+    'shouldUseSyncedRemoteAudioPlayback',
+    'promoteAudioMonitorToVideo',
+    'remotePlaybackNeedsGesture',
+    'remotePlaybackPendingCount',
+    'roomAudioPlaybackBlocked',
+    'unlockRoomAudioPlayback',
+    'unlockRoomAudioPlaybackFromGesture'
+  ], {
+    MediaStream,
+    audioMonitors,
+    pendingRemotePlaybackElements,
+    remoteAudiblePlaybackReceipts,
+    remoteVideoTracksByParticipant,
+    remoteStreamsByParticipant,
+    remoteAudiblePlaybackGeneration: 1,
+    remoteVideoElementForParticipant: name => name === 'Tim' ? video : null,
+    setVideoElementStream(element, stream) {
+      element.srcObject = stream
+      element.dataset.videoAttachmentRevision = String(++attachmentRevision)
+    },
+    syncRoomAudioPlaybackState() {},
+    notifyRoomAudioBlocked() { notifications.push('blocked') },
+    ensureAudioContext() {},
+    audioContext: null,
+    roomAudioUnlockNoticeIntervalMs: 8000,
+    console: { warn() {} },
+    safariBrowser: true,
+    window: {
+      requestAnimationFrame(callback) { callback() },
+      setTimeout(callback) { callback() }
+    }
+  })
+
+  assert.equal(harness.promoteAudioMonitorToVideo('stable-mid', oldMonitor, 'Tim'), true)
+  assert.equal(oldHiddenAudio.isConnected, false, 'audio-first fallback is retired before canonical transfer')
+  assert.equal(attempts[0].muted, true, 'combined A/V starts muted so video is autoplay-safe')
+  attempts[0].resolve()
+  await waitForCondition(() => video.dataset.remoteAudibleState === 'blocked', 'gesture-gated WebKit audio')
+  assert.equal(video.muted, true)
+  assert.equal(video.defaultMuted, true)
+  assert.equal(video.volume, 0)
+  assert.equal(video.srcObject.getVideoTracks()[0], videoTrack)
+  assert.deepEqual(video.srcObject.getAudioTracks(), [oldAudioTrack])
+  assert.equal(pendingRemotePlaybackElements.has(video), true)
+  assert.equal(attempts.length, 1, 'WebKit never probes audible autoplay after muted visual startup')
+
+  harness.unlockRoomAudioPlaybackFromGesture({ isTrusted: false })
+  assert.equal(attempts.length, 1, 'synthetic gestures cannot promote room audio')
+  harness.unlockRoomAudioPlaybackFromGesture({ isTrusted: true })
+  assert.equal(attempts.length, 2, 'trusted gesture retries the exact blocked owner')
+  assert.equal(attempts[1].muted, false)
+  const staleReceipt = remoteAudiblePlaybackReceipts.get(video)
+
+  // Stable-MID replacement lands while the old gesture attempt is pending.
+  const newMonitor = {
+    name: 'Tim',
+    track: newAudioTrack,
+    audio: null,
+    ownsAudioElement: false,
+    stream: new MediaStream([newAudioTrack]),
+    playbackGeneration: 20
+  }
+  audioMonitors.set('stable-mid', newMonitor)
+  const replacementStream = harness.syncedRemotePlaybackStream(video.srcObject, newAudioTrack, videoTrack)
+  assert.deepEqual(replacementStream.getAudioTracks(), [newAudioTrack], 'replacement cannot carry the old audio track forward')
+  harness.configureRemoteCanonicalAVPlayback('stable-mid', newMonitor, video, replacementStream, 'Tim')
+  assert.equal(attempts[2].muted, true)
+  attempts[1].reject(new Error('stale gesture rejection'))
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.notEqual(remoteAudiblePlaybackReceipts.get(video), staleReceipt)
+  assert.equal(video.muted, true, 'stale rejection cannot change replacement state')
+  assert.deepEqual(video.srcObject.getAudioTracks(), [newAudioTrack])
+  attempts[2].resolve()
+  await waitForCondition(() => video.dataset.remoteAudibleState === 'blocked', 'replacement gesture gate')
+  harness.unlockRoomAudioPlaybackFromGesture({ isTrusted: true })
+  assert.equal(attempts[3].muted, false)
+  attempts[3].resolve()
+  await waitForCondition(() => video.dataset.remoteAudibleState === 'audible', 'replacement audible owner')
+  assert.equal(video.muted, false)
+  assert.equal(pendingRemotePlaybackElements.has(video), false)
+  assert.equal(remoteAudiblePlaybackReceipts.size, 1)
+  assert.ok(notifications.length >= 1)
+})
+
+test('late ended events from a replaced stable-MID audio track cannot tear down the new playback owner', () => {
+  class MediaStream {
+    constructor(tracks = []) { this.tracks = tracks.slice() }
+    getTracks() { return this.tracks.slice() }
+    getAudioTracks() { return this.tracks.filter(track => track.kind === 'audio') }
+    getVideoTracks() { return this.tracks.filter(track => track.kind === 'video') }
+  }
+  const handlers = new Map()
+  const track = id => ({
+    id,
+    kind: 'audio',
+    readyState: 'live',
+    addEventListener(type, callback) { handlers.set(`${id}:${type}`, callback) }
+  })
+  const videoTrack = { id: 'Tyler-video', kind: 'video', readyState: 'live' }
+  const video = {
+    tagName: 'VIDEO',
+    dataset: { participant: 'Tyler', remotePlayback: 'muted' },
+    srcObject: new MediaStream([videoTrack]),
+    muted: true,
+    defaultMuted: true,
+    volume: 0
+  }
+  const audioMonitors = new Map()
+  const pendingRemotePlaybackElements = new Set()
+  const removed = []
+  const createRemoteAudioElement = (stream, name) => ({
+    dataset: { participant: name },
+    srcObject: stream,
+    isConnected: true,
+    pause() {},
+    remove() { this.isConnected = false; removed.push(stream.getAudioTracks()[0]?.id || '') }
+  })
+  const harness = compileFunctions([
+    'liveTrack',
+    'syncedRemotePlaybackStream',
+    'configureRemotePlaybackElement',
+    'detachAudioMonitor',
+    'attachAudioMonitor'
+  ], {
+    MediaStream,
+    audioMonitors,
+    remoteVideoTracksByParticipant: new Map([['Tyler', videoTrack]]),
+    pendingRemotePlaybackElements,
+    remoteAudiblePlaybackGeneration: 0,
+    ensureAudioContext: () => null,
+    shouldUseElementRemoteAudioPlayback: () => true,
+    shouldUseSyncedRemoteAudioPlayback: () => true,
+    configureRemoteCanonicalAVPlayback(key, monitor, element, stream) {
+      element.srcObject = stream
+      element.dataset.remotePlayback = 'synced'
+      monitor.audio = element
+      monitor.ownsAudioElement = false
+    },
+    createRemoteAudioElement,
+    startAudioLevelLoop() {},
+    setVideoElementStream(element, stream) { element.srcObject = stream },
+    playRemoteMedia() {}
+  })
+
+  const oldUnified = track('old-unified')
+  const newUnified = track('new-unified')
+  harness.attachAudioMonitor('mid-audio', 'Tyler', oldUnified, { play: true })
+  harness.attachAudioMonitor('mid-audio', 'Tyler', newUnified, {
+    play: true,
+    playbackStream: new MediaStream([videoTrack, newUnified]),
+    playbackElement: video
+  })
+  assert.equal(audioMonitors.get('mid-audio')?.track, newUnified)
+  assert.equal(audioMonitors.get('mid-audio')?.audio, video)
+  handlers.get('old-unified:ended')()
+  assert.equal(audioMonitors.get('mid-audio')?.track, newUnified)
+  assert.equal(audioMonitors.get('mid-audio')?.audio, video)
+  assert.deepEqual(video.srcObject.getTracks().map(candidate => candidate.id).sort(), ['Tyler-video', 'new-unified'])
+
+  const oldFallback = track('old-fallback')
+  const newFallback = track('new-fallback')
+  harness.attachAudioMonitor('mid-fallback', 'Erick', oldFallback, { play: true })
+  harness.attachAudioMonitor('mid-fallback', 'Erick', newFallback, { play: true })
+  const fallbackElement = audioMonitors.get('mid-fallback')?.audio
+  handlers.get('old-fallback:ended')()
+  assert.equal(audioMonitors.get('mid-fallback')?.track, newFallback)
+  assert.equal(audioMonitors.get('mid-fallback')?.audio, fallbackElement)
+  assert.ok(fallbackElement.isConnected)
+  assert.deepEqual(removed.sort(), ['old-fallback', 'old-unified'])
+})
+
+test('pruning a superseded audio alias cannot mute the newer canonical participant stream', () => {
+  class MediaStream {
+    constructor(tracks = []) { this.tracks = tracks.slice() }
+    getTracks() { return this.tracks.slice() }
+    getAudioTracks() { return this.tracks.filter(track => track.kind === 'audio') }
+    getVideoTracks() { return this.tracks.filter(track => track.kind === 'video') }
+  }
+  const oldAudio = { id: 'old-audio', kind: 'audio', readyState: 'live' }
+  const newAudio = { id: 'new-audio', kind: 'audio', readyState: 'live' }
+  const videoTrack = { id: 'Tyler-video', kind: 'video', readyState: 'live' }
+  const video = {
+    dataset: { participant: 'Tyler', remotePlayback: 'synced' },
+    srcObject: new MediaStream([videoTrack, newAudio]),
+    muted: false,
+    defaultMuted: false,
+    volume: 1
+  }
+  const pendingRemotePlaybackElements = new Set([video])
+  const audioMonitors = new Map([
+    ['old-alias', {
+      name: 'Tyler',
+      track: oldAudio,
+      audio: video,
+      ownsAudioElement: false,
+      createdAt: 1
+    }],
+    ['new-alias', {
+      name: 'Tyler',
+      track: newAudio,
+      audio: video,
+      ownsAudioElement: false,
+      createdAt: 2
+    }]
+  ])
+  const harness = compileFunctions([
+    'liveTrack',
+    'remoteAudioMonitorName',
+    'audioMonitorPreferenceScore',
+    'configureRemotePlaybackElement',
+    'detachAudioMonitor',
+    'pruneDuplicateAudioMonitorsByName'
+  ], {
+    MediaStream,
+    audioMonitors,
+    pendingRemotePlaybackElements,
+    setVideoElementStream(element, stream) { element.srcObject = stream },
+    playRemoteMedia() {},
+    updateHearthParticipants() {}
+  })
+
+  assert.equal(harness.pruneDuplicateAudioMonitorsByName('Tyler'), true)
+  assert.equal(audioMonitors.has('old-alias'), false)
+  assert.equal(audioMonitors.get('new-alias')?.track, newAudio)
+  assert.equal(video.muted, false)
+  assert.equal(video.defaultMuted, false)
+  assert.equal(video.volume, 1)
+  assert.equal(video.dataset.remotePlayback, 'synced')
+  assert.deepEqual(video.srcObject.getTracks(), [videoTrack, newAudio])
+  assert.equal(pendingRemotePlaybackElements.has(video), true, 'old aliases cannot clear the current autoplay warning')
+})
+
+test('only the newest play attempt may publish autoplay state for a reused canonical element', async () => {
+  const pendingRemotePlaybackElements = new Set()
+  const deferred = () => {
+    let resolve
+    let reject
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no })
+    return { promise, resolve, reject }
+  }
+  const attempts = []
+  const notifications = []
+  const syncs = []
+  const element = {
+    tagName: 'VIDEO',
+    dataset: { remotePlayback: 'synced' },
+    muted: false,
+    defaultMuted: false,
+    volume: 1,
+    isConnected: true,
+    srcObject: {},
+    play() {
+      const attempt = deferred()
+      attempts.push(attempt)
+      return attempt.promise
+    }
+  }
+  const { playRemoteMedia } = compileFunctions(['playRemoteMedia'], {
+    pendingRemotePlaybackElements,
+    remoteAudiblePlaybackReceipts: new Map(),
+    startRemoteCanonicalAVPlayback() {},
+    syncRoomAudioPlaybackState: () => syncs.push('sync'),
+    remotePlaybackNeedsGesture: () => true,
+    roomAudioUnlockNoticeIntervalMs: 8000,
+    notifyRoomAudioBlocked: () => notifications.push('blocked'),
+    console: { warn() {} }
+  })
+
+  playRemoteMedia(element)
+  playRemoteMedia(element)
+  attempts[1].reject(new Error('new playback needs a gesture'))
+  await waitForCondition(() => pendingRemotePlaybackElements.has(element), 'current autoplay failure')
+  assert.equal(pendingRemotePlaybackElements.has(element), true)
+  attempts[0].resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(pendingRemotePlaybackElements.has(element), true, 'stale success must not hide a current autoplay failure')
+
+  playRemoteMedia(element)
+  attempts[2].resolve()
+  await waitForCondition(() => !pendingRemotePlaybackElements.has(element), 'current autoplay success')
+  assert.equal(pendingRemotePlaybackElements.has(element), false)
+  playRemoteMedia(element)
+  playRemoteMedia(element)
+  attempts[4].resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+  attempts[3].reject(new Error('late stale failure'))
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(pendingRemotePlaybackElements.has(element), false, 'stale failure must not resurrect a resolved autoplay warning')
+  assert.deepEqual(notifications, ['blocked'])
+  assert.equal(syncs.length, 2)
+})
+
+test('delayed canonical playback repairs stay inside the current autoplay attempt fence', () => {
+  const frames = []
+  let fencedPlays = 0
+  let rawPlays = 0
+  const { ensureVideoElementPlayback } = compileFunctions(['ensureVideoElementPlayback'], {
+    window: {
+      requestAnimationFrame(callback) { frames.push(callback) },
+      setTimeout(callback) { frames.push(callback) }
+    },
+    playRemoteMedia() { fencedPlays += 1 },
+    remoteAudiblePlaybackReceipts: new Map(),
+    startRemoteCanonicalAVPlayback() {}
+  })
+  const canonical = {
+    dataset: { remotePlayback: 'synced' },
+    srcObject: {},
+    hidden: false,
+    muted: false,
+    isConnected: true,
+    play() { rawPlays += 1; return Promise.resolve() }
+  }
+  const clone = {
+    dataset: {},
+    srcObject: {},
+    hidden: false,
+    muted: true,
+    isConnected: true,
+    play() { rawPlays += 1; return Promise.resolve() }
+  }
+
+  ensureVideoElementPlayback(canonical)
+  ensureVideoElementPlayback(clone)
+  assert.equal(frames.length, 2)
+  frames.shift()()
+  frames.shift()()
+  assert.equal(fencedPlays, 1)
+  assert.equal(rawPlays, 1)
+})
+
+test('remote A/V telemetry reports per-participant estimated playout skew', () => {
+  const timings = new Map([
+    ['Caitlyn', {
+      audio: { estimatedPlayoutTimestamp: 1000, jitterBufferMs: 42 },
+      video: { estimatedPlayoutTimestamp: 1065, jitterBufferMs: 58 }
+    }],
+    ['Tyler', {
+      audio: { estimatedPlayoutTimestamp: 2000, jitterBufferMs: 20 },
+      video: { estimatedPlayoutTimestamp: 2230, jitterBufferMs: 90 }
+    }],
+    ['Erick', {
+      audio: { estimatedPlayoutTimestamp: 0, jitterBufferMs: 30 },
+      video: { estimatedPlayoutTimestamp: 0, jitterBufferMs: 40 }
+    }]
+  ])
+  const { remoteAVSyncTimingSnapshot } = compileFunctions(['remoteAVSyncTimingSnapshot'], {
+    remoteAVSyncSkewWarningMs: 160,
+    remoteAVSyncTelemetryParticipantCap: 16,
+    remoteAVPlaybackPath: () => 'unified',
+    audioMonitors: new Map(),
+    remoteAudioMonitorName: () => ''
+  })
+  const snapshot = remoteAVSyncTimingSnapshot(timings)
+  assert.equal(snapshot.estimatedParticipants, 2)
+  assert.equal(snapshot.maxEstimatedPlayoutSkewMs, 230)
+  assert.deepEqual(snapshot.warningParticipants, ['Tyler'])
+  assert.equal(snapshot.basis, 'estimated-playout-timestamp-same-getstats-report')
+  assert.equal(snapshot.proof, 'estimate-only')
+  assert.equal(snapshot.disposition, 'warning')
+  assert.equal(snapshot.participantCap, 16)
+  assert.equal(snapshot.totalParticipants, 3)
+  assert.equal(snapshot.sampledParticipants, 3)
+  assert.equal(snapshot.omittedParticipants, 0)
+  assert.equal(snapshot.truncated, false)
+  assert.equal(snapshot.warningParticipantCount, 1)
+  assert.equal(snapshot.warningParticipantsTruncated, false)
+  assert.deepEqual(snapshot.samples.map(sample => sample.playbackPath), ['unified', 'unified', 'unified'])
+  assert.equal(snapshot.samples.find(sample => sample.participant === 'Caitlyn').jitterBufferDeltaMs, 16)
+})
+
+test('remote A/V telemetry cardinality is fixed, deterministic, and honest above room capacity', () => {
+  const timings = new Map()
+  for (let index = 0; index < 100; index += 1) {
+    const participant = `Person ${String(index).padStart(3, '0')}`
+    timings.set(participant, {
+      audio: { estimatedPlayoutTimestamp: 1000, jitterBufferMs: index },
+      video: { estimatedPlayoutTimestamp: 1000 + index * 10, jitterBufferMs: 100 - index }
+    })
+  }
+  const compile = entries => compileFunctions(['remoteAVSyncTimingSnapshot'], {
+    remoteAVSyncSkewWarningMs: 160,
+    remoteAVSyncTelemetryParticipantCap: 16,
+    remoteAVPlaybackPath: () => 'unified',
+    audioMonitors: new Map(),
+    remoteAudioMonitorName: () => ''
+  }).remoteAVSyncTimingSnapshot(entries)
+  const snapshot = compile(timings)
+  const reverseSnapshot = compile(new Map(Array.from(timings.entries()).reverse()))
+  assert.equal(snapshot.proof, 'estimate-only')
+  assert.equal(snapshot.participantCap, 16)
+  assert.equal(snapshot.totalParticipants, 100)
+  assert.equal(snapshot.sampledParticipants, 16)
+  assert.equal(snapshot.omittedParticipants, 84)
+  assert.equal(snapshot.truncated, true)
+  assert.equal(snapshot.estimatedParticipants, 100)
+  assert.equal(snapshot.warningParticipantCount, 83)
+  assert.equal(snapshot.warningParticipants.length, 16)
+  assert.equal(snapshot.warningParticipantsTruncated, true)
+  assert.deepEqual(snapshot.samples.map(sample => sample.participant), reverseSnapshot.samples.map(sample => sample.participant))
+  assert.deepEqual(snapshot.samples.map(sample => sample.estimatedPlayoutSkewMs), [990, 980, 970, 960, 950, 940, 930, 920, 910, 900, 890, 880, 870, 860, 850, 840])
 })
 
 test('stable media reconciliation does not reparent unchanged PiP, board, or ordered tiles', () => {

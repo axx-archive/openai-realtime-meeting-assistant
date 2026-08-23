@@ -200,6 +200,41 @@ func deckPPTXRunPropertiesForText(t *testing.T, slide, value string) string {
 	return slide[runStart : runStart+runEndOffset+len(`</a:rPr>`)]
 }
 
+func TestDeckPPTXPictureHonorsNativeFocalPoint(t *testing.T) {
+	left, top := .25, .75
+	element := deckElement{
+		ID: "hero", Type: "image", X: 0, Y: 0, Width: 400, Height: 400, Opacity: 1,
+		Fit: "cover", Crop: "safe_area", FocalX: &left, FocalY: &top,
+	}
+	wide := deckPPTXPictureXML(1, element, deckPPTXMedia{Width: 800, Height: 400}, "rId1")
+	if !strings.Contains(wide, `<a:srcRect l="12500" r="37500"/>`) {
+		t.Fatalf("wide focal crop was recentered: %s", wide)
+	}
+	tall := deckPPTXPictureXML(1, element, deckPPTXMedia{Width: 400, Height: 800}, "rId1")
+	if !strings.Contains(tall, `<a:srcRect t="37500" b="12500"/>`) {
+		t.Fatalf("tall focal crop was recentered: %s", tall)
+	}
+	for _, test := range []struct {
+		focal float64
+		want  string
+	}{{0, `l="0" r="50000"`}, {.25, `l="12500" r="37500"`}, {.5, `l="25000" r="25000"`}, {.75, `l="37500" r="12500"`}, {1, `l="50000" r="0"`}} {
+		element.FocalX = &test.focal
+		got := deckPPTXPictureXML(1, element, deckPPTXMedia{Width: 800, Height: 400}, "rId1")
+		if !strings.Contains(got, test.want) {
+			t.Fatalf("CSS focal %.2f did not map to proportional cover crop %q: %s", test.focal, test.want, got)
+		}
+	}
+	element.FocalX = &left
+
+	element.Fit = "contain"
+	contained := deckPPTXPictureXML(1, element, deckPPTXMedia{Width: 800, Height: 400}, "rId1")
+	// A 2:1 image inside a square becomes 400x200; focalY=.75 places it 150px
+	// below the top, which is 952500 EMU at the deck's 1920px scale.
+	if !strings.Contains(contained, `<a:off x="0" y="952500"/><a:ext cx="2540000" cy="1270000"/>`) {
+		t.Fatalf("contained focal position was recentered: %s", contained)
+	}
+}
+
 func TestCompileDeckDocumentPPTXPreservesCanonicalMixedRichTextRunsAndHierarchy(t *testing.T) {
 	richText := `OBSERVED <span style="color:#C79B4D;display:block;font-family:Georgia,serif;font-size:75px;font-weight:700;letter-spacing:.04em;line-height:.92;margin:9px 0">6.1M</span><span style="color:#B84F32"><strong>You</strong><em>Tube</em></span><br><span style="text-decoration:underline">trusted</span> <span style="text-decoration:line-through">old</span> H<sub>2</sub>O<sup>+</sup>`
 	element := deckElement{

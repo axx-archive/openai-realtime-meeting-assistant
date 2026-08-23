@@ -103,7 +103,7 @@ test('Canvas keeps live Scout singular and separates composer dictation', () => 
   assert.equal(
     eas.build?.production?.env?.EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED,
     'true',
-    'Build 74 production explicitly enables the private Realtime surface',
+    'Build 75 production explicitly enables the private Realtime surface',
   );
 });
 

@@ -17,7 +17,7 @@ export type RootStackParamList = {
   Deck: { segment?: DeckSegment } | undefined;
   Login: undefined;
   OSWeb: { path?: string; title?: string } | undefined;
-  DeckViewer: { artifactId: string; title?: string; desktopEditable: boolean };
+  DeckViewer: { artifactId: string; artifactVersion?: number; artifactDigest?: string; title?: string; desktopEditable: boolean };
   Room: { roomId: string; title: string };
   CreateRoom: { displayMode?: 'sheet' | 'workstation' } | undefined;
   NewConversation: { displayMode?: 'sheet' | 'workstation' } | undefined;

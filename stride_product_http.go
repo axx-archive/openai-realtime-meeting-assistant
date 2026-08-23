@@ -667,13 +667,53 @@ func strideProductApprove(w http.ResponseWriter, r *http.Request, user *userAcco
 	thread, _, threadErr := kanbanApp.scoutChatThreadByID(user.Email, record.DestinationThreadID)
 	postAudience, postACLVersion, postAuthorityErr := strideProductProjectDestinationAuthority(thread)
 	if !record.CompletionPosted && threadErr == nil && postAuthorityErr == nil && record.DestinationAudience != nil && sameAudience(*record.DestinationAudience, postAudience) && record.DestinationACLVersion == postACLVersion {
+		resultArtifact, resultErr := ensureSTRIDEProductConversationResult(kanbanApp, thread, user, record)
+		if resultErr != nil {
+			writeSTRIDEProductError(w, resultErr)
+			return
+		}
+		resultVersion := artifactVersion(resultArtifact)
+		resultDigest := strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(resultArtifact)))
+		resultType := artifactType(resultArtifact)
+		if record.ResultArtifactID != resultArtifact.ID || record.ResultArtifactVersion != resultVersion || !strings.EqualFold(record.ResultArtifactDigest, resultDigest) || record.ResultArtifactType != resultType {
+			bindErr := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeWork, func(ctx STRIDEProductContext) error {
+				return ctx.withWorkAuthority(principal, "result_artifact_bind", record, func() error {
+					ctx.Product.mu.Lock()
+					defer ctx.Product.mu.Unlock()
+					current, found := ctx.Product.work[id]
+					if !found || current.Revision != record.Revision || current.Status != "completed" || (current.ResultArtifactID != "" && (current.ResultArtifactID != resultArtifact.ID || current.ResultArtifactVersion != resultVersion || !strings.EqualFold(current.ResultArtifactDigest, resultDigest) || current.ResultArtifactType != resultType)) {
+						return ErrSTRIDEProductConflict
+					}
+					current.ResultArtifactID = resultArtifact.ID
+					current.ResultArtifactType = resultType
+					current.ResultArtifactVersion = resultVersion
+					current.ResultArtifactDigest = resultDigest
+					if !strideWorkContainsString(current.Lifecycle, "conversation_result_bound") {
+						current.Lifecycle = append(current.Lifecycle, "conversation_result_bound")
+					}
+					ctx.Product.work[id] = current
+					record = current
+					return nil
+				})
+			})
+			if bindErr == nil {
+				bindErr = runtime.Save()
+			}
+			if bindErr != nil {
+				writeSTRIDEProductError(w, bindErr)
+				return
+			}
+		}
 		message := scoutChatMessageRecord{
 			ID: "stride-work-completion-" + temporalDigest(record.ID + "\x00" + record.RunID)[:20], Kind: "work_result", Role: "scout", AuthorName: "Scout",
 			Text: fmt.Sprintf("%s is complete. %s\n\nArtifact: %s", record.Title, record.CompletionSummary, record.ArtifactHref), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Work: &scoutChatWorkRecordRef{
-				ID: record.ID, RunID: record.RunID, Title: record.Title, Status: record.Status, WorkerName: "Scout",
+				ID: record.ID, RunID: record.RunID, RootRunID: record.RunID, Title: record.Title, Status: record.Status, WorkerName: "Scout",
 				CurrentStage: "Report ready", ProgressPercent: 100, Summary: record.CompletionSummary,
 				ArtifactID: record.ArtifactID, ArtifactHref: record.ArtifactHref, EvidenceHref: record.BrainHref,
+				ResultArtifactID: record.ResultArtifactID, ResultArtifactType: record.ResultArtifactType,
+				ResultArtifactVersion: record.ResultArtifactVersion, ResultArtifactDigest: record.ResultArtifactDigest,
+				ResultTitle: record.Title, OutputFamily: "Document",
 				ProviderExecutionFenced: record.ProviderExecutionFenced,
 			},
 		}
@@ -713,6 +753,30 @@ func strideProductApprove(w http.ResponseWriter, r *http.Request, user *userAcco
 		}
 	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "suggestion": record, "providerCalls": 0, "inputTokens": 0, "outputTokens": 0})
+}
+
+func ensureSTRIDEProductConversationResult(app *kanbanBoardApp, thread scoutChatThreadRecord, user *userAccount, record STRIDEProductWorkRecord) (meetingMemoryEntry, error) {
+	if app == nil || user == nil || record.Status != "completed" || strings.TrimSpace(record.RunID) == "" || strings.TrimSpace(thread.ID) == "" {
+		return meetingMemoryEntry{}, ErrSTRIDEProductInvalid
+	}
+	resultID := "stride-work-result-" + temporalDigest(record.ID + "\x00" + record.RunID)[:24]
+	body := strings.TrimSpace(fmt.Sprintf("# %s\n\n%s\n\n## Approved outcome\n\n%s\n\n## Verified source\n\n%s", record.Title, record.CompletionSummary, record.Outcome, record.SourceSnippet))
+	metadata := map[string]string{
+		"type": artifactTypeMarkdown, "source": "stride_product_work", "status": "complete", "threadStatus": "complete",
+		"title": strings.TrimSpace(record.Title), "originSurface": "chat:" + thread.ID, "requestedBy": normalizeAccountEmail(user.Email),
+		"threadId": record.RunID, "sourceRunId": record.RunID, "sourceArtifactId": record.ArtifactID, "outputFamily": "Document",
+	}
+	artifact, _, _, err := app.createOSArtifactWithIDAndMetadataAcknowledged(resultID, "research", record.Title, body, user.Name, metadata)
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	if artifact.ID != resultID || artifactType(artifact) != artifactTypeMarkdown || artifact.Metadata["source"] != "stride_product_work" ||
+		artifact.Metadata["sourceRunId"] != record.RunID || artifact.Metadata["sourceArtifactId"] != record.ArtifactID ||
+		!oneOf(strings.ToLower(strings.TrimSpace(artifact.Metadata["threadStatus"])), codexJobStatusComplete, artifactStatusApproved, artifactStatusPublished) ||
+		!scoutChatArtifactHasClosedResultEnvelope(artifact) {
+		return meetingMemoryEntry{}, ErrSTRIDEProductConflict
+	}
+	return artifact, nil
 }
 
 func strideProductReservedProjectTitle(value string) bool {

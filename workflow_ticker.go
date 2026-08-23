@@ -413,11 +413,13 @@ func (app *kanbanBoardApp) postChannelLaunchCard(channelID string, thread scoutA
 		Text:      text,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Thread: &scoutChatThreadRef{
-			ID:         thread.ID,
-			Mode:       thread.Mode,
-			Query:      firstNonEmptyString(thread.Query, thread.Artifact.Metadata["threadQuery"]),
-			Status:     "running",
-			ArtifactID: thread.Artifact.ID,
+			ID:           thread.ID,
+			Mode:         thread.Mode,
+			ProcessID:    thread.Artifact.Metadata["processId"],
+			Query:        firstNonEmptyString(thread.Query, thread.Artifact.Metadata["threadQuery"]),
+			Status:       "running",
+			ArtifactID:   thread.Artifact.ID,
+			OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(thread.Artifact), scoutChatOutputFamilyForMode(thread.Mode)),
 		},
 	}
 	if _, err := app.commitScoutChatThreadMessages(channel.OwnerEmail, channel.ID, message); err != nil {

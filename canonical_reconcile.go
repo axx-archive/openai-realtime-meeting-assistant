@@ -52,6 +52,14 @@ type CanonicalParityACLResolver interface {
 	CanReadCanonicalObject(context.Context, string, CanonicalEvent) (bool, error)
 }
 
+// canonicalParityACLSnapshotter lets a production resolver replace repeated
+// live authorization reads with one immutable, point-in-time view for a
+// reconcile pass. The returned resolver is scoped to this call only; ordinary
+// authorization continues to use the live resolver.
+type canonicalParityACLSnapshotter interface {
+	SnapshotCanonicalParityACL(context.Context, []CanonicalEvent) (CanonicalParityACLResolver, error)
+}
+
 type CanonicalReconcileOptions struct {
 	ACL              CanonicalParityACLResolver
 	TestedPrincipals []string
@@ -139,7 +147,6 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 	}
 	testedPrincipals = uniqueSortedStrings(testedPrincipals)
 
-	targetObjects := make([]CanonicalImportedObject, 0, len(events))
 	targetByKey := map[string]CanonicalEvent{}
 	targetVisibleByKey := map[string]map[string]bool{}
 	eventsByKey := map[string][]CanonicalEvent{}
@@ -171,11 +178,34 @@ func ReconcileCanonicalPlanWithOptions(ctx context.Context, source CanonicalImpo
 			continue
 		}
 		targetByKey[key] = current
+	}
+	acl := options.ACL
+	if snapshotter, ok := acl.(canonicalParityACLSnapshotter); ok {
+		currentEvents := make([]CanonicalEvent, 0, len(targetByKey))
+		for _, event := range targetByKey {
+			currentEvents = append(currentEvents, event)
+		}
+		sort.Slice(currentEvents, func(i, j int) bool {
+			if currentEvents[i].AggregateType != currentEvents[j].AggregateType {
+				return currentEvents[i].AggregateType < currentEvents[j].AggregateType
+			}
+			return currentEvents[i].AggregateID < currentEvents[j].AggregateID
+		})
+		acl, err = snapshotter.SnapshotCanonicalParityACL(ctx, currentEvents)
+		if err != nil {
+			return CanonicalReconcileReport{}, err
+		}
+		if acl == nil {
+			return CanonicalReconcileReport{}, errors.New("canonical parity ACL snapshot is unavailable")
+		}
+	}
+	targetObjects := make([]CanonicalImportedObject, 0, len(targetByKey))
+	for key, current := range targetByKey {
 		var principals []string
-		if options.ACL != nil {
+		if acl != nil {
 			targetVisibleByKey[key] = map[string]bool{}
 			for _, principal := range testedPrincipals {
-				allowed, err := options.ACL.CanReadCanonicalObject(ctx, principal, current)
+				allowed, err := acl.CanReadCanonicalObject(ctx, principal, current)
 				if err != nil {
 					return CanonicalReconcileReport{}, err
 				}

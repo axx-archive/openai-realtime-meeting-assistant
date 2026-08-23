@@ -74,33 +74,36 @@ type deckSlide struct {
 }
 
 type deckElement struct {
-	ID            string  `json:"id"`
-	Type          string  `json:"type"` // text | image | shape
-	X             float64 `json:"x"`
-	Y             float64 `json:"y"`
-	Width         float64 `json:"width"`
-	Height        float64 `json:"height"`
-	Z             int     `json:"z"`
-	Opacity       float64 `json:"opacity"`
-	Rotation      float64 `json:"rotation,omitempty"`
-	Text          string  `json:"text,omitempty"`
-	RichText      string  `json:"richText,omitempty"`
-	FontSize      float64 `json:"fontSize,omitempty"`
-	FontFamily    string  `json:"fontFamily,omitempty"`
-	FontWeight    int     `json:"fontWeight,omitempty"`
-	Color         string  `json:"color,omitempty"`
-	TextAlign     string  `json:"textAlign,omitempty"` // left | center | right
-	LineHeight    float64 `json:"lineHeight,omitempty"`
-	LetterSpacing string  `json:"letterSpacing,omitempty"`
-	Ref           string  `json:"ref,omitempty"`
-	Name          string  `json:"name,omitempty"`
-	Fit           string  `json:"fit,omitempty"`   // cover | contain
-	Shape         string  `json:"shape,omitempty"` // rectangle | ellipse
-	Fill          string  `json:"fill,omitempty"`
-	Stroke        string  `json:"stroke,omitempty"`
-	StrokeWidth   float64 `json:"strokeWidth,omitempty"`
-	Prompt        string  `json:"prompt,omitempty"`
-	GeneratedAt   string  `json:"generatedAt,omitempty"`
+	ID            string   `json:"id"`
+	Type          string   `json:"type"` // text | image | shape
+	X             float64  `json:"x"`
+	Y             float64  `json:"y"`
+	Width         float64  `json:"width"`
+	Height        float64  `json:"height"`
+	Z             int      `json:"z"`
+	Opacity       float64  `json:"opacity"`
+	Rotation      float64  `json:"rotation,omitempty"`
+	Text          string   `json:"text,omitempty"`
+	RichText      string   `json:"richText,omitempty"`
+	FontSize      float64  `json:"fontSize,omitempty"`
+	FontFamily    string   `json:"fontFamily,omitempty"`
+	FontWeight    int      `json:"fontWeight,omitempty"`
+	Color         string   `json:"color,omitempty"`
+	TextAlign     string   `json:"textAlign,omitempty"` // left | center | right
+	LineHeight    float64  `json:"lineHeight,omitempty"`
+	LetterSpacing string   `json:"letterSpacing,omitempty"`
+	Ref           string   `json:"ref,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Fit           string   `json:"fit,omitempty"`    // cover | contain
+	Crop          string   `json:"crop,omitempty"`   // closed Packaging Studio crop token
+	FocalX        *float64 `json:"focalX,omitempty"` // normalized 0..1 when crop is present
+	FocalY        *float64 `json:"focalY,omitempty"` // normalized 0..1 when crop is present
+	Shape         string   `json:"shape,omitempty"`  // rectangle | ellipse
+	Fill          string   `json:"fill,omitempty"`
+	Stroke        string   `json:"stroke,omitempty"`
+	StrokeWidth   float64  `json:"strokeWidth,omitempty"`
+	Prompt        string   `json:"prompt,omitempty"`
+	GeneratedAt   string   `json:"generatedAt,omitempty"`
 }
 
 type deckArtifactView struct {
@@ -859,6 +862,14 @@ func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{
 				if !validBlobRef(element.Ref) || len(element.Name) > 200 || (element.Fit != "cover" && element.Fit != "contain") {
 					return fmt.Errorf("image element is invalid")
 				}
+				crop := strings.TrimSpace(element.Crop)
+				if crop == "" {
+					if element.FocalX != nil || element.FocalY != nil {
+						return fmt.Errorf("image focal point requires a closed crop token")
+					}
+				} else if element.FocalX == nil || element.FocalY == nil || !deckFinite(*element.FocalX, *element.FocalY) || !oneOf(crop, "center", "top", "bottom", "left", "right", "faces", "safe_area") || *element.FocalX < 0 || *element.FocalX > 1 || *element.FocalY < 0 || *element.FocalY > 1 {
+					return fmt.Errorf("image crop/focal presentation is invalid")
+				}
 				if _, allowed := allowedImageRefs[element.Ref]; !allowed {
 					return fmt.Errorf("image element is not attached to this artifact")
 				}
@@ -1048,8 +1059,17 @@ func compileDeckDocumentHTML(deck deckDocument, title string) string {
 				}
 				builder.WriteString("</div>")
 			case "image":
+				hasLockedPresentation := strings.TrimSpace(element.Crop) != "" && element.FocalX != nil && element.FocalY != nil
 				builder.WriteString("<img class=\"el image\" data-element-id=\"")
 				builder.WriteString(html.EscapeString(element.ID))
+				if hasLockedPresentation {
+					builder.WriteString("\" data-deck-crop=\"")
+					builder.WriteString(html.EscapeString(element.Crop))
+					builder.WriteString("\" data-deck-focal-x=\"")
+					builder.WriteString(deckCSSNumber(*element.FocalX))
+					builder.WriteString("\" data-deck-focal-y=\"")
+					builder.WriteString(deckCSSNumber(*element.FocalY))
+				}
 				builder.WriteString("\" alt=\"")
 				builder.WriteString(html.EscapeString(firstNonEmptyString(element.Prompt, element.Name, "Deck image")))
 				builder.WriteString("\" src=\"/artifacts/blob?ref=")
@@ -1060,6 +1080,13 @@ func compileDeckDocumentHTML(deck deckDocument, title string) string {
 				builder.WriteString(style)
 				builder.WriteString(";object-fit:")
 				builder.WriteString(element.Fit)
+				if hasLockedPresentation {
+					builder.WriteString(";object-position:")
+					builder.WriteString(deckCSSNumber(*element.FocalX * 100))
+					builder.WriteString("% ")
+					builder.WriteString(deckCSSNumber(*element.FocalY * 100))
+					builder.WriteString("%")
+				}
 				builder.WriteString("\">")
 			case "shape":
 				builder.WriteString("<div class=\"el shape\" data-element-id=\"")
@@ -2066,6 +2093,10 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 			if strings.EqualFold(strings.TrimSpace(element.Fill), "none") {
 				element.Fill = "transparent"
 			}
+			if border := regexp.MustCompile(`^\s*((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))px\s+solid\s+(#[0-9A-Fa-f]{6})\s*$`).FindStringSubmatch(styles["border"]); len(border) == 3 {
+				element.StrokeWidth, _ = strconv.ParseFloat(border[1], 64)
+				element.Stroke = border[2]
+			}
 		case "image":
 			ref, name, ok := legacyImageSource(legacyNodeAttr(node, "src"), allowedRefs)
 			if !ok {
@@ -2087,6 +2118,21 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 			}
 			element.Ref, element.Name = ref, name
 			element.Fit = firstNonEmptyString(styles["object-fit"], "cover")
+			crop := strings.TrimSpace(legacyNodeAttr(node, "data-deck-crop"))
+			focalX := strings.TrimSpace(legacyNodeAttr(node, "data-deck-focal-x"))
+			focalY := strings.TrimSpace(legacyNodeAttr(node, "data-deck-focal-y"))
+			if crop != "" || focalX != "" || focalY != "" || strings.TrimSpace(styles["object-position"]) != "" {
+				if !oneOf(crop, "center", "top", "bottom", "left", "right", "faces", "safe_area") || focalX == "" || focalY == "" {
+					return nil, false
+				}
+				x, xerr := packagingStudioFocalCoordinate(focalX)
+				y, yerr := packagingStudioFocalCoordinate(focalY)
+				positionX, positionY, positionErr := packagingStudioObjectPosition(styles["object-position"])
+				if xerr != nil || yerr != nil || positionErr != nil || math.Abs(positionX-x) > packagingGeneratedSceneEpsilon || math.Abs(positionY-y) > packagingGeneratedSceneEpsilon {
+					return nil, false
+				}
+				element.Crop, element.FocalX, element.FocalY = crop, &x, &y
+			}
 		default:
 			return nil, false
 		}

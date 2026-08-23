@@ -189,8 +189,9 @@ const (
 // relevance lifecycle (Wave 7). Stored on meetingMemoryEntry.Metadata under
 // key "relevance"; absent == active. active/archived stay searchable (archived
 // is down-ranked in store.search); quarantined/expired are excluded from recall,
-// model context, and the client timeline. quarantined hard-deletes 30 visible
-// days after quarantinedAt, leaving a slop_pass audit stub.
+// model context, and the client timeline. At quarantine expiry transcript
+// source is retained summary-first for exact drilldown; disposable artifact
+// deletion still leaves a slop_pass audit stub.
 //
 // Digest-kind exception (Track-2 Wave 1): a relevanceArchived meeting/day/
 // company digest is a SUPERSEDED rollup — dead state, not down-ranked
@@ -202,6 +203,10 @@ const (
 	relevanceArchived    = "archived"
 	relevanceQuarantined = "quarantined"
 	relevanceExpired     = "expired"
+	// retainedRawTranscriptMetadataKey marks classifier-expired transcript
+	// source that remains durable for authorized exact drilldown but is omitted
+	// from ordinary recall/model context in favor of its meeting summaries.
+	retainedRawTranscriptMetadataKey = "retainedRawTranscript"
 	// archivedSearchPenalty subtracts from an archived entry's match score so it
 	// ranks below active material yet stays findable (design §6).
 	archivedSearchPenalty = 6
@@ -228,6 +233,9 @@ func memoryEntryHiddenFromRecall(entry meetingMemoryEntry) bool {
 	// artifact, embedding, brain, digest, and model-context lane that shares
 	// this universal recall guard. Dedicated probe reads bypass it explicitly.
 	if memoryEntryIsMediaSoakCanary(entry) {
+		return true
+	}
+	if entry.Kind == meetingMemoryKindTranscript && strings.EqualFold(strings.TrimSpace(entry.Metadata[retainedRawTranscriptMetadataKey]), "true") {
 		return true
 	}
 	switch memoryEntryRelevance(entry) {
@@ -402,6 +410,22 @@ type meetingMemoryStore struct {
 	path    string
 	entries []meetingMemoryEntry
 	seen    map[string]struct{}
+	// transcriptFenceHook runs before a transcript mutation is published. It
+	// durably reopens any ended meeting receipt first, so a receipt-store failure
+	// fails the transcript write closed instead of accepting source under stale
+	// finalized truth. transcriptCommitHook runs after either a durable source
+	// mutation or an aborted post-fence mutation; in the latter case it reseals
+	// the unchanged source. finalizationOutputMutationHook repairs a finalized
+	// receipt whose bound Brain/digest output was changed or removed. Standalone
+	// stores leave these nil.
+	transcriptFenceHook            func(meetingMemoryEntry) error
+	transcriptDeleteFenceHook      func(meetingMemoryEntry) error
+	transcriptCommitHook           func(meetingMemoryEntry)
+	finalizationOutputMutationHook func(meetingMemoryEntry)
+	// includeRetainedTranscripts is set only on the bounded, ACL-filtered
+	// Meeting Record projection. The primary store never enables it, so prompt,
+	// search, archive, and client snapshot lanes remain summary-first.
+	includeRetainedTranscripts bool
 	// artifactIndexes is the ordered, body-free directory for current artifact
 	// rows, while artifactIndexByID provides exact lookup. Chat tail projection
 	// reauthorizes several result refs per message; walking the lifetime memory
@@ -868,6 +892,51 @@ func (store *meetingMemoryStore) rotateMeetingIDIfCurrent(roomID string, id stri
 	return true
 }
 
+// mintSuccessorMeetingID returns a collision-free sitting id without making it
+// current. Manual archive persists the successor's admission anchors and
+// meeting record before publishing this id, so no writer can observe a current
+// sitting whose durable authority is still missing.
+func (store *meetingMemoryStore) mintSuccessorMeetingID(roomID string, previousID string) string {
+	if store == nil {
+		return ""
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	roomID = normalizeRoomID(roomID)
+	previousID = strings.TrimSpace(previousID)
+	now := time.Now().UTC()
+	nanos := now.Nanosecond()
+	for {
+		id := fmt.Sprintf("meeting-%s-%09d", now.Format("20060102-150405"), nanos)
+		_, historical := store.meetingEntryIndexes[id]
+		if id != previousID && !historical && !store.meetingIDHeldByAnotherRoomLocked(roomID, id) {
+			return id
+		}
+		nanos = (nanos + 1) % 1_000_000_000
+	}
+}
+
+// transitionMeetingIDIfCurrent atomically publishes a pre-persisted successor
+// identity. It never replaces a sitting that another admission already moved,
+// and it can also retire the expected sitting by passing an empty successor.
+func (store *meetingMemoryStore) transitionMeetingIDIfCurrent(roomID string, expectedID string, successorID string) bool {
+	if store == nil || strings.TrimSpace(expectedID) == "" {
+		return false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	roomID = normalizeRoomID(roomID)
+	if strings.TrimSpace(store.meetingIDs[roomID]) != strings.TrimSpace(expectedID) {
+		return false
+	}
+	if successorID = strings.TrimSpace(successorID); successorID == "" {
+		delete(store.meetingIDs, roomID)
+	} else {
+		store.meetingIDs[roomID] = successorID
+	}
+	return true
+}
+
 // ensureMeetingID mints (or returns) the room's active meeting id eagerly, so
 // a meeting record can be opened at room admission before any entry appends.
 func (store *meetingMemoryStore) ensureMeetingID(roomID string) string {
@@ -879,6 +948,27 @@ func (store *meetingMemoryStore) ensureMeetingID(roomID string) string {
 	defer store.mu.Unlock()
 
 	return store.currentMeetingIDLocked(roomID)
+}
+
+// resumeMeetingIDIfEmpty restores the sitting identity proven by a durable
+// admission anchor when a crash happened before any meeting-memory row could
+// persist it. It never replaces a different resumed sitting; ordinary boot
+// reconciliation resolves that conflict instead of guessing.
+func (store *meetingMemoryStore) resumeMeetingIDIfEmpty(roomID string, id string) bool {
+	if store == nil || strings.TrimSpace(id) == "" {
+		return false
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	roomID = normalizeRoomID(roomID)
+	if store.meetingIDs == nil {
+		store.meetingIDs = map[string]string{}
+	}
+	if current := strings.TrimSpace(store.meetingIDs[roomID]); current != "" {
+		return current == strings.TrimSpace(id)
+	}
+	store.meetingIDs[roomID] = strings.TrimSpace(id)
+	return true
 }
 
 func (store *meetingMemoryStore) currentMeetingIDLocked(roomID string) string {
@@ -1504,7 +1594,6 @@ func (store *meetingMemoryStore) updateOSArtifactMetadataExpected(expected *Arti
 		store.entries[index] = previousEntry
 		return meetingMemoryEntry{}, false, err
 	}
-
 	return cloneMemoryEntry(entry), true, nil
 }
 
@@ -1640,15 +1729,71 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 	if !changed {
 		return cloneMemoryEntry(entry), false, nil
 	}
+	if meetingFinalizationOutputEntry(previousEntry) {
+		previousRevision, revisionOK := meetingFinalizationOutputRevision(previousEntry)
+		if !revisionOK {
+			// A missing or corrupt generation marker is never equivalent to the
+			// immutable first generation. Keep the mutated entry permanently outside
+			// the receiptable revision-1 state until finalization regenerates it.
+			previousRevision = 1
+		}
+		entry.Metadata[meetingFinalizationOutputRevisionMetadataKey] = strconv.Itoa(previousRevision + 1)
+	}
 	entry.Text = text
 	stampMeetingRecordBodyDigest(&entry)
+	if kind == meetingMemoryKindTranscript && store.transcriptFenceHook != nil {
+		if err := store.transcriptFenceHook(cloneMemoryEntry(entry)); err != nil {
+			return meetingMemoryEntry{}, false, fmt.Errorf("prepare transcript finalization fence: %w", err)
+		}
+	}
 
 	store.entries[index] = entry
 	store.rebuildMeetingEntryIndexesIfChangedLocked(previousEntry, entry)
 	if err := store.rewriteLocked(false); err != nil {
-		store.entries[index] = previousEntry
-		store.rebuildMeetingEntryIndexesIfChangedLocked(entry, previousEntry)
+		repairEntry := entry
+		outputMutationVisible := false
+		if errors.Is(err, ErrDurableReplaceAmbiguous) {
+			// Rename published before the parent fsync failed. Reload the visible
+			// generation instead of restoring the preimage in memory: the exact
+			// transcript/output body that readers can now observe must drive the
+			// compensation pass and readiness decision.
+			if reloadErr := store.reloadVisibleMemoryGenerationLocked(); reloadErr != nil {
+				store.entries[index] = previousEntry
+				store.rebuildMeetingEntryIndexesIfChangedLocked(entry, previousEntry)
+				err = errors.Join(err, fmt.Errorf("reload visible memory generation: %w", reloadErr))
+			} else {
+				for _, visible := range store.entries {
+					if visible.ID != id || visible.Kind != kind {
+						continue
+					}
+					repairEntry = visible
+					visibleRevision, visibleRevisionOK := meetingFinalizationOutputRevision(visible)
+					previousRevision, _ := meetingFinalizationOutputRevision(previousEntry)
+					outputMutationVisible = meetingFinalizationOutputEntry(visible) && visibleRevisionOK && visibleRevision > previousRevision
+					break
+				}
+			}
+		} else {
+			store.entries[index] = previousEntry
+			store.rebuildMeetingEntryIndexesIfChangedLocked(entry, previousEntry)
+		}
+		if kind == meetingMemoryKindTranscript && store.transcriptCommitHook != nil {
+			// The write-ahead receipt already reopened. Whether the replacement
+			// definitely failed or its fsync outcome is ambiguous, an idempotent
+			// pass must reconcile the actually visible source instead of waiting
+			// for a process restart.
+			store.transcriptCommitHook(cloneMemoryEntry(repairEntry))
+		}
+		if outputMutationVisible && store.finalizationOutputMutationHook != nil {
+			store.finalizationOutputMutationHook(cloneMemoryEntry(repairEntry))
+		}
 		return meetingMemoryEntry{}, false, err
+	}
+	if kind == meetingMemoryKindTranscript && store.transcriptCommitHook != nil {
+		store.transcriptCommitHook(cloneMemoryEntry(entry))
+	}
+	if meetingFinalizationOutputEntry(entry) && store.finalizationOutputMutationHook != nil {
+		store.finalizationOutputMutationHook(cloneMemoryEntry(entry))
 	}
 
 	return cloneMemoryEntry(entry), true, nil
@@ -1815,17 +1960,46 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 	if err != nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("encode memory entry: %w", err)
 	}
+	if kind == meetingMemoryKindTranscript && store.transcriptFenceHook != nil {
+		if err := store.transcriptFenceHook(cloneMemoryEntry(entry)); err != nil {
+			return meetingMemoryEntry{}, false, fmt.Errorf("prepare transcript finalization fence: %w", err)
+		}
+	}
 	persist := appendFileBestEffort
 	if canonicalLegacyDurabilityRequired() {
 		persist = appendFileDurably
 	}
 	if err := persist(store.path, append(raw, '\n'), 0o600); err != nil {
+		repairEntry := entry
+		// Append failures can be ambiguous too (for example close/sync reports
+		// after the bytes reached the visible file). Reloading is idempotent and
+		// lets the repair worker cover whichever exact source generation is
+		// actually readable now; a definite failure simply reloads the preimage.
+		if reloadErr := store.reloadVisibleMemoryGenerationLocked(); reloadErr != nil {
+			err = errors.Join(err, fmt.Errorf("reload visible memory generation: %w", reloadErr))
+		} else {
+			for _, visible := range store.entries {
+				if visible.ID == entry.ID && visible.Kind == entry.Kind {
+					repairEntry = visible
+					break
+				}
+			}
+		}
+		if kind == meetingMemoryKindTranscript && store.transcriptCommitHook != nil {
+			// prepareTranscriptFinalizationFence already reopened an ended
+			// receipt. Schedule an idempotent observation of the visible log so a
+			// failed append cannot strand analysis in closing until restart.
+			store.transcriptCommitHook(cloneMemoryEntry(repairEntry))
+		}
 		return meetingMemoryEntry{}, false, fmt.Errorf("persist memory entry: %w", err)
 	}
 
 	store.entries = append(store.entries, entry)
 	store.indexMeetingEntryLocked(len(store.entries)-1, entry)
 	store.seen[entry.ID] = struct{}{}
+	if kind == meetingMemoryKindTranscript && store.transcriptCommitHook != nil {
+		store.transcriptCommitHook(cloneMemoryEntry(entry))
+	}
 
 	return entry, true, nil
 }
@@ -2107,7 +2281,11 @@ func stripOversizeBody(entry meetingMemoryEntry) meetingMemoryEntry {
 func (store *meetingMemoryStore) visibleEntriesLocked() []meetingMemoryEntry {
 	visible := make([]meetingMemoryEntry, 0, len(store.entries))
 	for _, entry := range store.entries {
-		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(entry) {
+		hidden := memoryEntryHiddenFromRecall(entry)
+		if hidden && store.includeRetainedTranscripts && entry.Kind == meetingMemoryKindTranscript && strings.EqualFold(strings.TrimSpace(entry.Metadata[retainedRawTranscriptMetadataKey]), "true") {
+			hidden = false
+		}
+		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || hidden {
 			continue
 		}
 		visible = append(visible, stripOversizeBody(entry))
@@ -2150,6 +2328,39 @@ func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int)
 	}
 
 	return cloneMemoryEntries(tailMemoryEntries(entries, limit))
+}
+
+// retainExpiredTranscript converts a classifier-expired raw transcript into a
+// summary-first archive row without deleting or rewriting its source text. It
+// intentionally bypasses transcript finalization hooks: only retention
+// metadata changes, while the exact transcript revision stays byte-identical.
+func (store *meetingMemoryStore) retainExpiredTranscript(id string, now time.Time) (meetingMemoryEntry, bool, error) {
+	if store == nil || strings.TrimSpace(id) == "" {
+		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	for index := len(store.entries) - 1; index >= 0; index-- {
+		entry := store.entries[index]
+		if entry.ID != strings.TrimSpace(id) || entry.Kind != meetingMemoryKindTranscript || memoryEntryRelevance(entry) != relevanceQuarantined {
+			continue
+		}
+		prior := cloneMemoryEntry(entry)
+		retained := cloneMemoryEntry(entry)
+		if retained.Metadata == nil {
+			retained.Metadata = map[string]string{}
+		}
+		retained.Metadata[relevanceMetadataKey] = relevanceArchived
+		retained.Metadata[retainedRawTranscriptMetadataKey] = "true"
+		retained.Metadata["retainedAt"] = now.UTC().Format(time.RFC3339Nano)
+		store.entries[index] = retained
+		if err := store.rewriteLocked(false); err != nil {
+			store.entries[index] = prior
+			return meetingMemoryEntry{}, false, err
+		}
+		return cloneMemoryEntry(retained), true, nil
+	}
+	return meetingMemoryEntry{}, false, nil
 }
 
 // transcriptCoverage is the deterministic read of how continuously ONE
@@ -2675,6 +2886,18 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 	}
 	stamped[digestKeyMetadataKey] = key
 	stamped[digestCurrentMetadataKey] = digestCurrentTrue
+	// A source-receipted close digest is the pinned current projection for the
+	// ended sitting. An ordinary ambient pass has no finalization source stamp
+	// and may not supersede it; only a later finalization pass bound to a new
+	// transcript manifest can replace it. This keeps receipt.OutputID resolvable
+	// and prevents a background worker from silently revoking analysis truth.
+	if kind == meetingMemoryKindMeetingDigest && strings.TrimSpace(stamped[meetingFinalizationSourceDigestMetadataKey]) == "" {
+		for _, prior := range store.entries {
+			if prior.Kind == kind && digestEntryKey(prior) == key && digestEntryCurrent(prior) && !memoryEntryHiddenFromRecall(prior) && strings.TrimSpace(prior.Metadata[meetingFinalizationSourceDigestMetadataKey]) != "" {
+				return cloneMemoryEntry(prior), nil
+			}
+		}
+	}
 
 	entry := meetingMemoryEntry{
 		ID:        id,
@@ -3148,7 +3371,7 @@ func (store *meetingMemoryStore) transcriptWindowAround(entryID string, radius i
 // callers only: the expiry job's terminal step (always paired with a slop_pass
 // audit stub so the fact of deletion survives) and a user deleting their own
 // misplaced room-chat message. Reports whether an entry was removed.
-func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) deleteEntryByID(id string, authorize ...func(meetingMemoryEntry) bool) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -3175,8 +3398,33 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 	}
 
 	removed := cloneMemoryEntry(store.entries[index])
+	if len(authorize) > 0 && authorize[0] != nil && !authorize[0](cloneMemoryEntry(removed)) {
+		return meetingMemoryEntry{}, false, nil
+	}
+	transcriptMutation := removed.Kind == meetingMemoryKindTranscript
+	if transcriptMutation && (store.transcriptDeleteFenceHook != nil || store.transcriptFenceHook != nil) {
+		// Deletion is a source mutation just like append/correction. Downgrade the
+		// exact ended meeting receipt and archive before removing bytes; if either
+		// durable truth store refuses the downgrade, the transcript stays put.
+		fence := store.transcriptDeleteFenceHook
+		if fence == nil {
+			fence = store.transcriptFenceHook
+		}
+		if err := fence(cloneMemoryEntry(removed)); err != nil {
+			// The meeting receipt may already be closing even though the archive
+			// downgrade failed. Queue an idempotent repair against the unchanged
+			// source instead of leaving that receipt stranded until restart.
+			if store.transcriptCommitHook != nil {
+				store.transcriptCommitHook(cloneMemoryEntry(removed))
+			}
+			return meetingMemoryEntry{}, false, fmt.Errorf("prepare transcript deletion finalization fence: %w", err)
+		}
+	}
 	objects, err := canonicalMemoryImportedObjects(removed)
 	if err != nil {
+		if transcriptMutation && store.transcriptCommitHook != nil {
+			store.transcriptCommitHook(cloneMemoryEntry(removed))
+		}
 		return meetingMemoryEntry{}, false, err
 	}
 	records := canonicalLifecycleDeletionRecords(objects, time.Now().UTC(), "memory_deleted")
@@ -3197,7 +3445,18 @@ func (store *meetingMemoryStore) deleteEntryByID(id string) (meetingMemoryEntry,
 		delete(store.seen, id)
 		return nil
 	}); err != nil {
+		if transcriptMutation && store.transcriptCommitHook != nil {
+			// The deletion did not commit, but the write-ahead receipt downgrade
+			// did. Reseal the unchanged source asynchronously.
+			store.transcriptCommitHook(cloneMemoryEntry(removed))
+		}
 		return meetingMemoryEntry{}, false, fmt.Errorf("journal memory deletion %s: %w", id, err)
+	}
+	if transcriptMutation && store.transcriptCommitHook != nil {
+		store.transcriptCommitHook(cloneMemoryEntry(removed))
+	}
+	if meetingFinalizationOutputEntry(removed) && store.finalizationOutputMutationHook != nil {
+		store.finalizationOutputMutationHook(cloneMemoryEntry(removed))
 	}
 
 	return removed, true, nil

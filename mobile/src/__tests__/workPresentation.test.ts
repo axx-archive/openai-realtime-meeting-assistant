@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  packagingStudioCustomerPhases,
-  packagingStudioPhase,
   safeWorkProgressNote,
+  workActivityPillLabel,
+  workCustomerPhase,
+  workCustomerPhases,
   workFamilyLabel,
   workHasDecisionCard,
   workNeedsInput,
@@ -13,14 +14,14 @@ import {
 } from '../messaging/workPresentation';
 
 /**
- * Work families come from mode, NOT inferred from query (the prompt).
+ * Work families come from the server-owned process/result contract, with mode
+ * as the compatibility fallback, and are never inferred from the prompt.
  *
- * The locked plan says: "Family is not inferred from the query." This prevents
- * showing user's prompt as a family label ("Presentation" when user asked for slides).
- * Mode-based labeling is stable and doesn't leak prompt content into titles.
+ * This prevents prompt copy or a transient Research worker from relabeling the
+ * final authored output.
  */
-test('work families come from mode, not inferred from query (locked plan)', () => {
-  // Mode-based labeling — the family comes from the server-provided mode
+test('work families come from the server output contract, never inferred from query', () => {
+  // Ordinary ungoverned work keeps the server-provided mode fallback.
   assert.equal(workFamilyLabel({ query: 'Create a polished 10-slide pitch deck', mode: 'deck' }), 'Presentation');
   assert.equal(workFamilyLabel({ query: 'Build a five-year financial model', mode: 'spreadsheet' }), 'Financial model');
   assert.equal(workFamilyLabel({ query: 'Design a new hero image', mode: 'design' }), 'Design');
@@ -36,6 +37,33 @@ test('work families come from mode, not inferred from query (locked plan)', () =
   // Generic mode='goal' returns stable 'Work', NOT query-inferred family
   assert.equal(workFamilyLabel({ query: 'Help me think this through', mode: 'goal' }), 'Work');
   assert.equal(workFamilyLabel({ query: 'Create a polished pitch deck', mode: 'goal' }), 'Work');
+  assert.equal(
+    workFamilyLabel({ query: 'Research the market', mode: 'research', processId: 'document_report' }),
+    'Document',
+    'the authored process outranks its transient research worker mode',
+  );
+  assert.equal(
+    workFamilyLabel({ query: 'Research the market', mode: 'research', resultArtifactType: 'html_deck' }),
+    'Presentation',
+    'the exact result type outranks its transient research worker mode',
+  );
+  assert.equal(workFamilyLabel({ mode: 'research', resultArtifactType: 'report' }), 'Document');
+  assert.equal(
+    workFamilyLabel({ mode: 'research', outputFamily: 'Presentation' }),
+    'Presentation',
+    'the server-owned family outranks a transient worker mode',
+  );
+  assert.equal(
+    workFamilyLabel({ mode: 'research', processId: 'document_report', outputFamily: 'Presentation' }),
+    'Document',
+    'the governed process outranks a stale projected family',
+  );
+  assert.equal(
+    workFamilyLabel({ mode: 'research', outputFamily: 'presentation' }),
+    'Research',
+    'unknown or non-canonical families fail closed to the compatibility mode',
+  );
+  assert.equal(workFamilyLabel({ mode: 'research', outputFamily: '__proto__' }), 'Research');
 });
 
 test('work phases translate server stages into a small stable product grammar', () => {
@@ -62,40 +90,64 @@ test('activity notes keep human progress and suppress runtime/process vocabulary
   assert.equal(safeWorkProgressNote('an unreviewed but natural-sounding update', 'Working'), 'Working');
 });
 
-test('Packaging Studio projects the same five customer phases as web Activity', () => {
+test('presentation and document processes share the same four customer phases', () => {
   assert.deepEqual(
-    packagingStudioCustomerPhases.map(({ id, label }) => ({ id, label })),
+    workCustomerPhases.map(({ id, label }) => ({ id, label })),
     [
-      { id: 'frame', label: 'Frame the decision' },
-      { id: 'ground', label: 'Ground the recommendation' },
-      { id: 'story', label: 'Build the story' },
-      { id: 'design', label: 'Design the presentation' },
-      { id: 'finish', label: 'Finish the presentation' },
+      { id: 'frame', label: 'Frame' },
+      { id: 'build', label: 'Build' },
+      { id: 'compose', label: 'Compose' },
+      { id: 'review', label: 'Review & deliver' },
     ],
   );
-  const parent = { mode: 'goal', processId: 'packaging_studio', status: 'running', currentStage: 'execute', progressPercent: 11 };
+  const parent = { mode: 'research', processId: 'packaging_studio', status: 'running', currentStage: 'execute', progressPercent: 38 };
   assert.equal(workFamilyLabel(parent), 'Presentation');
-  assert.deepEqual(packagingStudioPhase(parent), {
-    id: 'ground',
-    label: 'Ground the recommendation',
+  assert.deepEqual(workCustomerPhase(parent), {
+    id: 'build',
+    label: 'Build',
     number: 2,
-    count: 5,
-    displayLabel: 'Phase 2 of 5 · Ground the recommendation',
+    count: 4,
+    displayLabel: 'Phase 2/4',
   });
-  assert.equal(workPhaseLabel(parent), 'Phase 2 of 5 · Ground the recommendation');
-  assert.equal(workProgressPresentation(parent).percent, 11, 'the server parent percent remains canonical');
+  assert.equal(workPhaseLabel(parent), 'Phase 2/4');
+  assert.equal(workProgressPresentation(parent).percent, 38, 'the server parent percent remains canonical');
   assert.equal(
-    packagingStudioPhase({ ...parent, currentStage: 'ship_deck', progressPercent: 11 })?.id,
-    'finish',
+    workCustomerPhase({ ...parent, currentStage: 'ship_deck', progressPercent: 11 })?.id,
+    'compose',
     'an explicit durable stage outranks the percent fallback',
   );
+
+  const document = { mode: 'research', processId: 'document_report', status: 'running', progressPercent: 12 };
+  assert.equal(workFamilyLabel(document), 'Document');
+  assert.equal(workCustomerPhase({ ...document, currentStage: 'context_snapshot' })?.id, 'frame');
+  assert.equal(workCustomerPhase({ ...document, currentStage: 'external_research' })?.id, 'build');
+  assert.equal(workCustomerPhase({ ...document, currentStage: 'quality_gate' })?.id, 'compose');
+  assert.equal(workCustomerPhase({ ...document, currentStage: 'document_jury' })?.id, 'review');
+});
+
+test('the status pill uses one concise family, phase, and percent line', () => {
+  assert.equal(workActivityPillLabel({
+    mode: 'research', processId: 'packaging_studio', status: 'running', progressPercent: 38,
+  }), 'Presentation · Phase 2/4 · 38%');
+  assert.equal(workActivityPillLabel({
+    mode: 'research', processId: 'document_report', status: 'needs_attention', progressPercent: 38,
+  }), 'Document · Needs attention');
+  assert.equal(workActivityPillLabel({
+    mode: 'goal', processId: 'document_report', status: 'complete', progressPercent: 100,
+  }), 'Document · Delivered');
+  assert.equal(workActivityPillLabel({
+    mode: 'research', processId: 'packaging_studio', status: 'running', currentStage: 'external_research',
+  }), 'Presentation · Phase 2/4');
+  assert.equal(workProgressPresentation({
+    mode: 'research', processId: 'packaging_studio', status: 'running', currentStage: 'external_research',
+  }).percent, null, 'missing server progress remains unknown');
 });
 
 test('decision status only appears when native can render a real choice card', () => {
-  const parked = { mode: 'goal', processId: 'packaging_studio', status: 'approval_required', progressPercent: 24 };
+  const parked = { mode: 'goal', processId: 'packaging_studio', status: 'approval_required', progressPercent: 38 };
   assert.equal(workHasDecisionCard(parked), false);
   assert.equal(workNeedsInput(parked), false);
-  assert.equal(workPhaseLabel(parked), 'Phase 3 of 5 · Build the story');
+  assert.equal(workPhaseLabel(parked), 'Phase 2/4');
   const decision = {
     ...parked,
     checkpoint: {

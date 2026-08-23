@@ -271,6 +271,40 @@ func (store *blockingEventsCanonicalEventStore) Events(ctx context.Context) ([]C
 	return nil, ctx.Err()
 }
 
+type releaseOnceEventsCanonicalEventStore struct {
+	inner   CanonicalEventStore
+	entered chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (store *releaseOnceEventsCanonicalEventStore) Append(ctx context.Context, event CanonicalEvent) (CanonicalAppendResult, error) {
+	return store.inner.Append(ctx, event)
+}
+
+func (store *releaseOnceEventsCanonicalEventStore) Events(ctx context.Context) ([]CanonicalEvent, error) {
+	store.mu.Lock()
+	store.calls++
+	call := store.calls
+	store.mu.Unlock()
+	if call == 1 {
+		close(store.entered)
+		select {
+		case <-store.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return store.inner.Events(ctx)
+}
+
+func (store *releaseOnceEventsCanonicalEventStore) eventCalls() int {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.calls
+}
+
 type countingCanonicalEventStore struct {
 	inner   CanonicalEventStore
 	mu      sync.Mutex
@@ -499,6 +533,57 @@ func TestCanonicalRuntimeStalledReconcileDoesNotBlockSnapshotsOrWrites(t *testin
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("reconcile error=%v, want context canceled", err)
+	}
+}
+
+func TestCanonicalRuntimeConcurrentMutationForcesOneFreshFollowUp(t *testing.T) {
+	dir := canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := &releaseOnceEventsCanonicalEventStore{
+		inner: NewMemoryCanonicalEventStore(runtime.registry), entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	runtime.events = gate
+	runtime.reconcileSignal = make(chan struct{}, 1)
+	first := []byte(`{"id":"follow-up-first","kind":"note","text":"first","createdAt":"2026-01-01T00:00:00Z"}` + "\n")
+	if err := writeFileAtomicallyForCanonicalMode(meetingMemoryPath(), first, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- runtime.Reconcile(context.Background()) }()
+	select {
+	case <-gate.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first reconcile did not reach parity scan")
+	}
+	second := []byte(`{"id":"follow-up-second","kind":"note","text":"second","createdAt":"2026-01-01T00:00:01Z"}` + "\n")
+	if err := appendFileDurably(filepath.Join(dir, "meeting-memory.jsonl"), second, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	close(gate.release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if runtime.checkpointValid || runtime.reconciledHighWater == runtime.dirtyHighWater {
+		t.Fatalf("stale pass published a checkpoint: %+v", canonicalRuntimeSnapshot())
+	}
+	select {
+	case <-runtime.reconcileSignal:
+		// Put the observed signal back; the next pass consumes/coalesces it.
+		runtime.reconcileSignal <- struct{}{}
+	default:
+		t.Fatal("concurrent mutation did not retain a follow-up signal")
+	}
+	if err := runtime.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := canonicalRuntimeSnapshot(); !snapshot.CheckpointValid || snapshot.ReconciledHighWater != snapshot.DirtyHighWater || snapshot.DirtyHighWater != 4 {
+		t.Fatalf("fresh follow-up did not publish latest checkpoint: %+v", snapshot)
+	}
+	if calls := gate.eventCalls(); calls != 2 {
+		t.Fatalf("reconcile event scans=%d, want stale pass plus exactly one follow-up", calls)
 	}
 }
 

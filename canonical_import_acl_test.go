@@ -3,12 +3,44 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type canonicalQueryBudgetTracer struct {
+	mu      sync.Mutex
+	queries []string
+}
+
+func (tracer *canonicalQueryBudgetTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	tracer.mu.Lock()
+	tracer.queries = append(tracer.queries, data.SQL)
+	tracer.mu.Unlock()
+	return ctx
+}
+
+func (*canonicalQueryBudgetTracer) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (tracer *canonicalQueryBudgetTracer) countContaining(fragment string) int {
+	tracer.mu.Lock()
+	defer tracer.mu.Unlock()
+	count := 0
+	for _, query := range tracer.queries {
+		if strings.Contains(query, fragment) {
+			count++
+		}
+	}
+	return count
+}
 
 func canonicalACLImportFixture(t *testing.T) (CanonicalImportPlan, *CanonicalPayloadRegistry) {
 	t.Helper()
@@ -212,6 +244,160 @@ func TestPostgresImportGrantsAreIdempotentRevisionBoundAndParityChecked(t *testi
 	}
 	if err := store.SyncImportGrants(ctx, plan); err == nil || !strings.Contains(err.Error(), "ACL version mismatch") {
 		t.Fatalf("evolved ACL was silently overwritten: %v", err)
+	}
+}
+
+func TestPostgresCanonicalParitySnapshotHasConstantQueryBudget(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	plan, registry := canonicalACLImportFixture(t)
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Apply(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncImportGrants(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	tracer := &canonicalQueryBudgetTracer{}
+	config := pool.Config()
+	config.ConnConfig.Tracer = tracer
+	tracedPool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracedPool.Close)
+	resolver := NewPostgresCanonicalParityACL(NewPostgresCanonicalStore(tracedPool, registry), plan.TenantID)
+	memoryEvents := NewMemoryCanonicalEventStore(registry)
+	if err := plan.Apply(ctx, memoryEvents); err != nil {
+		t.Fatal(err)
+	}
+	extraPrincipals := make([]string, 500)
+	for index := range extraPrincipals {
+		extraPrincipals[index] = fmt.Sprintf("service:postgres-budget-%03d", index)
+	}
+	report, err := ReconcileCanonicalPlanWithOptions(ctx, plan, memoryEvents, CanonicalReconcileOptions{
+		ACL: resolver, TestedPrincipals: append(append([]string(nil), plan.TestedPrincipals...), extraPrincipals...),
+	})
+	if err != nil || report.Diverged {
+		t.Fatalf("snapshot reconcile diverged=%v candidates=%+v err=%v", report.Diverged, report.Candidates, err)
+	}
+	if objects, grants := tracer.countContaining("FROM objects o JOIN unnest"), tracer.countContaining("FROM object_grants g"); objects != 1 || grants != 1 {
+		t.Fatalf("snapshot query budget objects=%d grants=%d, want one set query each", objects, grants)
+	}
+	if liveObjects, liveGrants := tracer.countContaining("FROM objects WHERE tenant_id"), tracer.countContaining("g.object_type=$2"); liveObjects != 0 || liveGrants != 0 {
+		t.Fatalf("reconcile fell back to per-principal live queries: objects=%d grants=%d", liveObjects, liveGrants)
+	}
+}
+
+func TestPostgresCanonicalParitySnapshotIsImmutableButLiveResolverObservesRevocation(t *testing.T) {
+	ctx, pool := startDisposableCanonicalPostgres(t)
+	plan, registry := canonicalACLImportFixture(t)
+	store := NewPostgresCanonicalStore(pool, registry)
+	if err := store.ApplyMigrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.Apply(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SyncImportGrants(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+	resolver := NewPostgresCanonicalParityACL(store, plan.TenantID)
+	object := canonicalImportedObjectByID(t, plan, "artifact-private")
+	var event CanonicalEvent
+	for _, candidate := range plan.Events {
+		if candidate.AggregateType == object.Family && candidate.AggregateID == object.ObjectID {
+			event = candidate
+			break
+		}
+	}
+	principal := "user:owner@example.com"
+	snapshot, err := resolver.SnapshotCanonicalParityACL(ctx, []CanonicalEvent{event})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := snapshot.CanReadCanonicalObject(ctx, principal, event); err != nil || !allowed {
+		t.Fatalf("pre-revocation snapshot allowed=%v err=%v", allowed, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE object_grants SET revoked_at=now()
+		WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3 AND subject_type='user' AND subject_id='owner@example.com'`,
+		plan.TenantID, object.Family, object.ObjectID); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := resolver.CanReadCanonicalObject(ctx, principal, event); err != nil || allowed {
+		t.Fatalf("live resolver retained revoked authority: allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := snapshot.CanReadCanonicalObject(ctx, principal, event); err != nil || !allowed {
+		t.Fatalf("immutable point-in-time snapshot changed after revocation: allowed=%v err=%v", allowed, err)
+	}
+	memoryEvents := NewMemoryCanonicalEventStore(registry)
+	if err := plan.Apply(ctx, memoryEvents); err != nil {
+		t.Fatal(err)
+	}
+	followUp, err := ReconcileCanonicalPlanWithOptions(ctx, plan, memoryEvents, CanonicalReconcileOptions{ACL: resolver, TestedPrincipals: plan.TestedPrincipals})
+	if err != nil || !followUp.Diverged {
+		t.Fatalf("fresh follow-up missed revocation: diverged=%v candidates=%+v err=%v", followUp.Diverged, followUp.Candidates, err)
+	}
+	found := false
+	for _, candidate := range followUp.Candidates {
+		if candidate.Family == object.Family && candidate.ObjectID == object.ObjectID && candidate.Principal == principal && candidate.Kind == "principal_missing_access" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("follow-up candidates omitted revoked authority: %+v", followUp.Candidates)
+	}
+}
+
+func TestPostgresCanonicalParitySnapshotProductionScale(t *testing.T) {
+	if os.Getenv("CANONICAL_PARITY_SCALE_TEST") != "1" {
+		t.Skip("set CANONICAL_PARITY_SCALE_TEST=1 to run the 32,751-object snapshot soak")
+	}
+	ctx, store, registry := migratedPostgresCanonicalStore(t)
+	anchor := canonicalTestEvent(t, registry, uuid.New(), "scale-anchor", 1, "scale-anchor", "private")
+	if _, err := store.Append(ctx, anchor); err != nil {
+		t.Fatal(err)
+	}
+	var sequence int64
+	if err := store.pool.QueryRow(ctx, "SELECT sequence FROM canonical_events WHERE event_id=$1", anchor.EventID).Scan(&sequence); err != nil {
+		t.Fatal(err)
+	}
+	const objectCount = 32751
+	if _, err := store.pool.Exec(ctx, `INSERT INTO objects (
+		tenant_id,object_type,object_id,state_revision,content_revision,classification,state,content_sha256,acl_version,last_event_sequence
+	) SELECT $1,'artifact','scale-'||lpad(value::text,5,'0'),1,1,'internal','{}'::jsonb,decode(repeat('a',64),'hex'),1,$2
+		FROM generate_series(1,$3) AS value`, anchor.TenantID, sequence, objectCount); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(ctx, `INSERT INTO object_grants (
+		grant_id,tenant_id,object_type,object_id,acl_version,revision,subject_type,subject_id,action,granted_by_type,granted_by_id
+	) SELECT (substr(md5(value::text),1,8)||'-'||substr(md5(value::text),9,4)||'-'||substr(md5(value::text),13,4)||'-'||substr(md5(value::text),17,4)||'-'||substr(md5(value::text),21,12))::uuid,
+		$1,'artifact','scale-'||lpad(value::text,5,'0'),1,1,'team',$2,'read_content','service','scale-soak'
+		FROM generate_series(1,$3) AS value`, anchor.TenantID, canonicalLegacyOrgTeamID, objectCount); err != nil {
+		t.Fatal(err)
+	}
+	events := make([]CanonicalEvent, objectCount)
+	for index := range events {
+		events[index] = CanonicalEvent{TenantID: anchor.TenantID, AggregateType: "artifact", AggregateID: fmt.Sprintf("scale-%05d", index+1), ACLVersion: 1}
+	}
+	started := time.Now()
+	snapshot, err := NewPostgresCanonicalParityACL(store, anchor.TenantID).SnapshotCanonicalParityACL(ctx, events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedIn := time.Since(started)
+	principal := "user:scale@example.com"
+	for _, event := range events {
+		allowed, resolveErr := snapshot.CanReadCanonicalObject(ctx, principal, event)
+		if resolveErr != nil || !allowed {
+			t.Fatalf("snapshot authorization %s allowed=%v err=%v", event.AggregateID, allowed, resolveErr)
+		}
+	}
+	t.Logf("loaded and authorized %d objects from one repeatable-read snapshot in %s", objectCount, time.Since(started))
+	if loadedIn > 20*time.Second {
+		t.Fatalf("32,751-object snapshot load took %s", loadedIn)
 	}
 }
 

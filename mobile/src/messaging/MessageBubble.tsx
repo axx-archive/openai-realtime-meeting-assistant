@@ -5,7 +5,13 @@ import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
 import { useMappingHelper } from '@shopify/flash-list';
 
-import type { ScoutAnswerSource, ScoutFileAttachment, ScoutMessage, ScoutWorkThreadRef } from '../api/types';
+import type {
+  ScoutAnswerSource,
+  ScoutFileAttachment,
+  ScoutMessage,
+  ScoutResultAssetRef,
+  ScoutWorkThreadRef,
+} from '../api/types';
 import { authenticatedFileHeaders, authenticatedFileUrl } from '../files/fileActions';
 import { colors, radius, shadow, space, type } from '../theme/tokens';
 import { LinkPreviewCard } from './LinkPreviewCard';
@@ -26,7 +32,11 @@ import {
   InlineArtifactPreview,
   type InlineArtifactKind,
 } from './InlineArtifactPreview';
-import { workResultArtifactKind } from './workTimeline';
+import {
+  governedWorkHasRichResult,
+  governedWorkResultArtifactKind,
+  workResultArtifactKind,
+} from './workTimeline';
 
 /**
  * Detect the artifact kind from a work message for inline rendering.
@@ -37,7 +47,12 @@ import { workResultArtifactKind } from './workTimeline';
 function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | null {
   const resultType = workResultArtifactKind(message.thread);
   if (/^(html_deck|deck|presentation|slides?)$/u.test(resultType)) return 'html_deck';
+  if (resultType === 'pdf') return 'pdf';
+  if (/^(image|generated_image)$/u.test(resultType)) return 'image';
   if (/^(table|data_table|spreadsheet)$/u.test(resultType)) return 'table';
+  if (/^(workbook|xlsx)$/u.test(resultType)) return 'workbook';
+  if (/^(bundle|file_bundle)$/u.test(resultType)) return 'bundle';
+  if (/^(file|attachment)$/u.test(resultType)) return 'file';
   if (/^(ideation|ideas|brainstorm)$/u.test(resultType)) return 'ideation';
   if (/^(research|deep_research|report|analysis)$/u.test(resultType)) return 'research';
   if (/^(markdown|document|doc|memo|brief)$/u.test(resultType)) return 'document';
@@ -46,24 +61,27 @@ function detectInlineArtifactKind(message: ScoutMessage): InlineArtifactKind | n
   const threadMode = String(message.thread?.mode ?? '').toLowerCase();
   if (threadMode) {
     if (/^(html_deck|deck|presentation|slides?)$/u.test(threadMode)) return 'html_deck';
+    if (threadMode === 'pdf') return 'pdf';
+    if (/^(image|generated_image)$/u.test(threadMode)) return 'image';
     if (/^(table|data_table|spreadsheet)$/u.test(threadMode)) return 'table';
+    if (/^(workbook|xlsx)$/u.test(threadMode)) return 'workbook';
+    if (/^(bundle|file_bundle)$/u.test(threadMode)) return 'bundle';
+    if (/^(file|attachment)$/u.test(threadMode)) return 'file';
     if (/^(ideation|ideas|brainstorm)$/u.test(threadMode)) return 'ideation';
     if (/^(research|deep_research|report|analysis)$/u.test(threadMode)) return 'research';
     if (/^(markdown|document|doc|memo|brief)$/u.test(threadMode)) return 'document';
   }
 
   // Governed work path: check explicit artifact kind fields
-  const work = message.work;
-  if (work) {
-    const kind = String(
-      (work as Record<string, unknown>).artifactKind ??
-      (work as Record<string, unknown>).workKind ??
-      (work as Record<string, unknown>).outputKind ??
-      ''
-    ).toLowerCase();
-
+  const kind = governedWorkResultArtifactKind(message);
+  if (kind) {
     if (/^(html_deck|deck|presentation|slides?)$/u.test(kind)) return 'html_deck';
+    if (kind === 'pdf') return 'pdf';
+    if (/^(image|generated_image)$/u.test(kind)) return 'image';
     if (/^(table|data_table|spreadsheet)$/u.test(kind)) return 'table';
+    if (/^(workbook|xlsx)$/u.test(kind)) return 'workbook';
+    if (/^(bundle|file_bundle)$/u.test(kind)) return 'bundle';
+    if (/^(file|attachment)$/u.test(kind)) return 'file';
     if (/^(ideation|ideas|brainstorm)$/u.test(kind)) return 'ideation';
     if (/^(research|deep_research|report|analysis)$/u.test(kind)) return 'research';
     if (/^(markdown|document|doc|memo|brief)$/u.test(kind)) return 'document';
@@ -124,6 +142,7 @@ export type MessageBubbleProps = {
   onRetryReply?: (message: ScoutMessage) => void;
   onOpenLongMessage?: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact?: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onOpenWorkAsset?: (asset: ScoutResultAssetRef) => void;
   onResolveWorkCheckpoint?: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject?: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onResolveProposal?: (message: ScoutMessage, action: 'accepted' | 'dismissed', objective: string) => void;
@@ -172,7 +191,10 @@ function workThreadRef(message: ScoutMessage): { ref: ScoutWorkThreadRef; govern
     governedRecord: true,
     ref: {
       id: message.work.runId || message.work.id,
+      rootRunId: message.work.rootRunId,
+      parentRunId: message.work.parentRunId,
       mode: 'completed work',
+      outputFamily: message.work.outputFamily || 'Work',
       query: message.work.title,
       status: message.work.status,
       artifactId: message.work.artifactId,
@@ -180,8 +202,15 @@ function workThreadRef(message: ScoutMessage): { ref: ScoutWorkThreadRef; govern
       currentStage: message.work.currentStage,
       progressPercent: message.work.progressPercent,
       progressNote: message.work.summary,
+      resultArtifactType: governedWorkResultArtifactKind(message) || undefined,
+      resultArtifactId: message.work.resultArtifactId,
+      resultArtifactVersion: message.work.resultArtifactVersion,
+      resultArtifactDigest: message.work.resultArtifactDigest,
       resultTitle: message.work.title,
       resultPreview: message.work.summary,
+      resultAssets: message.work.resultAssets,
+      resultTable: message.work.resultTable,
+      resultWorkbook: message.work.resultWorkbook,
       provenance: message.work.providerExecutionFenced
         ? 'Deterministic local · provider fenced'
         : 'Provider-backed',
@@ -300,6 +329,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetryReply,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onOpenWorkAsset,
   onResolveWorkCheckpoint,
   onChangeWorkProject,
   onResolveProposal,
@@ -348,6 +378,8 @@ export const MessageBubble = React.memo(function MessageBubble({
   const retryingFailedWork = failedGoal ? retryingGoal : regeneratingWork;
   const retryFailedWork = () => failedGoal ? onRetryGoal?.(message) : onRegenerateWorkArtifact?.(message);
   const inlineArtifactKind = workThread ? detectInlineArtifactKind(message) : null;
+  const structuredInlineArtifact = inlineArtifactKind !== null
+    && ['pdf', 'image', 'table', 'workbook', 'bundle', 'file'].includes(inlineArtifactKind);
   const directArtifactMode = /^(html_deck|deck|presentation|slides?)$/u.test(String(workThread?.ref.mode ?? '').toLowerCase());
   // A goal/process artifact id owns lifecycle, not media. Only an explicit
   // ResultArtifactID may drive its preview/actions. Legacy standalone deck
@@ -361,7 +393,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const authoredResultCanPresent = Boolean(richArtifactId)
     && (!managedAuthoredResult || (authoredResultAdmitted && workThread?.ref.resultCanPresent === true));
   const showRichWorkResult = Boolean(richArtifactId) || Boolean(workThread?.active && workThread.family === 'Presentation');
-  const governedRichResult = Boolean(workThread?.governedRecord && workThread.complete && String(message.work?.artifactHref ?? '').trim());
+  const governedRichResult = governedWorkHasRichResult(message);
   const proposal = message.proposal;
   const proposalKind = String(proposal?.kind ?? '').toLowerCase();
   const proposalStatus = String(proposal?.status ?? '').toLowerCase();
@@ -593,11 +625,19 @@ export const MessageBubble = React.memo(function MessageBubble({
           ) : governedRichResult && workThread ? (
             <View style={styles.richWorkResult}>
               <InlineArtifactPreview
-                kind="deliverable"
+                kind={inlineArtifactKind ?? 'deliverable'}
                 title={String(workThread.ref.resultTitle ?? workThread.query ?? '').trim() || 'Completed work'}
                 text={String(workThread.ref.resultPreview ?? workThread.progressCopy ?? '').trim()}
                 agentName={workThread.agentName}
-                onExpand={() => onOpenWorkArtifact?.(message)}
+                artifactId={richArtifactId || undefined}
+                artifactVersion={workThread.ref.resultArtifactVersion}
+                artifactDigest={workThread.ref.resultArtifactDigest}
+                sessionToken={sessionToken}
+                assets={workThread.ref.resultAssets}
+                table={workThread.ref.resultTable}
+                workbook={workThread.ref.resultWorkbook}
+                onOpenAsset={onOpenWorkAsset}
+                onExpand={structuredInlineArtifact ? undefined : () => onOpenWorkArtifact?.(message)}
               />
             </View>
           ) : workThread
@@ -612,11 +652,17 @@ export const MessageBubble = React.memo(function MessageBubble({
                 loading={workThread.active && !richArtifactId}
                 needsAttention={workThread.failed || authoredResultNeedsAttention}
                 artifactId={richArtifactId || undefined}
+                artifactVersion={workThread.ref.resultArtifactVersion}
+                artifactDigest={workThread.ref.resultArtifactDigest}
                 sessionToken={sessionToken}
+                assets={workThread.ref.resultAssets}
+                table={workThread.ref.resultTable}
+                workbook={workThread.ref.resultWorkbook}
+                onOpenAsset={onOpenWorkAsset}
                 desktopEditingOnly={Boolean(inlineArtifactKind === 'html_deck' && richArtifactId && workThread.ref.resultCanEdit === true)}
                 onEdit={inlineArtifactKind === 'document' && richArtifactId && workThread.ref.resultCanEdit === true ? () => onOpenWorkArtifact?.(message) : undefined}
                 onPresent={authoredResultCanPresent ? () => onViewArtifactFullscreen?.(message) : undefined}
-                onExpand={richArtifactId && (inlineArtifactKind !== 'html_deck' || authoredResultCanPresent) ? () => onViewArtifactFullscreen?.(message) : undefined}
+                onExpand={!structuredInlineArtifact && richArtifactId && (inlineArtifactKind !== 'html_deck' || authoredResultCanPresent) ? () => onViewArtifactFullscreen?.(message) : undefined}
               />
               {authoredResultQuality === 'edited_after_admission' ? (
                 <Text accessibilityRole="alert" style={styles.workAttentionCopy}>Edited draft · fresh rendered review is required before presenting or exporting</Text>
@@ -705,14 +751,23 @@ export const MessageBubble = React.memo(function MessageBubble({
                 </View>
               ) : null}
               {workThread.active ? (
-                <Text
-                  accessibilityRole="progressbar"
-                  accessibilityValue={{ min: 0, max: 100, now: workThread.progressPercent }}
-                  maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier}
-                  style={styles.workProgressCopy}
-                >
-                  {workThread.progressCopy}{workThread.progressPercent > 0 ? ` · ${workThread.progressPercent}%` : ''}
-                </Text>
+                workThread.progressPercent === null ? (
+                  <Text
+                    maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier}
+                    style={styles.workProgressCopy}
+                  >
+                    {workThread.progressCopy}
+                  </Text>
+                ) : (
+                  <Text
+                    accessibilityRole="progressbar"
+                    accessibilityValue={{ min: 0, max: 100, now: workThread.progressPercent }}
+                    maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier}
+                    style={styles.workProgressCopy}
+                  >
+                    {workThread.progressCopy} · {workThread.progressPercent}%
+                  </Text>
+                )
               ) : null}
               {workThread.failed && workThread.attentionCopy ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workAttentionCopy}>{workThread.attentionCopy}</Text> : null}
               {String(workThread.ref.resultPreview ?? '').trim() ? <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} numberOfLines={3} style={styles.workPreview}>{String(workThread.ref.resultPreview)}</Text> : null}
@@ -777,7 +832,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                   ref={workDetailsTriggerRef}
                   style={({ pressed }) => [styles.workFoot, pressed && styles.workResultPressed]}
                 >
-                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.customerPhase?.displayLabel ?? (workThread.progressPercent > 0 ? `${workThread.progressPercent}% complete` : `${workThread.family} in progress`)}</Text>
+                  <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workFootText}>{workThread.customerPhase?.displayLabel ?? (workThread.progressPercent === null ? `${workThread.family} in progress` : `${workThread.progressPercent}% complete`)}</Text>
                   <Text maxFontSizeMultiplier={workSurfaceMaxFontSizeMultiplier} style={styles.workResultActionText}>View activity</Text>
                 </Pressable>
               )}

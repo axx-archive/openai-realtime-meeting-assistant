@@ -1407,11 +1407,13 @@ func (app *kanbanBoardApp) deliverArtifactToOrigin(artifact meetingMemoryEntry, 
 			Text:      text,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Thread: &scoutChatThreadRef{
-				ID:         firstNonEmptyString(agentThreadID, artifact.Metadata["threadId"]),
-				Mode:       mode,
-				Query:      firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["query"]),
-				Status:     "complete",
-				ArtifactID: artifact.ID,
+				ID:           firstNonEmptyString(agentThreadID, artifact.Metadata["threadId"]),
+				Mode:         mode,
+				ProcessID:    strings.TrimSpace(artifact.Metadata["processId"]),
+				Query:        firstNonEmptyString(artifact.Metadata["threadQuery"], artifact.Metadata["query"]),
+				Status:       "complete",
+				ArtifactID:   artifact.ID,
+				OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(artifact), scoutChatOutputFamilyForMode(mode)),
 			},
 		}
 		// The public-visibility branch inside commit broadcasts chat_thread
@@ -1738,7 +1740,7 @@ func (app *kanbanBoardApp) projectRoomAgentThreadStatus(artifact meetingMemoryEn
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	switch status {
-	case "queued", "running", "approval_required", "complete", "error", "needs_attention":
+	case "queued", "running", "approval_required", "needs_input", "complete", "error", "needs_attention":
 	default:
 		status = "running"
 	}
@@ -1752,6 +1754,8 @@ func (app *kanbanBoardApp) projectRoomAgentThreadStatus(artifact meetingMemoryEn
 		verb = "queued"
 	case "approval_required":
 		verb = "needs approval"
+	case "needs_input":
+		verb = "needs input"
 	case "complete":
 		verb = "finished"
 	case "error", "needs_attention":
@@ -1762,7 +1766,12 @@ func (app *kanbanBoardApp) projectRoomAgentThreadStatus(artifact meetingMemoryEn
 		logicalStatus = "needs_attention"
 	}
 	messageID := "room-work-" + sha256Hex([]byte(strings.Join([]string{threadID, logicalStatus}, "\x00")))[:32]
-	payload, appended := app.recordRoomChatMessageForMeeting(officeRoomID, scoutParticipantName, verb+" "+strings.ToLower(family)+" — "+title, map[string]string{
+	rootRunID := strings.TrimSpace(artifact.Metadata["rootRunId"])
+	parentRunID := strings.TrimSpace(artifact.Metadata["parentRunId"])
+	if rootRunID == "" && parentRunID == "" {
+		rootRunID = threadID
+	}
+	metadata := map[string]string{
 		roomChatServerMessageIDMetadataKey: messageID,
 		"artifactId":                       artifact.ID,
 		"speaker":                          scoutParticipantName,
@@ -1772,7 +1781,21 @@ func (app *kanbanBoardApp) projectRoomAgentThreadStatus(artifact meetingMemoryEn
 		"workFamily":                       family,
 		"workTitle":                        title,
 		"workProgress":                     strings.TrimSpace(artifact.Metadata["progressPercent"]),
-	}, meetingID)
+	}
+	if rootRunID != "" {
+		metadata["workRootRunId"] = rootRunID
+	}
+	if parentRunID != "" {
+		metadata["workParentRunId"] = parentRunID
+	}
+	if logicalStatus == "complete" && scoutChatArtifactHasClosedResultEnvelope(artifact) {
+		metadata["resultArtifactId"] = artifact.ID
+		metadata["resultArtifactType"] = artifactType(artifact)
+		metadata["resultArtifactVersion"] = strconv.Itoa(artifactVersion(artifact))
+		metadata["resultArtifactDigest"] = artifactCapabilityDigest(artifact)
+		metadata["resultTitle"] = title
+	}
+	payload, appended := app.recordRoomChatMessageForMeeting(officeRoomID, scoutParticipantName, verb+" "+strings.ToLower(family)+" — "+title, metadata, meetingID)
 	if appended {
 		if scope, current := app.roomPublicationScope(officeRoomID, meetingID); current {
 			broadcastScopedRoomKanbanEvent(scope, "room_chat", payload)

@@ -178,6 +178,19 @@ func artifactRenderTokenHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "artifact is not an html document")
 		return
 	}
+	requestedVersion := strings.TrimSpace(r.URL.Query().Get("version"))
+	requestedDigest := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("digest")))
+	if requestedVersion != "" || requestedDigest != "" {
+		expectedVersion, err := strconv.Atoi(requestedVersion)
+		if err != nil || expectedVersion < 1 || !isHexDigest(requestedDigest) {
+			writeAuthError(w, http.StatusBadRequest, "version and digest must name one exact artifact revision")
+			return
+		}
+		if artifactVersion(artifact) != expectedVersion || !strings.EqualFold(artifactCapabilityDigest(artifact), requestedDigest) {
+			writeAuthError(w, http.StatusConflict, "that artifact revision is no longer current")
+			return
+		}
+	}
 	if err := kanbanApp.requireFinalExportAdmission(artifact); err != nil {
 		writeAuthError(w, http.StatusConflict, err.Error())
 		return

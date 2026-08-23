@@ -19,13 +19,16 @@ func packagingIdentityCandidateValueForTest(mode string) map[string]any {
 		}
 		identity["palette"] = palette
 		return map[string]any{
-			"candidate_id": id, "strategy": "Use type for proof and imagery only for emotional turns.",
-			"visual_system": "warm paper, ink black, one clay accent, natural photography", "identity": identity,
+			"candidate_id": id, "strategy": "balanced_editorial",
+			"visual_system": "editorial_restraint", "identity": identity,
 		}
 	}
-	candidates := []any{candidate("direction_a", "paper, ink, clay")}
+	candidates := []any{candidate("direction_a", "background=#F7F3EA;foreground=#171711;accent=#C85A36;surface=#E8E1D3;muted=#6F6B63")}
 	if mode == "develop" {
-		candidates = append(candidates, candidate("direction_b", "bone, charcoal, signal red"))
+		second := candidate("direction_b", "background=#F2EBDD;foreground=#161616;accent=#D6402D;surface=#DED5C6;muted=#67615A")
+		second["strategy"] = "typography_first"
+		second["visual_system"] = "graphic_precision"
+		candidates = append(candidates, second)
 	}
 	return map[string]any{"mode": mode, "sample_slide_ids": []any{"cover", "proof"}, "candidates": candidates}
 }
@@ -137,13 +140,13 @@ func TestPackagingStudioDecisionEditorSelectsWithoutMergingAndValidatesImmediate
 	if _, err := validateCanonicalPackagingStudioIdentityDirection(app, plan, canonicalArtifact, canonical); err != nil {
 		t.Fatalf("canonical durable direction failed downstream admission: %v", err)
 	}
-	tampered := strings.Replace(canonical, packagingStudioProviderVisualSystem, packagingStudioProviderVisualSystem+" with Nike", 1)
-	if _, err := validateCanonicalPackagingStudioIdentityDirection(app, plan, canonicalArtifact, tampered); err == nil || !strings.Contains(err.Error(), "non-server-authored") {
+	tampered := strings.Replace(canonical, `"visual_system":"editorial_restraint"`, `"visual_system":"modern_minimal"`, 1)
+	if _, err := validateCanonicalPackagingStudioIdentityDirection(app, plan, canonicalArtifact, tampered); err == nil || !strings.Contains(err.Error(), "exact selected candidate") {
 		t.Fatalf("tampered canonical durable direction passed downstream admission: %v", err)
 	}
 	merged := packagingIdentityDirectionValueForTest()
 	merged["shots"] = []any{}
-	merged["identity"].(map[string]any)["palette"] = "a merged third palette"
+	merged["identity"].(map[string]any)["palette"] = "background=#FFFFFF;foreground=#000000;accent=#FF0000;surface=#EEEEEE;muted=#777777"
 	if _, err := validatePackagingStudioIdentityDirection(app, plan, strictIdentityJSONForTest(t, merged)); err == nil || !strings.Contains(err.Error(), "rewrote or merged") {
 		t.Fatalf("decision editor was allowed to merge candidate systems: %v", err)
 	}
@@ -225,13 +228,8 @@ func TestPackagingStudioImageDepictionsAreClaimAssetOrServerForcedGeneric(t *tes
 	}
 	doc.Shots[0].Subject = "non-identifying crowd holding lowercase-brand nike shoes"
 	doc.Shots[0].Composition = "outside nike headquarters"
-	shots, err := doc.imageryShots()
-	if err != nil {
-		t.Fatal(err)
-	}
-	prompt := shots[0].Description
-	if strings.Contains(strings.ToLower(prompt), "nike") || !strings.Contains(prompt, "server-forced") && !strings.Contains(prompt, "generic, non-identifying") {
-		t.Fatalf("generic generation prompt retained an identifying model-authored subject: %s", prompt)
+	if _, err := doc.imageryShots(); err == nil || !strings.Contains(err.Error(), "closed art direction") {
+		t.Fatalf("mutated generic direction did not fail closed at the provider boundary: %v", err)
 	}
 }
 
@@ -250,6 +248,10 @@ func TestPackagingStudioNamedImageryProviderPromptCarriesOnlyExactAuthorizedEnti
 		t.Fatalf("the exact Acme claim should authorize Acme before server sanitization: %v", err)
 	}
 	bound := packagingStudioServerBoundNamedShot(unsafe)
+	if _, err := (imageryDirectionDoc{Shots: []imageryDirectionShot{bound}}).imageryShots(); err == nil || !strings.Contains(err.Error(), "closed art direction") {
+		t.Fatalf("unvalidated named art direction did not fail closed at provider boundary: %v", err)
+	}
+	bound.Composition, bound.Temperature, bound.Treatment, bound.Why = "wide_negative_space_left", "focus", "natural_editorial", "evidence_texture"
 	shots, err := (imageryDirectionDoc{Shots: []imageryDirectionShot{bound}}).imageryShots()
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +263,7 @@ func TestPackagingStudioNamedImageryProviderPromptCarriesOnlyExactAuthorizedEnti
 			t.Fatalf("server-bound provider request retained unbound identity %q:\n%s", forbidden, providerText)
 		}
 	}
-	if !strings.Contains(providerText, "acme") || shot.Temperature != "poised" || shot.Place != "" {
+	if !strings.Contains(providerText, "acme") || shot.Temperature != "focus" || shot.Place != "" {
 		t.Fatalf("server-bound provider request lost or expanded the exact authority: %+v\n%s", shot, providerText)
 	}
 	slideIDInjection := bound
@@ -282,8 +284,8 @@ func TestPackagingStudioNamedImageryProviderPromptCarriesOnlyExactAuthorizedEnti
 	}
 	canonical, err := canonicalPackagingStudioIdentityDirection(imageryDirectionDoc{
 		SelectedCandidateID: "direction_a", SelectionRationale: "Exact admitted direction.",
-		Strategy: "Editorial proof", VisualSystem: "Unsafe Nike reference that must never reach the provider",
-		Identity: imageryIdentityTokens{Palette: "ink", Type: "sans", Spacing: "8", Grid: "12", GraphicMotif: "rule", ImageTreatment: "natural", DataVizTreatment: "direct", Refusals: "logos"},
+		Strategy: "balanced_editorial", VisualSystem: "editorial_restraint",
+		Identity: imageryIdentityTokens{Palette: "background=#F7F3EA;foreground=#171711;accent=#C85A36;surface=#E8E1D3;muted=#6F6B63", Type: "heading=modern_grotesk;body=humanist_sans;accent=editorial_serif", Spacing: "airy", Grid: "editorial_12", GraphicMotif: "rules", ImageTreatment: "natural_editorial", DataVizTreatment: "direct_labels", Refusals: "gradients,logos"},
 		Shots:    []imageryDirectionShot{bound},
 	}, strings.Repeat("a", 64))
 	if err != nil {
@@ -311,6 +313,7 @@ func TestPackagingStudioProviderSafeDepictionEntityStopsInjectionBeforeSpend(t *
 	attemptProvider := func(kind, entity string) error {
 		shots, err := (imageryDirectionDoc{Shots: []imageryDirectionShot{{
 			Fig: 1, Slot: "plate", Aspect: "landscape", Temperature: "focus",
+			Composition: "centered_subject", Treatment: "natural_editorial", Why: "human_scale",
 			DepictionKind: kind, DepictionEntity: entity,
 		}}}).imageryShots()
 		if err != nil {
@@ -365,6 +368,7 @@ func TestPackagingStudioProviderSafeDepictionEntityStopsInjectionBeforeSpend(t *
 		}
 		mapped, err := (imageryDirectionDoc{Shots: []imageryDirectionShot{{
 			Fig: 1, Slot: "plate", Aspect: "landscape", Temperature: "focus",
+			Composition: "centered_subject", Treatment: "natural_editorial", Why: "human_scale",
 			DepictionKind: safe.kind, DepictionEntity: safe.entity,
 		}}}).imageryShots()
 		if err != nil || len(mapped) != 1 || !strings.Contains(mapped[0].Description, "UNTRUSTED_ENTITY_DATA_BEGIN\n"+safe.entity+"\nUNTRUSTED_ENTITY_DATA_END") {

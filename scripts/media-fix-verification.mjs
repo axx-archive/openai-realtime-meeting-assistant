@@ -216,8 +216,11 @@ console.log('[2c] receive loss stays receive-only')
 console.log('[2d] selected ICE pair - stale paths do not poison RTT')
 {
   const make = new Function('performance', 'frozenRemoteVideoTrackIds', `
+    const remoteAVSyncSkewWarningMs = 160
+    const remoteAVSyncTelemetryParticipantCap = 16
     ${extractFn('succeededDirectCandidatePairAvailable')}
     ${extractFn('summarizeCandidatePair')}
+    ${extractFn('remoteAVSyncTimingSnapshot')}
     ${extractFn('summarizeMediaQualityStats')}
     return summarizeMediaQualityStats
   `)
@@ -262,6 +265,7 @@ console.log('[2f] remote audio playback - gesture recovery and stale promise cle
 {
   const make = new Function(`
     const pendingRemotePlaybackElements = new Set()
+    const remoteAudiblePlaybackReceipts = new Map()
     const audioMonitors = new Map()
     let audioContext = null
     let unlocks = 0
@@ -269,6 +273,7 @@ console.log('[2f] remote audio playback - gesture recovery and stale promise cle
     function ensureAudioContext() {}
     function syncRoomAudioPlaybackState() {}
     function notifyRoomAudioBlocked() {}
+    function startRemoteCanonicalAVPlayback() {}
     function unlockRoomAudioPlayback() { unlocks++ }
     ${extractFn('remotePlaybackNeedsGesture')}
     ${extractFn('remotePlaybackPendingCount')}

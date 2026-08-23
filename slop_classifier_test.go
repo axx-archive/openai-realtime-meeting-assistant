@@ -127,13 +127,14 @@ func TestApplySlopVerdictThresholds(t *testing.T) {
 	}
 }
 
-func TestSweepExpiredQuarantineDeletesAndLeavesStub(t *testing.T) {
+func TestSweepExpiredQuarantineRetainsTranscriptSummaryFirstAndLeavesStub(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
-	if _, ok, err := app.memory.appendTranscript("t-expire", "", "Redundant chatter destined to expire from memory."); err != nil || !ok {
+	const transcriptText = "Redundant chatter retained for exact meeting drilldown."
+	if _, ok, err := app.memory.appendTranscript("t-expire", "", transcriptText); err != nil || !ok {
 		t.Fatalf("append: ok=%v err=%v", ok, err)
 	}
 	past := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
-	if _, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindTranscript, "t-expire", "Redundant chatter destined to expire from memory.", map[string]string{
+	if _, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindTranscript, "t-expire", transcriptText, map[string]string{
 		relevanceMetadataKey: relevanceQuarantined,
 		"expiresAt":          past,
 		"classifierReason":   "orphaned chatter",
@@ -143,16 +144,30 @@ func TestSweepExpiredQuarantineDeletesAndLeavesStub(t *testing.T) {
 
 	app.sweepExpiredQuarantine("cursor-42")
 
-	if _, found := app.memory.entryByID("t-expire"); found {
-		t.Fatal("expired entry must be hard-deleted")
+	retained, found := app.memory.entryByID("t-expire")
+	if !found || retained.Text != transcriptText {
+		t.Fatalf("expired transcript source must remain byte-for-byte available: found=%v entry=%+v", found, retained)
+	}
+	if memoryEntryRelevance(retained) != relevanceArchived || retained.Metadata[retainedRawTranscriptMetadataKey] != "true" {
+		t.Fatalf("expired transcript must become summary-first retained source, got %v", retained.Metadata)
+	}
+	for _, visible := range app.memory.snapshot(0) {
+		if visible.ID == retained.ID {
+			t.Fatal("retained raw transcript leaked into ordinary snapshot recall")
+		}
+	}
+	meetingID := strings.TrimSpace(retained.Metadata["meetingId"])
+	segments := meetingRecordSegments([]meetingMemoryEntry{retained}, meetingID)
+	if len(segments) != 1 || segments[0].Text == "" {
+		t.Fatalf("exact meeting drilldown lost retained transcript: %+v", segments)
 	}
 	stubs := app.memory.entriesOfKind(meetingMemoryKindSlopPass, 0)
 	foundStub := false
 	for _, stub := range stubs {
-		if stub.Metadata["deletedId"] == "t-expire" {
+		if stub.Metadata["retainedId"] == "t-expire" {
 			foundStub = true
 			if stub.Metadata["reason"] == "" {
-				t.Fatal("audit stub must record the deletion reason")
+				t.Fatal("audit stub must record the retention reason")
 			}
 			if stub.Metadata[slopClassifierCursorKey] != "cursor-42" {
 				t.Fatalf("audit stub must carry the forward cursor, got %q", stub.Metadata[slopClassifierCursorKey])
@@ -160,7 +175,7 @@ func TestSweepExpiredQuarantineDeletesAndLeavesStub(t *testing.T) {
 		}
 	}
 	if !foundStub {
-		t.Fatal("a slop_pass audit stub must survive the hard delete")
+		t.Fatal("a slop_pass audit stub must record non-destructive retention")
 	}
 }
 

@@ -26,13 +26,14 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, BonfireApiError } from '../api/client';
-import type { Room, RoomAgentParticipant } from '../api/types';
+import type { Room, RoomAgentParticipant, ScoutFileAttachment, ScoutResultAssetRef } from '../api/types';
 import type { StrideMeetingSpecialistStatus, StrideMeetingSpecialistInvitation } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { Screen } from '../components/Screen';
 import {
   RoomConversationSheet,
   type RoomConversationMode,
+  type RoomResultArtifactRef,
 } from '../components/RoomConversationSheet';
 import { RoomParticipantsSheet, type RoomParticipantRow } from '../components/RoomParticipantsSheet';
 import { RoomConsentSheet } from '../components/RoomConsentSheet';
@@ -42,7 +43,8 @@ import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { useNativeRoom } from '../realtime/useNativeRoom';
 import { meetingIntelligenceStatusLabel } from '../realtime/meetingIntelligence';
 import { roomVoiceAgentControlsAvailable } from '../meetings/roomVoiceAgentAvailability';
-import { LongMessageSheet } from '../messaging/LongMessageSheet';
+import { FilePreviewModal } from '../components/FilePreviewModal';
+import { artifactStudioPath } from '../artifacts/studioRoutes';
 import {
   cameraFramingRenderRevision,
   centerStageControlStatus,
@@ -633,7 +635,7 @@ export function RoomScreen({ route, navigation }: Props) {
   const [pinnedParticipantKey, setPinnedParticipantKey] = useState<string | null>(null);
   const [conversationMode, setConversationMode] = useState<RoomConversationMode>('chat');
   const [conversationVisible, setConversationVisible] = useState(false);
-  const [roomWorkPreview, setRoomWorkPreview] = useState<{ title: string; text: string } | null>(null);
+  const [roomResultFile, setRoomResultFile] = useState<ScoutFileAttachment | null>(null);
   const [participantsVisible, setParticipantsVisible] = useState(false);
   const [consentVisible, setConsentVisible] = useState(false);
   const [specialistsVisible, setSpecialistsVisible] = useState(false);
@@ -1013,24 +1015,64 @@ export function RoomScreen({ route, navigation }: Props) {
     setConversationVisible(false);
     nativeRoom.setRoomChatOpen(false);
   }, [nativeRoom.setRoomChatOpen]);
-  const openRoomWorkArtifact = useCallback(async (artifactId: string, fallbackTitle: string) => {
-    if (!sessionToken || !artifactId) return;
+  const openRoomWorkArtifact = useCallback(async (result: RoomResultArtifactRef) => {
+    if (!sessionToken) return;
     setError(null);
+    const { artifactId, artifactType, artifactVersion, artifactDigest, title } = result;
+    if (!artifactId || !Number.isSafeInteger(artifactVersion) || artifactVersion < 1 || !/^[0-9a-f]{64}$/u.test(artifactDigest)) {
+      setError('This exact deliverable is unavailable. Refresh the room and try again.');
+      return;
+    }
     try {
       const response = await api.artifact(sessionToken, artifactId);
       const artifact = response.artifacts[0];
-      const text = String(artifact?.text ?? '').trim();
-      if (!text) throw new Error('This work has not published any activity yet.');
+      const metadata = artifact?.metadata ?? {};
+      if (!artifact || artifact.id !== artifactId
+        || String(metadata.type ?? '').trim().toLowerCase() !== artifactType
+        || Number(metadata.artifactVersion ?? 0) !== artifactVersion
+        || String(metadata.contentDigest ?? '').trim().toLowerCase() !== artifactDigest) {
+        throw new Error('The exact deliverable revision is no longer available.');
+      }
+    } catch (caught) {
+      setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open this deliverable.');
+      return;
+    }
+    if (artifactType === 'html_deck') {
       setConversationVisible(false);
       nativeRoom.setRoomChatOpen(false);
-      setRoomWorkPreview({
-        title: String(artifact?.metadata?.title ?? fallbackTitle).trim() || 'Scout work',
-        text,
+      navigation.navigate('DeckViewer', {
+        artifactId,
+        artifactVersion,
+        artifactDigest,
+        title: title || 'Presentation',
+        desktopEditable: false,
       });
-    } catch (caught) {
-      setError(caught instanceof BonfireApiError ? caught.message : caught instanceof Error ? caught.message : 'Could not open this work.');
+      return;
     }
-  }, [nativeRoom.setRoomChatOpen, sessionToken]);
+    if (artifactType === 'markdown') {
+      setConversationVisible(false);
+      nativeRoom.setRoomChatOpen(false);
+      navigation.navigate('OSWeb', {
+        path: artifactStudioPath(artifactId, 'document', 'present', { version: artifactVersion, digest: artifactDigest }),
+        title: title || 'Document',
+      });
+      return;
+    }
+    setError('This deliverable opens from its file preview.');
+  }, [nativeRoom.setRoomChatOpen, navigation, sessionToken]);
+  const openRoomResultAsset = useCallback((asset: ScoutResultAssetRef) => {
+    const ref = String(asset.ref ?? '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/u.test(ref)) {
+      setError('This deliverable file is not available.');
+      return;
+    }
+    setRoomResultFile({
+      ref,
+      name: String(asset.name ?? '').trim() || 'Deliverable',
+      mime: String(asset.mime ?? '').trim().toLowerCase() || 'application/octet-stream',
+      kind: String(asset.kind ?? '').trim() || undefined,
+    });
+  }, []);
 
   function completeJoin(withVideo: boolean, withAudio: boolean, transferExisting: boolean) {
     if (!room?.passcodeRequired) {
@@ -1546,20 +1588,20 @@ export function RoomScreen({ route, navigation }: Props) {
             onDeleteMessage={nativeRoom.deleteRoomChat}
             onModeChange={changeConversationMode}
             onOpenArtifact={openRoomWorkArtifact}
+            onOpenResultAsset={openRoomResultAsset}
             meetingRecordAvailable={Boolean(nativeRoom.intelligence?.meetingId)}
             onOpenMeetingRecord={openPermanentMeetingRecord}
             onSendMessage={nativeRoom.sendRoomChat}
             roomName={room?.name ?? route.params.title}
+            sessionToken={sessionToken ?? ''}
             transcriptEntries={[...spokenTranscriptEntries]}
             viewer={{ email: user?.email, name: user?.name }}
             visible={conversationVisible}
           />
-          <LongMessageSheet
-            authorName={roomWorkPreview?.title ?? 'Scout work'}
-            onClose={() => setRoomWorkPreview(null)}
-            scout
-            text={roomWorkPreview?.text ?? ''}
-            visible={Boolean(roomWorkPreview)}
+          <FilePreviewModal
+            file={roomResultFile}
+            onClose={() => setRoomResultFile(null)}
+            sessionToken={sessionToken ?? ''}
           />
           <RoomParticipantsSheet
             onClose={() => setParticipantsVisible(false)}

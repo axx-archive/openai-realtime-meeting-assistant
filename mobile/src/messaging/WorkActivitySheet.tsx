@@ -16,16 +16,15 @@ import type { ScoutMessage } from '../api/types';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { useReduceMotion } from '../theme/motion';
 import {
-  packagingStudioCustomerPhases,
-  safeWorkProgressNote,
+  workCustomerPhases,
   workFamilyLabel,
-  workPhaseLabel,
   workProgressPresentation,
 } from './workPresentation';
 import {
   workActivityPhaseStates,
   workActivityResultPresentation,
 } from './workActivityPresentation';
+import { workActivityThreadRef } from './workTimeline';
 
 type Props = {
   visible: boolean;
@@ -45,7 +44,7 @@ export function WorkActivitySheet({
   const reduceMotion = useReduceMotion();
   const titleRef = useRef<Text>(null);
   const wasVisibleRef = useRef(false);
-  const work = message?.thread;
+  const work = workActivityThreadRef(message);
   const progress = workProgressPresentation(work);
   const family = workFamilyLabel(work);
   const phaseStates = useMemo(() => workActivityPhaseStates(message), [message]);
@@ -56,12 +55,26 @@ export function WorkActivitySheet({
     ? resultPresentation
     : null;
   const delivered = terminal && Boolean(openResult);
+  const displayPercent = progress.percent === null
+    ? null
+    : terminal
+      ? 100
+      : progress.percent;
+  const needsAttention = ['error', 'failed', 'needs_attention', 'rejected', 'blocked'].includes(
+    String(work?.status ?? '').trim().toLowerCase(),
+  );
   const statusLabel = blockedResult?.title
-    ?? (terminal ? (openResult ? 'Delivered' : 'Work complete') : progress.phaseLabel);
+    ?? (terminal
+      ? (openResult ? 'Delivered' : 'Work complete')
+      : ['Needs input', 'Needs attention'].includes(progress.phaseLabel)
+        ? progress.phaseLabel
+        : progress.phase
+        ? `${progress.phase.label} · ${progress.phase.displayLabel}`
+        : progress.phaseLabel);
   const progressCopy = blockedResult?.body
     ?? (terminal
       ? openResult?.body ?? 'Scout finished this run without an openable deliverable attached.'
-      : safeWorkProgressNote(work?.progressNote, workPhaseLabel(work)));
+      : progress.progressCopy);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -83,124 +96,140 @@ export function WorkActivitySheet({
   return (
     <Modal
       animationType={reduceMotion ? 'none' : 'slide'}
+      allowSwipeDismissal
       presentationStyle="formSheet"
       visible={visible && Boolean(message)}
       onRequestClose={onClose}
     >
       <SafeAreaView accessibilityViewIsModal style={styles.sheet} edges={['left', 'right', 'bottom']}>
-        <View accessibilityElementsHidden style={styles.grabber} />
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>SCOUT · ACTIVITY</Text>
-            <Text ref={titleRef} accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.title}>
-              {family}
-            </Text>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close activity"
-            hitSlop={8}
-            onPress={onClose}
-            style={({ pressed }) => [styles.close, pressed && styles.pressed]}
-          >
-            <SymbolView name="xmark" size={15} tintColor={colors.text2} />
-          </Pressable>
-        </View>
-
-        <ScrollView
-          contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.hero}>
-            <View style={styles.heroStatusRow}>
-              <View style={[styles.statusSignal, delivered && styles.statusSignalComplete]} />
-              <Text style={styles.statusText}>{statusLabel}</Text>
-              <Text style={styles.percent}>{terminal ? '100%' : `${progress.percent}%`}</Text>
+        <View style={styles.card}>
+          <View accessibilityElementsHidden style={styles.grabber} />
+          <View style={styles.header}>
+            <View style={styles.headerCopy}>
+              <Text style={styles.eyebrow}>SCOUT · ACTIVITY</Text>
+              <Text ref={titleRef} accessibilityRole="header" maxFontSizeMultiplier={2} style={styles.title}>
+                {family}
+              </Text>
             </View>
-            <Text maxFontSizeMultiplier={1.8} style={styles.progressCopy}>
-              {progressCopy}
-            </Text>
-            <View
-              accessibilityRole="progressbar"
-              accessibilityLabel={`${terminal ? 100 : progress.percent}% complete`}
-              accessibilityValue={{ min: 0, max: 100, now: terminal ? 100 : progress.percent }}
-              style={styles.progressTrack}
-            >
-              <View style={[styles.progressFill, { width: `${terminal ? 100 : progress.percent}%` }]} />
-            </View>
-          </View>
-
-          {phaseStates.length > 0 ? (
-            <View accessibilityLabel="Presentation stages" style={styles.phases}>
-              {packagingStudioCustomerPhases.map((phase, index) => {
-                const state = phaseStates[index];
-                return (
-                  <View key={phase.id} style={styles.phaseRow}>
-                    <View style={styles.phaseRail}>
-                      <View style={[
-                        styles.phaseMark,
-                        state === 'complete' && styles.phaseMarkComplete,
-                        state === 'current' && styles.phaseMarkCurrent,
-                      ]}>
-                        {state === 'complete' ? (
-                          <SymbolView name="checkmark" size={10} tintColor={colors.onEmber} />
-                        ) : state === 'current' ? (
-                          <View style={styles.phaseMarkCore} />
-                        ) : null}
-                      </View>
-                      {index < packagingStudioCustomerPhases.length - 1 ? (
-                        <View style={[styles.phaseLine, state === 'complete' && styles.phaseLineComplete]} />
-                      ) : null}
-                    </View>
-                    <View style={styles.phaseCopy}>
-                      <Text
-                        maxFontSizeMultiplier={1.8}
-                        style={[styles.phaseLabel, state === 'upcoming' && styles.phaseLabelUpcoming]}
-                      >
-                        {phase.label}
-                      </Text>
-                      {state === 'current' ? <Text style={styles.phaseNow}>IN PROGRESS</Text> : null}
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          ) : null}
-
-          {progress.needsInput ? (
-            <View style={styles.decisionNote}>
-              <SymbolView name="person.crop.circle.badge.exclamationmark" size={18} tintColor={colors.emberText} />
-              <View style={styles.decisionCopy}>
-                <Text style={styles.decisionTitle}>Your decision is waiting in the channel</Text>
-                <Text style={styles.decisionBody}>Close Activity to review the choices and keep Scout moving.</Text>
-              </View>
-            </View>
-          ) : null}
-
-          {openResult && message && onOpenResult ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={openResult.actionLabel}
-              onPress={() => onOpenResult(message)}
-              style={({ pressed }) => [styles.openResult, pressed && styles.openResultPressed]}
+              accessibilityLabel="Close activity"
+              hitSlop={8}
+              onPress={onClose}
+              style={({ pressed }) => [styles.close, pressed && styles.pressed]}
             >
-              <SymbolView
-                name={openResult.kind === 'presentation' ? 'play.fill' : 'doc.text.fill'}
-                size={15}
-                tintColor={colors.onAccent}
-              />
-              <Text style={styles.openResultText}>{openResult.actionLabel}</Text>
+              <SymbolView name="xmark" size={15} tintColor={colors.text2} />
             </Pressable>
-          ) : null}
-        </ScrollView>
+          </View>
+
+          <ScrollView
+            contentInsetAdjustmentBehavior="automatic"
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+            style={styles.scroller}
+          >
+            <View style={styles.hero}>
+              <View style={styles.heroStatusRow}>
+                <View style={[
+                  styles.statusSignal,
+                  delivered && styles.statusSignalComplete,
+                  needsAttention && styles.statusSignalAttention,
+                ]} />
+                <Text style={styles.statusText}>{statusLabel}</Text>
+                {displayPercent === null ? null : <Text style={styles.percent}>{displayPercent}%</Text>}
+              </View>
+              <Text maxFontSizeMultiplier={1.8} style={styles.progressCopy}>
+                {progressCopy}
+              </Text>
+              {displayPercent === null ? null : (
+                <View
+                  accessibilityRole="progressbar"
+                  accessibilityLabel={`${displayPercent}% complete`}
+                  accessibilityValue={{ min: 0, max: 100, now: displayPercent }}
+                  style={styles.progressTrack}
+                >
+                  <View style={[styles.progressFill, { width: `${displayPercent}%` }]} />
+                </View>
+              )}
+            </View>
+
+            {phaseStates.length > 0 ? (
+              <View accessibilityLabel={`${family} stages`} style={styles.phases}>
+                {workCustomerPhases.map((phase, index) => {
+                  const state = phaseStates[index];
+                  return (
+                    <View key={phase.id} style={styles.phaseRow}>
+                      <View style={styles.phaseRail}>
+                        <View style={[
+                          styles.phaseMark,
+                          state === 'complete' && styles.phaseMarkComplete,
+                          state === 'current' && styles.phaseMarkCurrent,
+                        ]}>
+                          {state === 'complete' ? (
+                            <SymbolView name="checkmark" size={10} tintColor={colors.onEmber} />
+                          ) : state === 'current' ? (
+                            <View style={styles.phaseMarkCore} />
+                          ) : null}
+                        </View>
+                        {index < workCustomerPhases.length - 1 ? (
+                          <View style={[styles.phaseLine, state === 'complete' && styles.phaseLineComplete]} />
+                        ) : null}
+                      </View>
+                      <View style={styles.phaseCopy}>
+                        <Text
+                          maxFontSizeMultiplier={1.8}
+                          style={[styles.phaseLabel, state === 'upcoming' && styles.phaseLabelUpcoming]}
+                        >
+                          {phase.label}
+                        </Text>
+                        {state === 'current' ? <Text style={styles.phaseNow}>IN PROGRESS</Text> : null}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
+
+            {progress.needsInput ? (
+              <View style={styles.decisionNote}>
+                <SymbolView name="person.crop.circle.badge.exclamationmark" size={18} tintColor={colors.emberText} />
+                <View style={styles.decisionCopy}>
+                  <Text style={styles.decisionTitle}>Your decision is waiting in the channel</Text>
+                  <Text style={styles.decisionBody}>Close Activity to review the choices and keep Scout moving.</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {openResult && message && onOpenResult ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={openResult.actionLabel}
+                onPress={() => onOpenResult(message)}
+                style={({ pressed }) => [styles.openResult, pressed && styles.openResultPressed]}
+              >
+                <SymbolView
+                  name={openResult.kind === 'presentation'
+                    ? 'play.fill'
+                    : openResult.kind === 'document'
+                      ? 'doc.text.fill'
+                      : 'checkmark.circle.fill'}
+                  size={15}
+                  tintColor={colors.onAccent}
+                />
+                <Text style={styles.openResultText}>{openResult.actionLabel}</Text>
+              </Pressable>
+            ) : null}
+          </ScrollView>
+        </View>
       </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, overflow: 'hidden', backgroundColor: colors.bgApp },
+  sheet: { flex: 1, justifyContent: 'flex-end', overflow: 'hidden', backgroundColor: colors.bgApp },
+  card: { width: '100%', maxWidth: 720, maxHeight: '90%', alignSelf: 'center', overflow: 'hidden', borderTopLeftRadius: radius.xxl, borderTopRightRadius: radius.xxl, borderCurve: 'continuous', backgroundColor: colors.surface2 },
+  scroller: { flexShrink: 1 },
   grabber: { alignSelf: 'center', width: 36, height: 5, marginTop: space[2], borderRadius: radius.full, backgroundColor: colors.line2 },
   header: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[5], paddingVertical: space[3], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
   headerCopy: { flex: 1, minWidth: 0 },
@@ -213,15 +242,16 @@ const styles = StyleSheet.create({
   heroStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
   statusSignal: { width: 8, height: 8, borderRadius: radius.full, backgroundColor: colors.ember },
   statusSignalComplete: { backgroundColor: colors.success },
+  statusSignalAttention: { backgroundColor: colors.danger },
   statusText: { ...type.captionMedium, flex: 1, color: colors.text1 },
   percent: { ...type.captionMedium, color: colors.text2, fontVariant: ['tabular-nums'] },
   progressCopy: { ...type.body, color: colors.text2 },
   progressTrack: { height: 5, overflow: 'hidden', borderRadius: radius.full, backgroundColor: colors.surface3 },
   progressFill: { height: '100%', borderRadius: radius.full, backgroundColor: colors.ember },
-  phases: { marginTop: space[5] },
-  phaseRow: { minHeight: 56, flexDirection: 'row', gap: space[3] },
+  phases: { marginTop: space[4] },
+  phaseRow: { minHeight: 52, flexDirection: 'row', gap: space[3] },
   phaseRail: { width: 24, alignItems: 'center' },
-  phaseMark: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.bgApp },
+  phaseMark: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line2, backgroundColor: colors.surface2 },
   phaseMarkComplete: { borderColor: colors.ember, backgroundColor: colors.ember },
   phaseMarkCurrent: { borderColor: colors.ember, backgroundColor: colors.emberSoft },
   phaseMarkCore: { width: 7, height: 7, borderRadius: radius.full, backgroundColor: colors.ember },

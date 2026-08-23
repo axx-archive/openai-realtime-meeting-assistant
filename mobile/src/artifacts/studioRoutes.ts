@@ -29,9 +29,13 @@ export function artifactStudioPath(
   artifactId: string,
   kind: ArtifactStudioKind,
   intent: ArtifactStudioIntent,
+  expected?: { version: number; digest: string },
 ): string {
   const normalizedId = artifactId.trim();
   if (!normalizedId) return '';
   const mode = intent === 'present' ? (kind === 'deck' ? 'present' : 'view') : 'edit';
-  return `/studio/${kind}/${encodeURIComponent(normalizedId)}?mode=${mode}`;
+  const binding = expected
+    ? `&version=${encodeURIComponent(String(expected.version))}&digest=${encodeURIComponent(expected.digest)}`
+    : '';
+  return `/studio/${kind}/${encodeURIComponent(normalizedId)}?mode=${mode}${binding}`;
 }

@@ -958,7 +958,9 @@ func scoutChatDeckRequestDetected(text string) bool {
 	) {
 		return true
 	}
-	if scoutTextHasWord(normalized, "analyze", "analyse", "critique", "review", "assess") ||
+	if scoutCreationVerbLeadsArtifact(normalized,
+		[]string{"analyze", "analyse", "critique", "review", "assess"},
+		[]string{"deck", "presentation", "slide", "slides"}) ||
 		hasAssistantPhrase(normalized, "feedback on", "key takeaways", "help understanding") {
 		return false
 	}
@@ -1011,7 +1013,7 @@ func scoutDocumentReportRequestDetected(text string) bool {
 		return false
 	}
 	if scoutCreationVerbLeadsArtifact(normalized,
-		[]string{"create", "write", "prepare", "build", "produce", "generate", "develop", "draft", "design"},
+		[]string{"create", "write", "prepare", "build", "produce", "generate", "develop", "draft", "design", "need", "want"},
 		[]string{"report", "document", "memo"}) ||
 		hasAssistantPhrase(normalized,
 			"put together a report", "put together the report", "put together a document", "put together the document", "put together a memo", "put together the memo") {

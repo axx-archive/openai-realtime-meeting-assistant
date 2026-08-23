@@ -388,10 +388,37 @@ export type ScoutReplyLifecycle = {
   errorCode?: string;
 };
 
+export type ScoutResultAssetRef = {
+  ref: string;
+  mime?: string;
+  name?: string;
+  kind?: 'pdf' | 'image' | 'export' | string;
+};
+
+export type ScoutResultTableRef = {
+  columns: string[];
+  rows: string[][];
+  truncated?: boolean;
+};
+
+export type ScoutResultWorkbookRef = {
+  fileName: string;
+  mime: string;
+  sheetCount: number;
+  formulaCount: number;
+  inputPolicy?: string;
+  sheets?: Array<{ name: string; purpose?: string }>;
+};
+
 export type ScoutWorkThreadRef = {
   id: string;
+	/** Server-owned Activity topology. Clients never infer delegation from names or ordering. */
+	rootRunId?: string;
+	parentRunId?: string;
   mode: string;
   processId?: string;
+  /** Server-owned customer deliverable family; never inferred from prompt copy. */
+  outputFamily?: string;
   query: string;
   status: string;
   artifactId?: string;
@@ -409,8 +436,13 @@ export type ScoutWorkThreadRef = {
   /** Concrete deliverable produced by the run; artifactId remains the lifecycle owner. */
   resultArtifactId?: string;
   resultArtifactType?: string;
+	resultArtifactVersion?: number;
+	resultArtifactDigest?: string;
   resultTitle?: string;
   resultPreview?: string;
+	resultAssets?: ScoutResultAssetRef[];
+	resultTable?: ScoutResultTableRef;
+	resultWorkbook?: ScoutResultWorkbookRef;
   resultApprovalState?: 'approved_exact' | 'edited_after_approval' | 'legacy_approval_binding' | string;
   /** Server-owned rendered-admission truth for an authored result revision. */
   resultQualityState?: 'admitted' | 'draft_needs_attention' | 'edited_after_admission' | string;
@@ -434,16 +466,30 @@ export type ScoutWorkThreadRef = {
 export type ScoutWorkRecordRef = {
   id: string;
   runId: string;
+	rootRunId?: string;
+	parentRunId?: string;
   title: string;
   status: string;
   workerName: string;
   currentStage: string;
   summary: string;
-  progressPercent: number;
+  progressPercent?: number;
   artifactId: string;
   artifactHref: string;
   evidenceHref: string;
   providerExecutionFenced: boolean;
+  /** Optional explicit result identity for governed records. Untyped records stay in Activity/Files. */
+  artifactKind?: string;
+  workKind?: string;
+  outputKind?: string;
+  outputFamily?: string;
+	resultArtifactId?: string;
+	resultArtifactType?: string;
+	resultArtifactVersion?: number;
+	resultArtifactDigest?: string;
+	resultAssets?: ScoutResultAssetRef[];
+	resultTable?: ScoutResultTableRef;
+	resultWorkbook?: ScoutResultWorkbookRef;
 };
 
 export type ArtifactDispositionRef = {

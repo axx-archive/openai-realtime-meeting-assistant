@@ -787,27 +787,35 @@ func deckPPTXPictureXML(id int, element deckElement, media deckPPTXMedia, relati
 	description := html.EscapeString(firstNonEmptyString(element.Prompt, element.Name, "Deck image"))
 	position := element
 	sourceRect := ""
+	focal := func(value *float64) float64 {
+		if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) {
+			return .5
+		}
+		return math.Max(0, math.Min(1, *value))
+	}
 	if media.Width > 0 && media.Height > 0 {
 		frameRatio := element.Width / element.Height
 		imageRatio := float64(media.Width) / float64(media.Height)
 		if element.Fit == "contain" {
 			if imageRatio > frameRatio {
 				height := element.Width / imageRatio
-				position.Y += (element.Height - height) / 2
+				position.Y += (element.Height - height) * focal(element.FocalY)
 				position.Height = height
 			} else {
 				width := element.Height * imageRatio
-				position.X += (element.Width - width) / 2
+				position.X += (element.Width - width) * focal(element.FocalX)
 				position.Width = width
 			}
 		} else if imageRatio > frameRatio {
 			visible := frameRatio / imageRatio
-			crop := int(math.Round((1 - visible) * 50000))
-			sourceRect = `<a:srcRect l="` + strconv.Itoa(crop) + `" r="` + strconv.Itoa(crop) + `"/>`
+			left := (1 - visible) * focal(element.FocalX)
+			right := math.Max(0, 1-left-visible)
+			sourceRect = `<a:srcRect l="` + strconv.Itoa(int(math.Round(left*100000))) + `" r="` + strconv.Itoa(int(math.Round(right*100000))) + `"/>`
 		} else if imageRatio < frameRatio {
 			visible := imageRatio / frameRatio
-			crop := int(math.Round((1 - visible) * 50000))
-			sourceRect = `<a:srcRect t="` + strconv.Itoa(crop) + `" b="` + strconv.Itoa(crop) + `"/>`
+			top := (1 - visible) * focal(element.FocalY)
+			bottom := math.Max(0, 1-top-visible)
+			sourceRect = `<a:srcRect t="` + strconv.Itoa(int(math.Round(top*100000))) + `" b="` + strconv.Itoa(int(math.Round(bottom*100000))) + `"/>`
 		}
 	}
 	alpha := ""

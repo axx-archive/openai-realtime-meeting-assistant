@@ -403,17 +403,46 @@ func (app *kanbanBoardApp) applySlopVerdict(entry meetingMemoryEntry, verdict sl
 	return target, nil
 }
 
-// sweepExpiredQuarantine hard-deletes quarantined entries past their expiry —
-// the ONLY hard delete in the system — each leaving a slop_pass audit stub that
-// records the deleted id + reason so the FACT of deletion survives. forwardCursor
-// keeps the audit stub carrying the transcript cursor so it never strands the
-// classification window.
+// sweepExpiredQuarantine retires quarantined entries past their expiry.
+// Transcript source is never destructively reaped: it becomes a summary-first
+// retained row, hidden from ordinary recall but available through the exact,
+// ACL-checked Meeting Record drilldown. Disposable unpublished artifacts keep
+// the prior audited deletion path. forwardCursor preserves classifier progress.
 func (app *kanbanBoardApp) sweepExpiredQuarantine(forwardCursor string) map[string][]scopedRoomDeliveryAcknowledgement {
 	now := time.Now().UTC()
 	artifactAcknowledgements := map[string][]scopedRoomDeliveryAcknowledgement{}
 	for _, entry := range app.memory.entriesByRelevance(relevanceQuarantined) {
 		expiresAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata["expiresAt"]))
 		if err != nil || !now.After(expiresAt) {
+			continue
+		}
+		if entry.Kind == meetingMemoryKindTranscript {
+			retained, changed, retainErr := app.memory.retainExpiredTranscript(entry.ID, now)
+			if retainErr != nil {
+				log.Errorf("%s expiry failed to retain transcript %s: %v", slopClassifierAgentName, entry.ID, retainErr)
+				continue
+			}
+			if !changed {
+				continue
+			}
+			reason := firstNonEmptyString(strings.TrimSpace(retained.Metadata["classifierReason"]), "quarantine expired after 30 days")
+			auditMetadata := map[string]string{
+				"retainedId":            retained.ID,
+				"retainedKind":          retained.Kind,
+				"reason":                reason,
+				"retainedAt":            now.Format(time.RFC3339Nano),
+				slopClassifierCursorKey: forwardCursor,
+			}
+			if _, _, err := app.memory.appendSlopPass(durableTimestampID("slop-retained", time.Now()), "Retained raw transcript "+retained.ID+" for exact drilldown", auditMetadata); err != nil {
+				log.Errorf("%s expiry failed to write retention audit stub for %s: %v", slopClassifierAgentName, retained.ID, err)
+			}
+			broadcastOSEvent(osEvent{
+				Kind:          osEventQuarantineChange,
+				Ref:           retained.ID,
+				Title:         "Archived raw transcript",
+				OriginSurface: "quarantine",
+				Actor:         reviewedByClassifier,
+			})
 			continue
 		}
 		removed, acknowledgements, deleted, delErr := app.deleteEntryByIDAcknowledged(entry.ID)

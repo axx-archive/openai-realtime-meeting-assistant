@@ -95,3 +95,20 @@ test('persisted ledger keeps only the newest version per work item and stays bou
   assert.deepEqual(parseWorkActivityDismissalLedger('{bad json'), { version: 1, records: [] });
 });
 
+test('generic governed work keeps viewer-local Activity dismissal identity', () => {
+  const governed: ScoutMessage = {
+    id: 'message-governed',
+    kind: 'work_result',
+    role: 'scout',
+    createdAt: '2026-08-22T12:00:00Z',
+    work: {
+      id: 'record-1', runId: 'run-1', title: 'Completed work', status: 'complete', workerName: 'Scout',
+      currentStage: 'done', summary: 'Ready.', artifactId: 'artifact-1',
+      artifactHref: '/api/stride/v1/work/runs/run-1/artifact', evidenceHref: '', providerExecutionFenced: false,
+    },
+  };
+  const identity = workActivitySurfaceIdentity('thread-1', governed);
+  assert.ok(identity);
+  const ledger = recordWorkActivityDismissal(parseWorkActivityDismissalLedger(null), identity!, 100);
+  assert.equal(workActivityIsDismissed(ledger, identity!), true);
+});

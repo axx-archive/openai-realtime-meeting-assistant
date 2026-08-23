@@ -269,13 +269,51 @@ func realtimeUsageTokens(usage *kanbanRealtimeUsage, entry *llmUsageEntry) bool 
 }
 
 type kanbanBoardApp struct {
-	mu                         sync.Mutex
+	mu sync.Mutex
+	// meetingLifecycleMu fences accepted sitting-scoped input against an
+	// explicit archive boundary. Transcript/chat writers take a read lease for
+	// their full validate+persist path; archive takes the write lease from its
+	// source snapshot through successor authority and media generation install.
+	meetingLifecycleMu sync.RWMutex
+	// roomChatDeleteAfterLifecycleLease is an instance-local deterministic test
+	// seam used to prove a queued archive writer cannot deadlock author delete.
+	// It is nil in production.
+	roomChatDeleteAfterLifecycleLease func()
+	// meetingArchiveMu serializes every archive file publication and read-
+	// modify-write. Memory deletion holds memory.mu before entering this lock;
+	// archive refresh therefore snapshots memory before taking it and validates
+	// the finalization revision again under the archive lock.
+	meetingArchiveMu           sync.Mutex
 	cards                      []kanbanCard
 	nextCreatedIndex           int
 	updatedAt                  time.Time
 	handledCalls               map[string]struct{}
 	memory                     *meetingMemoryStore
-	scoutChatIndexBackfillOnce sync.Once
+	meetingFinalizationRunMu   sync.Mutex
+	meetingFinalizationRunning map[string]struct{}
+	meetingFinalizationAgain   map[string]bool
+	// Fresh live closes/late transcript fences always drain ahead of the boot
+	// backlog. At most two workers run, and only one may consume backlog work,
+	// reserving capacity for a current sitting without unleashing unbounded
+	// historical model concurrency.
+	meetingFinalizationQueue          []string
+	meetingFinalizationBacklog        []string
+	meetingFinalizationQueuedPriority map[string]bool
+	meetingFinalizationActive         map[string]bool
+	meetingFinalizationWorkers        int
+	meetingFinalizationBacklogActive  bool
+	meetingFinalizationWorker         bool
+	meetingFinalizationRetryTimers    map[string]*time.Timer
+	meetingFinalizationRetriesStopped bool
+	meetingArchivePublishing          map[string]bool
+	// roomArchiveCloseRetryTimers keeps a durably archived named room from
+	// becoming a half-closed sitting when meetings.json is temporarily
+	// unavailable. The archived room flag is the restart authority; these
+	// bounded timers are only the same-process fast recovery lane.
+	roomArchiveCloseRetryMu       sync.Mutex
+	roomArchiveCloseRetryTimers   map[string]*time.Timer
+	roomArchiveCloseRetryAttempts map[string]int
+	scoutChatIndexBackfillOnce    sync.Once
 	// privateRealtimeOfferReplays is deliberately process-only. It retains the
 	// raw lease token and answer SDP just long enough to replay a lost HTTP
 	// response without a second provider call; durable memory stores digests.
@@ -588,22 +626,33 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	}
 
 	app := &kanbanBoardApp{
-		cards:                     cards,
-		nextCreatedIndex:          nextKanbanCardIndex(cards),
-		updatedAt:                 updatedAt,
-		handledCalls:              map[string]struct{}{},
-		memory:                    memory,
-		goalStartedChildren:       map[string]struct{}{},
-		roomStartedThreads:        map[string]struct{}{},
-		openAIToolActiveRuns:      map[string]struct{}{},
-		openAIToolActivationOwner: uuid.NewString(),
-		pendingAttachmentUploads:  map[string]pendingAttachmentUploadGrant{},
+		cards:                          cards,
+		nextCreatedIndex:               nextKanbanCardIndex(cards),
+		updatedAt:                      updatedAt,
+		handledCalls:                   map[string]struct{}{},
+		memory:                         memory,
+		meetingFinalizationRunning:     map[string]struct{}{},
+		meetingFinalizationAgain:       map[string]bool{},
+		meetingFinalizationRetryTimers: map[string]*time.Timer{},
+		roomArchiveCloseRetryTimers:    map[string]*time.Timer{},
+		roomArchiveCloseRetryAttempts:  map[string]int{},
+		goalStartedChildren:            map[string]struct{}{},
+		roomStartedThreads:             map[string]struct{}{},
+		openAIToolActiveRuns:           map[string]struct{}{},
+		openAIToolActivationOwner:      uuid.NewString(),
+		pendingAttachmentUploads:       map[string]pendingAttachmentUploadGrant{},
 		roomLive: map[string]*roomLiveState{
 			officeRoomID: newRoomLiveState(officeRoomID, updatedAt),
 		},
 		boardLifecycleFrozen: boardLifecycleRecoveryErr != nil,
 		boardLifecycleErr:    boardLifecycleRecoveryErr,
 		scoutInvocation:      NewSTRIDEScoutInvocationMachine(20 * time.Second),
+	}
+	if app.memory != nil {
+		app.memory.transcriptFenceHook = app.prepareTranscriptFinalizationFence
+		app.memory.transcriptDeleteFenceHook = app.prepareTranscriptDeletionFinalizationFence
+		app.memory.transcriptCommitHook = app.handleDurableTranscriptCommit
+		app.memory.finalizationOutputMutationHook = app.handleMeetingFinalizationOutputMutation
 	}
 	if err := app.initializeAttachmentSourceStore(); err != nil {
 		app.attachmentSourceStoreErr = err
@@ -629,10 +678,6 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	if err := app.initializeAdmissionAnchorStore(admissionAnchorsPath()); err != nil {
 		log.Errorf("Admission anchor persistence disabled: %v", err)
 	}
-	// boot reconciliation: close a stale open record (its meeting id no longer
-	// matches the memory store's resumed id), or re-arm the idle timer when
-	// the same in-flight meeting survived the restart.
-	app.reconcileMeetingRecordsAtBoot()
 	app.resumeRoomFollowThroughAtBoot()
 	// One-time, idempotent Files backfill (kanban-card-110): stamp every
 	// pre-gate-qualifying deliverable savedToFiles=true so introducing the
@@ -654,6 +699,11 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		log.Errorf("STRIDE runtime unavailable: %v", err)
 	}
 	app.meetingSpecialists = initializeMeetingSpecialistProduct(app, app.strideRuntime)
+	// Reconcile only after every service an immediately-expired durable idle
+	// deadline may call has been installed. A past deadline legitimately fires
+	// at once; publishing that timer from the middle of construction races
+	// meeting specialists and other close consumers.
+	app.reconcileMeetingRecordsAtBoot()
 	app.replaySTRIDETeamChatProjection()
 	app.reconcileConversationContinuityAtStartup()
 
@@ -804,6 +854,10 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 		app.roomScoutFactory = nil
 	}
 	app.mu.Unlock()
+	// Provider authority is now installed. Resume any receipt that survived a
+	// crash in closing/degraded before ordinary ambient workers can advance the
+	// same meeting cursors.
+	app.resumeMeetingFinalizationsAtBoot(apiKey)
 	// W4 (§4.4/§9.10, the plan's ONE deliberate behavior change): the office
 	// transcription lane and the Scout Realtime peer are no longer boot-started
 	// — they are created lazily at the first admission (ensureRoomMedia →
@@ -1225,6 +1279,8 @@ func (app *kanbanBoardApp) restartRealtimePeer(reason string) {
 func (app *kanbanBoardApp) Close() error {
 	var closeErr error
 	app.closeOnce.Do(func() {
+		app.stopMeetingFinalizationRetries()
+		app.stopRoomArchiveCloseRetries()
 		app.stopScoutChatImageWorkers()
 		app.stopScoutOpeningReplyWorkers()
 		app.stopScoutProactiveWorker()
@@ -5438,6 +5494,8 @@ func (app *kanbanBoardApp) rememberTranscriptWithScopeAndSegmentAndSource(roomID
 		log.Errorf("Meeting memory unavailable; transcript was not saved")
 		return
 	}
+	app.meetingLifecycleMu.RLock()
+	defer app.meetingLifecycleMu.RUnlock()
 	app.mu.Lock()
 	recordingState := app.roomLiveLocked(roomID)
 	recordingEnabled := recordingState.recordingEnabled
@@ -5768,6 +5826,8 @@ func (app *kanbanBoardApp) recordRoomChatMessageForMeetingWithScope(roomID strin
 		log.Errorf("Meeting memory unavailable; room chat message was not saved")
 		return nil, false
 	}
+	app.meetingLifecycleMu.RLock()
+	defer app.meetingLifecycleMu.RUnlock()
 	text = normalizeRoomChatText(text)
 	if text == "" {
 		return nil, false
@@ -5871,7 +5931,10 @@ func roomChatEventPayload(entry meetingMemoryEntry) map[string]any {
 	if artifactID := strings.TrimSpace(entry.Metadata["artifactId"]); artifactID != "" {
 		payload["artifactId"] = artifactID
 	}
-	for _, key := range []string{"workRunId", "workStatus", "workFamily", "workTitle", "workProgress"} {
+	for _, key := range []string{
+		"workRunId", "workRootRunId", "workParentRunId", "workStatus", "workFamily", "workTitle", "workProgress",
+		"resultArtifactId", "resultArtifactType", "resultArtifactVersion", "resultArtifactDigest", "resultTitle",
+	} {
 		if value := strings.TrimSpace(entry.Metadata[key]); value != "" {
 			payload[key] = value
 		}
@@ -5910,18 +5973,22 @@ func (app *kanbanBoardApp) deleteRoomChatMessage(entryID string, requesterEmail 
 	if app == nil || app.memory == nil {
 		return nil, false
 	}
+	app.meetingLifecycleMu.RLock()
+	defer app.meetingLifecycleMu.RUnlock()
+	if app.roomChatDeleteAfterLifecycleLease != nil {
+		app.roomChatDeleteAfterLifecycleLease()
+	}
 	entryID = strings.TrimSpace(entryID)
 	if entryID == "" {
 		return nil, false
 	}
-	entry, ok := app.memory.entryByID(entryID)
-	if !ok || entry.Kind != meetingMemoryKindTranscript || entry.Metadata["source"] != transcriptSourceRoomChat {
-		return nil, false
-	}
-	if !roomChatEntryAuthoredBy(entry, requesterEmail, requesterName) {
-		return nil, false
-	}
-	removed, deleted, err := app.deleteEntryByID(entryID)
+	// Authorization is evaluated under memory.mu in the same critical section
+	// that removes the row. Calling the generic app delete router here would
+	// recursively take meetingLifecycleMu.RLock; Go's writer-preferring RWMutex
+	// deadlocks that shape when an archive writer is already queued.
+	removed, deleted, err := app.memory.deleteEntryByID(entryID, func(entry meetingMemoryEntry) bool {
+		return entry.Kind == meetingMemoryKindTranscript && entry.Metadata["source"] == transcriptSourceRoomChat && roomChatEntryAuthoredBy(entry, requesterEmail, requesterName)
+	})
 	if err != nil || !deleted {
 		if err != nil {
 			log.Errorf("Failed to delete room chat message %s: %v", entryID, err)
@@ -8373,9 +8440,16 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	// force-end an active grill FIRST so the grill Q&A lands in the archive,
 	// the report window closes cleanly, and normal instructions are restored.
 	app.endGrillSessionForArchive()
-	// flush ambient agents first so the final minutes of the meeting are
-	// summarized and applied to the board before the snapshot is taken.
-	app.flushAmbientAgentsForArchive()
+	// From this point through successor authority/media publication, every
+	// accepted transcript, typed chat, and admission is ordered wholly before or
+	// after this boundary. Slow model/email work remains outside the fence.
+	app.meetingLifecycleMu.Lock()
+	lifecycleLocked := true
+	defer func() {
+		if lifecycleLocked {
+			app.meetingLifecycleMu.Unlock()
+		}
+	}()
 
 	archivedBy = canonicalRoomActorName(archivedBy)
 	archivedAt := time.Now().UTC()
@@ -8384,6 +8458,7 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	if app.memory != nil {
 		meetingID = app.memory.currentMeetingID(officeRoomID)
 	}
+	finalizationSource := app.meetingFinalizationSource(meetingID)
 	board := app.snapshotState()
 	memory := app.memorySnapshotForMeeting(meetingID, 2000)
 	participants := app.participantSnapshot()
@@ -8395,17 +8470,22 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	// ends after the archive is durably written, so a failed write never
 	// strands an ended record whose archiveId 404s while the room keeps
 	// talking on an un-rotated memory id. The end stamps below mirror exactly
-	// what endMeeting will persist after the first successful write.
+	// what endMeetingWithFinalization will persist after the first successful
+	// write. The preliminary archive truthfully says closing; it can never
+	// claim analysis-ready before the core receipt lands.
 	var closedMeeting *meetingRecord
+	meetingNeedsClose := false
 	if record, ok := app.meetings.activeRecord(officeRoomID); ok && record.ID == meetingID {
 		pending := record
 		pending.EndedAt = archivedAt.Format(time.RFC3339Nano)
 		pending.EndedReason = meetingEndedReasonArchive
 		pending.ArchiveID = archiveID
+		receipt := newMeetingFinalizationReceipt(finalizationSource, archivedAt)
+		pending.Finalization = &receipt
 		closedMeeting = &pending
-	} else if record, _ := app.meetings.endMeeting(meetingID, archivedAt, meetingEndedReasonArchive, archiveID); record.ID != "" {
-		// Defensive: the id matches an ALREADY-ENDED record (endMeeting is
-		// idempotent, changed=false) — embed it as stored.
+		meetingNeedsClose = true
+	} else if record, ok := app.meetings.recordByID(meetingID); ok {
+		// Defensive retry: embed the already-ended record exactly as stored.
 		closedRecord := record
 		closedMeeting = &closedRecord
 	}
@@ -8432,28 +8512,182 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 	if err != nil {
 		return meetingArchiveResult{}, err
 	}
+	closedMeetingChanged := false
+	archivePublicationOpen := false
+	// A retry of an already-ended archive participates in the same publication
+	// fence as a fresh close. This prevents its two non-model file writes from
+	// racing a late transcript downgrade and restoring stale finalized truth.
+	if !meetingNeedsClose && closedMeeting != nil && closedMeeting.Finalization != nil {
+		app.beginMeetingArchivePublication(meetingID)
+		archivePublicationOpen = true
+		defer func() {
+			if archivePublicationOpen {
+				app.endMeetingArchivePublication(meetingID, true)
+			}
+		}()
+	}
 
-	if err := writeMeetingArchive(archivePath, archive); err != nil {
+	if err := app.writeMeetingArchiveSerialized(archivePath, archive); err != nil {
 		return meetingArchiveResult{}, fmt.Errorf("write meeting archive: %w", err)
 	}
 
-	// The archive is durable: NOW close the record (idempotent — a retried
-	// archive of an already-ended id reports changed=false and never
-	// restamps).
-	closedMeetingChanged := false
-	if record, changed := app.meetings.endMeeting(meetingID, archivedAt, meetingEndedReasonArchive, archiveID); record.ID != "" {
-		closedRecord := record
-		closedMeeting = &closedRecord
-		closedMeetingChanged = changed
-		if changed && app.meetingSpecialists != nil {
-			app.meetingSpecialists.CloseScope(officeRoomID, record.ID, "room_closed")
-		}
+	if meetingNeedsClose {
+		app.beginMeetingArchivePublication(meetingID)
+		archivePublicationOpen = true
 	}
+	if archivePublicationOpen && meetingNeedsClose {
+		defer func() {
+			if archivePublicationOpen {
+				app.endMeetingArchivePublication(meetingID, true)
+			}
+		}()
+	}
+
+	// The user-triggered archive is a meeting boundary, not a model request.
+	// While input/admission readers remain fenced, snapshot occupants under
+	// app.mu, stage every successor anchor, atomically close/open the meeting
+	// pair in one meetings.json write, and only then publish memory/media. A
+	// failed transaction leaves the predecessor open; staged anchors are ignored
+	// by boot recovery until that exact successor record exists.
+	successorID := ""
+	var successorMeeting meetingRecord
+	var successorMeetingChanged bool
+	var mediaRollover officeManualArchiveMediaRollover
+	if meetingID != "" && app.memory != nil {
+		app.mu.Lock()
+		state := app.roomLiveLocked(officeRoomID)
+		if currentID := app.memory.currentMeetingID(officeRoomID); currentID != meetingID {
+			app.mu.Unlock()
+			return meetingArchiveResult{}, fmt.Errorf("archive sitting changed before successor publication: %w", ErrMeetingRecordStore)
+		}
+		occupied := app.activeParticipantCountInRoomLocked(state) > 0
+		if occupied {
+			successorID = app.memory.mintSuccessorMeetingID(officeRoomID, meetingID)
+			staged, successorErr := app.stageManualRolloverSittingLocked(context.Background(), officeRoomID, meetingID, successorID)
+			if successorErr != nil {
+				app.mu.Unlock()
+				if meetingNeedsClose {
+					app.endMeetingArchivePublication(meetingID, false)
+					archivePublicationOpen = false
+				}
+				return meetingArchiveResult{}, fmt.Errorf("start anchored archive successor: %w", successorErr)
+			}
+			if meetingNeedsClose {
+				closed, successor, rolloverErr := app.meetings.rolloverMeetingWithFinalization(officeRoomID, meetingID, archivedAt, archiveID, finalizationSource, successorID, staged.startedAt, staged.participants)
+				if rolloverErr != nil {
+					if resolveErr := app.admissionAnchors.ResolvePendingRollover(context.Background(), staged.pending, false); resolveErr != nil {
+						app.latchAdmissionAnchorFailure(resolveErr)
+					}
+					app.mu.Unlock()
+					app.endMeetingArchivePublication(meetingID, false)
+					archivePublicationOpen = false
+					return meetingArchiveResult{}, fmt.Errorf("atomically roll over archived meeting: %w", rolloverErr)
+				}
+				closedMeeting = &closed
+				closedMeetingChanged = true
+				successorMeeting = successor
+				successorMeetingChanged = true
+			} else {
+				var startErr error
+				successorMeeting, successorMeetingChanged, startErr = app.meetings.startMeetingDurable(officeRoomID, successorID, staged.startedAt, staged.participants)
+				if startErr != nil {
+					_ = app.admissionAnchors.ResolvePendingRollover(context.Background(), staged.pending, false)
+					app.mu.Unlock()
+					return meetingArchiveResult{}, fmt.Errorf("start anchored archive successor: %w", startErr)
+				}
+			}
+			if !app.memory.transitionMeetingIDIfCurrent(officeRoomID, meetingID, successorID) {
+				app.mu.Unlock()
+				return meetingArchiveResult{}, fmt.Errorf("publish anchored archive successor: %w", ErrMeetingRecordStore)
+			}
+			app.meetings.cancelIdleEnd(officeRoomID)
+			mediaRollover = app.rolloverOfficeMediaAfterManualArchiveLocked(meetingID, successorID)
+			if resolveErr := app.admissionAnchors.ResolvePendingRollover(context.Background(), staged.pending, true); resolveErr != nil {
+				app.latchAdmissionAnchorFailure(resolveErr)
+				log.Errorf("Could not commit successor admission anchors for %s: %v", successorID, resolveErr)
+			}
+		} else {
+			if meetingNeedsClose {
+				record, changed, closeErr := app.meetings.endMeetingWithFinalization(meetingID, archivedAt, meetingEndedReasonArchive, archiveID, finalizationSource)
+				if closeErr != nil {
+					app.mu.Unlock()
+					app.endMeetingArchivePublication(meetingID, false)
+					archivePublicationOpen = false
+					return meetingArchiveResult{}, fmt.Errorf("begin meeting finalization: %w", closeErr)
+				}
+				closedRecord := record
+				closedMeeting = &closedRecord
+				closedMeetingChanged = changed
+			}
+			if !app.memory.transitionMeetingIDIfCurrent(officeRoomID, meetingID, "") {
+				app.mu.Unlock()
+				return meetingArchiveResult{}, fmt.Errorf("retire archived meeting identity: %w", ErrMeetingRecordStore)
+			}
+			app.meetings.cancelIdleEnd(officeRoomID)
+			mediaRollover = app.rolloverOfficeMediaAfterManualArchiveLocked(meetingID, "")
+		}
+		app.mu.Unlock()
+	}
+	if closedMeetingChanged && app.meetingSpecialists != nil {
+		app.meetingSpecialists.CloseScope(officeRoomID, meetingID, "room_closed")
+	}
+	app.meetingLifecycleMu.Unlock()
+	lifecycleLocked = false
+	// The exact identity/generation transition above is the linearization
+	// point. Potentially blocking peer/lane/socket teardown follows outside the
+	// lifecycle fence; any old callback that arrives meanwhile fails the exact
+	// sitting+generation check and cannot be accepted or re-labeled.
+	app.finishOfficeMediaAfterManualArchive(mediaRollover)
+	if closedMeetingChanged {
+		app.broadcastMeetingRecord(*closedMeeting)
+	}
+	if successorMeetingChanged {
+		app.broadcastMeetingRecord(successorMeeting)
+	}
+	archive.Meeting = closedMeeting
+	archive.Memory = app.memorySnapshotForMeeting(meetingID, 2000)
+	notes = buildMeetingNotes(archiveID, archivedAt, archivedBy, board, archive.Memory, participants)
+	archive.Notes = notes
 
 	email = sendMeetingNotesEmail(email.Recipients, notes)
 	archive.Email = email
-	if err := writeMeetingArchive(archivePath, archive); err != nil {
+	if err := app.updateMeetingArchiveSerialized(archivePath, func(current *meetingArchive) error {
+		if strings.TrimSpace(current.MeetingID) != strings.TrimSpace(meetingID) {
+			return fmt.Errorf("archive belongs to meeting %s", strings.TrimSpace(current.MeetingID))
+		}
+		current.Email = email
+		return nil
+	}); err != nil {
 		return meetingArchiveResult{}, fmt.Errorf("write meeting archive email status: %w", err)
+	}
+	if latest, found := app.meetings.recordByID(meetingID); found && latest.Finalization != nil {
+		if err := app.writeMeetingArchiveFinalizationTruth(latest, false); err != nil {
+			return meetingArchiveResult{}, fmt.Errorf("refresh meeting archive finalization truth: %w", err)
+		}
+		latestCopy := latest
+		closedMeeting = &latestCopy
+	}
+	if closedMeeting != nil && closedMeeting.Finalization != nil &&
+		(closedMeeting.Finalization.State == meetingFinalizationFinalized || closedMeeting.Finalization.State == meetingFinalizationDegraded) {
+		if synced, syncErr := app.meetings.markFinalizationArchiveSynced(closedMeeting.ID, archiveID, *closedMeeting.Finalization, time.Now().UTC()); syncErr != nil {
+			// The archive itself is already durable and truthful. Leaving the
+			// receipt unsynced makes boot recovery retry the refresh instead of
+			// claiming a write that the meeting store could not receipt.
+			log.Errorf("Could not receipt manual meeting %s archive finalization: %v", closedMeeting.ID, syncErr)
+			if errors.Is(syncErr, ErrMeetingFinalizationSourceAdvanced) {
+				if latest, found := app.meetings.recordByID(closedMeeting.ID); found {
+					if repairErr := app.writeMeetingArchiveFinalizationTruth(latest, false); repairErr != nil {
+						log.Errorf("Could not repair manual meeting %s archive after finalization race: %v", closedMeeting.ID, repairErr)
+					}
+				}
+			}
+		} else {
+			closedMeeting = &synced
+		}
+	}
+	if archivePublicationOpen {
+		app.endMeetingArchivePublication(meetingID, true)
+		archivePublicationOpen = false
 	}
 
 	summary := fmt.Sprintf("Archived meeting %s with %d transcript item(s), %d board card(s), %d participant(s), and %d project status item(s).", archiveID, len(archive.Memory), len(archive.Board.Cards), len(archive.Participants), len(notes.ProjectStatuses))
@@ -8498,37 +8732,15 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 		clientArtifact := decorateArchiveDownloadURLForClient(artifactEntry)
 		artifact = &clientArtifact
 		// the meeting is over: deliver anything queued with deliver
-		// "after_meeting" before the id rotates (idempotent — the idle-end
-		// seam may already have flushed).
+		// "after_meeting" (idempotent — the idle-end seam may already have
+		// flushed). The meeting id already rotated at the durable boundary.
 		app.flushDeferredNotifications("archive")
 		app.flushRoomFollowThroughForMeeting(officeRoomID, meetingID, "archive")
-		// the archive closes the current meeting; the next entry starts a new
-		// one. Conditional: a racing admission that already rotated and minted
-		// a successor id must not have it cleared by this stale close.
-		if meetingID != "" {
-			app.memory.rotateMeetingIDIfCurrent(officeRoomID, meetingID)
-		} else {
+		if meetingID == "" {
 			// nothing was captured before the archive; clear whatever id the
 			// archive entries themselves lazily minted (pre-fix behavior).
 			app.memory.rotateMeetingID(officeRoomID)
 		}
-	}
-
-	// push the closed record, then immediately open a successor record when
-	// people are still in the room so a mid-occupancy archive never leaves a
-	// recordless gap.
-	if closedMeetingChanged && closedMeeting != nil {
-		app.broadcastMeetingRecord(*closedMeeting)
-	}
-	successorID := ""
-	if app.meetings != nil && app.memory != nil && app.activeParticipantCount(officeRoomID) > 0 {
-		successorID = app.memory.ensureMeetingID(officeRoomID)
-		if successor, started := app.meetings.startMeeting(officeRoomID, successorID, time.Now().UTC(), app.participantSnapshot()); started {
-			app.broadcastMeetingRecord(successor)
-		}
-	}
-	if successorID != "" && meetingID != "" {
-		app.rolloverOfficeMediaAfterManualArchive(meetingID, successorID)
 	}
 
 	return meetingArchiveResult{
@@ -8553,10 +8765,10 @@ func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResu
 // lazily mint (and stamp) a successor id. Differences from archiveMeeting,
 // all deliberate: no email (silent), no successor record (the room is empty),
 // no deferred-notification flush (endMeetingForIdle already flushed with
-// "meeting_end"), and no ambient-agent flush here — post-rotation model output
-// would key to the successor id; endMeetingForIdle already ran the close
-// chain (flushAmbientAgentsForClose) BEFORE rotating, so the snapshot below
-// embeds the final brain pass and the meeting's digest.
+// "meeting_end"), and no model work here. The first archive truthfully embeds
+// the durable `closing` receipt; the asynchronous core worker refreshes it to
+// finalized/degraded without delaying rotation or media teardown. Non-core
+// organization rollups remain asynchronous.
 func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 	if app == nil || app.memory == nil || app.meetings == nil || strings.TrimSpace(closed.ID) == "" {
 		return
@@ -8595,7 +8807,10 @@ func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 		log.Errorf("Failed to resolve idle auto-archive path: %v", err)
 		return
 	}
-	if err := writeMeetingArchive(archivePath, archive); err != nil {
+	if idleArchiveBeforeWrite != nil {
+		idleArchiveBeforeWrite()
+	}
+	if err := app.writeMeetingArchiveSerialized(archivePath, archive); err != nil {
 		log.Errorf("Failed to write idle auto-archive: %v", err)
 		return
 	}
@@ -8643,6 +8858,11 @@ func (app *kanbanBoardApp) autoArchiveIdleMeeting(closed meetingRecord) {
 	// toast and no assistant announcement.
 	broadcastSignedInKanbanEvent("memory", nil)
 }
+
+// idleArchiveBeforeWrite is a test-only barrier for proving that accepted
+// transcript mutation cannot cross the close -> archive -> archiveId stamp
+// publication fence. Production leaves it nil.
+var idleArchiveBeforeWrite func()
 
 func meetingArchiveArtifactTitle(archive meetingArchive) string {
 	title := ""
@@ -8732,6 +8952,38 @@ func buildMeetingArchiveArtifactText(archive meetingArchive, summary string) str
 
 func writeMeetingArchive(path string, archive meetingArchive) error {
 	return writeJSONFileAtomically(path, "meeting archive", archive)
+}
+
+func (app *kanbanBoardApp) writeMeetingArchiveSerialized(path string, archive meetingArchive) error {
+	if app == nil {
+		return fmt.Errorf("meeting archive app is unavailable")
+	}
+	app.meetingArchiveMu.Lock()
+	defer app.meetingArchiveMu.Unlock()
+	return writeMeetingArchive(path, archive)
+}
+
+// updateMeetingArchiveSerialized performs a locked read-modify-write so a
+// slow manual email result cannot overwrite a newer transcript downgrade or
+// author deletion with a stale full archive snapshot.
+func (app *kanbanBoardApp) updateMeetingArchiveSerialized(path string, update func(*meetingArchive) error) error {
+	if app == nil || update == nil {
+		return fmt.Errorf("meeting archive update is unavailable")
+	}
+	app.meetingArchiveMu.Lock()
+	defer app.meetingArchiveMu.Unlock()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var archive meetingArchive
+	if err := json.Unmarshal(raw, &archive); err != nil {
+		return err
+	}
+	if err := update(&archive); err != nil {
+		return err
+	}
+	return writeMeetingArchive(path, archive)
 }
 
 func meetingArchiveDownloadURL(archiveID string) string {

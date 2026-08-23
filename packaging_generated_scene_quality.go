@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
+	"strconv"
 	"strings"
 
 	xhtml "golang.org/x/net/html"
@@ -16,7 +18,7 @@ const (
 )
 
 // packagingGeneratedScenePreflightRequired keeps the stricter production
-// contract on Packaging Studio's generated v5 candidate. Deck Studio remains
+// contract on Packaging Studio's generated v5+ candidates. Deck Studio remains
 // deliberately permissive so a human can move elements beyond the canvas while
 // editing and recover them later.
 func packagingGeneratedScenePreflightRequired(plan *goalPlan) bool {
@@ -31,6 +33,15 @@ type packagingGeneratedSceneSource struct {
 	OverlapAllowed map[string]bool
 	SafeZoneExempt map[string]bool
 	VisuallyHidden map[string]bool
+	Identity       map[string]string
+	ImageFig       map[string]string
+	ImageCrop      map[string]string
+	ImageFocalX    map[string]string
+	ImageFocalY    map[string]string
+	ImageFit       map[string]string
+	ImagePosition  map[string]string
+	UnsafeTextTree map[string]bool
+	TextLines      map[string][]string
 }
 
 type packagingGeneratedSceneBounds struct {
@@ -48,6 +59,14 @@ func validatePackagingGeneratedScene(app *kanbanBoardApp, plan *goalPlan, source
 	source, err := parsePackagingGeneratedSceneSource(sourceHTML)
 	if err != nil {
 		return err
+	}
+	if packagingStudioPremiumDesignContract(plan) {
+		if err := validatePackagingGeneratedPremiumStyles(sourceHTML); err != nil {
+			return err
+		}
+		if err := validatePackagingGeneratedPremiumDOM(sourceHTML); err != nil {
+			return err
+		}
 	}
 	assetsJSON, err := json.Marshal(assets)
 	if err != nil {
@@ -72,7 +91,7 @@ func validatePackagingGeneratedScene(app *kanbanBoardApp, plan *goalPlan, source
 	if err := validatePackagingGeneratedSceneLockedCopy(app, plan, deck); err != nil {
 		return err
 	}
-	if err := validatePackagingGeneratedSceneLockedLayout(app, plan, deck); err != nil {
+	if err := validatePackagingGeneratedSceneLockedLayout(app, plan, deck, source); err != nil {
 		return err
 	}
 	return nil
@@ -100,6 +119,11 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 
 	source := packagingGeneratedSceneSource{
 		SlideElements: make(map[string][]string), ElementSlide: make(map[string]string), OverlapAllowed: make(map[string]bool), SafeZoneExempt: make(map[string]bool), VisuallyHidden: make(map[string]bool),
+		Identity: make(map[string]string), ImageFig: make(map[string]string), ImageCrop: make(map[string]string), ImageFocalX: make(map[string]string), ImageFocalY: make(map[string]string), ImageFit: make(map[string]string), ImagePosition: make(map[string]string), UnsafeTextTree: make(map[string]bool),
+		TextLines: make(map[string][]string),
+	}
+	for _, key := range []string{"candidate", "strategy", "system", "palette", "type", "spacing", "grid", "motif", "image-treatment", "data-viz", "refusals"} {
+		source.Identity[key] = strings.TrimSpace(legacyNodeAttr(stages[0], "data-deck-identity-"+key))
 	}
 	seenSlides := map[string]struct{}{}
 	for node := stages[0].FirstChild; node != nil; node = node.NextSibling {
@@ -144,6 +168,17 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 					source.SlideElements[slideID] = append(source.SlideElements[slideID], elementID)
 					source.OverlapAllowed[elementID] = strings.EqualFold(strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-overlap")), "allow")
 					styles := legacyStyleMap(elementNode)
+					if typ == "image" {
+						source.ImageFig[elementID] = strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-fig"))
+						source.ImageCrop[elementID] = strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-crop"))
+						source.ImageFocalX[elementID] = strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-focal-x"))
+						source.ImageFocalY[elementID] = strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-focal-y"))
+						source.ImageFit[elementID] = strings.TrimSpace(styles["object-fit"])
+						source.ImagePosition[elementID] = strings.TrimSpace(styles["object-position"])
+					} else if typ == "text" {
+						source.UnsafeTextTree[elementID] = packagingGeneratedTextTreeHasVisualOverrides(elementNode)
+						source.TextLines[elementID] = packagingGeneratedTextTreeLines(elementNode)
+					}
 					source.VisuallyHidden[elementID] = packagingGeneratedNodeHasAttribute(elementNode, "hidden") ||
 						strings.EqualFold(strings.TrimSpace(styles["display"]), "none") ||
 						strings.EqualFold(strings.TrimSpace(styles["visibility"]), "hidden")
@@ -175,6 +210,597 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 		return packagingGeneratedSceneSource{}, fmt.Errorf("generated deck has no mapped slides")
 	}
 	return source, nil
+}
+
+// Premium scenes deliberately keep every authored aesthetic on the exact
+// mapped node's inline contract. An arbitrary stylesheet can otherwise defeat
+// a perfectly valid native lock after import (for example, an !important rule
+// that hides all text, a body opacity rule, or a stage transform). The verbatim
+// invariant chassis is the only stylesheet; generated pixels are materialized
+// by the server on the exact locked .ph node rather than through the cascade.
+func validatePackagingGeneratedPremiumStyles(sourceHTML string) error {
+	doc, err := xhtml.Parse(strings.NewReader(sourceHTML))
+	if err != nil {
+		return fmt.Errorf("parse premium generated deck styles: %w", err)
+	}
+	chassisCount := 0
+	var validationErr error
+	var walk func(*xhtml.Node)
+	walk = func(node *xhtml.Node) {
+		if node == nil || validationErr != nil {
+			return
+		}
+		if node.Type == xhtml.ElementNode {
+			tag := strings.ToLower(strings.TrimSpace(node.Data))
+			if tag == "link" && strings.EqualFold(strings.TrimSpace(legacyNodeAttr(node, "rel")), "stylesheet") {
+				validationErr = fmt.Errorf("premium generated scene may not load an author stylesheet")
+				return
+			}
+			if tag == "style" {
+				css := strings.TrimSpace(legacyNodeTextPreservingWhitespace(node))
+				if packagingGeneratedCanonicalCSS(css) == packagingGeneratedCanonicalCSS(packagingDeckChassisCSS) && len(node.Attr) == 0 {
+					chassisCount++
+					if chassisCount > 1 {
+						validationErr = fmt.Errorf("premium generated scene repeats the invariant deck chassis")
+					}
+					return
+				}
+				validationErr = fmt.Errorf("premium generated scene contains an author stylesheet outside the locked inline scene (id=%q css=%q)", strings.TrimSpace(legacyNodeAttr(node, "id")), trimForStorage(css, 96))
+				return
+			}
+			if oneOf(tag, "html", "body") && strings.TrimSpace(legacyNodeAttr(node, "style")) != "" {
+				validationErr = fmt.Errorf("premium generated scene styles %s outside the locked inline scene", tag)
+				return
+			}
+			if legacyNodeAttr(node, "id") == "stage" && strings.TrimSpace(legacyNodeAttr(node, "style")) != "" {
+				validationErr = fmt.Errorf("premium generated scene styles #stage outside the locked inline scene")
+				return
+			}
+			if rawStyle := strings.TrimSpace(legacyNodeAttr(node, "style")); rawStyle != "" {
+				if err := validatePackagingGeneratedPremiumInlineStyle(node, rawStyle); err != nil {
+					validationErr = err
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	if validationErr == nil && chassisCount != 1 {
+		return fmt.Errorf("premium generated scene must contain exactly one verbatim invariant deck chassis")
+	}
+	return validationErr
+}
+
+func packagingGeneratedCanonicalCSS(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+// validatePackagingGeneratedPremiumDOM closes the raw-HTML/native-scene
+// ownership boundary. Premium output has no anonymous visual wrappers or
+// presenter chrome: body owns one #stage, stage owns exact slides, and each
+// slide owns only mapped nodes plus one optional hidden notes record. That
+// prevents chassis/reserved-class collisions and hidden ancestors from making
+// the browser/PDF disagree with the same locked native scene.
+func validatePackagingGeneratedPremiumDOM(sourceHTML string) error {
+	if !regexp.MustCompile(`(?is)^\s*<!doctype\s+html\s*>`).MatchString(sourceHTML) {
+		return fmt.Errorf("premium generated deck must begin with one HTML doctype")
+	}
+	doc, err := xhtml.Parse(strings.NewReader(sourceHTML))
+	if err != nil {
+		return fmt.Errorf("parse premium generated deck DOM: %w", err)
+	}
+	var doctypes, htmls, heads, bodies, stages []*xhtml.Node
+	var collect func(*xhtml.Node)
+	collect = func(node *xhtml.Node) {
+		if node.Type == xhtml.DoctypeNode {
+			doctypes = append(doctypes, node)
+		}
+		if node.Type == xhtml.ElementNode {
+			if strings.EqualFold(node.Data, "html") {
+				htmls = append(htmls, node)
+			}
+			if strings.EqualFold(node.Data, "head") {
+				heads = append(heads, node)
+			}
+			if strings.EqualFold(node.Data, "body") {
+				bodies = append(bodies, node)
+			}
+			if legacyNodeAttr(node, "id") == "stage" {
+				stages = append(stages, node)
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			collect(child)
+		}
+	}
+	collect(doc)
+	if len(doctypes) != 1 || !strings.EqualFold(strings.TrimSpace(doctypes[0].Data), "html") || len(htmls) != 1 || len(heads) != 1 || len(bodies) != 1 || heads[0].Parent != htmls[0] || bodies[0].Parent != htmls[0] || len(stages) != 1 || stages[0].Parent != bodies[0] {
+		return fmt.Errorf("premium generated deck must use one exact inert html/head/body shell")
+	}
+	htmlNode, head := htmls[0], heads[0]
+	if len(htmlNode.Attr) != 0 || len(head.Attr) != 0 {
+		return fmt.Errorf("premium generated deck html and head may not carry attributes")
+	}
+	for child := htmlNode.FirstChild; child != nil; child = child.NextSibling {
+		if child == head || child == bodies[0] || child.Type == xhtml.CommentNode || (child.Type == xhtml.TextNode && strings.TrimSpace(child.Data) == "") {
+			continue
+		}
+		return fmt.Errorf("premium generated html may contain only head and body")
+	}
+	metaCharset, title, chassis := 0, 0, 0
+	for child := head.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.CommentNode || (child.Type == xhtml.TextNode && strings.TrimSpace(child.Data) == "") {
+			continue
+		}
+		if child.Type != xhtml.ElementNode {
+			return fmt.Errorf("premium generated head contains unowned content")
+		}
+		switch strings.ToLower(strings.TrimSpace(child.Data)) {
+		case "meta":
+			if len(child.Attr) != 1 || !strings.EqualFold(strings.TrimSpace(child.Attr[0].Key), "charset") || !strings.EqualFold(strings.TrimSpace(child.Attr[0].Val), "utf-8") {
+				return fmt.Errorf("premium generated head permits only an optional utf-8 charset meta")
+			}
+			metaCharset++
+		case "title":
+			if len(child.Attr) != 0 || packagingGeneratedHasElementChild(child) {
+				return fmt.Errorf("premium generated title must be plain inert text")
+			}
+			title++
+		case "style":
+			if len(child.Attr) != 0 || packagingGeneratedCanonicalCSS(legacyNodeTextPreservingWhitespace(child)) != packagingGeneratedCanonicalCSS(packagingDeckChassisCSS) {
+				return fmt.Errorf("premium generated head style must be the invariant deck chassis")
+			}
+			chassis++
+		default:
+			return fmt.Errorf("premium generated head may contain only charset, title, and the invariant chassis; found %s", child.Data)
+		}
+	}
+	if metaCharset > 1 || title > 1 || chassis != 1 {
+		return fmt.Errorf("premium generated head must carry one chassis and at most one inert charset and title")
+	}
+	if len(bodies) != 1 || len(stages) != 1 || stages[0].Parent != bodies[0] {
+		return fmt.Errorf("premium generated deck body must own exactly one direct #stage")
+	}
+	body, stage := bodies[0], stages[0]
+	if len(body.Attr) != 0 {
+		return fmt.Errorf("premium generated deck body may not carry visual or visibility attributes")
+	}
+	for child := body.FirstChild; child != nil; child = child.NextSibling {
+		if child == stage || child.Type == xhtml.CommentNode || (child.Type == xhtml.TextNode && strings.TrimSpace(child.Data) == "") {
+			continue
+		}
+		return fmt.Errorf("premium generated deck body may contain only #stage")
+	}
+	allowedStageAttrs := map[string]bool{"id": true}
+	for _, key := range []string{"candidate", "strategy", "system", "palette", "type", "spacing", "grid", "motif", "image-treatment", "data-viz", "refusals"} {
+		allowedStageAttrs["data-deck-identity-"+key] = true
+	}
+	if err := packagingGeneratedExactAttributeKeys(stage, allowedStageAttrs, "#stage"); err != nil || len(stage.Attr) != len(allowedStageAttrs) {
+		return fmt.Errorf("premium generated #stage must carry only its complete identity contract")
+	}
+
+	slideIndex := 0
+	for child := stage.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.CommentNode || (child.Type == xhtml.TextNode && strings.TrimSpace(child.Data) == "") {
+			continue
+		}
+		if child.Type != xhtml.ElementNode || !strings.EqualFold(child.Data, "section") {
+			return fmt.Errorf("premium generated #stage may contain only exact slide sections")
+		}
+		if err := validatePackagingGeneratedPremiumSlideDOM(child, slideIndex); err != nil {
+			return err
+		}
+		slideIndex++
+	}
+	if slideIndex == 0 {
+		return fmt.Errorf("premium generated #stage has no slides")
+	}
+	return nil
+}
+
+func validatePackagingGeneratedPremiumSlideDOM(slide *xhtml.Node, slideIndex int) error {
+	wantClasses := map[string]bool{"pg": true}
+	if slideIndex == 0 {
+		wantClasses["on"] = true
+	}
+	if !packagingGeneratedExactClassSet(slide, wantClasses) {
+		return fmt.Errorf("premium generated slide %d has invalid chassis classes", slideIndex+1)
+	}
+	if err := packagingGeneratedExactAttributeKeys(slide, map[string]bool{"class": true, "data-deck-slide": true, "style": true}, "slide"); err != nil || len(slide.Attr) != 3 {
+		return fmt.Errorf("premium generated slide %d has attributes outside its exact contract", slideIndex+1)
+	}
+	notes := 0
+	for child := slide.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.CommentNode || (child.Type == xhtml.TextNode && strings.TrimSpace(child.Data) == "") {
+			continue
+		}
+		if child.Type != xhtml.ElementNode {
+			return fmt.Errorf("premium generated slide %d has unowned content", slideIndex+1)
+		}
+		if packagingGeneratedPremiumNotesNode(child) {
+			notes++
+			if notes > 1 {
+				return fmt.Errorf("premium generated slide %d repeats presenter notes", slideIndex+1)
+			}
+			continue
+		}
+		if strings.TrimSpace(legacyNodeAttr(child, "data-deck-element")) == "" {
+			return fmt.Errorf("premium generated slide %d contains an unowned %s node", slideIndex+1, child.Data)
+		}
+		if err := validatePackagingGeneratedPremiumElementDOM(child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePackagingGeneratedPremiumElementDOM(node *xhtml.Node) error {
+	typ := strings.ToLower(strings.TrimSpace(legacyNodeAttr(node, "data-deck-type")))
+	common := map[string]bool{"data-deck-element": true, "data-deck-type": true, "style": true, "data-deck-overlap": true}
+	if packagingGeneratedNodeHasAttribute(node, "hidden") || packagingGeneratedNodeHasAttribute(node, "inert") {
+		return fmt.Errorf("premium generated mapped %s may not be hidden or inert", typ)
+	}
+	switch typ {
+	case "text":
+		if !strings.EqualFold(node.Data, "div") {
+			return fmt.Errorf("premium generated text must be a direct div")
+		}
+		common["data-deck-furniture"] = true
+		common["aria-hidden"] = true
+		if err := packagingGeneratedExactAttributeKeys(node, common, "text"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(legacyNodeAttr(node, "class")) != "" {
+			return fmt.Errorf("premium generated text may not carry reserved or authored classes")
+		}
+		furniture := strings.TrimSpace(legacyNodeAttr(node, "data-deck-furniture"))
+		ariaHidden := strings.TrimSpace(legacyNodeAttr(node, "aria-hidden"))
+		if (furniture == "") != (ariaHidden == "") || (furniture != "" && (!oneOf(furniture, "background", "full-bleed") || !strings.EqualFold(ariaHidden, "true"))) {
+			return fmt.Errorf("premium generated text has invalid background-furniture visibility")
+		}
+		if packagingGeneratedTextTreeHasVisualOverrides(node) {
+			return fmt.Errorf("premium generated text contains non-structural descendants")
+		}
+	case "shape":
+		if !strings.EqualFold(node.Data, "div") {
+			return fmt.Errorf("premium generated shape must be a direct div")
+		}
+		common["data-deck-shape"] = true
+		if err := packagingGeneratedExactAttributeKeys(node, common, "shape"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(legacyNodeAttr(node, "class")) != "" || strings.TrimSpace(legacyNodeTextPreservingWhitespace(node)) != "" || packagingGeneratedHasElementChild(node) {
+			return fmt.Errorf("premium generated shape must be an empty classless mapped div")
+		}
+	case "image":
+		if !strings.EqualFold(node.Data, "figure") {
+			return fmt.Errorf("premium generated image must be a direct figure")
+		}
+		for _, key := range []string{"class", "data-deck-fig", "data-deck-crop", "data-deck-focal-x", "data-deck-focal-y"} {
+			common[key] = true
+		}
+		if err := packagingGeneratedExactAttributeKeys(node, common, "image"); err != nil {
+			return err
+		}
+		fig := strings.TrimSpace(legacyNodeAttr(node, "data-deck-fig"))
+		figNumber, err := strconv.Atoi(fig)
+		if err != nil || figNumber < 1 {
+			return fmt.Errorf("premium generated image has an invalid FIG identity")
+		}
+		classes := map[string]bool{"image-plate": true, "fig-" + fig: true}
+		if legacyNodeHasClass(node, "bleed") {
+			classes["bleed"] = true
+		}
+		if !packagingGeneratedExactClassSet(node, classes) {
+			return fmt.Errorf("premium generated image has classes outside its exact FIG contract")
+		}
+		placeholders := 0
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if child.Type == xhtml.CommentNode || (child.Type == xhtml.TextNode && strings.TrimSpace(child.Data) == "") {
+				continue
+			}
+			if child.Type != xhtml.ElementNode || !strings.EqualFold(child.Data, "div") || !packagingGeneratedExactClassSet(child, map[string]bool{"ph": true}) || !packagingGeneratedInlineImagePattern.MatchString(strings.TrimSpace(legacyNodeAttr(child, "style"))) || len(child.Attr) != 2 || packagingGeneratedHasElementChild(child) || strings.TrimSpace(legacyNodeTextPreservingWhitespace(child)) != "" {
+				return fmt.Errorf("premium generated image must contain one exact server-owned pixel node")
+			}
+			placeholders++
+		}
+		if placeholders != 1 {
+			return fmt.Errorf("premium generated image must contain one exact server-owned pixel node")
+		}
+	default:
+		return fmt.Errorf("premium generated mapped element has invalid type %q", typ)
+	}
+	return nil
+}
+
+func packagingGeneratedPremiumNotesNode(node *xhtml.Node) bool {
+	if node == nil || node.Type != xhtml.ElementNode || !strings.EqualFold(node.Data, "div") || !packagingGeneratedExactClassSet(node, map[string]bool{"notes": true}) || !packagingGeneratedNodeHasAttribute(node, "hidden") || len(node.Attr) != 2 || packagingGeneratedHasElementChild(node) {
+		return false
+	}
+	return true
+}
+
+func packagingGeneratedExactAttributeKeys(node *xhtml.Node, allowed map[string]bool, label string) error {
+	seen := map[string]bool{}
+	for _, attribute := range node.Attr {
+		key := strings.ToLower(strings.TrimSpace(attribute.Key))
+		if !allowed[key] || seen[key] || strings.HasPrefix(key, "on") {
+			return fmt.Errorf("premium generated %s has unowned attribute %q", label, key)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+func packagingGeneratedExactClassSet(node *xhtml.Node, want map[string]bool) bool {
+	classes := strings.Fields(strings.TrimSpace(legacyNodeAttr(node, "class")))
+	if len(classes) != len(want) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, className := range classes {
+		if !want[className] || seen[className] {
+			return false
+		}
+		seen[className] = true
+	}
+	return true
+}
+
+func packagingGeneratedHasElementChild(node *xhtml.Node) bool {
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode {
+			return true
+		}
+	}
+	return false
+}
+
+func validatePackagingGeneratedPremiumInlineStyle(node *xhtml.Node, raw string) error {
+	tag := strings.ToLower(strings.TrimSpace(node.Data))
+	elementType := strings.ToLower(strings.TrimSpace(legacyNodeAttr(node, "data-deck-type")))
+	if tag == "div" && legacyNodeHasClass(node, "ph") && packagingGeneratedInlineImagePattern.MatchString(raw) {
+		return nil
+	}
+	allowed := map[string]bool{}
+	required := map[string]bool{}
+	if tag == "section" && legacyNodeHasClass(node, "pg") && node.Parent != nil && legacyNodeAttr(node.Parent, "id") == "stage" {
+		allowed["background"] = true
+		allowed["background-color"] = true
+	} else if strings.TrimSpace(legacyNodeAttr(node, "data-deck-element")) != "" && oneOf(elementType, "text", "image", "shape") {
+		for _, key := range []string{"position", "left", "top", "width", "height", "z-index", "opacity", "transform"} {
+			allowed[key] = true
+			required[key] = true
+		}
+		switch elementType {
+		case "text":
+			for _, key := range []string{"font-size", "font-family", "font-weight", "color", "text-align", "line-height", "letter-spacing"} {
+				allowed[key] = true
+				required[key] = true
+			}
+		case "image":
+			allowed["margin"] = true
+			allowed["object-fit"] = true
+			allowed["object-position"] = true
+			required["margin"] = true
+			required["object-fit"] = true
+			required["object-position"] = true
+		case "shape":
+			for _, key := range []string{"background", "background-color", "border", "border-radius"} {
+				allowed[key] = true
+			}
+		}
+	} else {
+		return fmt.Errorf("premium generated scene has inline style on an unowned %s node", tag)
+	}
+
+	seen := map[string]bool{}
+	for _, declaration := range strings.Split(raw, ";") {
+		declaration = strings.TrimSpace(declaration)
+		if declaration == "" {
+			continue
+		}
+		parts := strings.SplitN(declaration, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("premium generated scene has a malformed inline declaration on %s", tag)
+		}
+		key := strings.ToLower(strings.TrimSpace(parts[0]))
+		value := strings.TrimSpace(parts[1])
+		lowerValue := strings.ToLower(value)
+		if key == "" || value == "" || seen[key] || !allowed[key] || strings.Contains(lowerValue, "!important") || strings.Contains(lowerValue, "url(") || strings.Contains(lowerValue, "var(") || strings.Contains(lowerValue, "calc(") || strings.Contains(lowerValue, "expression") || strings.ContainsAny(value, "{}@") {
+			return fmt.Errorf("premium generated scene has unowned inline property %q on %s", key, tag)
+		}
+		seen[key] = true
+	}
+	if len(seen) == 0 {
+		return fmt.Errorf("premium generated scene has an empty inline style on %s", tag)
+	}
+	styles := legacyStyleMap(node)
+	if tag == "section" {
+		if len(seen) != 1 || (!seen["background"] && !seen["background-color"]) {
+			return fmt.Errorf("premium generated slide must carry exactly one inline background color")
+		}
+		value := firstNonEmptyString(styles["background"], styles["background-color"])
+		if !deckHexColorPattern.MatchString(value) {
+			return fmt.Errorf("premium generated slide background must be one exact hex color")
+		}
+		return nil
+	}
+	for key := range required {
+		if !seen[key] {
+			return fmt.Errorf("premium generated %s is missing required inline property %q", elementType, key)
+		}
+	}
+	if styles["position"] != "absolute" {
+		return fmt.Errorf("premium generated %s position must be absolute", elementType)
+	}
+	for _, key := range []string{"left", "top", "width", "height"} {
+		value, ok := packagingGeneratedCSSNumber(styles[key], "px")
+		if !ok || ((key == "width" || key == "height") && value <= 0) {
+			return fmt.Errorf("premium generated %s %s must be a finite pixel value", elementType, key)
+		}
+	}
+	z, err := strconv.Atoi(styles["z-index"])
+	if err != nil || z < 0 || z > 10000 {
+		return fmt.Errorf("premium generated %s z-index must be an integer from 0 to 10000", elementType)
+	}
+	opacity, ok := packagingGeneratedCSSNumber(styles["opacity"], "")
+	if !ok || opacity <= 0 || opacity > 1 {
+		return fmt.Errorf("premium generated %s opacity must be greater than zero and at most one", elementType)
+	}
+	if !packagingGeneratedRotatePattern.MatchString(styles["transform"]) {
+		return fmt.Errorf("premium generated %s transform must be exactly one finite rotate(deg)", elementType)
+	}
+
+	switch elementType {
+	case "text":
+		if size, ok := packagingGeneratedCSSNumber(styles["font-size"], "px"); !ok || size <= 0 {
+			return fmt.Errorf("premium generated text font-size must be a positive pixel value")
+		}
+		weight, weightErr := strconv.Atoi(styles["font-weight"])
+		if weightErr != nil || weight < 100 || weight > 900 || weight%100 != 0 {
+			return fmt.Errorf("premium generated text font-weight must be a numeric 100-step from 100 to 900")
+		}
+		if !deckHexColorPattern.MatchString(styles["color"]) || !oneOf(styles["text-align"], "left", "center", "right") {
+			return fmt.Errorf("premium generated text color or alignment is invalid")
+		}
+		lineHeight, lineHeightOK := packagingGeneratedCSSNumber(styles["line-height"], "")
+		if !lineHeightOK || lineHeight < .8 || lineHeight > 2 {
+			return fmt.Errorf("premium generated text line-height must be from .8 to 2")
+		}
+		if _, ok := packagingStudioTrackingPixels(styles["letter-spacing"], 1); !ok {
+			return fmt.Errorf("premium generated text letter-spacing is outside the closed tracking range")
+		}
+	case "image":
+		if styles["margin"] != "0" {
+			return fmt.Errorf("premium generated image margin must be exactly zero")
+		}
+		if !oneOf(styles["object-fit"], "cover", "contain") {
+			return fmt.Errorf("premium generated image object-fit must be cover or contain")
+		}
+		if _, _, err := packagingStudioObjectPosition(styles["object-position"]); err != nil {
+			return fmt.Errorf("premium generated image object-position is invalid")
+		}
+	case "shape":
+		fills := 0
+		for _, key := range []string{"background", "background-color"} {
+			if seen[key] {
+				fills++
+				if !deckHexColorPattern.MatchString(styles[key]) {
+					return fmt.Errorf("premium generated shape fill must be one exact hex color")
+				}
+			}
+		}
+		if fills != 1 {
+			return fmt.Errorf("premium generated shape must carry exactly one inline fill color")
+		}
+		if radius := styles["border-radius"]; radius != "" && radius != "50%" {
+			return fmt.Errorf("premium generated shape border-radius must be exactly 50 percent when present")
+		}
+		if border := styles["border"]; border != "" && !packagingGeneratedBorderPattern.MatchString(border) {
+			return fmt.Errorf("premium generated shape border must be an exact pixel solid hex stroke")
+		}
+	}
+	return nil
+}
+
+func packagingGeneratedCSSNumber(value, suffix string) (float64, bool) {
+	value = strings.TrimSpace(value)
+	if suffix != "" {
+		if !strings.HasSuffix(value, suffix) {
+			return 0, false
+		}
+		value = strings.TrimSuffix(value, suffix)
+	}
+	if value == "" {
+		return 0, false
+	}
+	number, err := strconv.ParseFloat(value, 64)
+	return number, err == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
+}
+
+var (
+	packagingGeneratedImagerySelectorPattern = regexp.MustCompile(`^\.fig-[1-9][0-9]*\[data-deck-crop="(?:center|top|bottom|left|right|faces|safe_area)"\] \.ph$`)
+	packagingGeneratedImageryBodyPattern     = regexp.MustCompile(`^position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;visibility:visible!important;opacity:1!important;background-image:url\(data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+\)!important;background-size:(?:cover|contain)!important;background-position:-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)% -?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)%!important;background-repeat:no-repeat!important$`)
+	packagingGeneratedCSSRulePattern         = regexp.MustCompile(`(?s)\s*([^{}]+)\{([^{}]+)\}\s*`)
+	packagingGeneratedRotatePattern          = regexp.MustCompile(`^rotate\(\s*-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)deg\s*\)$`)
+	packagingGeneratedBorderPattern          = regexp.MustCompile(`^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)px solid #[0-9A-Fa-f]{6}$`)
+	packagingGeneratedInlineImagePattern     = regexp.MustCompile(`^position:absolute;inset:0;width:100%;height:100%;display:block;visibility:visible;opacity:1;background-image:url\(data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+\);background-size:(?:cover|contain);background-position:-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)% -?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)%;background-repeat:no-repeat$`)
+)
+
+func packagingGeneratedServerImageryStyle(node *xhtml.Node, css string) bool {
+	if node == nil || legacyNodeAttr(node, "id") != "bonfire-imagery" || len(node.Attr) != 1 || css == "" {
+		return false
+	}
+	matches := packagingGeneratedCSSRulePattern.FindAllStringSubmatchIndex(css, -1)
+	if len(matches) == 0 {
+		return false
+	}
+	cursor := 0
+	for _, match := range matches {
+		if match[0] != cursor || match[1] <= match[0] || len(match) < 6 {
+			return false
+		}
+		selector := strings.TrimSpace(css[match[2]:match[3]])
+		body := strings.TrimSpace(css[match[4]:match[5]])
+		if !packagingGeneratedImagerySelectorPattern.MatchString(selector) || !packagingGeneratedImageryBodyPattern.MatchString(body) {
+			return false
+		}
+		cursor = match[1]
+	}
+	return cursor == len(css)
+}
+
+// Premium generated copy is deliberately plain. Nested styling creates a
+// second, unvalidated typography surface (for example an 8px child span inside
+// an admitted 52px parent). Only an attribute-free line break is structural;
+// every other element descendant can alter the locked visual hierarchy.
+func packagingGeneratedTextTreeHasVisualOverrides(node *xhtml.Node) bool {
+	if node == nil {
+		return false
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == xhtml.ElementNode {
+			if !strings.EqualFold(child.Data, "br") || len(child.Attr) != 0 || child.FirstChild != nil {
+				return true
+			}
+		}
+		if packagingGeneratedTextTreeHasVisualOverrides(child) {
+			return true
+		}
+	}
+	return false
+}
+
+// packagingGeneratedTextTreeLines preserves authored hard line breaks for the
+// deterministic fit gate. The native import intentionally flattens <br> for
+// plain-text copy matching while RichText preserves it; without this parallel
+// structural read, unlimited breaks could pass a one-line character estimate
+// and then clip in the browser.
+func packagingGeneratedTextTreeLines(node *xhtml.Node) []string {
+	lines := []string{""}
+	var walk func(*xhtml.Node)
+	walk = func(current *xhtml.Node) {
+		if current == nil {
+			return
+		}
+		if current.Type == xhtml.TextNode {
+			lines[len(lines)-1] += current.Data
+			return
+		}
+		if current != node && current.Type == xhtml.ElementNode && strings.EqualFold(current.Data, "br") {
+			lines = append(lines, "")
+			return
+		}
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return lines
 }
 
 func validatePackagingGeneratedSceneMapping(deck deckDocument, source packagingGeneratedSceneSource) error {
@@ -283,13 +909,29 @@ func packagingGeneratedTransparentTextColor(value string) bool {
 
 type packagingLockedCopySlide struct {
 	ID      string
+	Kind    string
 	Visible []string
 }
 
 func validatePackagingGeneratedSceneLockedCopy(app *kanbanBoardApp, plan *goalPlan, deck deckDocument) error {
 	artifact, present, err := packagingGeneratedStageArtifact(app, plan, "write", "deck_copy_v3")
-	if err != nil || !present {
+	if err != nil {
 		return err
+	}
+	if !present {
+		if packagingStudioPremiumDesignContract(plan) {
+			return fmt.Errorf("premium generated scene is missing its completed deck_copy_v3 lock")
+		}
+		return nil
+	}
+	if packagingStudioPremiumDesignContract(plan) {
+		stage := plan.subtaskByID("write")
+		if stage == nil || stage.Status != subtaskComplete {
+			return fmt.Errorf("premium generated scene deck_copy_v3 lock is not complete")
+		}
+		if err := validatePackagingStudioDeckCopyOutput(app, plan, artifact.Text); err != nil {
+			return fmt.Errorf("premium generated scene deck_copy_v3 lock is invalid: %w", err)
+		}
 	}
 	root, err := packagingGeneratedJSONObject(artifact.Text, "deck_copy_v3")
 	if err != nil {
@@ -319,7 +961,8 @@ func validatePackagingGeneratedSceneLockedCopy(app *kanbanBoardApp, plan *goalPl
 		if len(visible) == 0 {
 			return fmt.Errorf("deck_copy_v3 slide %q has no deterministic visible copy", id)
 		}
-		locked = append(locked, packagingLockedCopySlide{ID: id, Visible: visible})
+		kind, _ := slide["slide_kind"].(string)
+		locked = append(locked, packagingLockedCopySlide{ID: id, Kind: strings.TrimSpace(kind), Visible: visible})
 	}
 	if len(deck.Slides) != len(locked) {
 		return fmt.Errorf("generated scene has %d slides; locked deck_copy_v3 has %d", len(deck.Slides), len(locked))
@@ -333,6 +976,12 @@ func validatePackagingGeneratedSceneLockedCopy(app *kanbanBoardApp, plan *goalPl
 			if element.Type == "text" && strings.TrimSpace(element.Text) != "" {
 				sceneStrings = append(sceneStrings, element.Text)
 			}
+		}
+		if packagingStudioPremiumDesignContract(plan) {
+			if err := packagingStudioCompareExactVisibleCopy(slide, locked[index]); err != nil {
+				return err
+			}
+			continue
 		}
 		sceneText := packagingGeneratedCanonicalText(strings.Join(sceneStrings, " "))
 		for _, value := range locked[index].Visible {
@@ -382,7 +1031,7 @@ func packagingGeneratedCanonicalText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-func validatePackagingGeneratedSceneLockedLayout(app *kanbanBoardApp, plan *goalPlan, deck deckDocument) error {
+func validatePackagingGeneratedSceneLockedLayoutLegacy(app *kanbanBoardApp, plan *goalPlan, deck deckDocument) error {
 	artifact, present, err := packagingGeneratedStageArtifact(app, plan, "layout_plan", "layout_plan_v3")
 	if err != nil || !present {
 		return err

@@ -93,6 +93,31 @@ func TestPostgresCanonicalMigrationsAreIdempotentAndRefuseDrift(t *testing.T) {
 	}
 }
 
+func TestPostgresCanonicalEventsUsesOneOrderedSetQuery(t *testing.T) {
+	ctx, store, registry := migratedPostgresCanonicalStore(t)
+	for index := 0; index < 12; index++ {
+		event := canonicalTestEvent(t, registry, uuid.New(), fmt.Sprintf("set-read-%02d", index), 1, fmt.Sprintf("set-read-%02d", index), "private")
+		if _, err := store.Append(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tracer := &canonicalQueryBudgetTracer{}
+	config := store.pool.Config()
+	config.ConnConfig.Tracer = tracer
+	tracedPool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tracedPool.Close)
+	events, err := NewPostgresCanonicalStore(tracedPool, registry).Events(ctx)
+	if err != nil || len(events) != 12 {
+		t.Fatalf("events=%d err=%v", len(events), err)
+	}
+	if setQueries, perSequence := tracer.countContaining("FROM canonical_events ORDER BY sequence"), tracer.countContaining("WHERE sequence=$1"); setQueries != 1 || perSequence != 0 {
+		t.Fatalf("event query budget set=%d per_sequence=%d, want 1/0", setQueries, perSequence)
+	}
+}
+
 func TestPostgresCanonicalMigrationsRefuseUnknownFutureVersion(t *testing.T) {
 	ctx, store, _ := migratedPostgresCanonicalStore(t)
 	if _, err := store.pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (999,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {

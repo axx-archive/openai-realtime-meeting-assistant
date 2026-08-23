@@ -9,7 +9,7 @@ package main
 // rotates.
 //
 // Session-end rule (founder decision 2026-07-08, card 078): a session is one
-// SITTING — an empty room for a few minutes (meetingIdleEndGrace default 4m,
+// SITTING — an empty room for five minutes (meetingIdleEndGrace default 5m,
 // env MEETING_IDLE_END_GRACE) finalizes the meeting; the next entry mints a
 // fresh id. The idle end closes the record, rotates the memory meeting id, and
 // silently auto-archives a non-empty meeting (no email); the next join always
@@ -35,6 +35,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,6 +50,8 @@ const (
 	// deleting older identities. Authorization can make a page sparse, but the
 	// returned cursor always advances through this bounded directory window.
 	meetingDirectoryScanLimit = 200
+	meetingIdleCloseRetryBase = time.Second
+	meetingIdleCloseRetryMax  = 30 * time.Second
 )
 
 const (
@@ -62,19 +65,23 @@ const (
 
 const meetingTitleSourceAuto = "auto"
 
+var ErrMeetingRecordStore = errors.New("meeting record store unavailable")
+
 // meetingRecord is one first-class meeting. Timestamps are RFC3339Nano UTC
 // strings (same convention as notificationRecord.CreatedAt).
 type meetingRecord struct {
-	ID           string   `json:"id"`                    // == memory meetingId ("meeting-YYYYMMDD-HHMMSS-nnnnnnnnn")
-	RoomID       string   `json:"roomId,omitempty"`      // empty on read == office (§9 migration rule)
-	ListenOnly   bool     `json:"listenOnly,omitempty"`  // per-sitting latch (§7.1) — set/enforced in W4
-	Title        string   `json:"title,omitempty"`       // empty until auto-titled
-	TitleSource  string   `json:"titleSource,omitempty"` // "auto" (manual reserved for later)
-	StartedAt    string   `json:"startedAt"`
-	EndedAt      string   `json:"endedAt,omitempty"`     // empty == active
-	EndedReason  string   `json:"endedReason,omitempty"` // archive | idle | restart
-	ArchiveID    string   `json:"archiveId,omitempty"`   // stamps at archive time
-	Participants []string `json:"participants"`          // union of admitted canonical names, meetingParticipantNames order
+	ID             string                      `json:"id"`                    // == memory meetingId ("meeting-YYYYMMDD-HHMMSS-nnnnnnnnn")
+	RoomID         string                      `json:"roomId,omitempty"`      // empty on read == office (§9 migration rule)
+	ListenOnly     bool                        `json:"listenOnly,omitempty"`  // per-sitting latch (§7.1) — set/enforced in W4
+	Title          string                      `json:"title,omitempty"`       // empty until auto-titled
+	TitleSource    string                      `json:"titleSource,omitempty"` // "auto" (manual reserved for later)
+	StartedAt      string                      `json:"startedAt"`
+	EndedAt        string                      `json:"endedAt,omitempty"`        // empty == active
+	EndedReason    string                      `json:"endedReason,omitempty"`    // archive | idle | restart
+	ArchiveID      string                      `json:"archiveId,omitempty"`      // stamps at archive time
+	IdleDeadlineAt string                      `json:"idleDeadlineAt,omitempty"` // durable all-empty grace boundary; cleared by admission/close
+	Participants   []string                    `json:"participants"`             // union of admitted canonical names, meetingParticipantNames order
+	Finalization   *meetingFinalizationReceipt `json:"finalization,omitempty"`
 }
 
 // meetingRoomID resolves a record's room under the migration invariant:
@@ -99,9 +106,13 @@ type meetingStoreState struct {
 }
 
 type meetingStore struct {
-	mu                     sync.Mutex
-	path                   string
-	records                []meetingRecord // oldest-first; permanent identities are never evicted
+	mu      sync.Mutex
+	path    string
+	records []meetingRecord // oldest-first; permanent identities are never evicted
+	// persistState is an instance-local durability seam. Production leaves it
+	// nil and uses writeJSONFileAtomically; focused recovery tests inject exact
+	// definite/ambiguous outcomes without racing package globals.
+	persistState           func(meetingStoreState) error
 	directoryCursorIndexes map[string]int
 	recordIndexes          map[string]int
 	// idleTimers holds each room's pending idle-end timer (multi-room W2:
@@ -123,6 +134,7 @@ type meetingStore struct {
 	// registered here, rather than treating Stop as a goroutine join.
 	idleTimerDones     map[string]chan struct{}
 	idleTimerCallbacks map[chan struct{}]struct{}
+	idleRetryAttempts  map[string]int
 	idleTimersStopped  bool
 }
 
@@ -134,18 +146,17 @@ func meetingsPath() string {
 }
 
 // meetingIdleEndGrace is how long an empty room stays "in the meeting" before
-// the record closes and the memory meeting id rotates. The 4-minute default IS
-// the founder's "a few minutes" session boundary: empty for a few minutes = the
-// sitting is over. The grace still absorbs a brief drop+rejoin (a reconnect
-// re-admits well inside it), while being short enough that the next sitting
-// mints a fresh id instead of accreting onto the last one.
+// the record closes and the memory meeting id rotates. The five-minute default
+// is the deliberate reconnection boundary: it absorbs refreshes, device swaps,
+// and short network handoffs without fragmenting one sitting, while still
+// closing promptly enough for final analysis and the next sitting's fresh id.
 func meetingIdleEndGrace() time.Duration {
 	if raw := strings.TrimSpace(os.Getenv("MEETING_IDLE_END_GRACE")); raw != "" {
 		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
 			return parsed
 		}
 	}
-	return 4 * time.Minute
+	return 5 * time.Minute
 }
 
 func loadMeetingStore(path string) (*meetingStore, error) {
@@ -196,7 +207,12 @@ func (store *meetingStore) persistLocked() error {
 		Meetings:  append([]meetingRecord(nil), store.records...),
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	err := writeJSONFileAtomically(store.path, "meetings", state)
+	var err error
+	if store.persistState != nil {
+		err = store.persistState(state)
+	} else {
+		err = writeJSONFileAtomically(store.path, "meetings", state)
+	}
 	if err == nil {
 		return nil
 	}
@@ -264,6 +280,10 @@ func unionMeetingParticipants(existing []string, added []string) ([]string, bool
 
 func cloneMeetingRecord(record meetingRecord) meetingRecord {
 	record.Participants = append([]string(nil), record.Participants...)
+	if record.Finalization != nil {
+		finalization := cloneMeetingFinalizationReceipt(*record.Finalization)
+		record.Finalization = &finalization
+	}
 	return record
 }
 
@@ -318,6 +338,107 @@ func (store *meetingStore) openRoomIDs() []string {
 	return roomIDs
 }
 
+// recoverAnchoredMeetings repairs the only admissible missing-directory case:
+// a checksummed admission anchor became durable before the meeting-store
+// replace completed. It never mints from memory ids, timestamps, or room state;
+// every created record is backed by a valid earliest anchor. All repairs land
+// in one atomic meetings.json replace, and chronological successors close older
+// orphan sittings so each room still has at most one open record.
+func (store *meetingStore) recoverAnchoredMeetings(starts []AdmissionAnchor) ([]meetingRecord, error) {
+	if store == nil {
+		return nil, ErrMeetingRecordStore
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	priorRecords := make([]meetingRecord, len(store.records))
+	for index := range store.records {
+		priorRecords[index] = cloneMeetingRecord(store.records[index])
+	}
+	if store.recordIndexes == nil {
+		store.rebuildDirectoryCursorIndexesLocked()
+	}
+	touched := map[string]struct{}{}
+	changed := false
+	for _, anchor := range starts {
+		id := strings.TrimSpace(anchor.SittingID)
+		roomID := normalizeRoomID(anchor.RoomID)
+		if anchor.TenantID != canonicalTenantID() || id == "" || anchor.AdmittedAt.IsZero() {
+			continue
+		}
+		if index, found := store.recordIndexes[id]; found {
+			if index < 0 || index >= len(store.records) || meetingRoomID(store.records[index]) != roomID {
+				store.records = priorRecords
+				store.rebuildDirectoryCursorIndexesLocked()
+				return nil, fmt.Errorf("%w: anchored sitting %s conflicts with its meeting record", ErrMeetingRecordStore, id)
+			}
+			startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(store.records[index].StartedAt))
+			if err != nil || anchor.AdmittedAt.UTC().Before(startedAt.UTC()) {
+				store.records[index].StartedAt = anchor.AdmittedAt.UTC().Format(time.RFC3339Nano)
+				changed = true
+				touched[id] = struct{}{}
+			}
+			continue
+		}
+		store.records = append(store.records, meetingRecord{
+			ID: id, RoomID: storedMeetingRoomID(roomID), StartedAt: anchor.AdmittedAt.UTC().Format(time.RFC3339Nano), Participants: []string{},
+		})
+		changed = true
+		touched[id] = struct{}{}
+		store.rebuildDirectoryCursorIndexesLocked()
+	}
+	if !changed {
+		return nil, nil
+	}
+
+	// Keep the permanent directory chronological and close every non-latest open
+	// sitting at the next admitted sitting boundary. Existing ended records retain
+	// their stronger archive/idle reason and timestamp.
+	sort.SliceStable(store.records, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, store.records[i].StartedAt)
+		right, rightErr := time.Parse(time.RFC3339Nano, store.records[j].StartedAt)
+		if leftErr == nil && rightErr == nil && !left.Equal(right) {
+			return left.Before(right)
+		}
+		return store.records[i].ID < store.records[j].ID
+	})
+	byRoom := map[string][]int{}
+	for index, record := range store.records {
+		byRoom[meetingRoomID(record)] = append(byRoom[meetingRoomID(record)], index)
+	}
+	for _, indexes := range byRoom {
+		for position := 0; position+1 < len(indexes); position++ {
+			index := indexes[position]
+			if store.records[index].EndedAt != "" {
+				continue
+			}
+			next := store.records[indexes[position+1]]
+			store.records[index].EndedAt = next.StartedAt
+			store.records[index].EndedReason = meetingEndedReasonRestart
+			store.records[index].IdleDeadlineAt = ""
+			if store.records[index].Finalization == nil {
+				closedAt, _ := time.Parse(time.RFC3339Nano, next.StartedAt)
+				receipt := newMeetingFinalizationReceipt(meetingFinalizationSourceHighWater{}, closedAt)
+				store.records[index].Finalization = &receipt
+			}
+			changed = true
+			touched[store.records[index].ID] = struct{}{}
+		}
+	}
+	store.rebuildDirectoryCursorIndexesLocked()
+	if err := store.persistLocked(); err != nil {
+		store.resolvePersistFailureLocked(err, func() { store.records = priorRecords })
+		return nil, fmt.Errorf("%w: %v", ErrMeetingRecordStore, err)
+	}
+	recovered := make([]meetingRecord, 0, len(touched))
+	for _, record := range store.records {
+		if _, ok := touched[record.ID]; ok {
+			recovered = append(recovered, cloneMeetingRecord(record))
+		}
+	}
+	return recovered, nil
+}
+
 // startMeeting opens (or extends) the room's record for id. If the room's
 // open record already carries the SAME id the start is a no-op that unions
 // participants; an open record with a DIFFERENT id (should not happen;
@@ -326,9 +447,22 @@ func (store *meetingStore) openRoomIDs() []string {
 // a record belonging to the SAME room (openRecordIndexLocked filters by
 // room), so one room starting a sitting never restarts another's.
 func (store *meetingStore) startMeeting(roomID string, id string, startedAt time.Time, participants []string) (meetingRecord, bool) {
+	record, changed, _ := store.startMeetingDurable(roomID, id, startedAt, participants)
+	return record, changed
+}
+
+// startMeetingDurable is the admission-authority variant of startMeeting. It
+// surfaces persistence failure so a durable admission anchor can never publish
+// a live participant while its matching meeting record is absent. When a retry
+// presents the winning earlier anchor timestamp, the record start moves back to
+// that authority rather than preserving the later process-recovery time.
+func (store *meetingStore) startMeetingDurable(roomID string, id string, startedAt time.Time, participants []string) (meetingRecord, bool, error) {
 	id = strings.TrimSpace(id)
 	if store == nil || id == "" {
-		return meetingRecord{}, false
+		return meetingRecord{}, false, fmt.Errorf("meeting store is unavailable")
+	}
+	if startedAt.IsZero() {
+		return meetingRecord{}, false, fmt.Errorf("meeting start authority is missing")
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -337,22 +471,29 @@ func (store *meetingStore) startMeeting(roomID string, id string, startedAt time
 	}
 	if existingIndex, exists := store.recordIndexes[id]; exists {
 		if existingIndex < 0 || existingIndex >= len(store.records) {
-			return meetingRecord{}, false
+			return meetingRecord{}, false, fmt.Errorf("meeting record index is invalid")
 		}
 		existing := &store.records[existingIndex]
 		if existing.RoomID != storedMeetingRoomID(roomID) || existing.EndedAt != "" {
-			return cloneMeetingRecord(*existing), false
+			return cloneMeetingRecord(*existing), false, fmt.Errorf("meeting sitting is not open in this room")
 		}
 		union, changed := unionMeetingParticipants(existing.Participants, participants)
-		if changed {
+		priorStart, startErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(existing.StartedAt))
+		startChanged := startErr != nil || startedAt.UTC().Before(priorStart.UTC())
+		idleChanged := strings.TrimSpace(existing.IdleDeadlineAt) != ""
+		if changed || startChanged || idleChanged {
 			prior := cloneMeetingRecord(*existing)
 			existing.Participants = union
+			if startChanged {
+				existing.StartedAt = startedAt.UTC().Format(time.RFC3339Nano)
+			}
+			existing.IdleDeadlineAt = ""
 			if err := store.persistLocked(); err != nil {
 				store.resolvePersistFailureLocked(err, func() { store.records[existingIndex] = prior })
-				return cloneMeetingRecord(store.records[existingIndex]), false
+				return cloneMeetingRecord(store.records[existingIndex]), false, err
 			}
 		}
-		return cloneMeetingRecord(store.records[existingIndex]), changed
+		return cloneMeetingRecord(store.records[existingIndex]), changed || startChanged || idleChanged, nil
 	}
 
 	priorRecords := make([]meetingRecord, len(store.records))
@@ -362,6 +503,11 @@ func (store *meetingStore) startMeeting(roomID string, id string, startedAt time
 	if index := store.openRecordIndexLocked(roomID); index >= 0 {
 		store.records[index].EndedAt = startedAt.UTC().Format(time.RFC3339Nano)
 		store.records[index].EndedReason = meetingEndedReasonRestart
+		store.records[index].IdleDeadlineAt = ""
+		if store.records[index].Finalization == nil {
+			receipt := newMeetingFinalizationReceipt(meetingFinalizationSourceHighWater{}, startedAt)
+			store.records[index].Finalization = &receipt
+		}
 	}
 
 	union, _ := unionMeetingParticipants(nil, participants)
@@ -380,9 +526,9 @@ func (store *meetingStore) startMeeting(roomID string, id string, startedAt time
 	}
 	if err := store.persistLocked(); err != nil {
 		store.resolvePersistFailureLocked(err, func() { store.records = priorRecords })
-		return meetingRecord{}, false
+		return meetingRecord{}, false, err
 	}
-	return cloneMeetingRecord(record), true
+	return cloneMeetingRecord(record), true, nil
 }
 
 // recordByID returns the record (open or ended) carrying id — the
@@ -506,6 +652,7 @@ func (store *meetingStore) endMeetingLocked(id string, endedAt time.Time, reason
 		store.records[index].EndedAt = endedAt.UTC().Format(time.RFC3339Nano)
 		store.records[index].EndedReason = reason
 		store.records[index].ArchiveID = strings.TrimSpace(archiveID)
+		store.records[index].IdleDeadlineAt = ""
 		if err := store.persistLocked(); err != nil {
 			store.resolvePersistFailureLocked(err, func() { store.records[index] = prior })
 			return cloneMeetingRecord(prior), false
@@ -680,17 +827,126 @@ func (store *meetingStore) countStartedSince(now time.Time) (int, int) {
 	return today, week
 }
 
-// armIdleEnd schedules fire for the room after the idle grace; arming
-// replaces any pending timer for that room (which bumps the room's generation
-// so the replaced fire cannot land). fire receives the generation captured at
-// arm time and must hand it back to endMeetingIfIdleGeneration for
-// validation. Timers are per room: arming room A never disturbs room B's.
+// armIdleEnd schedules a process-local timer for callers that do not own an
+// open meeting record. Meeting lifecycle callers use armIdleEndDurable below,
+// which first journals the absolute deadline so a restart cannot grant a
+// second grace window.
 func (store *meetingStore) armIdleEnd(roomID string, fire func(generation uint64)) {
 	if store == nil {
 		return
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	store.armIdleEndLocked(roomID, meetingIdleEndGrace(), fire)
+}
+
+// armIdleEndDurable records the first all-empty deadline for the exact open
+// sitting and schedules only the remaining duration. Repeated empty signals
+// and boot reconciliation preserve that timestamp; a successful admission
+// clears it in startMeetingDurable's same durable write.
+func (store *meetingStore) armIdleEndDurable(roomID, meetingID string, emptyAt time.Time, fire func(generation uint64)) (meetingRecord, bool, error) {
+	if store == nil || strings.TrimSpace(meetingID) == "" {
+		return meetingRecord{}, false, ErrMeetingRecordStore
+	}
+	if emptyAt.IsZero() {
+		emptyAt = time.Now().UTC()
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.idleTimersStopped {
+		return meetingRecord{}, false, nil
+	}
+	index := store.openRecordIndexLocked(roomID)
+	if index < 0 || store.records[index].ID != strings.TrimSpace(meetingID) {
+		return meetingRecord{}, false, nil
+	}
+	record := &store.records[index]
+	deadline, parseErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(record.IdleDeadlineAt))
+	changed := strings.TrimSpace(record.IdleDeadlineAt) == "" || parseErr != nil
+	if changed {
+		if store.idleRetryAttempts != nil {
+			delete(store.idleRetryAttempts, normalizeRoomID(roomID))
+		}
+		prior := cloneMeetingRecord(*record)
+		deadline = emptyAt.UTC().Add(meetingIdleEndGrace())
+		record.IdleDeadlineAt = deadline.Format(time.RFC3339Nano)
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index] = prior })
+			// Admission cancels the prior process timer before it attempts the
+			// participant-union write. If that write (or this deadline write)
+			// fails, retaining no close guard would strand the empty sitting for
+			// the rest of this process. Prefer the deadline recovered from an
+			// ambiguous durable replacement; otherwise keep a best-effort local
+			// guard at the proposed absolute deadline while returning the error
+			// so callers still fail the admission closed.
+			if recovered, parseRecoveredErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(store.records[index].IdleDeadlineAt)); parseRecoveredErr == nil {
+				deadline = recovered
+			}
+			delay := deadline.Sub(time.Now().UTC())
+			if delay < 0 {
+				delay = 0
+			}
+			store.armIdleEndLocked(roomID, delay, fire)
+			return cloneMeetingRecord(store.records[index]), false, fmt.Errorf("%w: %v", ErrMeetingRecordStore, err)
+		}
+	}
+	delay := deadline.Sub(time.Now().UTC())
+	if delay < 0 {
+		delay = 0
+	}
+	store.armIdleEndLocked(roomID, delay, fire)
+	return cloneMeetingRecord(store.records[index]), changed, nil
+}
+
+// rearmIdleCloseAfterFailure keeps the original durable deadline authoritative
+// after a close write definitely failed. Since that deadline is already due,
+// retrying at delay zero would create a disk-failure busy loop; instead a
+// bounded process-local backoff re-enters the same generation-fenced close.
+// A restart reads the unchanged past-due IdleDeadlineAt and retries as well.
+func (store *meetingStore) rearmIdleCloseAfterFailure(roomID, meetingID string, generation uint64, fire func(generation uint64)) bool {
+	if store == nil || strings.TrimSpace(meetingID) == "" {
+		return false
+	}
+	roomID = normalizeRoomID(roomID)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.idleTimersStopped || store.idleGenerations[roomID] != generation {
+		return false
+	}
+	index := store.openRecordIndexLocked(roomID)
+	if index < 0 || store.records[index].ID != strings.TrimSpace(meetingID) || strings.TrimSpace(store.records[index].IdleDeadlineAt) == "" {
+		return false
+	}
+	if store.idleRetryAttempts == nil {
+		store.idleRetryAttempts = map[string]int{}
+	}
+	store.idleRetryAttempts[roomID]++
+	delay := meetingIdleCloseRetryBase
+	for attempt := 1; attempt < store.idleRetryAttempts[roomID] && delay < meetingIdleCloseRetryMax; attempt++ {
+		delay *= 2
+		if delay > meetingIdleCloseRetryMax {
+			delay = meetingIdleCloseRetryMax
+		}
+	}
+	store.armIdleEndLocked(roomID, delay, fire)
+	return true
+}
+
+func (store *meetingStore) clearIdleCloseRetry(roomID string) {
+	if store == nil {
+		return
+	}
+	store.mu.Lock()
+	if store.idleRetryAttempts != nil {
+		delete(store.idleRetryAttempts, normalizeRoomID(roomID))
+	}
+	store.mu.Unlock()
+}
+
+// armIdleEndLocked replaces the room's pending callback at an explicit delay.
+// The caller holds store.mu. Generation fencing remains process-local; the
+// absolute deadline above is the restart authority.
+func (store *meetingStore) armIdleEndLocked(roomID string, delay time.Duration, fire func(generation uint64)) {
 
 	if store.idleTimersStopped {
 		return
@@ -718,7 +974,7 @@ func (store *meetingStore) armIdleEnd(roomID string, fire func(generation uint64
 	done := make(chan struct{})
 	store.idleTimerDones[roomID] = done
 	store.idleTimerCallbacks[done] = struct{}{}
-	store.idleTimers[roomID] = time.AfterFunc(meetingIdleEndGrace(), func() {
+	store.idleTimers[roomID] = time.AfterFunc(delay, func() {
 		defer func() {
 			store.mu.Lock()
 			store.finishIdleTimerCallbackLocked(done)
@@ -739,6 +995,9 @@ func (store *meetingStore) cancelIdleEnd(roomID string) {
 	defer store.mu.Unlock()
 
 	roomID = normalizeRoomID(roomID)
+	if store.idleRetryAttempts != nil {
+		delete(store.idleRetryAttempts, roomID)
+	}
 	if store.idleGenerations == nil {
 		store.idleGenerations = map[string]uint64{}
 	}
@@ -801,6 +1060,18 @@ func (store *meetingStore) stopIdleEndsAndWait() {
 // sharedElapsed = (Date.parse(startedAt) + (Date.now() - Date.parse(serverNow))).
 func meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
 	active := record.EndedAt == ""
+	finalizationState := "active"
+	analysisReady := false
+	if !active {
+		finalizationState = "untracked"
+		if record.Finalization != nil {
+			finalizationState = record.Finalization.State
+			analysisReady = meetingFinalizationReceiptReady(record.Finalization)
+			if finalizationState != meetingFinalizationClosing && finalizationState != meetingFinalizationFinalized && finalizationState != meetingFinalizationDegraded {
+				finalizationState = meetingFinalizationDegraded
+			}
+		}
+	}
 	var durationSeconds int64
 	if startedAt, err := time.Parse(time.RFC3339Nano, record.StartedAt); err == nil {
 		end := now
@@ -817,20 +1088,39 @@ func meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
 	if participants == nil {
 		participants = []string{}
 	}
-	return map[string]any{
-		"id":              record.ID,
-		"roomId":          normalizeRoomID(record.RoomID),
-		"title":           record.Title,
-		"titleSource":     record.TitleSource,
-		"startedAt":       record.StartedAt,
-		"endedAt":         record.EndedAt,
-		"endedReason":     record.EndedReason,
-		"archiveId":       record.ArchiveID,
-		"participants":    participants,
-		"active":          active,
-		"durationSeconds": durationSeconds,
-		"serverNow":       now.UTC().Format(time.RFC3339Nano),
+	payload := map[string]any{
+		"id":                record.ID,
+		"roomId":            normalizeRoomID(record.RoomID),
+		"title":             record.Title,
+		"titleSource":       record.TitleSource,
+		"startedAt":         record.StartedAt,
+		"endedAt":           record.EndedAt,
+		"endedReason":       record.EndedReason,
+		"archiveId":         record.ArchiveID,
+		"participants":      participants,
+		"active":            active,
+		"finalizationState": finalizationState,
+		"analysisReady":     analysisReady,
+		"durationSeconds":   durationSeconds,
+		"serverNow":         now.UTC().Format(time.RFC3339Nano),
 	}
+	if record.Finalization != nil {
+		receipt := cloneMeetingFinalizationReceipt(*record.Finalization)
+		payload["finalization"] = receipt
+	}
+	return payload
+}
+
+// meetingRecordPayload applies the app's durable-output validation to the
+// pure wire-shape helper above. A finalized receipt is necessary but not
+// sufficient for analysis readiness: its exact source-stamped Brain/digest
+// outputs must still be present and current. Production reads and broadcasts
+// use this method so a deleted or corrupt output cannot look ready during the
+// interval before boot recovery reopens the receipt.
+func (app *kanbanBoardApp) meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
+	payload := meetingRecordPayload(record, now)
+	payload["analysisReady"] = app.meetingFinalizationOutputsReady(record)
+	return payload
 }
 
 /* ---------- app lifecycle hooks ---------- */
@@ -892,20 +1182,51 @@ func (app *kanbanBoardApp) noteMeetingAdmissionForSitting(roomID string, name st
 	return record.ID
 }
 
+// publishAnchoredMeetingAdmission completes the non-durable presentation side
+// of an anchored admission. The meeting record itself was already persisted
+// before the live seat committed; this step only applies the per-sitting guest
+// latch and broadcasts the resulting record after app.mu is released.
+func (app *kanbanBoardApp) publishAnchoredMeetingAdmission(admission participantAdmissionResult) string {
+	record := admission.meeting
+	if app == nil || app.meetings == nil || strings.TrimSpace(record.ID) == "" {
+		return ""
+	}
+	changed := admission.meetingChanged
+	roomID := meetingRoomID(record)
+	if !record.ListenOnly && app.roomListenOnly(roomID) {
+		if latched, flipped := app.meetings.latchListenOnly(record.ID); flipped {
+			record = latched
+			changed = true
+		}
+	}
+	if changed {
+		app.broadcastMeetingRecord(record)
+	}
+	return record.ID
+}
+
 // noteMeetingOccupancy arms the room's idle-end timer when that room empties.
 // Called after forgetParticipantSession in the websocket cleanup path.
 func (app *kanbanBoardApp) noteMeetingOccupancy(roomID string) {
 	if app == nil || app.meetings == nil {
 		return
 	}
+	app.meetingLifecycleMu.RLock()
+	defer app.meetingLifecycleMu.RUnlock()
 	roomID = normalizeRoomID(roomID)
-	if app.activeParticipantCount(roomID) > 0 {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	if app.activeParticipantCountInRoomLocked(state) > 0 {
 		return
 	}
-	if _, ok := app.meetings.activeRecord(roomID); !ok {
+	record, ok := app.meetings.activeRecord(roomID)
+	if !ok {
 		return
 	}
-	app.meetings.armIdleEnd(roomID, func(generation uint64) { app.endMeetingForIdle(roomID, generation) })
+	if _, _, err := app.meetings.armIdleEndDurable(roomID, record.ID, time.Now().UTC(), func(generation uint64) { app.endMeetingForIdle(roomID, generation) }); err != nil {
+		log.Errorf("Could not persist empty-room deadline for meeting %s: %v", record.ID, err)
+	}
 }
 
 // endMeetingForIdle fires from a room's grace timer: re-check that room's
@@ -921,6 +1242,8 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	if app == nil || app.meetings == nil {
 		return
 	}
+	app.meetingLifecycleMu.Lock()
+	defer app.meetingLifecycleMu.Unlock()
 	roomID = normalizeRoomID(roomID)
 	if app.activeParticipantCount(roomID) > 0 {
 		// someone rejoined during the race; the meeting stays open.
@@ -930,10 +1253,19 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	if !ok {
 		return
 	}
-	closed, changed := app.meetings.endMeetingIfIdleGeneration(roomID, record.ID, time.Now().UTC(), generation)
+	source := app.meetingFinalizationSource(record.ID)
+	closed, changed, closeErr := app.meetings.endMeetingWithFinalizationIfIdleGeneration(roomID, record.ID, time.Now().UTC(), generation, source)
+	if closeErr != nil {
+		log.Errorf("Could not durably begin meeting %s finalization: %v", record.ID, closeErr)
+		app.meetings.rearmIdleCloseAfterFailure(roomID, record.ID, generation, func(nextGeneration uint64) {
+			app.endMeetingForIdle(roomID, nextGeneration)
+		})
+		return
+	}
 	if !changed {
 		return
 	}
+	app.meetings.clearIdleCloseRetry(roomID)
 	if app.meetingSpecialists != nil {
 		app.meetingSpecialists.CloseScope(roomID, closed.ID, "room_closed")
 	}
@@ -944,53 +1276,78 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	// "after_meeting" before the id rotates (idempotent — archiveMeeting may
 	// flush the same queue).
 	app.flushDeferredNotifications("meeting_end")
-	// Track-2 boundary flush (the idle-close hole): run the close chain —
-	// final brain pass, meeting/day digests, ledger consolidation, company
-	// digest — BEFORE the id rotates, so the tail of the meeting is summarized
-	// and every rollup keys to the CLOSING meeting id (post-rotation model
-	// output would misfile onto the successor, which is why the auto-archive
-	// below deliberately never flushes). Bounded by meetingArchiveFlushTimeout
-	// and best-effort: a model failure or timeout only logs, and the rotation
-	// below ALWAYS proceeds. A participant admitted mid-flush self-heals — the
-	// record is already ended, so noteMeetingAdmission mints a fresh id via
-	// hasEndedRecord and the conditional rotation here can never clobber it.
-	// W4: the flush is room-scoped (only the closing room's chain runs, under
-	// per-(agent, room) locks) and carries the sitting's listen-only latch so
-	// the board stage is skipped for a guest-exposed sitting (§7.3).
-	app.flushAmbientAgentsForClose("idle-end", roomID, closed.ListenOnly)
-	app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "meeting_end")
+	// The durable receipt already says closing. Rotate and release media before
+	// any model latency: a post-grace rejoin must mint a successor immediately,
+	// never inherit the ended sitting while its Brain/digest are being finalized.
 	if app.memory != nil {
 		app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
 	}
 	app.broadcastMeetingRecord(closed)
+	app.teardownRoomMediaAfterIdle(roomID)
+	app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "meeting_end")
 	// The session is over for good (empty past the grace): silently archive
 	// what the meeting captured so the next join starts a fresh context with
-	// the prior one preserved. Synchronous is fine — this already runs on the
-	// grace timer's goroutine, and a contentless meeting is skipped inside.
+	// the prior one preserved. The archive embeds `closing`; the asynchronous
+	// core runner refreshes it to finalized/degraded from its durable receipt.
 	app.autoArchiveIdleMeeting(closed)
-	// Multi-room W3 (§4.4): AFTER the close-flush chain and archive, tear down
-	// the named room's lazy media (lane, mixer, cap timer) and bump mediaGen.
-	// A rejoin during the grace window cancels the idle end upstream; a rejoin
-	// after this simply recreates media at the next admission. Office media
-	// stays boot-managed until W4 (no-op inside).
-	app.teardownRoomMediaAfterIdle(roomID)
+	app.scheduleMeetingCoreFinalization(closed.ID)
 	broadcastRoomsSnapshot()
 }
 
-// reconcileMeetingRecordsAtBoot runs once from newKanbanBoardApp, PER ROOM
-// (the union of rooms holding an open record and rooms whose memory meeting
-// id resumed): a stale open record whose id no longer matches the room's
-// resumed memory meeting id closes with reason restart; a matching open
-// record (memory resumed the same in-flight meeting) stays open with the
-// room's idle timer armed — occupancy is zero at boot, and a join inside the
-// grace window cancels it. With NO open record, a resumed memory id that
-// matches an ENDED record is rotated away: idle end rotates only in-process,
-// so after a restart newMeetingMemoryStore resumes the ended meeting's id
-// (the room's last JSONL entry is not an archive) and the next admission
-// would otherwise re-mint it onto a duplicate record.
+// reconcileMeetingRecordsAtBoot first repairs the admission-anchor -> meeting
+// directory crash seam, then runs once PER ROOM (the union of rooms holding an
+// open record and rooms whose memory meeting id resumed). A stale open record
+// whose id no longer matches the room's resumed memory meeting id closes with
+// reason restart; a matching open record stays open with its idle timer armed.
+// With NO open record, a resumed memory id that matches an ENDED record rotates
+// away. A recovered anchor-backed record may restore an otherwise-empty memory
+// sitting id; no unanchored memory id is ever allowed to create a record.
 func (app *kanbanBoardApp) reconcileMeetingRecordsAtBoot() {
 	if app == nil || app.meetings == nil {
 		return
+	}
+	app.admissionAnchorMu.RLock()
+	anchors := app.admissionAnchors
+	anchorErr := app.admissionAnchorErr
+	app.admissionAnchorMu.RUnlock()
+	if anchors != nil && anchorErr == nil {
+		// Complete or abort the explicit manual-rollover cross-file journal
+		// before ordinary anchor recovery. A durable successor meeting proves
+		// the atomic close/open landed; otherwise staged anchors are discarded
+		// so they can never manufacture a successor after a failed archive.
+		if pending, err := anchors.PendingRollovers(context.Background()); err != nil {
+			app.latchAdmissionAnchorFailure(err)
+			log.Errorf("Could not read pending admission rollovers: %v", err)
+		} else {
+			for _, rollover := range pending {
+				record, committed := app.meetings.recordByID(rollover.SittingID)
+				if committed && app.memory != nil {
+					currentID := app.memory.currentMeetingID(rollover.RoomID)
+					if currentID == rollover.Predecessor {
+						app.memory.transitionMeetingIDIfCurrent(rollover.RoomID, rollover.Predecessor, rollover.SittingID)
+					} else if currentID == "" && record.EndedAt == "" {
+						app.memory.resumeMeetingIDIfEmpty(rollover.RoomID, rollover.SittingID)
+					}
+				}
+				if err := anchors.ResolvePendingRollover(context.Background(), rollover, committed); err != nil {
+					app.latchAdmissionAnchorFailure(err)
+					log.Errorf("Could not resolve pending admission rollover %s: %v", rollover.SittingID, err)
+				}
+			}
+		}
+		starts, err := anchors.SittingStarts(context.Background())
+		if err != nil {
+			app.latchAdmissionAnchorFailure(err)
+			log.Errorf("Could not read admission anchors for meeting recovery: %v", err)
+		} else if recovered, err := app.meetings.recoverAnchoredMeetings(starts); err != nil {
+			log.Errorf("Could not recover anchored meeting records: %v", err)
+		} else if app.memory != nil {
+			for _, record := range recovered {
+				if record.EndedAt == "" {
+					app.memory.resumeMeetingIDIfEmpty(meetingRoomID(record), record.ID)
+				}
+			}
+		}
 	}
 	roomIDs := map[string]struct{}{officeRoomID: {}}
 	for _, roomID := range app.meetings.openRoomIDs() {
@@ -1008,6 +1365,15 @@ func (app *kanbanBoardApp) reconcileMeetingRecordsAtBoot() {
 
 func (app *kanbanBoardApp) reconcileMeetingRecordsAtBootForRoom(roomID string) {
 	roomID = normalizeRoomID(roomID)
+	if roomID != officeRoomID {
+		if room, found := appRoomStore().byID(roomID); found && room.Archived {
+			// The archived flag is the durable cross-store close intent. A crash
+			// after rooms.json committed but before meetings.json closed resumes
+			// this fenced chain instead of granting a new five-minute idle window.
+			go app.closeRoomForArchive(roomID)
+			return
+		}
+	}
 	record, ok := app.meetings.activeRecord(roomID)
 	if !ok {
 		if resumed := app.memory.currentMeetingID(roomID); resumed != "" && app.meetings.hasEndedRecord(resumed) {
@@ -1016,14 +1382,19 @@ func (app *kanbanBoardApp) reconcileMeetingRecordsAtBootForRoom(roomID string) {
 		return
 	}
 	if record.ID != app.memory.currentMeetingID(roomID) {
-		app.meetings.endMeeting(record.ID, time.Now().UTC(), meetingEndedReasonRestart, "")
+		source := app.meetingFinalizationSource(record.ID)
+		if _, _, err := app.meetings.endMeetingWithFinalization(record.ID, time.Now().UTC(), meetingEndedReasonRestart, "", source); err != nil {
+			log.Errorf("Could not close stale meeting %s with a durable finalization receipt: %v", record.ID, err)
+		}
 		return
 	}
-	app.meetings.armIdleEnd(roomID, func(generation uint64) { app.endMeetingForIdle(roomID, generation) })
+	if _, _, err := app.meetings.armIdleEndDurable(roomID, record.ID, time.Now().UTC(), func(generation uint64) { app.endMeetingForIdle(roomID, generation) }); err != nil {
+		log.Errorf("Could not restore empty-room deadline for meeting %s: %v", record.ID, err)
+	}
 }
 
 func (app *kanbanBoardApp) broadcastMeetingRecord(record meetingRecord) {
-	payload := meetingRecordPayload(record, time.Now().UTC())
+	payload := app.meetingRecordPayload(record, time.Now().UTC())
 	broadcastRoomAudienceKanbanEvent(record.RoomID, "meeting", payload)
 }
 
@@ -1037,7 +1408,7 @@ func (app *kanbanBoardApp) meetingSnapshot(roomID string) map[string]any {
 	if !ok {
 		return nil
 	}
-	return meetingRecordPayload(record, time.Now().UTC())
+	return app.meetingRecordPayload(record, time.Now().UTC())
 }
 
 /* ---------- memory enrichment (Memory tool, D15) ---------- */
@@ -1410,7 +1781,7 @@ func assistantMeetingsHandler(w http.ResponseWriter, r *http.Request) {
 	// the same current-source authorization as the closed index/detail routes.
 	meetings := make([]map[string]any, 0, len(projections))
 	for _, projection := range projections {
-		item := meetingRecordPayload(projection.record, now)
+		item := kanbanApp.meetingRecordPayload(projection.record, now)
 		// one top-level anchor instead of a per-item serverNow.
 		delete(item, "serverNow")
 		// Memory-tool enrichment (D15): summary, decided checklist, log

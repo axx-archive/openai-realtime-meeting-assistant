@@ -2862,6 +2862,11 @@ func (e *goalEngine) runProcessSynthesizerStage(ctx context.Context, plan *goalP
 	}
 	if plan.ProcessID == packagingStudioProcessID {
 		switch stage.ID {
+		case "write":
+			if err := validatePackagingStudioDeckCopyOutput(e.app, plan, text); err != nil {
+				failProcessStage(st, "deck copy is invalid: "+err.Error())
+				return
+			}
 		case "identity_candidates":
 			if err := validatePackagingStudioIdentityCandidates(e.app, plan, text); err != nil {
 				failProcessStage(st, "art director identity candidates are invalid: "+err.Error())
@@ -3018,6 +3023,9 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		st.Review.Score = decision.Score
 	case goalGateOutcomeRevise:
 		targetID := strings.TrimSpace(spec.RepairTarget)
+		if renderedReview != nil {
+			targetID = renderedReview.repairTarget()
+		}
 		if targetID == "" {
 			targetID = strings.TrimSpace(stage.InputFrom[0])
 		}
@@ -3033,12 +3041,30 @@ func (e *goalEngine) runProcessGateStage(ctx context.Context, plan *goalPlan, pa
 		st.Status = subtaskPending
 		target.Revisions++
 		target.Status = subtaskReady
-		target.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: reasons, By: "process_gate"}
+		targetReasons := reasons
+		if renderedReview != nil {
+			ownerLines := renderedReview.repairLinesForOwner(targetID)
+			parts := []string{compactAssistantLine(decision.Reasons)}
+			parts = append(parts, ownerLines...)
+			targetReasons = strings.Join(parts, " | ")
+		}
+		target.Review = &goalSubtaskReview{Verdict: goalReviewRevise, Reasons: targetReasons, By: "process_gate"}
 		// A rendered quality gate may sit several stages after the authored
 		// draft. Reset every completed dependent between the draft and this gate
 		// so repair produces a fresh render and a fresh jury verdict.
 		resetGoalDependentsWithEvidence(plan, target.ID, st.ID, "process_gate_cascade",
 			"stage "+target.ID+" was requeued by process gate "+stage.ID+" — re-run against the repaired work")
+		if renderedReview != nil && targetID == "write" {
+			if layoutLines := renderedReview.repairLinesForOwner("layout_plan"); len(layoutLines) > 0 {
+				if layout := plan.subtaskByID("layout_plan"); layout != nil {
+					layout.Review = &goalSubtaskReview{
+						Verdict: goalReviewRevise,
+						Reasons: "rendered design-eye repairs owned by composition: " + strings.Join(layoutLines, " | "),
+						By:      "process_gate",
+					}
+				}
+			}
+		}
 	case goalGateOutcomeTerminal:
 		st.Status = subtaskFailed
 		st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: reasons, By: "process_gate"}

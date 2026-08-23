@@ -1722,7 +1722,7 @@ func (backend *openAIToolProductBackend) commitOpenAIToolFinalArtifactAndChat(ct
 				thread.Messages[index].Text = statusCopy
 			}
 		}
-		if thread.Messages[index].Text != beforeText || *thread.Messages[index].Thread != beforeRef {
+		if thread.Messages[index].Text != beforeText || !scoutChatThreadRefsEqual(*thread.Messages[index].Thread, beforeRef) {
 			copy := thread.Messages[index]
 			changedMessage = &copy
 		}

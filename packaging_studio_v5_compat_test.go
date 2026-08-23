@@ -62,8 +62,8 @@ func TestPackagingStudioV5DefinitionRemainsExactlyResolvable(t *testing.T) {
 	}
 
 	current, ok := processByID(packagingStudioProcessID)
-	if !ok || current.Version != 7 {
-		t.Fatalf("new launches must still resolve the current v7 definition: ok=%t version=%d", ok, current.Version)
+	if !ok || current.Version != 8 {
+		t.Fatalf("new launches must still resolve the current v8 definition: ok=%t version=%d", ok, current.Version)
 	}
 }
 

@@ -93,10 +93,10 @@ func TestProduceMissionInsightAppendsParsedInsightWithCursor(t *testing.T) {
 	}
 }
 
-// The archive flush includes the mission worker: the archived meeting's
-// dominant theme titles the ARCHIVED record before the id rotates, and the
-// mid-occupancy successor never inherits the old meeting's theme.
-func TestArchiveFlushRunsMissionPassAndTitlesArchivedMeeting(t *testing.T) {
+// Archive completion does not wait on organization-wide mission maintenance.
+// A mid-occupancy successor therefore opens immediately and cannot inherit an
+// old meeting title merely because an asynchronous rollup lands later.
+func TestArchiveDoesNotBlockOnMissionPassOrLeakTitleToSuccessor(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	app.mu.Lock()
 	app.apiKey = "test-key"
@@ -121,8 +121,8 @@ func TestArchiveFlushRunsMissionPassAndTitlesArchivedMeeting(t *testing.T) {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
 
-	if insights := app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 10); len(insights) == 0 {
-		t.Fatal("archive flush did not run the mission-intel pass")
+	if insights := app.memory.entriesOfKind(meetingMemoryKindMissionInsight, 10); len(insights) != 0 {
+		t.Fatalf("archive synchronously ran non-core mission maintenance: %+v", insights)
 	}
 	var closed meetingRecord
 	for _, record := range app.meetings.recent(0) {
@@ -133,8 +133,11 @@ func TestArchiveFlushRunsMissionPassAndTitlesArchivedMeeting(t *testing.T) {
 	if closed.ID == "" {
 		t.Fatal("archived meeting record not found")
 	}
-	if closed.Title != "intel canvas" || closed.TitleSource != meetingTitleSourceAuto {
-		t.Fatalf("archived record=%#v, want the flushed dominant theme as its auto title", closed)
+	if closed.Finalization == nil || closed.Finalization.State != meetingFinalizationFinalized {
+		t.Fatalf("archived record receipt=%+v, want core finalized", closed.Finalization)
+	}
+	if closed.Title != "" || closed.TitleSource != "" {
+		t.Fatalf("archived record synchronously adopted non-core title: %#v", closed)
 	}
 
 	// AJ never left, so a successor record opened — it must NOT be titled

@@ -342,7 +342,7 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 // transcript rows and only the small analysis digest bodies needed to label a
 // row, while detail callers copy bodies for one exact meeting.
 func (app *kanbanBoardApp) meetingRecordStoreForPrincipal(ctx context.Context, principal RecallPrincipal, meetingIDs map[string]struct{}, includeBody func(string) bool) *meetingMemoryStore {
-	filtered := &meetingMemoryStore{seen: map[string]struct{}{}, meetingEntryIndexes: map[string][]int{}, meetingIDs: map[string]string{}, bootLatestIDs: map[string]string{}, bootLatestRoomIDs: map[string]map[string]string{}}
+	filtered := &meetingMemoryStore{seen: map[string]struct{}{}, meetingEntryIndexes: map[string][]int{}, meetingIDs: map[string]string{}, bootLatestIDs: map[string]string{}, bootLatestRoomIDs: map[string]map[string]string{}, includeRetainedTranscripts: true}
 	if app == nil || app.memory == nil || len(meetingIDs) == 0 {
 		return filtered
 	}
@@ -375,7 +375,8 @@ func (app *kanbanBoardApp) meetingRecordStoreForPrincipal(ctx context.Context, p
 		}
 		stored := app.memory.entries[index]
 		meetingID := strings.TrimSpace(stored.Metadata["meetingId"])
-		if meetingID == "" || !meetingRecordMeetingWanted(meetingIDs, meetingID) || memoryEntryHiddenFromRecall(stored) || !recallEntryScopeAllowed(stored.Metadata, principal) {
+		retainedTranscript := stored.Kind == meetingMemoryKindTranscript && strings.EqualFold(strings.TrimSpace(stored.Metadata[retainedRawTranscriptMetadataKey]), "true")
+		if meetingID == "" || !meetingRecordMeetingWanted(meetingIDs, meetingID) || (memoryEntryHiddenFromRecall(stored) && !retainedTranscript) || !recallEntryScopeAllowed(stored.Metadata, principal) {
 			continue
 		}
 		if stored.Kind == meetingMemoryKindOSArtifact {

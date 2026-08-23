@@ -71,7 +71,14 @@ export function DeckViewerScreen({ route, navigation }: Props) {
       setError('This presentation is unavailable.');
       return () => { active = false; };
     }
-    void api.artifactRenderToken(sessionToken, route.params.artifactId)
+    const artifactVersion = Number(route.params.artifactVersion ?? 0);
+    const artifactDigest = String(route.params.artifactDigest ?? '').trim().toLowerCase();
+    const hasExpectedBinding = route.params.artifactVersion !== undefined || route.params.artifactDigest !== undefined;
+    if (hasExpectedBinding && (!Number.isSafeInteger(artifactVersion) || artifactVersion < 1 || !/^[0-9a-f]{64}$/u.test(artifactDigest))) {
+      setError('This exact presentation is unavailable.');
+      return () => { active = false; };
+    }
+    void api.artifactRenderToken(sessionToken, route.params.artifactId, hasExpectedBinding ? { version: artifactVersion, digest: artifactDigest } : undefined)
       .then((response) => {
         if (!active) return;
         const path = nativeDeckRenderPath(response.url);
@@ -85,7 +92,7 @@ export function DeckViewerScreen({ route, navigation }: Props) {
         if (active) setError('This presentation could not be opened.');
       });
     return () => { active = false; };
-  }, [resetNavigation, retryNonce, route.params.artifactId, sessionToken]);
+  }, [resetNavigation, retryNonce, route.params.artifactDigest, route.params.artifactId, route.params.artifactVersion, sessionToken]);
 
   const navigateSlide = useCallback((direction: 'previous' | 'next') => {
     const target = deckPreviewNavigationTarget(navigationRef.current, direction);

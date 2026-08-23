@@ -178,16 +178,20 @@ func TestIndexCompletedWorkIsClearedBeforeThreadRerender(t *testing.T) {
 	}
 }
 
-func TestIndexCompletedWorkRendersGovernedFieldsAndStructuredViewer(t *testing.T) {
+func TestIndexCompletedWorkStaysInActivityAndFiles(t *testing.T) {
 	html := readIndexForThreadNavSplit(t)
 	body := functionBody(html, "function scoutChatMessageRecordNode(message)")
-	if !strings.Contains(body, "recordKind === 'work_result' || recordKind === 'work_record'") || !strings.Contains(body, "scoutChatWorkRecordNode(message)") {
-		t.Fatal("structured completed work must bypass the ordinary raw message body")
+	if strings.Contains(body, "scoutChatWorkRecordNode(message)") {
+		t.Fatal("generic completed work must not render as a center-timeline deliverable")
 	}
 	projection := functionBody(html, "function scoutChatRecordBelongsInTimeline(message)")
-	if !strings.Contains(projection, "governedWorkResourcePath(message.work.artifactHref, 'artifact')") {
-		t.Fatal("only an authorized governed artifact may promote completed work into the timeline")
+	for _, exactGate := range []string{"scoutActivityMessage(message)", "scoutThreadTimelineProjection(resultMessage).richResult"} {
+		if !strings.Contains(projection, exactGate) {
+			t.Fatalf("governed completed work is missing exact rich-result gate %q", exactGate)
+		}
 	}
+	// The governed reader remains available to Activity/Files. Removing its
+	// center-timeline promotion must not weaken its same-origin path checks.
 	workBody := functionBody(html, "function scoutChatWorkRecordNode(message)")
 	for _, expected := range []string{"workerName", "deliverable", "artifactHref", "evidenceHref", "providerExecutionFenced", "resultArtifactHref"} {
 		if !strings.Contains(workBody, expected) {
@@ -210,7 +214,7 @@ func TestIndexCompletedWorkRendersGovernedFieldsAndStructuredViewer(t *testing.T
 	}
 }
 
-func TestCompletedWorkThreadPreviewUsesStructuredSummary(t *testing.T) {
+func TestCompletedWorkThreadPreviewUsesClosedStatusCopy(t *testing.T) {
 	workMessage := scoutChatMessageRecord{
 		Kind: "work_result",
 		Text: "Artifact: /api/stride/v1/work/runs/raw-internal-path/artifact",
@@ -218,14 +222,14 @@ func TestCompletedWorkThreadPreviewUsesStructuredSummary(t *testing.T) {
 	}
 	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{workMessage}}
 	preview := scoutChatThreadPreview(thread)
-	if preview != "Evidence-linked launch brief is ready." {
-		t.Fatalf("structured completed-work preview=%q", preview)
+	if preview != "Work · Delivered" {
+		t.Fatalf("closed completed-work preview=%q", preview)
 	}
 	if strings.Contains(preview, "/api/") {
 		t.Fatal("thread rail leaked an internal artifact path")
 	}
 	updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, workMessage)
-	if thread.Preview != "Evidence-linked launch brief is ready." || strings.Contains(thread.Preview, "/api/") {
+	if thread.Preview != "Work · Delivered" || strings.Contains(thread.Preview, "/api/") || strings.Contains(thread.Preview, "Evidence-linked") {
 		t.Fatalf("committed completed-work preview=%q", thread.Preview)
 	}
 }

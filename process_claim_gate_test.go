@@ -94,6 +94,10 @@ func scopedEvidenceAuthorityFixture() processEvidenceGateAuthority {
 	}
 }
 
+func packagingStoryClaimPolicyFixture() (*goalPlan, ProcessStage) {
+	return &goalPlan{ProcessID: packagingStudioProcessID}, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v2"}
+}
+
 func TestProcessPanelVoiceGateAllowsDeliberationButRejectsInventedFacts(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	// A panelist may argue for a direction. That voice is retained for audit but
@@ -117,6 +121,84 @@ func TestProcessPanelVoiceGateAllowsDeliberationButRejectsInventedFacts(t *testi
 	unsafeSynthesis := `{"evidence_scope":"scoped","evidence_scope_receipt":"` + authority.DossierDigest + `","decision_posture":"conditional","evidence_scope_disclosure":"` + processScopedEvidenceDisclosure + `","decision":"Build the product now."}`
 	if err := validateProcessScopedEvidenceOutput(unsafeSynthesis, ProcessStage{ID: "story_architects"}, authority); err == nil || !strings.Contains(err.Error(), "unconditional high-consequence action") {
 		t.Fatalf("unconditional panel synthesis passed: %v", err)
+	}
+}
+
+func TestProcessClaimGateTreatsSlideArgumentRoleAsPlanningMetadata(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := packagingStoryClaimPolicyFixture()
+	for _, body := range []string{
+		`{"slides":[{"slide_id":"slide-1","role_in_argument":"Establish the current reality and a shared understanding of the choice ahead."}]}`,
+		`{"slides":[{"slide_id":"slide-1","role_in_argument":"Show the tension between the audience's current frame and the choice ahead."}]}`,
+	} {
+		if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err != nil {
+			t.Fatalf("claim-free panel planning role was rejected: %v", err)
+		}
+		// The same typed field can survive the authoritative panel synthesis;
+		// both exceptions are bound to this exact authored stage policy.
+		if err := validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage); err != nil {
+			t.Fatalf("claim-free synthesized planning role was rejected: %v", err)
+		}
+		if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
+			t.Fatal("generic factual validator accepted a stage-specific planning-role exception")
+		}
+	}
+}
+
+func TestProcessClaimGatePlanningRoleExceptionIsBoundToExactStoryStage(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	body := `{"slides":[{"role_in_argument":"Establish the current reality and the decision ahead."}]}`
+	for name, policy := range map[string]struct {
+		plan  *goalPlan
+		stage ProcessStage
+	}{
+		"nil plan":       {nil, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v2"}},
+		"wrong process":  {&goalPlan{ProcessID: documentReportProcessID}, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v2"}},
+		"write stage":    {&goalPlan{ProcessID: packagingStudioProcessID}, ProcessStage{ID: "write", OutputContract: "deck_copy_v3"}},
+		"layout stage":   {&goalPlan{ProcessID: packagingStudioProcessID}, ProcessStage{ID: "layout_plan", OutputContract: "layout_plan_v3"}},
+		"wrong contract": {&goalPlan{ProcessID: packagingStudioProcessID}, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v3"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessFactualClaimsForStage(body, authority.Claims, policy.plan, policy.stage); err == nil {
+				t.Fatal("planning-role exception escaped its exact process-stage-output policy")
+			}
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, policy.plan, policy.stage); err == nil {
+				t.Fatal("panel planning-role exception escaped its exact process-stage-output policy")
+			}
+		})
+	}
+}
+
+func TestProcessClaimGatePlanningRoleCannotLaunderFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := packagingStoryClaimPolicyFixture()
+	for name, body := range map[string]string{
+		"number in role":         `{"slides":[{"role_in_argument":"Establish that the market is worth $6.8 billion."}]}`,
+		"url in role":            `{"slides":[{"role_in_argument":"Establish the source at https://example.com/market."}]}`,
+		"superlative in role":    `{"slides":[{"role_in_argument":"Establish Acme as the market leader."}]}`,
+		"copula fact in role":    `{"slides":[{"role_in_argument":"Establish that Acme is the category standard."}]}`,
+		"inflected factual lead": `{"slides":[{"role_in_argument":"Leads the market."}]}`,
+		"second sentence":        `{"slides":[{"role_in_argument":"Establish the current reality. Acme wins."}]}`,
+		"semicolon clause":       `{"slides":[{"role_in_argument":"Establish the current reality; Acme wins."}]}`,
+		"because clause":         `{"slides":[{"role_in_argument":"Establish the current reality because Acme wins."}]}`,
+		"comma clause":           `{"slides":[{"role_in_argument":"Establish the current reality, Acme wins."}]}`,
+		"colon clause":           `{"slides":[{"role_in_argument":"Establish the current reality: Acme wins."}]}`,
+		"em dash clause":         `{"slides":[{"role_in_argument":"Establish the current reality — Acme wins."}]}`,
+		"en dash clause":         `{"slides":[{"role_in_argument":"Establish the current reality – Acme wins."}]}`,
+		"second line":            "{\"slides\":[{\"role_in_argument\":\"Establish the current reality.\\nAcme wins.\"}]}",
+		"hidden HTML comment":    `{"slides":[{"role_in_argument":"Establish the current reality. <!-- Acme is the market leader. -->"}]}`,
+		"hidden claim marker":    `{"slides":[{"role_in_argument":"Establish the current reality. [[claim:` + strings.Repeat("a", 64) + `]]"}]}`,
+		"malformed claim marker": `{"slides":[{"role_in_argument":"Establish the current reality. [[ claim:abc ]]"}]}`,
+		"literal claim marker":   `{"slides":[{"role_in_argument":"Establish the current reality. stride-claim:` + strings.Repeat("a", 64) + `"}]}`,
+		"fact in slide copy":     `{"slides":[{"role_in_argument":"Establish the current reality and the decision ahead.","visible_copy":"Acme is the category standard."}]}`,
+		"fact in headline":       `{"slides":[{"role_in_argument":"Establish the current reality and the decision ahead.","headline":"The market leader"}]}`,
+		"non-string role":        `{"slides":[{"role_in_argument":1}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("unsupported factual material passed through the planning-role contract")
+			}
+		})
 	}
 }
 

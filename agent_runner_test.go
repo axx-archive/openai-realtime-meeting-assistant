@@ -55,6 +55,31 @@ func appendTestTranscript(t *testing.T, app *kanbanBoardApp, id string, text str
 	}
 }
 
+func TestUnconsumedCursorNeverRewindsWhenLateOldMeetingArtifactAppends(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	appendTestTranscript(t, app, "cursor-tx-1", "first source")
+	appendTestTranscript(t, app, "cursor-tx-2", "second source")
+	meetingID := app.memory.currentMeetingID(officeRoomID)
+	if _, appended, err := app.memory.appendBrainWriteUp("cursor-brain-through-two", "covers both", map[string]string{
+		"meetingId": meetingID, meetingBrainCursorMetadataKey: "cursor-tx-2",
+	}); err != nil || !appended {
+		t.Fatalf("append current cursor artifact=%v err=%v", appended, err)
+	}
+	// A delayed recovery for an older source may append physically later. It
+	// must never become the room cursor merely because it is the newest row.
+	if _, appended, err := app.memory.appendBrainWriteUp("cursor-brain-late-old", "late old output", map[string]string{
+		"meetingId": meetingID, meetingBrainCursorMetadataKey: "cursor-tx-1",
+	}); err != nil || !appended {
+		t.Fatalf("append late cursor artifact=%v err=%v", appended, err)
+	}
+	remaining := app.memory.unconsumedEntriesAfterForRoomForPrincipal(
+		meetingMemoryKindTranscript, meetingMemoryKindBrain, meetingBrainCursorMetadataKey, 10, "", officeRoomID, RecallPrincipal{},
+	)
+	if len(remaining) != 0 {
+		t.Fatalf("late old artifact rewound cursor; remaining=%+v", remaining)
+	}
+}
+
 func cannedArchiveMeetingDigestJSON(anchor string) string {
 	anchor = strings.TrimSpace(anchor)
 	return strings.ReplaceAll(strings.ReplaceAll(cannedMeetingDigestJSON(), `"tx-1"`, strconv.Quote(anchor)), `"tx-2"`, strconv.Quote(anchor))
@@ -1376,6 +1401,7 @@ func TestAmbientAgentRunnerBaselineSkipsHistory(t *testing.T) {
 
 func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission(officeRoomID, "AJ")
 	authority := newAmbientConsentAuthorityForTest(t)
 	grantAmbientConsentForTest(t, app, authority, officeRoomID, "tom@shareability.com")
 	t.Setenv("MEETING_BRAIN_MIN_TRANSCRIPTS", "4")
@@ -1384,38 +1410,44 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	app.mu.Unlock()
 
 	var calls []string
+	var callsMu sync.Mutex
+	recordCall := func(call string) {
+		callsMu.Lock()
+		calls = append(calls, call)
+		callsMu.Unlock()
+	}
 	originalResponder := createOpenAITextResponse
 	defer func() { createOpenAITextResponse = originalResponder }()
 	createOpenAITextResponse = func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		if strings.Contains(request.Instructions, "board intelligence") {
-			calls = append(calls, "board")
+			recordCall("board")
 			return `{"summary":"No actionable board changes.","operations":[]}`, nil
 		}
 		if strings.Contains(request.Instructions, "decision ledger") {
-			calls = append(calls, "ledger")
+			recordCall("ledger")
 			return `{"decisions":[]}`, nil
 		}
 		if strings.Contains(request.Instructions, "mission intelligence") {
-			calls = append(calls, "mission")
+			recordCall("mission")
 			return `{"themes":[],"openQuestions":[],"alignments":[]}`, nil
 		}
 		if strings.Contains(request.Instructions, "narrative maintainer") {
-			calls = append(calls, "narrative")
+			recordCall("narrative")
 			return `{"narratives":[]}`, nil
 		}
 		if strings.Contains(request.Instructions, "meeting digest compiler") {
-			calls = append(calls, "digest")
+			recordCall("digest")
 			return cannedArchiveMeetingDigestJSON("event-1"), nil
 		}
 		if strings.Contains(request.Instructions, "company digest narrator") {
-			calls = append(calls, "company")
+			recordCall("company")
 			return "The Zebra packaging pilot is decided.", nil
 		}
 		if strings.Contains(request.Instructions, "entity-ledger adjudicator") || strings.Contains(request.Instructions, "end-of-day reflection") {
 			t.Errorf("unexpected model call at archive flush: %s", request.Instructions)
 			return "", nil
 		}
-		calls = append(calls, "brain")
+		recordCall("brain")
 		return "## Overview\nBoot Barn shoot confirmed for Friday.", nil
 	}
 
@@ -1425,10 +1457,17 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
-	// the close chain in dependency order; the day fold and the entity-ledger
-	// consolidation are deterministic (no model call).
-	if strings.Join(calls, ",") != "brain,ledger,mission,narrative,digest,company" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, mission, narrative, meeting-digest, then company", calls)
+	waitForMeetingFinalizationState(t, app, result.MeetingID, meetingFinalizationFinalized)
+	waitForMeetingArchiveFinalizationSync(t, app, result.MeetingID)
+	waitForMeetingFinalizationQueueIdle(t, app)
+	// The user-visible archive boundary returns before provider work. Once the
+	// durable close queue settles, only the receipted meeting-scoped core has
+	// run; wider organization rollups remain asynchronous.
+	callsMu.Lock()
+	gotCalls := append([]string(nil), calls...)
+	callsMu.Unlock()
+	if strings.Join(gotCalls, ",") != "brain,digest" {
+		t.Fatalf("calls=%v, want only final Brain then meeting digest", gotCalls)
 	}
 	if !strings.Contains(result.DownloadURL, "?key=") {
 		t.Fatalf("downloadUrl=%q, want embedded room key", result.DownloadURL)
@@ -1451,7 +1490,10 @@ func TestArchiveMeetingFlushesAgentsBeforeSnapshot(t *testing.T) {
 		kinds[entry.Kind] = true
 	}
 	if !kinds[meetingMemoryKindBrain] || kinds[meetingMemoryKindBoardUpdate] {
-		t.Fatalf("archive memory kinds=%v, want brain and no new retired board_update", kinds)
+		t.Fatalf("archive memory kinds=%v, want core Brain and no retired board_update", kinds)
+	}
+	if archive.Meeting == nil || archive.Meeting.Finalization == nil || archive.Meeting.Finalization.State != meetingFinalizationFinalized {
+		t.Fatalf("archive meeting receipt=%+v, want finalized", archive.Meeting)
 	}
 }
 
@@ -1623,8 +1665,8 @@ func TestArchiveFlushDoesNotConsumePreBootHistory(t *testing.T) {
 	// company narrative rides the ledger events the consolidation just landed.
 	appendTestTranscript(t, app, "fresh", "Boot Barn shoot confirmed for Friday.")
 	app.flushAmbientAgentsForArchive()
-	if strings.Join(calls, ",") != "brain,ledger,mission,narrative,digest,company" {
-		t.Fatalf("calls=%v, want brain, decision-ledger, mission, narrative, meeting-digest, then company for post-boot input", calls)
+	if strings.Join(calls, ",") != "brain,digest,ledger,mission,narrative,company" {
+		t.Fatalf("calls=%v, want core Brain/digest before the non-core recovery chain", calls)
 	}
 	if entries := app.memory.entriesOfKind(meetingMemoryKindDayDigest, 0); len(entries) == 0 {
 		t.Fatal("archive flush did not fold a day digest")

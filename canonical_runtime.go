@@ -895,12 +895,35 @@ func (runtime *CanonicalRuntime) spoolHighWater() uint64 {
 
 func (runtime *CanonicalRuntime) markDirtyLocked() {
 	runtime.dirtyHighWater = runtime.spoolHighWater()
+	runtime.signalReconcileLocked()
+}
+
+func (runtime *CanonicalRuntime) signalReconcileLocked() {
 	if runtime.reconcileSignal != nil {
 		select {
 		case runtime.reconcileSignal <- struct{}{}:
 		default:
 		}
 	}
+}
+
+// takeReconcileTarget coalesces notifications that were queued before the
+// sampled high-water. markDirtyLocked uses the same mutex, so any mutation
+// after this boundary publishes a fresh signal that cannot be drained as
+// stale and will force a follow-up pass.
+func (runtime *CanonicalRuntime) takeReconcileTarget() uint64 {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	target := runtime.dirtyHighWater
+	for runtime.reconcileSignal != nil {
+		select {
+		case <-runtime.reconcileSignal:
+			continue
+		default:
+			return target
+		}
+	}
+	return target
 }
 
 func (runtime *CanonicalRuntime) startReconcileLoop() {
@@ -1115,9 +1138,7 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	// remain available throughout the potentially expensive scan and apply.
 	runtime.reconcileMu.Lock()
 	defer runtime.reconcileMu.Unlock()
-	runtime.mu.Lock()
-	target := runtime.dirtyHighWater
-	runtime.mu.Unlock()
+	target := runtime.takeReconcileTarget()
 	// Reading the committed set validates the complete local chain through the
 	// target high-water before reconstructing logical object identities.
 	for _, fact := range runtime.spool.CommittedFacts() {
@@ -1171,6 +1192,7 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 		// cannot claim a spool high-water that changed underneath it. A queued
 		// signal will reconcile the newer stable boundary without ever blocking
 		// covered legacy writes for the duration of this full scan.
+		runtime.signalReconcileLocked()
 		runtime.markSuccessLocked()
 		return nil
 	}

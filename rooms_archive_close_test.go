@@ -7,6 +7,8 @@ package main
 // same close chain as idle end.
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,6 +68,122 @@ func TestCloseRoomForArchiveEndsSittingAndForgetsSeats(t *testing.T) {
 	if app.memory.currentMeetingID(room.ID) == record.ID {
 		t.Fatal("archive close must rotate the room's memory meeting id off the closed record")
 	}
+}
+
+func TestArchivedRoomRejectsMemberAndGuestWhileDurableCloseRetriesBeforeTeardown(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("BONFIRE_ROOMS_PATH", filepath.Join(t.TempDir(), "rooms.json"))
+	app := newIsolatedKanbanBoardApp(t)
+
+	room, err := appRoomStore().create("retry room", "", "aj@shareability.com", true)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if _, _, err := app.admitParticipantSessionEndpointInRoom(room.ID, "AJ", "sess-existing", "ep-existing"); err != nil {
+		t.Fatalf("seed existing seat: %v", err)
+	}
+	app.noteMeetingAdmission(room.ID, "AJ")
+	record, ok := app.meetings.activeRecord(room.ID)
+	if !ok {
+		t.Fatal("admission did not open a meeting record")
+	}
+
+	persistCalls := 0
+	app.meetings.persistState = func(state meetingStoreState) error {
+		persistCalls++
+		if persistCalls == 1 {
+			return errors.New("injected definite room-close write failure")
+		}
+		return writeJSONFileAtomically(app.meetings.path, "room archive close retry fixture", state)
+	}
+	if err := app.archiveNamedRoom(room.ID); err != nil {
+		t.Fatalf("archive room: %v", err)
+	}
+	app.closeRoomForArchive(room.ID)
+
+	stillOpen, active := app.meetings.activeRecord(room.ID)
+	if !active || stillOpen.ID != record.ID || stillOpen.EndedAt != "" {
+		t.Fatalf("definite close failure did not preserve open record: %+v active=%v", stillOpen, active)
+	}
+	if got := app.activeParticipantCount(room.ID); got != 1 {
+		t.Fatalf("close failure tore down %d-seat live state, want the existing seat preserved", got)
+	}
+	app.roomArchiveCloseRetryMu.Lock()
+	retryArmed := app.roomArchiveCloseRetryTimers[room.ID] != nil
+	app.roomArchiveCloseRetryMu.Unlock()
+	if !retryArmed {
+		t.Fatal("durably archived room did not arm an in-process close retry")
+	}
+
+	sittingID := app.prepareMeetingSittingID(room.ID)
+	if _, err := app.admitParticipantWithAnchorResult(context.Background(), room.ID, "Tyler", "sess-member", "ep-member", sittingID, memberAdmissionPrincipal("tyler@shareability.com"), false); !errors.Is(err, errRoomArchived) {
+		t.Fatalf("member admission err=%v, want errRoomArchived", err)
+	}
+	if _, err := app.admitGuestWithAnchorResult(context.Background(), room.ID, "guest-session", "Pat", "sess-guest", sittingID); !errors.Is(err, errRoomArchived) {
+		t.Fatalf("guest admission err=%v, want errRoomArchived", err)
+	}
+	if got := app.activeParticipantCount(room.ID); got != 1 {
+		t.Fatalf("rejected admissions changed live seats to %d", got)
+	}
+
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		closed, found := app.meetings.recordByID(record.ID)
+		if found && closed.EndedAt != "" {
+			if closed.EndedReason != meetingEndedReasonRoomClosed {
+				t.Fatalf("retried close reason=%q, want room_closed", closed.EndedReason)
+			}
+			if got := app.activeParticipantCount(room.ID); got != 0 {
+				t.Fatalf("durable close completed but left %d seats", got)
+			}
+			app.meetings.mu.Lock()
+			calls := persistCalls
+			app.meetings.mu.Unlock()
+			if calls < 2 {
+				t.Fatalf("close settled without retrying persistence: calls=%d", calls)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("durably archived room remained open after bounded close retry")
+}
+
+func TestBootResumesNamedRoomCloseFromDurableArchivedFlag(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("BONFIRE_ROOMS_PATH", filepath.Join(t.TempDir(), "rooms.json"))
+	app := newIsolatedKanbanBoardApp(t)
+	room, err := appRoomStore().create("restart archive room", "", "aj@shareability.com", false)
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	app.noteMeetingAdmission(room.ID, "AJ")
+	record, ok := app.meetings.activeRecord(room.ID)
+	if !ok {
+		t.Fatal("admission did not open a meeting record")
+	}
+	if err := app.archiveNamedRoom(room.ID); err != nil {
+		t.Fatalf("archive room: %v", err)
+	}
+
+	restarted := newKanbanBoardApp()
+	t.Cleanup(func() {
+		restarted.stopMeetingFinalizationRetries()
+		restarted.stopRoomArchiveCloseRetries()
+		restarted.meetings.stopIdleEndsAndWait()
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		closed, found := restarted.meetings.recordByID(record.ID)
+		if found && closed.EndedAt != "" {
+			if closed.EndedReason != meetingEndedReasonRoomClosed {
+				t.Fatalf("boot close reason=%q, want room_closed", closed.EndedReason)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("boot granted an archived named room a live sitting instead of resuming its durable close intent")
 }
 
 // Restore is an undo. The close chain runs async after the archive response,

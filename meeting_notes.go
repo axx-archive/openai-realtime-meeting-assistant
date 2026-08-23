@@ -202,9 +202,16 @@ func renderMeetingNotesText(archiveID string, archivedAt time.Time, archivedBy s
 	return body.String()
 }
 
+// meetingNotesEmailBeforeDelivery is a test-only barrier for archive RMW race
+// coverage. Production leaves it nil.
+var meetingNotesEmailBeforeDelivery func()
+
 func sendMeetingNotesEmail(recipients []string, notes meetingNotes) meetingEmailStatus {
 	status := meetingEmailStatus{
 		Recipients: append([]string(nil), recipients...),
+	}
+	if meetingNotesEmailBeforeDelivery != nil {
+		meetingNotesEmailBeforeDelivery()
 	}
 	if len(recipients) == 0 {
 		status.Skipped = true

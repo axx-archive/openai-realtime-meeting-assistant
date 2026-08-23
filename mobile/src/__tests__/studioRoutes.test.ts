@@ -121,6 +121,7 @@ test('documents expose Edit and full-screen actions while unsupported artifacts 
       export const StyleSheet={create:value=>value};
     `,
     'studio-preview-stub:react-native-webview': `export const WebView='WebView';`,
+    'studio-preview-stub:expo-image': `export const Image='Image';`,
     'studio-preview-stub:expo-symbols': `export const SymbolView='SymbolView';`,
     'studio-preview-stub:../api/client': `export const api={};`,
     'studio-preview-stub:../config': `export const API_BASE_URL='https://example.test';`,
@@ -128,6 +129,7 @@ test('documents expose Edit and full-screen actions while unsupported artifacts 
     'studio-preview-stub:../artifacts/nativeDeckViewer': `export const nativeTextArtifactIsRenderable=value=>{const text=String(value??'').trim();if(!text||text.startsWith('<'))return false;try{JSON.parse(text);return false}catch{return true}};`,
     'studio-preview-stub:../theme/glass': `export const Glass='Glass';`,
     'studio-preview-stub:../theme/tokens': `const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const space=proxy; export const type=proxy;`,
+    'studio-preview-stub:../files/fileActions': `export const authenticatedFileUrl=()=>''; export const authenticatedFileHeaders=()=>({});`,
     'studio-preview-stub:./ScoutRichText': `export const ScoutRichText='ScoutRichText';`,
   });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

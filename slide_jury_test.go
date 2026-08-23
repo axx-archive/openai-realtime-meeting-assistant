@@ -319,7 +319,9 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "installed-but-retired")
 	deck := seedSlideJuryDeck(t, app, []byte("fake-jpeg-page-one"), []byte("fake-jpeg-page-two"))
 
-	const seatJSON = `{"pages":[{"page":1,"score":6.5,"fix":"Cut the headline to seven words"},{"page":2,"score":9,"fix":"KEEP"}],"weakest_three":[1],"strongest_three":[2]}`
+	const headlineSeatJSON = `{"pages":[{"page":1,"score":6.5,"fix":"Cut the headline to seven words","blockers":["weak_thesis"]},{"page":2,"score":9,"fix":"KEEP","blockers":[]}],"weakest_three":[1],"strongest_three":[2]}`
+	const designSeatJSON = `{"pages":[{"page":1,"score":6.5,"fix":"Give the headline a clean focal hierarchy","blockers":["competing_hierarchies"]},{"page":2,"score":9,"fix":"KEEP","blockers":[]}],"weakest_three":[1],"strongest_three":[2]}`
+	const roomSeatJSON = `{"pages": [{"page":1,"score":6.5,"fix":"Cut the headline to seven words","blockers":["weak_thesis"]},{"page":2,"score":9,"fix":"KEEP","blockers":[]}],"weakest_three":[1],"strongest_three":[2]}`
 	const mergedScoreboard = "Merged scoreboard: page 1 avg 6.5 — cut the headline to seven words; page 2 KEEP."
 
 	var mu sync.Mutex
@@ -333,9 +335,14 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 		mu.Lock()
 		requests = append(requests, request)
 		mu.Unlock()
-		text := seatJSON
-		if strings.Contains(strings.ToLower(request.Instructions), "slide jury synthesizer") {
+		instructions := strings.ToLower(request.Instructions)
+		text := roomSeatJSON
+		if strings.Contains(instructions, "slide jury synthesizer") {
 			text = mergedScoreboard
+		} else if strings.Contains(instructions, "headline ear") {
+			text = headlineSeatJSON
+		} else if strings.Contains(instructions, "design eye") {
+			text = designSeatJSON
 		}
 		return text, nil
 	}
@@ -394,7 +401,7 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 		t.Fatalf("jury readiness metadata wrong: %v", jury.Metadata)
 	}
 	var repairs []slideJuryRepair
-	if err := json.Unmarshal([]byte(jury.Metadata["repairFixes"]), &repairs); err != nil || len(repairs) != 1 || repairs[0].Page != 1 || len(repairs[0].Fixes) != 1 || repairs[0].Fixes[0] != "Cut the headline to seven words" {
+	if err := json.Unmarshal([]byte(jury.Metadata["repairFixes"]), &repairs); err != nil || len(repairs) != 2 || repairs[0].Page != 1 || repairs[0].Owner != "write" || repairs[1].Owner != "layout_plan" || len(repairs[0].Fixes) != 1 || repairs[0].Fixes[0] != "Cut the headline to seven words" {
 		t.Fatalf("jury did not persist the exact bounded seat fix: metadata=%v repairs=%+v err=%v", jury.Metadata, repairs, err)
 	}
 	if jury.Metadata["deckArtifactVersion"] != strconv.Itoa(artifactVersion(deck)) || jury.Metadata["deckContentDigest"] != artifactCapabilityDigest(deck) {
@@ -403,7 +410,7 @@ func TestRunSlideJuryPanelFanOutWithImages(t *testing.T) {
 	if !strings.Contains(jury.Text, mergedScoreboard) {
 		t.Fatalf("scoreboard missing the synthesis:\n%s", jury.Text)
 	}
-	if !strings.Contains(jury.Text, "## Jury voices") || strings.Count(jury.Text, seatJSON) != 3 {
+	if !strings.Contains(jury.Text, "## Jury voices") || strings.Count(jury.Text, headlineSeatJSON) != 1 || strings.Count(jury.Text, designSeatJSON) != 1 || strings.Count(jury.Text, roomSeatJSON) != 1 {
 		t.Fatalf("scoreboard missing the three seat voices:\n%s", jury.Text)
 	}
 }
@@ -597,13 +604,22 @@ func TestRunSlideJuryKeylessErrors(t *testing.T) {
 	}
 }
 
-func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
+func TestEvaluateSlideJuryReadinessRequiresBothSpecialistsAndHonorsHardVeto(t *testing.T) {
 	voice := func(persona string, pageOne, pageTwo float64) goalPanelVoice {
-		return goalPanelVoice{Persona: persona, Text: fmt.Sprintf(`{"pages":[{"page":1,"score":%.1f,"fix":"Refit the title","blockers":[]},{"page":2,"score":%.1f,"fix":"KEEP","blockers":[]}],"weakest_three":[1],"strongest_three":[2]}`, pageOne, pageTwo)}
+		fix, blockers := "KEEP", `[]`
+		if pageOne < slideJuryReadyAverageFloor {
+			fix = "Make the thesis immediate and specific"
+			blockers = `["weak_thesis"]`
+			if persona == "design_eye" {
+				fix = "Refit the title inside the locked composition"
+				blockers = `["text_overlap"]`
+			}
+		}
+		return goalPanelVoice{Persona: persona, Text: fmt.Sprintf(`{"pages":[{"page":1,"score":%.1f,"fix":%q,"blockers":%s},{"page":2,"score":%.1f,"fix":"KEEP","blockers":[]}],"weakest_three":[1],"strongest_three":[2]}`, pageOne, fix, blockers, pageTwo)}
 	}
 	got := evaluateSlideJuryReadiness([]goalPanelVoice{
 		voice("headline_ear", 4, 9),
-		voice("design_eye", 5, 8),
+		voice("design_eye", 5, 9),
 		voice("room_gut", 8, 9),
 	}, 2)
 	if got.Verdict != "needs_changes" || len(got.BlockingPages) != 1 || got.BlockingPages[0] != 1 || got.ParsedSeats != 3 {
@@ -618,8 +634,48 @@ func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
 		voice("design_eye", 10, 9),
 		voice("room_gut", 10, 9),
 	}, 2)
-	if oneOutlier.Verdict != "ready" || len(oneOutlier.BlockingPages) != 0 {
-		t.Fatalf("one-outlier readiness=%+v, want ready because the page average clears %.1f", oneOutlier, slideJuryReadyAverageFloor)
+	if oneOutlier.Verdict != "needs_changes" || len(oneOutlier.BlockingPages) != 1 || len(oneOutlier.Repairs) != 1 || oneOutlier.Repairs[0].Owner != "write" {
+		t.Fatalf("headline specialist hard veto was outvoted: %+v", oneOutlier)
+	}
+	designOutlier := evaluateSlideJuryReadiness([]goalPanelVoice{
+		voice("headline_ear", 10, 9),
+		voice("design_eye", 6, 9),
+		voice("room_gut", 10, 9),
+	}, 2)
+	if designOutlier.Verdict != "needs_changes" || len(designOutlier.BlockingPages) != 1 || len(designOutlier.Repairs) != 1 || designOutlier.Repairs[0].Owner != "layout_plan" {
+		t.Fatalf("design specialist hard veto was outvoted or misrouted: %+v", designOutlier)
+	}
+	aboveFloorSpecialistRepair := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":8,"fix":"Rewrite the headline","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if aboveFloorSpecialistRepair.Verdict != "needs_changes" || len(aboveFloorSpecialistRepair.BlockingPages) != 1 || len(aboveFloorSpecialistRepair.Repairs) != 1 || aboveFloorSpecialistRepair.Repairs[0].Owner != "write" || len(aboveFloorSpecialistRepair.Repairs[0].Fixes) != 1 || aboveFloorSpecialistRepair.Repairs[0].Fixes[0] != "Rewrite the headline" {
+		t.Fatalf("above-floor specialist repair was numerically outvoted: %+v", aboveFloorSpecialistRepair)
+	}
+	belowFloorSpecialistKeep := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":8,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if belowFloorSpecialistKeep.Verdict != "needs_attention" || len(belowFloorSpecialistKeep.BlockingPages) != 1 || len(belowFloorSpecialistKeep.Repairs) != 0 {
+		t.Fatalf("below-floor specialist KEEP was numerically outvoted or given an invented repair: %+v", belowFloorSpecialistKeep)
+	}
+	duplicateDesignMembers := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":10,"fix":"Repair overlap","blockers":["text_overlap"],"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if duplicateDesignMembers.Verdict != "needs_attention" || duplicateDesignMembers.ParsedSeats != 2 {
+		t.Fatalf("duplicate authoritative jury members used last-value-wins: %+v", duplicateDesignMembers)
+	}
+	unknownDesignMember := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[],"veto":false}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if unknownDesignMember.Verdict != "needs_attention" || unknownDesignMember.ParsedSeats != 2 {
+		t.Fatalf("unknown authoritative jury member escaped the closed scorecard schema: %+v", unknownDesignMember)
 	}
 
 	bland := evaluateSlideJuryReadiness([]goalPanelVoice{
@@ -644,6 +700,10 @@ func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
 	if incomplete.Verdict != "needs_attention" {
 		t.Fatalf("incomplete readiness=%+v, want fail-closed needs_attention", incomplete)
 	}
+	missingDesign := evaluateSlideJuryReadiness([]goalPanelVoice{voice("headline_ear", 9, 9), voice("room_gut", 10, 10)}, 2)
+	if missingDesign.Verdict != "needs_attention" {
+		t.Fatalf("room_gut substituted for missing design_eye: %+v", missingDesign)
+	}
 
 	omitted := evaluateSlideJuryReadiness([]goalPanelVoice{
 		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP"}]}`},
@@ -659,14 +719,47 @@ func TestEvaluateSlideJuryReadinessRequiresTwoSeatAgreement(t *testing.T) {
 		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":8,"fix":"Refit","blockers":["text_overlap"]}]}`},
 		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
 	}, 1)
-	if structural.Verdict != "needs_changes" || len(structural.BlockingPages) != 1 {
+	if structural.Verdict != "needs_changes" || len(structural.BlockingPages) != 1 || len(structural.Repairs) != 1 || structural.Repairs[0].Owner != "layout_plan" {
 		t.Fatalf("structural-blocker readiness=%+v, want needs_changes", structural)
 	}
 
-	duplicateFromOneSeat := evaluateSlideJuryReadiness([]goalPanelVoice{
-		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"Refit","blockers":["text_overlap","text_overlap"]}]}`},
+	mixedOwner := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":6,"fix":"Rewrite and refit the line","blockers":["weak_thesis","text_overlap"]}]}`},
 		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
 		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+	}, 1)
+	if mixedOwner.Verdict != "needs_attention" || len(mixedOwner.Repairs) != 0 {
+		t.Fatalf("one ambiguous cross-owner fix was auto-routed: %+v", mixedOwner)
+	}
+	ambiguousAudience := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":6,"fix":"Make it land harder","blockers":[]}]}`},
+	}, 1)
+	if ambiguousAudience.Verdict != "needs_attention" || len(ambiguousAudience.Repairs) != 0 {
+		t.Fatalf("unclassified room-gut repair guessed a copy/layout owner: %+v", ambiguousAudience)
+	}
+	ownerlessAlongsideRoutable := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":6,"fix":"Make the thesis immediate","blockers":["weak_thesis"]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":6,"fix":"Make it land harder","blockers":[]}]}`},
+	}, 1)
+	if ownerlessAlongsideRoutable.Verdict != "needs_attention" || len(ownerlessAlongsideRoutable.Repairs) != 0 {
+		t.Fatalf("ownerless room-gut repair was silently dropped beside a routable repair: %+v", ownerlessAlongsideRoutable)
+	}
+	ownerlessAboveAverageFloor := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":10,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":8.8,"fix":"Make the audience care","blockers":[]}]}`},
+	}, 1)
+	if ownerlessAboveAverageFloor.Verdict != "needs_attention" || len(ownerlessAboveAverageFloor.Repairs) != 0 {
+		t.Fatalf("ownerless room-gut repair was numerically outvoted: %+v", ownerlessAboveAverageFloor)
+	}
+
+	duplicateFromOneSeat := evaluateSlideJuryReadiness([]goalPanelVoice{
+		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9,"fix":"Refit","blockers":["text_overlap","text_overlap"]}]}`},
+		{Persona: "design_eye", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
+		{Persona: "headline_ear", Text: `{"pages":[{"page":1,"score":9,"fix":"KEEP","blockers":[]}]}`},
 	}, 1)
 	if duplicateFromOneSeat.Verdict != "ready" {
 		t.Fatalf("duplicate single-seat blocker=%+v, want one vote only", duplicateFromOneSeat)
@@ -695,6 +788,7 @@ func TestSlideJuryBlockerCodesCoverFirstClassRenderedDefects(t *testing.T) {
 	for name, card := range map[string]slideJurySeatScorecard{
 		"unknown":              {Pages: []slideJuryPageScore{{Page: 1, Score: 8, Fix: "Repair it.", Blockers: []string{"vague_vibes"}}}},
 		"cover code off cover": {Pages: []slideJuryPageScore{{Page: 2, Score: 8, Fix: "Repair it.", Blockers: []string{"weak_cover_hierarchy"}}}},
+		"keep with blocker":    {Pages: []slideJuryPageScore{{Page: 1, Score: 10, Fix: "KEEP", Blockers: []string{"text_overlap"}}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateSlideJurySeatScorecard(card, []int{card.Pages[0].Page}); err == nil {
@@ -704,10 +798,9 @@ func TestSlideJuryBlockerCodesCoverFirstClassRenderedDefects(t *testing.T) {
 	}
 }
 
-// The editorial backstop (Wave 5 d): the design-eye seat judges whether a
-// page's imagery EARNS its place, and its verdicts stay ADVISORY revision
-// notes — never an auto-revise.
-func TestSlideJuryDesignEyeJudgesImageryAdvisory(t *testing.T) {
+// The design-eye specialist judges whether imagery earns its place and can
+// hard-veto a rendered defect into composition-owned repair.
+func TestSlideJuryDesignEyeJudgesImageryAndOwnsHardVeto(t *testing.T) {
 	var designEye goalPanelPersona
 	for _, p := range slideJuryPersonas() {
 		if p.Name == "design_eye" {
@@ -717,8 +810,8 @@ func TestSlideJuryDesignEyeJudgesImageryAdvisory(t *testing.T) {
 	if designEye.Name == "" {
 		t.Fatal("design_eye seat missing from the slide jury")
 	}
-	for _, need := range []string{"image", "EARNS", "ADVISORY"} {
-		if !strings.Contains(designEye.System, need) {
+	for _, need := range []string{"image", "earns", "hard veto"} {
+		if !strings.Contains(strings.ToLower(designEye.System), strings.ToLower(need)) {
 			t.Errorf("design_eye prompt missing the imagery-earns-its-place cue %q:\n%s", need, designEye.System)
 		}
 	}

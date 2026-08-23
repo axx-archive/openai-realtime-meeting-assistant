@@ -182,12 +182,14 @@ test('native preview keeps deck navigation top-right and actions separate from n
             return React.createElement('WebViewHost', props);
           });
         `,
+        'deck-preview-stub:expo-image': `export const Image='Image';`,
         'deck-preview-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'deck-preview-stub:../api/client': `export const api={artifactRenderToken:async()=>({url:'/artifacts/render?id=deck'})};`,
         'deck-preview-stub:../config': `export const API_BASE_URL='https://example.test';`,
         'deck-preview-stub:../api/requestHelpers': `export const buildApiUrl=(base,path)=>base+path;`,
         'deck-preview-stub:../theme/glass': `export const Glass='Glass';`,
         'deck-preview-stub:../theme/tokens': `const proxy=new Proxy({}, {get:()=>0}); export const colors=proxy; export const radius=proxy; export const space=proxy; export const type=proxy;`,
+        'deck-preview-stub:../files/fileActions': `export const authenticatedFileUrl=()=>''; export const authenticatedFileHeaders=()=>({});`,
         'deck-preview-stub:./ScoutRichText': `export const ScoutRichText='ScoutRichText';`,
   });
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -251,6 +253,7 @@ test('native preview keeps deck navigation top-right and actions separate from n
   await act(async () => {
     renderer!.update(React.createElement(InlineArtifactPreview, {
       kind: 'html_deck', title: 'Signed field network', text: '', artifactId: 'deck', sessionToken: 'session',
+      artifactVersion: 7, artifactDigest: 'a'.repeat(64),
       desktopEditingOnly: true, onPresent: () => { presented += 1; },
     }));
     await Promise.resolve();

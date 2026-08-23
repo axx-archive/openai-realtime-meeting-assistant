@@ -337,6 +337,11 @@ func (app *kanbanBoardApp) deleteEntryByIDAcknowledged(id string) (meetingMemory
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, nil, false, fmt.Errorf("memory store is unavailable")
 	}
+	// Transcript deletion is a sitting-source mutation. Share the same lifecycle
+	// read lease as append/correction so a manual archive source snapshot cannot
+	// be separated from close by an accepted delete.
+	app.meetingLifecycleMu.RLock()
+	defer app.meetingLifecycleMu.RUnlock()
 	entry, found := app.memory.entryByID(id)
 	if !found {
 		return meetingMemoryEntry{}, nil, false, nil

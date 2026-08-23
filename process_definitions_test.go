@@ -197,7 +197,7 @@ func TestStudioProcessSourceEntailmentGraphsAreIdentityPinned(t *testing.T) {
 		resultStage    string
 		resultContract string
 	}{
-		{name: "presentation", def: packagingStudioDefinition(), version: 7, implementation: "packaging_studio.runtime.v7.scoped-evidence-image-authority.v2", maxSubtasks: 20, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
+		{name: "presentation", def: packagingStudioDefinition(), version: 8, implementation: "packaging_studio.runtime.v8.premium-design-contract.v1", maxSubtasks: 20, resultStage: "ship_deck", resultContract: packagingStudioDeckContract},
 		{name: "document", def: documentReportDefinition(), version: 4, implementation: "document_report.runtime.v4.scoped-evidence.v1", maxSubtasks: 12, resultStage: "write", resultContract: documentReportOutputContract},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -727,9 +727,8 @@ func TestProcessStageLawSweepRejectsDeckBeyondNativeSlideBound(t *testing.T) {
 	}
 }
 
-// The rendered quality gate sends executable repairs back to ship_deck and
-// fails closed after its bounded rounds; a bad deck never reaches delivery as
-// an advisory warning.
+// The rendered quality gate sends composition repairs back to layout_plan and
+// fails closed after its bounded rounds; a bad deck never reaches delivery.
 func TestPackagingStudioRenderedQualityGateRepairsOrHolds(t *testing.T) {
 	def, ok := processByID("packaging_studio")
 	if !ok {
@@ -739,7 +738,7 @@ func TestPackagingStudioRenderedQualityGateRepairsOrHolds(t *testing.T) {
 	if !ok {
 		t.Fatal("quality_gate stage missing")
 	}
-	if stage.GateSpec == nil || stage.GateSpec.RepairTarget != "ship_deck" || !stage.GateSpec.HoldOnFailure || stage.GateSpec.ForceAccept {
-		t.Fatalf("quality_gate must repair ship_deck then hold, never force-accept: %+v", stage.GateSpec)
+	if stage.GateSpec == nil || stage.GateSpec.RepairTarget != "layout_plan" || !stage.GateSpec.HoldOnFailure || stage.GateSpec.ForceAccept {
+		t.Fatalf("quality_gate must repair layout_plan then hold, never force-accept: %+v", stage.GateSpec)
 	}
 }

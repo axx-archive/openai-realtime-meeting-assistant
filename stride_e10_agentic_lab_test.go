@@ -980,6 +980,20 @@ func seedStrideE10AgenticLab(t *testing.T, app *kanbanBoardApp, mux http.Handler
 	if workResultCount != 1 {
 		t.Fatalf("Agentic Lab governed completed-work count=%d", workResultCount)
 	}
+	projectedWorkThread := app.projectScoutChatThreadForViewer(artifactLibraryAdminEmail, workThread)
+	projectedResultCount := 0
+	for _, message := range projectedWorkThread.Messages {
+		if message.Kind != "work_result" || message.Work == nil {
+			continue
+		}
+		projectedResultCount++
+		if message.Work.ResultArtifactID == "" || message.Work.ResultArtifactType != artifactTypeMarkdown || message.Work.ResultArtifactVersion < 1 || !isHexDigest(message.Work.ResultArtifactDigest) || strings.TrimSpace(message.Work.ResultPreview) == "" || message.Work.OutputFamily != "Document" {
+			t.Fatalf("Agentic Lab governed result lost exact rich envelope: %+v", message.Work)
+		}
+	}
+	if projectedResultCount != 1 {
+		t.Fatalf("Agentic Lab exact governed-result count=%d", projectedResultCount)
+	}
 	evidence.RevisedArtifactID = "stride-agentic-lab-revision-artifact"
 	artifact, appended, err := app.memory.appendOSArtifact(evidence.RevisedArtifactID, "# Agentic Lab decision brief\n\nPrivate synthetic draft grounded in the completed work result.", map[string]string{
 		"title": "Agentic Lab decision brief", "status": "draft", "visibility": "private", "ownerEmail": artifactLibraryAdminEmail,

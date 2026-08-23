@@ -1,11 +1,17 @@
 import type { ScoutMessage } from '../api/types';
-import { packagingStudioCustomerPhases, packagingStudioPhase } from './workPresentation';
-import { workMessageHasPrimaryResult, workResultArtifactKind } from './workTimeline';
+import { workCustomerPhase, workCustomerPhases } from './workPresentation';
+import {
+  governedWorkArtifactAvailable,
+  isGovernedWorkMessage,
+  workActivityThreadRef,
+  workMessageHasPrimaryResult,
+  workResultArtifactKind,
+} from './workTimeline';
 
 export type WorkActivityPhaseState = 'complete' | 'current' | 'upcoming';
 
 export type WorkActivityResultPresentation = {
-  kind: 'presentation' | 'document';
+  kind: 'presentation' | 'document' | 'work';
   state: 'open' | 'review_required' | 'desktop_only';
   title: string;
   body: string;
@@ -13,14 +19,15 @@ export type WorkActivityResultPresentation = {
 };
 
 export function workActivityPhaseStates(message: ScoutMessage | null): WorkActivityPhaseState[] {
-  if (!message?.thread || !String(message.thread.processId ?? '').startsWith('packaging_studio')) return [];
-  const status = String(message.thread.status ?? '').trim().toLowerCase();
+  const work = workActivityThreadRef(message);
+  if (!work || !workCustomerPhase(work)) return [];
+  const status = String(work.status ?? '').trim().toLowerCase();
   if (['complete', 'completed', 'published'].includes(status)) {
-    return packagingStudioCustomerPhases.map(() => 'complete');
+    return workCustomerPhases.map(() => 'complete');
   }
-  const current = packagingStudioPhase(message.thread);
+  const current = workCustomerPhase(work);
   const currentIndex = current ? Math.max(0, current.number - 1) : 0;
-  return packagingStudioCustomerPhases.map((_phase, index) => (
+  return workCustomerPhases.map((_phase, index) => (
     index < currentIndex ? 'complete' : index === currentIndex ? 'current' : 'upcoming'
   ));
 }
@@ -33,6 +40,16 @@ export function workActivityPhaseStates(message: ScoutMessage | null): WorkActiv
 export function workActivityResultPresentation(
   message: ScoutMessage | null,
 ): WorkActivityResultPresentation | null {
+  if (isGovernedWorkMessage(message)) {
+    if (!governedWorkArtifactAvailable(message)) return null;
+    return {
+      kind: 'work',
+      state: 'open',
+      title: 'Work complete',
+      body: 'The completed work is available here and in Files.',
+      actionLabel: 'Open completed work',
+    };
+  }
   if (!workMessageHasPrimaryResult(message) || !message?.thread) return null;
   const work = message.thread;
   const explicitResultId = String(work.resultArtifactId ?? '').trim();

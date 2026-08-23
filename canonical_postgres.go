@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -475,19 +476,28 @@ type canonicalRowQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type canonicalRowScanner interface {
+	Scan(...any) error
+}
+
+const canonicalEventSelectColumns = `event_id::text,tenant_id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,
+	occurred_at,recorded_at,actor_type,actor_id,COALESCE(room_id,''),COALESCE(meeting_id,''),COALESCE(correlation_id,''),
+	causation_id::text,COALESCE(idempotency_key,''),classification,consent_snapshot_id::text,acl_version,
+	payload::text,COALESCE(content_ref,''),payload_sha256,retain_until`
+
 func queryCanonicalEvent(ctx context.Context, queryer canonicalRowQuerier, where string, args ...any) (CanonicalEvent, error) {
-	query := `SELECT event_id::text,tenant_id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,
-		occurred_at,recorded_at,actor_type,actor_id,COALESCE(room_id,''),COALESCE(meeting_id,''),COALESCE(correlation_id,''),
-		causation_id::text,COALESCE(idempotency_key,''),classification,consent_snapshot_id::text,acl_version,
-		payload::text,COALESCE(content_ref,''),payload_sha256,retain_until
-		FROM canonical_events WHERE ` + where + ` ORDER BY sequence LIMIT 1`
+	query := `SELECT ` + canonicalEventSelectColumns + ` FROM canonical_events WHERE ` + where + ` ORDER BY sequence LIMIT 1`
+	return scanCanonicalEvent(queryer.QueryRow(ctx, query, args...))
+}
+
+func scanCanonicalEvent(row canonicalRowScanner) (CanonicalEvent, error) {
 	var event CanonicalEvent
 	var eventID string
 	var causation, consent pgtype.Text
 	var payload string
 	var digest []byte
 	var retain pgtype.Timestamptz
-	err := queryer.QueryRow(ctx, query, args...).Scan(
+	err := row.Scan(
 		&eventID, &event.TenantID, &event.AggregateType, &event.AggregateID, &event.AggregateVersion, &event.EventType,
 		&event.SchemaVersion, &event.OccurredAt, &event.RecordedAt, &event.Actor.Kind, &event.Actor.ID, &event.RoomID,
 		&event.MeetingID, &event.CorrelationID, &causation, &event.IdempotencyKey, &event.Classification, &consent,
@@ -540,29 +550,24 @@ func queryCanonicalEvent(ctx context.Context, queryer canonicalRowQuerier, where
 }
 
 func (store *PostgresCanonicalStore) Events(ctx context.Context) ([]CanonicalEvent, error) {
-	rows, err := store.pool.Query(ctx, "SELECT sequence FROM canonical_events ORDER BY sequence")
+	if store == nil || store.pool == nil {
+		return nil, ErrCanonicalStoreUnhealthy
+	}
+	rows, err := store.pool.Query(ctx, `SELECT `+canonicalEventSelectColumns+` FROM canonical_events ORDER BY sequence`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var sequences []int64
+	events := make([]CanonicalEvent, 0)
 	for rows.Next() {
-		var sequence int64
-		if err := rows.Scan(&sequence); err != nil {
-			return nil, err
-		}
-		sequences = append(sequences, sequence)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	events := make([]CanonicalEvent, 0, len(sequences))
-	for _, sequence := range sequences {
-		event, err := queryCanonicalEvent(ctx, store.pool, "sequence=$1", sequence)
+		event, err := scanCanonicalEvent(rows)
 		if err != nil {
 			return nil, err
 		}
 		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return events, nil
 }
@@ -665,16 +670,164 @@ func NewPostgresCanonicalParityACL(store *PostgresCanonicalStore, tenantID strin
 }
 
 func (resolver PostgresCanonicalParityACL) CanReadCanonicalObject(ctx context.Context, principal string, event CanonicalEvent) (bool, error) {
+	return canReadCanonicalObjectWithStore(ctx, resolver.store, resolver.tenantID, principal, event, nil)
+}
+
+type immutableCanonicalParityACLStore struct {
+	objects map[string]ACLObject
+	grants  map[string][]ACLGrant
+}
+
+func (store immutableCanonicalParityACLStore) ResolveACLObject(_ context.Context, ref ACLObjectRef) (ACLObject, error) {
+	object, ok := store.objects[aclObjectKey(ref)]
+	if !ok {
+		return ACLObject{}, ErrACLObjectNotFound
+	}
+	object.RequiredConsentScopes = append([]string(nil), object.RequiredConsentScopes...)
+	return object, nil
+}
+
+func (store immutableCanonicalParityACLStore) ListACLGrants(_ context.Context, ref ACLObjectRef) ([]ACLGrant, error) {
+	stored := store.grants[aclObjectKey(ref)]
+	grants := make([]ACLGrant, len(stored))
+	for index, grant := range stored {
+		grants[index] = grant
+		grants[index].Actions = append([]ACLAction(nil), grant.Actions...)
+		grants[index].Obligations = append([]string(nil), grant.Obligations...)
+	}
+	return grants, nil
+}
+
+type immutableCanonicalParityACL struct {
+	store    immutableCanonicalParityACLStore
+	tenantID string
+	at       time.Time
+}
+
+func (resolver immutableCanonicalParityACL) CanReadCanonicalObject(ctx context.Context, principal string, event CanonicalEvent) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return canReadCanonicalObjectWithStore(ctx, resolver.store, resolver.tenantID, principal, event, func() time.Time { return resolver.at })
+}
+
+type canonicalParityACLRef struct {
+	objectType string
+	objectID   string
+}
+
+// SnapshotCanonicalParityACL loads every object and current-version grant
+// needed by one reconciliation in two bounded set queries under a read-only
+// repeatable-read transaction. Authorization then runs against the immutable
+// in-memory snapshot. The normal resolver above deliberately remains live and
+// uncached for request-time authorization and subsequent reconcile passes.
+func (resolver PostgresCanonicalParityACL) SnapshotCanonicalParityACL(ctx context.Context, events []CanonicalEvent) (CanonicalParityACLResolver, error) {
+	if resolver.store == nil || resolver.store.pool == nil || resolver.tenantID == "" {
+		return nil, ErrCanonicalStoreUnhealthy
+	}
+	refsByKey := make(map[string]canonicalParityACLRef, len(events))
+	for _, event := range events {
+		if event.TenantID != resolver.tenantID || strings.TrimSpace(event.AggregateType) == "" || strings.TrimSpace(event.AggregateID) == "" {
+			return nil, errors.New("canonical parity ACL snapshot contains an invalid object reference")
+		}
+		ref := canonicalParityACLRef{objectType: event.AggregateType, objectID: event.AggregateID}
+		refsByKey[event.AggregateType+"\x00"+event.AggregateID] = ref
+	}
+	refs := make([]canonicalParityACLRef, 0, len(refsByKey))
+	for _, ref := range refsByKey {
+		refs = append(refs, ref)
+	}
+	sort.Slice(refs, func(i, j int) bool {
+		if refs[i].objectType != refs[j].objectType {
+			return refs[i].objectType < refs[j].objectType
+		}
+		return refs[i].objectID < refs[j].objectID
+	})
+	snapshot := immutableCanonicalParityACL{
+		store:    immutableCanonicalParityACLStore{objects: make(map[string]ACLObject, len(refs)), grants: make(map[string][]ACLGrant, len(refs))},
+		tenantID: resolver.tenantID,
+	}
+	if len(refs) == 0 {
+		snapshot.at = time.Now().UTC()
+		return snapshot, nil
+	}
+	objectTypes := make([]string, len(refs))
+	objectIDs := make([]string, len(refs))
+	for index, ref := range refs {
+		objectTypes[index] = ref.objectType
+		objectIDs[index] = ref.objectID
+	}
+	tx, err := resolver.store.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("begin canonical parity ACL snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	objectRows, err := tx.Query(ctx, `SELECT o.tenant_id,o.object_type,o.object_id,o.acl_version,COALESCE(o.room_id,''),o.state,o.content_revision,o.content_sha256,o.deleted_at
+		FROM objects o JOIN unnest($2::text[],$3::text[]) AS wanted(object_type,object_id)
+		ON wanted.object_type=o.object_type AND wanted.object_id=o.object_id
+		WHERE o.tenant_id=$1 ORDER BY o.object_type,o.object_id`, resolver.tenantID, objectTypes, objectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load canonical parity ACL objects: %w", err)
+	}
+	for objectRows.Next() {
+		object, scanErr := scanCanonicalACLObject(objectRows)
+		if scanErr != nil {
+			objectRows.Close()
+			return nil, fmt.Errorf("scan canonical parity ACL object: %w", scanErr)
+		}
+		snapshot.store.objects[aclObjectKey(object.Ref)] = object
+	}
+	if err := objectRows.Err(); err != nil {
+		objectRows.Close()
+		return nil, fmt.Errorf("load canonical parity ACL objects: %w", err)
+	}
+	objectRows.Close()
+	grantRows, err := tx.Query(ctx, `SELECT g.grant_id::text,g.tenant_id,g.object_type,g.object_id,g.acl_version,
+		g.subject_type,g.subject_id,g.action,COALESCE(g.room_id,''),COALESCE(g.sitting_id,''),g.expires_at,g.revoked_at,g.conditions
+		FROM object_grants g
+		JOIN objects o ON o.tenant_id=g.tenant_id AND o.object_type=g.object_type AND o.object_id=g.object_id
+		JOIN unnest($2::text[],$3::text[]) AS wanted(object_type,object_id)
+		ON wanted.object_type=g.object_type AND wanted.object_id=g.object_id
+		WHERE g.tenant_id=$1 AND g.acl_version=o.acl_version
+		AND (g.revision IS NULL OR g.revision=o.content_revision)
+		ORDER BY g.object_type,g.object_id,g.grant_id`, resolver.tenantID, objectTypes, objectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("load canonical parity ACL grants: %w", err)
+	}
+	for grantRows.Next() {
+		grant, scanErr := scanCanonicalACLGrant(grantRows)
+		if scanErr != nil {
+			grantRows.Close()
+			return nil, fmt.Errorf("scan canonical parity ACL grant: %w", scanErr)
+		}
+		key := aclObjectKey(ACLObjectRef{TenantID: grant.TenantID, Type: grant.ObjectType, ID: grant.ObjectID})
+		snapshot.store.grants[key] = append(snapshot.store.grants[key], grant)
+	}
+	if err := grantRows.Err(); err != nil {
+		grantRows.Close()
+		return nil, fmt.Errorf("load canonical parity ACL grants: %w", err)
+	}
+	grantRows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit canonical parity ACL snapshot: %w", err)
+	}
+	// Evaluate expirations after the snapshot transaction closes, never at a
+	// stale pre-query timestamp if pool acquisition or the set reads were delayed.
+	snapshot.at = time.Now().UTC()
+	return snapshot, nil
+}
+
+func canReadCanonicalObjectWithStore(ctx context.Context, store ACLStore, tenantID, principal string, event CanonicalEvent, now func() time.Time) (bool, error) {
 	kind, id, ok := splitCanonicalImportPrincipal(principal)
-	if !ok || resolver.store == nil || resolver.tenantID == "" {
+	if !ok || store == nil || tenantID == "" {
 		return false, nil
 	}
-	aclPrincipal := ACLPrincipal{TenantID: resolver.tenantID, Kind: kind, ID: id}
+	aclPrincipal := ACLPrincipal{TenantID: tenantID, Kind: kind, ID: id}
 	if kind == ACLPrincipalUser {
 		aclPrincipal.TeamIDs = []string{canonicalLegacyOrgTeamID}
 	}
-	ref := ACLObjectRef{TenantID: resolver.tenantID, Type: event.AggregateType, ID: event.AggregateID, ACLVersion: event.ACLVersion}
-	object, err := resolver.store.ResolveACLObject(ctx, ref)
+	ref := ACLObjectRef{TenantID: tenantID, Type: event.AggregateType, ID: event.AggregateID, ACLVersion: event.ACLVersion}
+	object, err := store.ResolveACLObject(ctx, ref)
 	if err != nil {
 		if errors.Is(err, ErrACLObjectNotFound) {
 			return false, nil
@@ -687,7 +840,7 @@ func (resolver PostgresCanonicalParityACL) CanReadCanonicalObject(ctx context.Co
 		action = ACLReadContent
 		revision = ACLRevisionRef{ContentRevision: object.CurrentContentRevision, ContentDigest: object.CurrentContentDigest}
 	}
-	decision := (AuthorizationKernel{Store: resolver.store}).Authorize(ctx, aclPrincipal, action, ref, revision)
+	decision := (AuthorizationKernel{Store: store, Now: now}).Authorize(ctx, aclPrincipal, action, ref, revision)
 	if decision.DenialCode == ACLDenialUnavailable {
 		return false, errors.New(decision.PolicyReason)
 	}
@@ -699,13 +852,12 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-func (store *PostgresCanonicalStore) ResolveACLObject(ctx context.Context, ref ACLObjectRef) (ACLObject, error) {
+func scanCanonicalACLObject(row canonicalRowScanner) (ACLObject, error) {
 	var object ACLObject
 	var stateBytes []byte
 	var contentDigest []byte
 	var deleted pgtype.Timestamptz
-	err := store.pool.QueryRow(ctx, `SELECT tenant_id,object_type,object_id,acl_version,room_id,state,content_revision,content_sha256,deleted_at
-		FROM objects WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3`, ref.TenantID, ref.Type, ref.ID).Scan(
+	err := row.Scan(
 		&object.Ref.TenantID, &object.Ref.Type, &object.Ref.ID, &object.Ref.ACLVersion, &object.RoomID, &stateBytes,
 		&object.CurrentContentRevision, &contentDigest, &deleted)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -728,7 +880,50 @@ func (store *PostgresCanonicalStore) ResolveACLObject(ctx context.Context, ref A
 	return object, nil
 }
 
+func (store *PostgresCanonicalStore) ResolveACLObject(ctx context.Context, ref ACLObjectRef) (ACLObject, error) {
+	if store == nil || store.pool == nil {
+		return ACLObject{}, ErrCanonicalStoreUnhealthy
+	}
+	return scanCanonicalACLObject(store.pool.QueryRow(ctx, `SELECT tenant_id,object_type,object_id,acl_version,COALESCE(room_id,''),state,content_revision,content_sha256,deleted_at
+		FROM objects WHERE tenant_id=$1 AND object_type=$2 AND object_id=$3`, ref.TenantID, ref.Type, ref.ID))
+}
+
+func scanCanonicalACLGrant(row canonicalRowScanner) (ACLGrant, error) {
+	var grant ACLGrant
+	var subjectType, action string
+	var expires, revoked pgtype.Timestamptz
+	var conditions []byte
+	if err := row.Scan(&grant.ID, &grant.TenantID, &grant.ObjectType, &grant.ObjectID, &grant.ACLVersion,
+		&subjectType, &grant.SubjectID, &action, &grant.RoomID, &grant.SittingID, &expires, &revoked, &conditions); err != nil {
+		return ACLGrant{}, err
+	}
+	if subjectType == string(ACLSubjectTeam) {
+		grant.SubjectKind = ACLSubjectTeam
+	} else {
+		grant.SubjectKind = ACLSubjectPrincipal
+		grant.SubjectPrincipalKind = ACLPrincipalKind(subjectType)
+	}
+	grant.Actions = []ACLAction{ACLAction(action)}
+	if expires.Valid {
+		t := expires.Time
+		grant.ExpiresAt = &t
+	}
+	if revoked.Valid {
+		t := revoked.Time
+		grant.RevokedAt = &t
+	}
+	var conditionState struct {
+		Obligations []string `json:"obligations"`
+	}
+	_ = json.Unmarshal(conditions, &conditionState)
+	grant.Obligations = uniqueSortedStrings(conditionState.Obligations)
+	return grant, nil
+}
+
 func (store *PostgresCanonicalStore) ListACLGrants(ctx context.Context, ref ACLObjectRef) ([]ACLGrant, error) {
+	if store == nil || store.pool == nil {
+		return nil, ErrCanonicalStoreUnhealthy
+	}
 	rows, err := store.pool.Query(ctx, `SELECT grant_id::text,g.tenant_id,g.object_type,g.object_id,g.acl_version,
 		g.subject_type,g.subject_id,g.action,COALESCE(g.room_id,''),COALESCE(g.sitting_id,''),g.expires_at,g.revoked_at,g.conditions
 		FROM object_grants g JOIN objects o ON o.tenant_id=g.tenant_id AND o.object_type=g.object_type AND o.object_id=g.object_id
@@ -740,34 +935,10 @@ func (store *PostgresCanonicalStore) ListACLGrants(ctx context.Context, ref ACLO
 	defer rows.Close()
 	var grants []ACLGrant
 	for rows.Next() {
-		var grant ACLGrant
-		var subjectType, action string
-		var expires, revoked pgtype.Timestamptz
-		var conditions []byte
-		if err := rows.Scan(&grant.ID, &grant.TenantID, &grant.ObjectType, &grant.ObjectID, &grant.ACLVersion,
-			&subjectType, &grant.SubjectID, &action, &grant.RoomID, &grant.SittingID, &expires, &revoked, &conditions); err != nil {
-			return nil, err
+		grant, scanErr := scanCanonicalACLGrant(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		if subjectType == string(ACLSubjectTeam) {
-			grant.SubjectKind = ACLSubjectTeam
-		} else {
-			grant.SubjectKind = ACLSubjectPrincipal
-			grant.SubjectPrincipalKind = ACLPrincipalKind(subjectType)
-		}
-		grant.Actions = []ACLAction{ACLAction(action)}
-		if expires.Valid {
-			t := expires.Time
-			grant.ExpiresAt = &t
-		}
-		if revoked.Valid {
-			t := revoked.Time
-			grant.RevokedAt = &t
-		}
-		var conditionState struct {
-			Obligations []string `json:"obligations"`
-		}
-		_ = json.Unmarshal(conditions, &conditionState)
-		grant.Obligations = uniqueSortedStrings(conditionState.Obligations)
 		grants = append(grants, grant)
 	}
 	return grants, rows.Err()

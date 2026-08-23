@@ -15,6 +15,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -120,6 +121,269 @@ func TestRenderRunnerQueueClaimsLexicallyFirstAndCompletes(t *testing.T) {
 	}
 	if leftover, err := store.claimNext("test-runner"); err != nil || leftover != nil {
 		t.Fatalf("claimNext on drained queue=%+v err=%v, want nil/nil", leftover, err)
+	}
+}
+
+func renderRunnerPayloadReadCounterForTest(store *renderRunnerJobStore) *atomic.Int64 {
+	var reads atomic.Int64
+	store.readFile = func(path string) ([]byte, error) {
+		reads.Add(1)
+		return os.ReadFile(path)
+	}
+	return &reads
+}
+
+func renderRunnerTerminalCacheSizeForTest(store *renderRunnerJobStore) int {
+	store.terminalJobsMu.Lock()
+	defer store.terminalJobsMu.Unlock()
+	return len(store.terminalJobs)
+}
+
+func TestRenderRunnerTerminalCacheSkipsWarmMultiMegabytePayloads(t *testing.T) {
+	store := newRenderRunnerJobStore(t.TempDir())
+	largeHTML := "<!doctype html><html><body>" + strings.Repeat("terminal-payload-", 1<<17) + "</body></html>"
+	for _, fixture := range []struct {
+		id     string
+		status string
+	}{
+		{id: "render-job-complete", status: renderJobStatusComplete},
+		{id: "render-job-failed", status: renderJobStatusFailed},
+	} {
+		if _, err := store.enqueue(renderRunnerJob{
+			ID: fixture.id, ArtifactID: "artifact-" + fixture.id, Kind: renderJobKindDeck,
+			HTML: largeHTML, Status: fixture.status,
+		}); err != nil {
+			t.Fatalf("enqueue %s: %v", fixture.status, err)
+		}
+	}
+
+	reads := renderRunnerPayloadReadCounterForTest(store)
+	if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+		t.Fatalf("cold terminal scan claimed=%+v err=%v, want nil/nil", claimed, err)
+	}
+	if got := reads.Load(); got != 2 {
+		t.Fatalf("cold payload reads=%d, want one successful decode per terminal job", got)
+	}
+	if got := renderRunnerTerminalCacheSizeForTest(store); got != 2 {
+		t.Fatalf("terminal cache entries=%d, want 2", got)
+	}
+
+	reads.Store(0)
+	if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+		t.Fatalf("warm terminal scan claimed=%+v err=%v, want nil/nil", claimed, err)
+	}
+	if got := reads.Load(); got != 0 {
+		t.Fatalf("warm unchanged multi-megabyte terminal jobs caused %d payload reads, want 0", got)
+	}
+}
+
+func TestRenderRunnerTerminalCacheDetectsAtomicReplacementAndNewQueuedWork(t *testing.T) {
+	store := newRenderRunnerJobStore(t.TempDir())
+	terminal := renderRunnerJob{
+		ID: "render-job-010", ArtifactID: "artifact-terminal", Kind: renderJobKindDeck,
+		HTML: "<html><body>done</body></html>", Status: renderJobStatusComplete,
+	}
+	if _, err := store.enqueue(terminal); err != nil {
+		t.Fatalf("enqueue terminal: %v", err)
+	}
+	if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+		t.Fatalf("warm terminal cache claimed=%+v err=%v", claimed, err)
+	}
+
+	// Simulate the application container publishing both a new filename and an
+	// atomic replacement while the long-lived sidecar keeps its warm cache.
+	replacement := terminal
+	replacement.ArtifactID = "artifact-replacement"
+	replacement.Status = renderJobStatusQueued
+	replacement.HTML = "<html><body>replacement work</body></html>"
+	if err := writeRenderRunnerJobAtomically(store.jobPath(replacement.ID), replacement); err != nil {
+		t.Fatalf("atomically replace cached terminal job: %v", err)
+	}
+	externalStore := newRenderRunnerJobStore(store.dir)
+	if _, err := externalStore.enqueue(renderRunnerJob{
+		ID: "render-job-005", ArtifactID: "artifact-new", Kind: renderJobKindDeck,
+		HTML: "<html><body>new work</body></html>", Status: renderJobStatusQueued,
+	}); err != nil {
+		t.Fatalf("enqueue new work: %v", err)
+	}
+
+	first, err := store.claimNext("test-runner")
+	if err != nil || first == nil || first.ID != "render-job-005" {
+		t.Fatalf("first claim=%+v err=%v, want newly discovered lexical job", first, err)
+	}
+	second, err := store.claimNext("test-runner")
+	if err != nil || second == nil || second.ID != replacement.ID || second.ArtifactID != replacement.ArtifactID {
+		t.Fatalf("second claim=%+v err=%v, want atomically replaced cached job", second, err)
+	}
+}
+
+func TestRenderRunnerTerminalCacheNeverMasksChangedCorruption(t *testing.T) {
+	store := newRenderRunnerJobStore(t.TempDir())
+	job := renderRunnerJob{
+		ID: "render-job-corrupt", ArtifactID: "artifact-corrupt", Kind: renderJobKindDeck,
+		HTML: "<html><body>done</body></html>", Status: renderJobStatusFailed,
+	}
+	if _, err := store.enqueue(job); err != nil {
+		t.Fatalf("enqueue terminal: %v", err)
+	}
+	reads := renderRunnerPayloadReadCounterForTest(store)
+	if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+		t.Fatalf("warm terminal cache claimed=%+v err=%v", claimed, err)
+	}
+
+	if err := writeFileAtomicallyForCanonicalMode(store.jobPath(job.ID), []byte("{changed-corruption\n"), 0o660); err != nil {
+		t.Fatalf("replace terminal with corrupt payload: %v", err)
+	}
+	reads.Store(0)
+	for attempt := 1; attempt <= 2; attempt++ {
+		claimed, err := store.claimNext("test-runner")
+		if err == nil || claimed != nil || !strings.Contains(err.Error(), "decode render runner job render-job-corrupt.json") {
+			t.Fatalf("attempt %d claimed=%+v err=%v, want visible decode failure", attempt, claimed, err)
+		}
+		if got := reads.Load(); got != int64(attempt) {
+			t.Fatalf("attempt %d cumulative payload reads=%d, want %d (decode errors must not cache)", attempt, got, attempt)
+		}
+	}
+	if got := renderRunnerTerminalCacheSizeForTest(store); got != 0 {
+		t.Fatalf("terminal cache entries=%d after corruption, want 0", got)
+	}
+}
+
+func TestRenderRunnerTerminalCacheNeverCachesStatOrReadErrors(t *testing.T) {
+	newWarmTerminal := func(t *testing.T) (*renderRunnerJobStore, renderRunnerJob) {
+		t.Helper()
+		store := newRenderRunnerJobStore(t.TempDir())
+		job := renderRunnerJob{
+			ID: "render-job-error", ArtifactID: "artifact-error", Kind: renderJobKindDeck,
+			HTML: "<html><body>done</body></html>", Status: renderJobStatusComplete,
+		}
+		if _, err := store.enqueue(job); err != nil {
+			t.Fatalf("enqueue terminal: %v", err)
+		}
+		if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+			t.Fatalf("warm terminal cache claimed=%+v err=%v", claimed, err)
+		}
+		return store, job
+	}
+
+	t.Run("read", func(t *testing.T) {
+		store, job := newWarmTerminal(t)
+		// A fresh atomic generation forces the cache to consult the payload.
+		if err := writeRenderRunnerJobAtomically(store.jobPath(job.ID), job); err != nil {
+			t.Fatalf("replace terminal generation: %v", err)
+		}
+		readFailure := errors.New("injected payload read failure")
+		store.readFile = func(string) ([]byte, error) { return nil, readFailure }
+		if claimed, err := store.claimNext("test-runner"); !errors.Is(err, readFailure) || claimed != nil {
+			t.Fatalf("claimed=%+v err=%v, want visible injected read error", claimed, err)
+		}
+		if got := renderRunnerTerminalCacheSizeForTest(store); got != 0 {
+			t.Fatalf("terminal cache entries=%d after read error, want 0", got)
+		}
+		store.readFile = os.ReadFile
+		if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+			t.Fatalf("recovery scan claimed=%+v err=%v", claimed, err)
+		}
+		if got := renderRunnerTerminalCacheSizeForTest(store); got != 1 {
+			t.Fatalf("terminal cache entries=%d after recovery, want 1", got)
+		}
+	})
+
+	t.Run("stat", func(t *testing.T) {
+		store, job := newWarmTerminal(t)
+		path := store.jobPath(job.ID)
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove terminal: %v", err)
+		}
+		if err := os.Symlink(filepath.Join(store.dir, "missing-target.json"), path); err != nil {
+			t.Fatalf("publish broken job link: %v", err)
+		}
+		if claimed, err := store.claimNext("test-runner"); err == nil || claimed != nil || !strings.Contains(err.Error(), "stat render runner job") {
+			t.Fatalf("claimed=%+v err=%v, want visible stat error", claimed, err)
+		}
+		if got := renderRunnerTerminalCacheSizeForTest(store); got != 0 {
+			t.Fatalf("terminal cache entries=%d after stat error, want 0", got)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove broken job link: %v", err)
+		}
+		if err := writeRenderRunnerJobAtomically(path, job); err != nil {
+			t.Fatalf("restore terminal: %v", err)
+		}
+		if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+			t.Fatalf("recovery scan claimed=%+v err=%v", claimed, err)
+		}
+		if got := renderRunnerTerminalCacheSizeForTest(store); got != 1 {
+			t.Fatalf("terminal cache entries=%d after recovery, want 1", got)
+		}
+	})
+}
+
+func TestRenderRunnerTerminalCachePrunesRemovedFiles(t *testing.T) {
+	store := newRenderRunnerJobStore(t.TempDir())
+	job := renderRunnerJob{
+		ID: "render-job-remove", ArtifactID: "artifact-remove", Kind: renderJobKindDeck,
+		HTML: "<html><body>done</body></html>", Status: renderJobStatusComplete,
+	}
+	if _, err := store.enqueue(job); err != nil {
+		t.Fatalf("enqueue terminal: %v", err)
+	}
+	if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+		t.Fatalf("warm terminal cache claimed=%+v err=%v", claimed, err)
+	}
+	if got := renderRunnerTerminalCacheSizeForTest(store); got != 1 {
+		t.Fatalf("terminal cache entries=%d, want 1", got)
+	}
+	if err := os.Remove(store.jobPath(job.ID)); err != nil {
+		t.Fatalf("remove terminal job: %v", err)
+	}
+	if claimed, err := store.claimNext("test-runner"); err != nil || claimed != nil {
+		t.Fatalf("post-removal scan claimed=%+v err=%v", claimed, err)
+	}
+	if got := renderRunnerTerminalCacheSizeForTest(store); got != 0 {
+		t.Fatalf("terminal cache entries=%d after removal, want 0", got)
+	}
+}
+
+func TestRenderRunnerTerminalCacheNeverCachesRunningStaleOrQueuedJobs(t *testing.T) {
+	store := newRenderRunnerJobStore(t.TempDir())
+	for _, fixture := range []struct {
+		id     string
+		status string
+	}{
+		{id: "render-job-001-running", status: renderJobStatusRunning},
+		{id: "render-job-002-stale", status: renderJobStatusStale},
+	} {
+		if _, err := store.enqueue(renderRunnerJob{
+			ID: fixture.id, ArtifactID: "artifact-" + fixture.id, Kind: renderJobKindDeck,
+			HTML: "<html><body>nonterminal</body></html>", Status: fixture.status,
+		}); err != nil {
+			t.Fatalf("enqueue %s: %v", fixture.status, err)
+		}
+	}
+	reads := renderRunnerPayloadReadCounterForTest(store)
+	for scan := 1; scan <= 2; scan++ {
+		claimed, err := store.claimNext("test-runner")
+		if err != nil || claimed != nil {
+			t.Fatalf("scan %d claimed=%+v err=%v, want running/stale examined but not claimed", scan, claimed, err)
+		}
+		if got, want := reads.Load(), int64(scan*2); got != want {
+			t.Fatalf("scan %d cumulative payload reads=%d, want %d", scan, got, want)
+		}
+	}
+	if got := renderRunnerTerminalCacheSizeForTest(store); got != 0 {
+		t.Fatalf("terminal cache entries=%d, want no nonterminal entries", got)
+	}
+
+	if _, err := newRenderRunnerJobStore(store.dir).enqueue(renderRunnerJob{
+		ID: "render-job-003-queued", ArtifactID: "artifact-queued", Kind: renderJobKindDeck,
+		HTML: "<html><body>queued</body></html>", Status: renderJobStatusQueued,
+	}); err != nil {
+		t.Fatalf("enqueue queued work: %v", err)
+	}
+	claimed, err := store.claimNext("test-runner")
+	if err != nil || claimed == nil || claimed.ID != "render-job-003-queued" || claimed.Status != renderJobStatusRunning {
+		t.Fatalf("queued claim=%+v err=%v, want newly queued job claimed running", claimed, err)
 	}
 }
 

@@ -300,8 +300,9 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		AuthorName: scoutParticipantName, IntentOutcome: string(conversationIntentStartPrivateWork),
 		Text:      firstNonEmptyString(strings.TrimSpace(label), "Private work") + " started — progress and the finished result will stay in this conversation",
 		CreatedAt: now.Format(time.RFC3339Nano), CausedByMessageID: userMessage.ID,
-		Thread: &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
-			ProjectID: launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"]},
+		Thread: &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
+			OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(launched.Artifact), scoutChatOutputFamilyForMode(launched.Mode)),
+			ProjectID:    launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"]},
 	}
 	if work.AgentID != "" && work.AgentName != "" {
 		assistantMessage.AuthorName = work.AgentName

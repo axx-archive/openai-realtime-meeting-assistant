@@ -13,7 +13,8 @@ import { SymbolView } from 'expo-symbols';
 
 import type { ScoutMessage } from '../api/types';
 import { colors, radius, space, type } from '../theme/tokens';
-import { workFamilyLabel, workPhaseLabel } from './workPresentation';
+import { workActivityPillLabel } from './workPresentation';
+import { workActivityThreadRef } from './workTimeline';
 
 type Props = {
   message: ScoutMessage;
@@ -27,12 +28,6 @@ const swipeIntentDistance = 10;
 const swipeDismissDistance = 72;
 const swipeHorizontalBias = 1.45;
 const swipeDismissVelocity = 0.55;
-
-function workIsActive(message: ScoutMessage): boolean {
-  return ['queued', 'running', 'approval_required', 'needs_input', 'parked'].includes(
-    String(message.thread?.status ?? '').trim().toLowerCase(),
-  );
-}
 
 export const WorkActivityPill = memo(function WorkActivityPill({
   message,
@@ -116,11 +111,9 @@ export const WorkActivityPill = memo(function WorkActivityPill({
     onPanResponderTerminate: restore,
   }), [dismiss, opacity, restore, translateX, window.width]);
 
-  const agentName = String(message.thread?.agentName ?? 'Scout').trim() || 'Scout';
-  const family = workFamilyLabel(message.thread);
-  const phase = workPhaseLabel(message.thread);
-  const active = workIsActive(message);
-  const percent = Number(message.thread?.progressPercent ?? 0);
+  const work = workActivityThreadRef(message);
+  const agentName = String(work?.agentName ?? 'Scout').trim() || 'Scout';
+  const label = workActivityPillLabel(work);
 
   return (
     <Animated.View
@@ -134,13 +127,12 @@ export const WorkActivityPill = memo(function WorkActivityPill({
       <Pressable
         ref={openRef}
         accessibilityRole="button"
-        accessibilityLabel={`${agentName}, ${family} work, ${phase}${percent > 0 ? `, ${Math.round(percent)}% complete` : ''}`}
+        accessibilityLabel={`${agentName}, ${label}`}
         accessibilityHint="Opens work activity. Swipe horizontally or use Dismiss status to hide this update for you."
         focusable
         onPress={() => onOpen(findNodeHandle(openRef.current) ?? undefined)}
         style={({ pressed }) => [
           styles.open,
-          stacked && styles.openStacked,
           pressed && styles.pressed,
         ]}
       >
@@ -149,12 +141,14 @@ export const WorkActivityPill = memo(function WorkActivityPill({
           <View style={styles.barTall} />
           <View style={styles.barMid} />
         </View>
-        <Text maxFontSizeMultiplier={1.8} style={[styles.text, stacked && styles.textStacked]}>
-          {agentName} · {family} · {phase}
+        <Text
+          maxFontSizeMultiplier={1.8}
+          numberOfLines={stacked ? 2 : 1}
+          style={styles.text}
+        >
+          {label}
         </Text>
-        <Text maxFontSizeMultiplier={1.8} style={[styles.action, stacked && styles.actionStacked]}>
-          {active ? 'View activity' : 'Details'}
-        </Text>
+        <SymbolView name="chevron.up" tintColor={colors.text3} size={12} />
       </Pressable>
       <Pressable
         accessibilityRole="button"
@@ -185,7 +179,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line1,
     backgroundColor: colors.surface2,
   },
-  pillStacked: { alignItems: 'flex-start' },
+  pillStacked: { minHeight: 56 },
   open: {
     minWidth: 0,
     minHeight: 44,
@@ -194,11 +188,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space[2],
     paddingLeft: space[2],
-  },
-  openStacked: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    paddingVertical: space[3],
   },
   pressed: { opacity: 0.76, transform: [{ scale: 0.96 }] },
   signal: {
@@ -214,10 +203,7 @@ const styles = StyleSheet.create({
   barShort: { width: 2, height: 7, borderRadius: radius.full, backgroundColor: colors.emberText },
   barTall: { width: 2, height: 13, borderRadius: radius.full, backgroundColor: colors.emberText },
   barMid: { width: 2, height: 9, borderRadius: radius.full, backgroundColor: colors.emberText },
-  text: { ...type.captionMedium, minWidth: 0, flex: 1, color: colors.text1 },
-  textStacked: { flex: 0, alignSelf: 'stretch' },
-  action: { ...type.captionMedium, color: colors.emberText },
-  actionStacked: { alignSelf: 'stretch', textAlign: 'right' },
+  text: { ...type.captionMedium, minWidth: 0, flex: 1, color: colors.text1, fontVariant: ['tabular-nums'] },
   close: {
     width: 44,
     height: 44,
@@ -228,4 +214,3 @@ const styles = StyleSheet.create({
   },
   closePressed: { backgroundColor: colors.surface3, transform: [{ scale: 0.96 }] },
 });
-

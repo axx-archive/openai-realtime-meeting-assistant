@@ -60,7 +60,84 @@ func newPackagingQualityGateFixture(t *testing.T, verdict string, repairs []slid
 	}
 	plan.State = goalStateExecute
 
-	shipArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "ship_deck", studioTestDeckHTML(), scoutParticipantName, map[string]string{
+	deckCopy := map[string]any{
+		"slide_count_inference": "Two slides are sufficient for this exact rendered-review fixture.",
+		"slides": []any{
+			map[string]any{
+				"slide_id": "slide-1", "slide_kind": "cover", "thesis": "Slide 1 — " + studioTestFounderPhrase,
+				"turn": "open", "headline": "Slide 1 — " + studioTestFounderPhrase,
+				"kicker": "", "body": "", "proof": "", "evidence_label": "", "source_label": "",
+				"speaker_intent": "Open on the exact founder line.", "transition": "Close cleanly.",
+				"presenter_note": "Opening note [BEAT]", "claim_ids": []any{}, "claim_renderings": []any{},
+			},
+			map[string]any{
+				"slide_id": "slide-2", "slide_kind": "close", "thesis": "Slide 2 — Close",
+				"turn": "close", "headline": "Slide 2 — Close",
+				"kicker": "", "body": "", "proof": "", "evidence_label": "", "source_label": "",
+				"speaker_intent": "Close on the decision.", "transition": "", "presenter_note": "Closing note [BEAT]",
+				"claim_ids": []any{}, "claim_renderings": []any{},
+			},
+		},
+	}
+	deckCopyRaw, err := json.Marshal(deckCopy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePackagingStudioDeckCopyOutput(app, &plan, string(deckCopyRaw)); err != nil {
+		t.Fatalf("quality fixture deck_copy_v3 is invalid: %v", err)
+	}
+	writeArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "write", string(deckCopyRaw), scoutParticipantName, map[string]string{
+		"source": "process_stage", "goalParentId": run.Artifact.ID, "goalSubtaskId": "write",
+		"processId": packagingStudioProcessID, "processStage": "write", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := plan.subtaskByID("write")
+	write.Status, write.ArtifactID = subtaskComplete, writeArtifact.ID
+	write.Review = &goalSubtaskReview{Verdict: goalReviewPass, By: "fixture"}
+	installPackagingPremiumIdentityForTest(t, app, &plan, []string{"slide-1", "slide-2"})
+
+	textElement := func(id, text, color string) map[string]any {
+		stack, _ := packagingStudioResolvedFontStack("modern_grotesk")
+		return map[string]any{
+			"id": id, "type": "text", "x": 120, "y": 140, "width": 1680, "height": 240,
+			"z": 2, "opacity": 1, "rotation": 0, "text": text, "copy_role": "headline",
+			"typography": map[string]any{
+				"font_token": "modern_grotesk", "font_family": stack, "font_size": 92, "font_weight": 700, "line_height": 1.05,
+				"letter_spacing": "normal", "alignment": "left", "color": color,
+			},
+			"claim_ids": []any{}, "claim_renderings": []any{},
+		}
+	}
+	layout := map[string]any{"visual_identity": packagingPremiumLayoutIdentityForTest(), "slides": []any{
+		map[string]any{
+			"slide_id": "slide-1", "slide_kind": "cover", "composition": "one focal statement",
+			"background": "#101014", "grid": "editorial_12",
+			"elements": []any{textElement("headline-1", "Slide 1 — "+studioTestFounderPhrase, "#ffffff")},
+		},
+		map[string]any{
+			"slide_id": "slide-2", "slide_kind": "close", "composition": "one closing statement",
+			"background": "#f4efe5", "grid": "editorial_12",
+			"elements": []any{textElement("headline-2", "Slide 2 — Close", "#111111")},
+		},
+	}}
+	layoutRaw, err := json.Marshal(layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layoutArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "layout_plan", string(layoutRaw), scoutParticipantName, map[string]string{
+		"source": "process_stage", "goalParentId": run.Artifact.ID, "goalSubtaskId": "layout_plan",
+		"processId": packagingStudioProcessID, "processStage": "layout_plan", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layoutStage := plan.subtaskByID("layout_plan")
+	layoutStage.Status, layoutStage.ArtifactID = subtaskComplete, layoutArtifact.ID
+	layoutStage.Review = &goalSubtaskReview{Verdict: goalReviewPass, By: "fixture"}
+
+	shipArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "ship_deck", studioPremiumTestDeckHTML(), scoutParticipantName, map[string]string{
 		"source": "process_stage", "goalParentId": run.Artifact.ID, "goalSubtaskId": "ship_deck",
 		"processId": packagingStudioProcessID, "processStage": "ship_deck", "status": "complete", "threadStatus": "complete",
 	})
@@ -101,35 +178,28 @@ func (fixture *packagingQualityGateFixture) fileJury(t *testing.T, verdict strin
 			map[string]string{"reviewVerdict": "needs_attention"})
 		return
 	}
-	blocking := ""
-	minimum := "9.25"
-	if verdict == "needs_changes" {
-		minimum = "6.50"
-		pages := make([]string, 0, len(repairs))
-		for _, repair := range repairs {
-			pages = append(pages, fmt.Sprintf("%d", repair.Page))
+	for index := range repairs {
+		if repairs[index].Owner == "" {
+			repairs[index].Owner = "layout_plan"
 		}
-		blocking = strings.Join(pages, ",")
 	}
-	repairJSON, err := json.Marshal(repairs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	repairByPage := map[int]string{}
+	repairByOwnerPage := map[string]map[int]string{"write": {}, "layout_plan": {}}
 	for _, repair := range repairs {
 		if len(repair.Fixes) > 0 {
-			repairByPage[repair.Page] = repair.Fixes[0]
+			repairByOwnerPage[repair.Owner][repair.Page] = repair.Fixes[0]
 		}
 	}
 	pageCount := renderedDeckSlideCount(fixture.deck.Text)
 	var juryBody strings.Builder
 	juryBody.WriteString("Exact rendered scoreboard\n\n## Jury voices\n")
+	voices := []goalPanelVoice{}
 	for _, persona := range slideJuryPersonas() {
 		card := slideJurySeatScorecard{Pages: make([]slideJuryPageScore, 0, pageCount)}
 		for page := 1; page <= pageCount; page++ {
 			score := 9.25
 			fix := "KEEP"
-			if exactFix := repairByPage[page]; exactFix != "" {
+			owner := slideJuryRepairOwner(persona.Name, slideJuryPageScore{})
+			if exactFix := repairByOwnerPage[owner][page]; exactFix != "" {
 				score, fix = 6.5, exactFix
 			}
 			card.Pages = append(card.Pages, slideJuryPageScore{Page: page, Score: score, Fix: fix})
@@ -139,7 +209,22 @@ func (fixture *packagingQualityGateFixture) fileJury(t *testing.T, verdict strin
 			t.Fatal(marshalErr)
 		}
 		juryBody.WriteString("\n### " + persona.Name + "\n" + string(raw) + "\n")
+		voices = append(voices, goalPanelVoice{Persona: persona.Name, Text: string(raw)})
 	}
+	readiness := evaluateSlideJuryReadiness(voices, pageCount)
+	if readiness.Verdict != verdict {
+		t.Fatalf("fixture jury verdict=%s, want %s: %+v", readiness.Verdict, verdict, readiness)
+	}
+	readinessRepairs := readiness.Repairs
+	if readinessRepairs == nil {
+		readinessRepairs = []slideJuryRepair{}
+	}
+	repairJSON, err := json.Marshal(readinessRepairs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := slideJuryPageList(readiness.BlockingPages)
+	minimum := strconv.FormatFloat(readiness.MinimumAverage, 'f', 2, 64)
 	scoreboardBody := normalizeMemoryEntryText(meetingMemoryKindOSArtifact, juryBody.String())
 	deckVersion := fmt.Sprintf("%d", artifactVersion(fixture.deck))
 	deckDigest := artifactCapabilityDigest(fixture.deck)
@@ -153,7 +238,7 @@ func (fixture *packagingQualityGateFixture) fileJury(t *testing.T, verdict strin
 		"reviewVerdict":       verdict,
 		"blockingPages":       blocking,
 		"minimumAverage":      minimum,
-		"parsedSeats":         "3",
+		"parsedSeats":         strconv.Itoa(readiness.ParsedSeats),
 		"repairFixes":         string(repairJSON),
 		"jurySeatsDigest":     sha256Hex([]byte(scoreboardBody)),
 	})
@@ -168,7 +253,7 @@ func (fixture *packagingQualityGateFixture) fileJury(t *testing.T, verdict strin
 			"reviewVerdict":           verdict,
 			"blockingPages":           blocking,
 			"minimumAverage":          minimum,
-			"parsedSeats":             "3",
+			"parsedSeats":             strconv.Itoa(readiness.ParsedSeats),
 			"repairFixes":             string(repairJSON),
 			"deckArtifactVersion":     deckVersion,
 			"deckContentDigest":       deckDigest,
@@ -334,11 +419,11 @@ func TestPackagingQualityGateNeedsChangesUsesExactFixesWithoutScorer(t *testing.
 		t.Fatalf("needs_changes spent %d scorer calls, want zero", calls.Load())
 	}
 	quality := fixture.plan.subtaskByID("quality_gate")
-	ship := fixture.plan.subtaskByID("ship_deck")
-	if quality.Status != subtaskPending || quality.Revisions != 1 || ship.Status != subtaskReady || ship.Review == nil || !strings.Contains(ship.Review.Reasons, exactFix) {
-		t.Fatalf("exact jury repair did not requeue ship_deck: gate=%+v ship=%+v", quality, ship)
+	layout := fixture.plan.subtaskByID("layout_plan")
+	if quality.Status != subtaskPending || quality.Revisions != 1 || layout.Status != subtaskReady || layout.Review == nil || !strings.Contains(layout.Review.Reasons, exactFix) {
+		t.Fatalf("exact jury repair did not requeue layout_plan: gate=%+v layout=%+v", quality, layout)
 	}
-	for _, id := range []string{"draft_compile", "slide_jury"} {
+	for _, id := range []string{"ship_deck", "draft_compile", "slide_jury"} {
 		if stage := fixture.plan.subtaskByID(id); stage.Status != subtaskPending || stage.Review == nil || stage.Review.By != "process_gate_cascade" {
 			t.Fatalf("%s retained stale rendered work: %+v", id, stage)
 		}
@@ -628,7 +713,7 @@ func TestPackagingQualityScorerRequiresEveryExactBoundedRubricDimension(t *testi
 }
 
 func TestPackagingQualityGateRepairedDeckShipsTheNewReviewedIdentity(t *testing.T) {
-	const exactFix = "Move the closing proof inside the 96px safe area."
+	const exactFix = "Give the closing headline a stronger second-column inset."
 	fixture := newPackagingQualityGateFixture(t, "needs_changes", []slideJuryRepair{{Page: 2, Fixes: []string{exactFix}}})
 	originalDeckID := fixture.deck.ID
 	originalVersion := artifactVersion(fixture.deck)
@@ -638,8 +723,34 @@ func TestPackagingQualityGateRepairedDeckShipsTheNewReviewedIdentity(t *testing.
 		t.Fatalf("repair admission unexpectedly called scorer %d time(s)", firstCalls.Load())
 	}
 
-	repairedHTML := strings.Replace(studioTestDeckHTML(), "Slide 2 — Close", "Slide 2 — Repaired close", 1)
-	repairedWriter, _, err := fixture.app.createOSArtifactWithMetadata("workflow", "ship_deck repaired", repairedHTML, scoutParticipantName, map[string]string{})
+	layoutRecord := mustArtifact(t, fixture.app, fixture.plan.subtaskByID("layout_plan").ArtifactID)
+	var repairedLayout map[string]any
+	if err := json.Unmarshal([]byte(layoutRecord.Text), &repairedLayout); err != nil {
+		t.Fatal(err)
+	}
+	repairedElement := repairedLayout["slides"].([]any)[1].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	repairedElement["x"] = float64(262)
+	repairedElement["width"] = float64(1538)
+	repairedLayoutRaw, err := json.Marshal(repairedLayout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repairedLayoutArtifact, _, err := fixture.app.createOSArtifactWithMetadata("workflow", "layout_plan repaired", string(repairedLayoutRaw), scoutParticipantName, map[string]string{
+		"source": "process_stage", "goalParentId": fixture.parentID, "goalSubtaskId": "layout_plan",
+		"processId": packagingStudioProcessID, "processStage": "layout_plan", "status": "complete", "threadStatus": "complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layoutStage := fixture.plan.subtaskByID("layout_plan")
+	layoutStage.Status, layoutStage.ArtifactID = subtaskComplete, repairedLayoutArtifact.ID
+	layoutStage.Review = &goalSubtaskReview{Verdict: goalReviewPass, By: "fixture"}
+
+	repairedHTML := strings.Replace(studioPremiumTestDeckHTML(), `data-deck-element="headline-2" data-deck-type="text" style="position:absolute;left:120px;top:140px;width:1680px`, `data-deck-element="headline-2" data-deck-type="text" style="position:absolute;left:262px;top:140px;width:1538px`, 1)
+	repairedWriter, _, err := fixture.app.createOSArtifactWithMetadata("workflow", "ship_deck repaired", repairedHTML, scoutParticipantName, map[string]string{
+		"source": "process_stage", "goalParentId": fixture.parentID, "goalSubtaskId": "ship_deck",
+		"processId": packagingStudioProcessID, "processStage": "ship_deck", "status": "complete", "threadStatus": "complete",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +766,7 @@ func TestPackagingQualityGateRepairedDeckShipsTheNewReviewedIdentity(t *testing.
 	}
 	fixture.engine.completeProcessStage(&fixture.plan, fixture.parentID, draft, draftStage, body, "repaired draft", extra)
 	fixture.deck = mustArtifact(t, fixture.app, extra["deckArtifactId"])
-	if fixture.deck.ID != originalDeckID || artifactVersion(fixture.deck) <= originalVersion || !strings.Contains(fixture.deck.Text, "Repaired close") {
+	if fixture.deck.ID != originalDeckID || artifactVersion(fixture.deck) <= originalVersion || !strings.Contains(fixture.deck.Text, `headline-2" data-deck-type="text" style="position:absolute;left:262px;top:140px;width:1538px`) {
 		t.Fatalf("repair did not version the candidate in place: original=%s/v%d repaired=%s/v%d", originalDeckID, originalVersion, fixture.deck.ID, artifactVersion(fixture.deck))
 	}
 
@@ -691,7 +802,7 @@ func TestSlideJuryUnsupportedClaimAgreementBlocksAndFixesAreMandatory(t *testing
 		{Persona: "room_gut", Text: `{"pages":[{"page":1,"score":9.1,"fix":"KEEP","blockers":[]}]}`},
 	}
 	readiness := evaluateSlideJuryReadiness(voices, 1)
-	if readiness.Verdict != "needs_changes" || len(readiness.BlockingPages) != 1 || len(readiness.Repairs) != 1 || len(readiness.Repairs[0].Fixes) != 2 {
+	if readiness.Verdict != "needs_changes" || len(readiness.BlockingPages) != 1 || len(readiness.Repairs) != 1 || readiness.Repairs[0].Owner != "write" || len(readiness.Repairs[0].Fixes) != 2 {
 		t.Fatalf("agreed unsupported claim did not block with exact fixes: %+v", readiness)
 	}
 	voices[0].Text = `{"pages":[{"page":1,"score":8.5,"fix":"","blockers":["unsupported_claim"]}]}`

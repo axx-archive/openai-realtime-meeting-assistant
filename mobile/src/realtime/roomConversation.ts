@@ -22,10 +22,17 @@ export type RoomChatMessage = Readonly<{
   roomId: string;
   artifactId?: string;
   workRunId?: string;
-  workStatus?: 'queued' | 'running' | 'approval_required' | 'complete' | 'needs_attention';
+  workRootRunId?: string;
+  workParentRunId?: string;
+  workStatus?: 'queued' | 'running' | 'approval_required' | 'needs_input' | 'complete' | 'needs_attention';
   workFamily?: string;
   workTitle?: string;
   workProgress?: number;
+  resultArtifactId?: string;
+  resultArtifactType?: 'html_deck' | 'markdown' | 'pdf' | 'image' | 'table' | 'workbook' | 'bundle' | 'file';
+  resultArtifactVersion?: number;
+  resultArtifactDigest?: string;
+  resultTitle?: string;
   authorEmail?: string;
   agentId?: string;
   replyTo?: string;
@@ -106,6 +113,13 @@ function normalizedEmail(value: unknown): string {
   return email.length <= 320 ? email : '';
 }
 
+function normalizedResultArtifactType(value: unknown): RoomChatMessage['resultArtifactType'] {
+  const kind = wireIdentifier(value).toLowerCase();
+  return ['html_deck', 'markdown', 'pdf', 'image', 'table', 'workbook', 'bundle', 'file'].includes(kind)
+    ? kind as RoomChatMessage['resultArtifactType']
+    : undefined;
+}
+
 function normalizedAuthor(value: unknown): string {
   if (typeof value !== 'string') return '';
   return limitedCodePoints(
@@ -182,8 +196,10 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
   const roomId = normalizedRoomId(payload.roomId);
   const artifactId = wireIdentifier(payload.artifactId);
   const workRunId = wireIdentifier(payload.workRunId);
+  const workRootRunId = wireIdentifier(payload.workRootRunId);
+  const workParentRunId = wireIdentifier(payload.workParentRunId);
   const rawWorkStatus = wireIdentifier(payload.workStatus).toLowerCase();
-  const workStatus = ['queued', 'running', 'approval_required', 'complete', 'needs_attention'].includes(rawWorkStatus)
+  const workStatus = ['queued', 'running', 'approval_required', 'needs_input', 'complete', 'needs_attention'].includes(rawWorkStatus)
     ? rawWorkStatus as RoomChatMessage['workStatus']
     : undefined;
   const workFamily = normalizedText(payload.workFamily, MAX_AUTHOR_CODE_POINTS);
@@ -192,6 +208,17 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
   const workProgress = Number.isFinite(rawWorkProgress) && rawWorkProgress >= 0 && rawWorkProgress <= 100
     ? Math.round(rawWorkProgress)
     : undefined;
+  const resultArtifactId = wireIdentifier(payload.resultArtifactId);
+  const resultArtifactType = normalizedResultArtifactType(payload.resultArtifactType);
+  const rawResultArtifactVersion = Number(payload.resultArtifactVersion);
+  const resultArtifactVersion = Number.isSafeInteger(rawResultArtifactVersion) && rawResultArtifactVersion > 0
+    ? rawResultArtifactVersion
+    : undefined;
+  const rawResultArtifactDigest = wireIdentifier(payload.resultArtifactDigest).toLowerCase();
+  const resultArtifactDigest = /^[0-9a-f]{64}$/u.test(rawResultArtifactDigest)
+    ? rawResultArtifactDigest
+    : undefined;
+  const resultTitle = normalizedText(payload.resultTitle, MAX_CHAT_TEXT_CODE_POINTS);
   const authorEmail = normalizedEmail(payload.authorEmail);
   const agentId = wireIdentifier(payload.agentId).toLowerCase();
   const replyTo = wireIdentifier(payload.replyTo);
@@ -210,9 +237,16 @@ export function parseRoomChatMessage(payload: unknown): RoomChatMessage | null {
     roomId,
     ...(artifactId ? { artifactId } : {}),
     ...(workRunId && workStatus ? { workRunId, workStatus } : {}),
+    ...(workRunId && workRootRunId ? { workRootRunId } : {}),
+    ...(workRunId && workParentRunId ? { workParentRunId } : {}),
     ...(workRunId && workFamily ? { workFamily } : {}),
     ...(workRunId && workTitle ? { workTitle } : {}),
     ...(workRunId && workProgress !== undefined ? { workProgress } : {}),
+    ...(workRunId && resultArtifactId ? { resultArtifactId } : {}),
+    ...(workRunId && resultArtifactType ? { resultArtifactType } : {}),
+    ...(workRunId && resultArtifactVersion !== undefined ? { resultArtifactVersion } : {}),
+    ...(workRunId && resultArtifactDigest ? { resultArtifactDigest } : {}),
+    ...(workRunId && resultTitle ? { resultTitle } : {}),
     ...(authorEmail ? { authorEmail } : {}),
     ...(agentId ? { agentId } : {}),
     ...(replyTo ? { replyTo } : {}),
@@ -312,6 +346,81 @@ export function roomChatMessageIsOwn(
   return Boolean(authorName && viewerName && authorName === viewerName);
 }
 
+/**
+ * Room chat is conversation, decisions, and exact typed deliverables. Work
+ * lifecycle and follow-through records belong to Activity even when an older
+ * server serialized them as chat messages.
+ */
+export function roomChatMessageBelongsInConversation(message: RoomChatMessage): boolean {
+  if (!message.workRunId) return !message.followThroughId;
+  const version = Number(message.resultArtifactVersion ?? 0);
+  const digest = String(message.resultArtifactDigest ?? '').trim().toLowerCase();
+  return message.workStatus === 'complete'
+    && Boolean(message.resultArtifactId)
+    && Boolean(message.resultArtifactType)
+    && Number.isSafeInteger(version)
+    && version > 0
+    && /^[0-9a-f]{64}$/u.test(digest);
+}
+
+function roomWorkRootIdentity(message: RoomChatMessage): string {
+  const runId = String(message.workRunId ?? '').trim();
+  const rootRunId = String(message.workRootRunId ?? '').trim();
+  const parentRunId = String(message.workParentRunId ?? '').trim();
+  // A direct run is its own root. Delegated work must carry the server-owned
+  // root explicitly; never infer ancestry from display names or event order.
+  if (parentRunId && !rootRunId) return '';
+  return rootRunId || runId;
+}
+
+export function roomConversationFeedMessages(
+  messages: readonly RoomChatMessage[],
+): readonly RoomChatMessage[] {
+  const newestRootResult = new Map<string, number>();
+  const newestArtifactResult = new Map<string, number>();
+  messages.forEach((message, index) => {
+    if (!roomChatMessageBelongsInConversation(message) || !message.workRunId) return;
+    const rootIdentity = roomWorkRootIdentity(message);
+    if (!rootIdentity) return;
+    newestRootResult.set(rootIdentity, index);
+    if (message.resultArtifactId) newestArtifactResult.set(message.resultArtifactId, index);
+  });
+  return messages.filter((message, index) => {
+    if (!roomChatMessageBelongsInConversation(message)) return false;
+    if (!message.workRunId) return true;
+    const rootIdentity = roomWorkRootIdentity(message);
+    return Boolean(rootIdentity)
+      && newestRootResult.get(rootIdentity) === index
+      && newestArtifactResult.get(message.resultArtifactId || '') === index;
+  });
+}
+
+export function roomConversationActivityMessages(
+  messages: readonly RoomChatMessage[],
+): readonly RoomChatMessage[] {
+  const newestByIdentity = new Map<string, RoomChatMessage>();
+  messages.forEach((message) => {
+    const identity = message.workRunId
+      ? `work:${message.workRunId}`
+      : message.followThroughId
+        ? `follow:${message.followThroughId}`
+        : '';
+    if (!identity) return;
+    // Reinsert revised runs so iteration order remains durable event order.
+    // The sheet presents one row per exact run, never a wall of revisions.
+    newestByIdentity.delete(identity);
+    newestByIdentity.set(identity, message);
+  });
+  return [...newestByIdentity.values()];
+}
+
+export function latestRoomConversationActivity(
+  messages: readonly RoomChatMessage[],
+): RoomChatMessage | null {
+  const activity = roomConversationActivityMessages(messages);
+  return activity.length ? activity[activity.length - 1] : null;
+}
+
 function tail<T>(values: readonly T[], limit: number): readonly T[] {
   return values.length <= limit ? values : values.slice(values.length - limit);
 }
@@ -358,7 +467,9 @@ export function roomConversationReducer(
       const newUnread = action.chatOpen
         ? 0
         : messages.reduce((count, message) => (
-          !knownIds.has(message.id) && !roomChatMessageIsOwn(message, action.viewer)
+          !knownIds.has(message.id)
+            && roomChatMessageBelongsInConversation(message)
+            && !roomChatMessageIsOwn(message, action.viewer)
             ? count + 1
             : count
         ), 0);
@@ -380,10 +491,12 @@ export function roomConversationReducer(
         ? state.messages.findIndex((candidate) => candidate.workRunId === message.workRunId)
         : -1;
       const nextMessages = priorWorkIndex >= 0
-        ? state.messages.map((candidate, index) => index === priorWorkIndex ? message : candidate)
+        ? [...state.messages.filter((_, index) => index !== priorWorkIndex), message]
         : [...state.messages, message];
 
-      const unreadCount = !action.chatOpen && !roomChatMessageIsOwn(message, action.viewer)
+      const unreadCount = !action.chatOpen
+        && roomChatMessageBelongsInConversation(message)
+        && !roomChatMessageIsOwn(message, action.viewer)
         ? Math.min(state.unreadCount + 1, ROOM_CONVERSATION_UNREAD_LIMIT)
         : state.unreadCount;
       return {

@@ -222,7 +222,13 @@ type scoutChatFileAttachment struct {
 }
 
 type scoutChatThreadRef struct {
-	ID              string  `json:"id"`
+	ID string `json:"id"`
+	// RootRunID and ParentRunID are server-owned topology. Clients use them to
+	// choose the one customer workstream that owns Activity; they must never
+	// infer parentage from author names, timestamps, or the presence of an older
+	// result.
+	RootRunID       string  `json:"rootRunId,omitempty"`
+	ParentRunID     string  `json:"parentRunId,omitempty"`
 	Mode            string  `json:"mode"`
 	ProcessID       string  `json:"processId,omitempty"`
 	Query           string  `json:"query"`
@@ -239,16 +245,26 @@ type scoutChatThreadRef struct {
 	StartedAt       string  `json:"startedAt,omitempty"`
 	ProjectID       string  `json:"projectId,omitempty"`
 	ProjectTitle    string  `json:"projectTitle,omitempty"`
+	// OutputFamily is the server-owned customer deliverable family. It derives
+	// only from a governed process or concrete artifact type; the agent's
+	// transient function (researcher, designer, synthesizer) is never output
+	// identity.
+	OutputFamily string `json:"outputFamily,omitempty"`
 	// Result* names the concrete deliverable produced by a durable work run.
 	// ArtifactID above remains the run/goal record that owns lifecycle and
 	// checkpoint state; clients must not infer the output from its title or
 	// mode. This explicit projection lets web and native render the same deck
 	// while the parent is still parked at final review.
-	ResultArtifactID    string `json:"resultArtifactId,omitempty"`
-	ResultArtifactType  string `json:"resultArtifactType,omitempty"`
-	ResultTitle         string `json:"resultTitle,omitempty"`
-	ResultPreview       string `json:"resultPreview,omitempty"`
-	ResultApprovalState string `json:"resultApprovalState,omitempty"`
+	ResultArtifactID      string                      `json:"resultArtifactId,omitempty"`
+	ResultArtifactType    string                      `json:"resultArtifactType,omitempty"`
+	ResultArtifactVersion int                         `json:"resultArtifactVersion,omitempty"`
+	ResultArtifactDigest  string                      `json:"resultArtifactDigest,omitempty"`
+	ResultTitle           string                      `json:"resultTitle,omitempty"`
+	ResultPreview         string                      `json:"resultPreview,omitempty"`
+	ResultAssets          []scoutChatResultAssetRef   `json:"resultAssets,omitempty"`
+	ResultTable           *scoutChatResultTableRef    `json:"resultTable,omitempty"`
+	ResultWorkbook        *scoutChatResultWorkbookRef `json:"resultWorkbook,omitempty"`
+	ResultApprovalState   string                      `json:"resultApprovalState,omitempty"`
 	// ResultQualityState is the server-owned publication truth for an authored
 	// deck/document. Clients must not infer readiness from the child artifact's
 	// generic complete status: a blocked goal can intentionally expose its best
@@ -262,6 +278,51 @@ type scoutChatThreadRef struct {
 	ResultCanPresent  bool                        `json:"resultCanPresent,omitempty"`
 	ResultCanExport   bool                        `json:"resultCanExport,omitempty"`
 	Checkpoint        *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+}
+
+// scoutChatThreadRefsEqual compares the complete viewer projection. Thread
+// refs carry bounded slices for rich result previews, so the language's ==/!=
+// operators are intentionally unavailable once those closed envelopes are
+// present.
+func scoutChatThreadRefsEqual(left, right scoutChatThreadRef) bool {
+	return reflect.DeepEqual(left, right)
+}
+
+// scoutChatResultAssetRef is a bounded, exact attachment on the authorized
+// result revision. The blob route reauthorizes the signed-in viewer; clients
+// may use these refs for a real image/file preview but never infer a result type
+// from a filename or MIME claim.
+type scoutChatResultAssetRef struct {
+	Ref  string `json:"ref"`
+	Mime string `json:"mime,omitempty"`
+	Name string `json:"name,omitempty"`
+	Kind string `json:"kind,omitempty"`
+}
+
+// scoutChatResultTableRef is the closed display contract for a finished table.
+// Cells are already bounded at the viewer projection seam, so clients render a
+// grid instead of falling back to Markdown, JSON, or a prose summary.
+type scoutChatResultTableRef struct {
+	Columns   []string   `json:"columns"`
+	Rows      [][]string `json:"rows"`
+	Truncated bool       `json:"truncated,omitempty"`
+}
+
+type scoutChatResultWorkbookSheetRef struct {
+	Name    string `json:"name"`
+	Purpose string `json:"purpose,omitempty"`
+}
+
+// scoutChatResultWorkbookRef carries preview facts, not workbook bytes. The
+// exact XLSX remains a content-addressed ResultAsset and opens through the
+// authenticated file path.
+type scoutChatResultWorkbookRef struct {
+	FileName     string                            `json:"fileName"`
+	Mime         string                            `json:"mime"`
+	SheetCount   int                               `json:"sheetCount"`
+	FormulaCount int                               `json:"formulaCount"`
+	InputPolicy  string                            `json:"inputPolicy,omitempty"`
+	Sheets       []scoutChatResultWorkbookSheetRef `json:"sheets,omitempty"`
 }
 
 // scoutChatWorkCheckpointRef is the bounded, display-safe checkpoint carried
@@ -285,18 +346,31 @@ type scoutChatWorkCheckpointOptionRef struct {
 // native clients render one rich result card instead of parsing prose or a raw
 // URL. The hrefs remain authenticated same-origin routes, never public links.
 type scoutChatWorkRecordRef struct {
-	ID                      string  `json:"id"`
-	RunID                   string  `json:"runId"`
-	Title                   string  `json:"title"`
-	Status                  string  `json:"status"`
-	WorkerName              string  `json:"workerName"`
-	CurrentStage            string  `json:"currentStage"`
-	ProgressPercent         float64 `json:"progressPercent"`
-	Summary                 string  `json:"summary"`
-	ArtifactID              string  `json:"artifactId"`
-	ArtifactHref            string  `json:"artifactHref"`
-	EvidenceHref            string  `json:"evidenceHref"`
-	ProviderExecutionFenced bool    `json:"providerExecutionFenced"`
+	ID                      string                      `json:"id"`
+	RunID                   string                      `json:"runId"`
+	RootRunID               string                      `json:"rootRunId"`
+	ParentRunID             string                      `json:"parentRunId,omitempty"`
+	Title                   string                      `json:"title"`
+	Status                  string                      `json:"status"`
+	WorkerName              string                      `json:"workerName"`
+	CurrentStage            string                      `json:"currentStage"`
+	ProgressPercent         float64                     `json:"progressPercent"`
+	Summary                 string                      `json:"summary"`
+	ArtifactID              string                      `json:"artifactId"`
+	ArtifactHref            string                      `json:"artifactHref"`
+	ArtifactKind            string                      `json:"artifactKind,omitempty"`
+	OutputFamily            string                      `json:"outputFamily,omitempty"`
+	ResultArtifactID        string                      `json:"resultArtifactId,omitempty"`
+	ResultArtifactType      string                      `json:"resultArtifactType,omitempty"`
+	ResultArtifactVersion   int                         `json:"resultArtifactVersion,omitempty"`
+	ResultArtifactDigest    string                      `json:"resultArtifactDigest,omitempty"`
+	ResultTitle             string                      `json:"resultTitle,omitempty"`
+	ResultPreview           string                      `json:"resultPreview,omitempty"`
+	ResultAssets            []scoutChatResultAssetRef   `json:"resultAssets,omitempty"`
+	ResultTable             *scoutChatResultTableRef    `json:"resultTable,omitempty"`
+	ResultWorkbook          *scoutChatResultWorkbookRef `json:"resultWorkbook,omitempty"`
+	EvidenceHref            string                      `json:"evidenceHref"`
+	ProviderExecutionFenced bool                        `json:"providerExecutionFenced"`
 }
 
 func scoutChatThreadAttentionReason(metadata map[string]string) string {
@@ -420,13 +494,19 @@ func scoutChatResearchInputRequest(profile STRIDEProductAgentContextProfile, now
 
 func scoutChatThreadRefForAgent(thread scoutAgentThread, profile STRIDEProductAgentContextProfile, delegatedBy string) *scoutChatThreadRef {
 	progress, _ := strconv.ParseFloat(strings.TrimSpace(thread.Artifact.Metadata["progressPercent"]), 64)
+	parentRunID := strings.TrimSpace(thread.Artifact.Metadata["parentRunId"])
+	rootRunID := strings.TrimSpace(thread.Artifact.Metadata["rootRunId"])
+	if rootRunID == "" && parentRunID == "" {
+		rootRunID = thread.ID
+	}
 	return &scoutChatThreadRef{
-		ID: thread.ID, Mode: thread.Mode, Query: thread.Query, Status: thread.Status, ArtifactID: thread.Artifact.ID,
+		ID: thread.ID, RootRunID: rootRunID, ParentRunID: parentRunID, Mode: thread.Mode, Query: thread.Query, Status: thread.Status, ArtifactID: thread.Artifact.ID,
 		ProcessID: strings.TrimSpace(thread.Artifact.Metadata["processId"]),
 		AgentID:   profile.AgentID, AgentName: profile.DisplayName, DelegatedBy: strings.TrimSpace(delegatedBy),
 		CurrentStage: thread.Artifact.Metadata["currentStage"], ProgressPercent: progress,
 		ProgressNote: thread.Artifact.Metadata["progressNote"], AttentionReason: scoutChatThreadAttentionReason(thread.Artifact.Metadata), StartedAt: thread.Artifact.Metadata["startedAt"],
 		ProjectID: thread.Artifact.Metadata["projectWorkId"], ProjectTitle: thread.Artifact.Metadata["projectWorkTitle"],
+		OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(thread.Artifact), scoutChatOutputFamilyForMode(thread.Mode)),
 	}
 }
 
@@ -2452,7 +2532,10 @@ func conversationWorkReplayCard(userMessage scoutChatMessageRecord, launched sco
 		IntentOutcome: string(conversationIntentStartPrivateWork), CausedByMessageID: userMessage.ID,
 		Text:      firstNonEmptyString(strings.TrimSpace(label), "Private work") + " started — progress and the finished result will stay in this conversation",
 		CreatedAt: createdAt.Format(time.RFC3339Nano),
-		Thread:    &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID},
+		Thread: &scoutChatThreadRef{
+			ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
+			OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(launched.Artifact), scoutChatOutputFamilyForMode(launched.Mode)),
+		},
 	}
 }
 
@@ -3332,12 +3415,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				Text:      process.Title + " launched — the staged process is running; it will park here at each human checkpoint",
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 				Thread: &scoutChatThreadRef{
-					ID:         goalThread.ID,
-					Mode:       goalThread.Mode,
-					ProcessID:  process.ID,
-					Query:      goalThread.Query,
-					Status:     goalThread.Status,
-					ArtifactID: goalThread.Artifact.ID,
+					ID:           goalThread.ID,
+					Mode:         goalThread.Mode,
+					ProcessID:    process.ID,
+					Query:        goalThread.Query,
+					Status:       goalThread.Status,
+					ArtifactID:   goalThread.Artifact.ID,
+					OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(goalThread.Artifact), scoutChatOutputFamilyForMode(goalThread.Mode)),
 				},
 			}
 			saved, err := commitUserMessage(userMessage, assistantMessage)
@@ -3368,7 +3452,10 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 				ID: fmt.Sprintf("scout-chat-message-%d", time.Now().UTC().UnixNano()), Kind: "thread", Role: "scout", AuthorName: scoutParticipantName,
 				Text:      "Workbook delivered · 5 sheets · 63 formulas · no financial facts inferred",
 				CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
-				Thread:    &scoutChatThreadRef{ID: agentThread.ID, Mode: agentThread.Mode, Query: agentThread.Query, Status: agentThread.Status, ArtifactID: agentThread.Artifact.ID, ProgressPercent: 100},
+				Thread: &scoutChatThreadRef{
+					ID: agentThread.ID, Mode: agentThread.Mode, Query: agentThread.Query, Status: agentThread.Status, ArtifactID: agentThread.Artifact.ID, ProgressPercent: 100,
+					OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(agentThread.Artifact), scoutChatOutputFamilyForMode(agentThread.Mode)),
+				},
 			}
 			if ventureWorkbookBeforeChatCommitProbe != nil {
 				if err := ventureWorkbookBeforeChatCommitProbe(); err != nil {
@@ -3425,11 +3512,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 			Text:      tool.Name + " launched — running against its output contract and gate rubric",
 			CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			Thread: &scoutChatThreadRef{
-				ID:         agentThread.ID,
-				Mode:       agentThread.Mode,
-				Query:      agentThread.Query,
-				Status:     agentThread.Status,
-				ArtifactID: agentThread.Artifact.ID,
+				ID:           agentThread.ID,
+				Mode:         agentThread.Mode,
+				ProcessID:    agentThread.Artifact.Metadata["processId"],
+				Query:        agentThread.Query,
+				Status:       agentThread.Status,
+				ArtifactID:   agentThread.Artifact.ID,
+				OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(agentThread.Artifact), scoutChatOutputFamilyForMode(agentThread.Mode)),
 			},
 		}
 		if delegated {
@@ -5353,6 +5442,139 @@ func scoutChatThreadHasArtifactRef(thread scoutChatThreadRecord, artifactID stri
 	return false
 }
 
+// scoutChatOutputFamilyForMode is the deliberately small compatibility lane
+// for ordinary work that has no authored process or typed result yet. Callers
+// must consult governed process/result identity first. Query prose is never an
+// input, and unknown modes fail closed to an empty family.
+func scoutChatOutputFamilyForMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "deck", "presentation", "slide", "slides":
+		return "Presentation"
+	case "document", "doc", "memo", "brief", "report":
+		return "Document"
+	case "scheduled", "recurring":
+		return "Scheduled work"
+	case "revision":
+		return "Revision"
+	case "meeting recap":
+		return "Meeting recap"
+	case "visualization":
+		return "Data visualization"
+	case "build":
+		return "Build"
+	case "project plan":
+		return "Project plan"
+	case "financial model":
+		return "Financial model"
+	case "design":
+		return "Design"
+	case "research":
+		return "Research"
+	default:
+		return ""
+	}
+}
+
+// scoutChatOutputFamilyForArtifact is the server classifier for the
+// customer-facing output family carried by a thread ref. Process and concrete
+// artifact type are durable product contracts and always outrank the bounded
+// ordinary-mode fallback, so a Research worker inside a presentation or report
+// can never relabel the customer's deliverable.
+func scoutChatOutputFamilyForArtifact(artifact meetingMemoryEntry) string {
+	metadata := artifact.Metadata
+	switch strings.ToLower(strings.TrimSpace(metadata["processId"])) {
+	case packagingStudioProcessID:
+		return "Presentation"
+	case documentReportProcessID:
+		return "Document"
+	}
+	if artifactIsHTMLDocument(artifact) || strings.EqualFold(strings.TrimSpace(metadata["type"]), artifactTypeHTMLDeck) {
+		return "Presentation"
+	}
+	switch strings.ToLower(strings.TrimSpace(metadata["type"])) {
+	case artifactTypeMarkdown, artifactTypePDF:
+		return "Document"
+	case artifactTypeImage:
+		return "Image"
+	case artifactTypeTable:
+		return "Data table"
+	case artifactTypeWorkbook:
+		return "Workbook"
+	case artifactTypeBundle, artifactTypeFile:
+		return "Files"
+	}
+	return scoutChatOutputFamilyForMode(metadata["mode"])
+}
+
+func scoutChatOutputFamilyForRef(ref *scoutChatThreadRef) string {
+	if ref == nil {
+		return "Work"
+	}
+	switch strings.ToLower(strings.TrimSpace(ref.ProcessID)) {
+	case packagingStudioProcessID:
+		return "Presentation"
+	case documentReportProcessID:
+		return "Document"
+	}
+	switch strings.ToLower(strings.TrimSpace(ref.ResultArtifactType)) {
+	case artifactTypeHTMLDeck:
+		return "Presentation"
+	case artifactTypeMarkdown, artifactTypePDF, "document", "doc":
+		return "Document"
+	case artifactTypeImage:
+		return "Image"
+	case artifactTypeTable:
+		return "Data table"
+	case artifactTypeWorkbook:
+		return "Workbook"
+	case artifactTypeBundle, artifactTypeFile:
+		return "Files"
+	}
+	for _, family := range []string{
+		"Presentation", "Document", "Image", "Workbook", "Data table", "Files", "Work",
+		"Scheduled work", "Revision", "Meeting recap", "Data visualization", "Build", "Project plan",
+		"Financial model", "Design", "Research",
+	} {
+		if strings.TrimSpace(ref.OutputFamily) == family {
+			return family
+		}
+	}
+	return firstNonEmptyString(scoutChatOutputFamilyForMode(ref.Mode), "Work")
+}
+
+func scoutChatClosedWorkStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "complete", "completed", "published":
+		return "Delivered"
+	case "error", "failed", "needs_attention", "rejected", "blocked":
+		return "Needs attention"
+	case "approval_required", "needs_input", "needs-input", "parked":
+		return "Needs input"
+	case "queued":
+		return "Queued"
+	case "running", "in_progress":
+		return "Building"
+	case "cancelled", "canceled":
+		return "Stopped"
+	default:
+		return "Working"
+	}
+}
+
+// scoutChatClosedWorkPreview is the only work-derived copy allowed into the
+// persistent thread rail. Detailed activity and results remain available in
+// the sidecar and Files; model-authored summaries, stage ids, and synthesizer
+// text never become navigation copy.
+func scoutChatClosedWorkPreview(message scoutChatMessageRecord) (string, bool) {
+	if message.Kind == "thread" && message.Thread != nil {
+		return scoutChatOutputFamilyForRef(message.Thread) + " · " + scoutChatClosedWorkStatus(message.Thread.Status), true
+	}
+	if oneOf(message.Kind, "work_result", "work_record") && message.Work != nil {
+		return "Work · " + scoutChatClosedWorkStatus(message.Work.Status), true
+	}
+	return "", false
+}
+
 func scoutChatWorkLabel(metadata map[string]string) string {
 	if strings.TrimSpace(metadata["workLabel"]) == "Insights & Opportunities report" {
 		return "Insights & Opportunities report"
@@ -5658,6 +5880,7 @@ func (app *kanbanBoardApp) commitScoutChatThreadRefStatusWithContext(ctx context
 		ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
 		ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
 		ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
+		ref.OutputFamily = firstNonEmptyString(scoutChatOutputFamilyForArtifact(artifact), ref.OutputFamily, scoutChatOutputFamilyForMode(ref.Mode))
 		if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
 			ref.ProgressPercent = progress
 		}
@@ -5761,6 +5984,7 @@ func (app *kanbanBoardApp) reconcileScoutChatTerminalProjection(user *userAccoun
 	ref.FollowUpStatus = artifact.Metadata["followUpStatus"]
 	ref.AttentionReason = scoutChatThreadAttentionReason(artifact.Metadata)
 	ref.StartedAt = firstNonBlank(artifact.Metadata["startedAt"], ref.StartedAt)
+	ref.OutputFamily = firstNonEmptyString(scoutChatOutputFamilyForArtifact(artifact), ref.OutputFamily, scoutChatOutputFamilyForMode(ref.Mode))
 	if progress, parseErr := strconv.ParseFloat(strings.TrimSpace(artifact.Metadata["progressPercent"]), 64); parseErr == nil {
 		ref.ProgressPercent = progress
 	}
@@ -5830,12 +6054,13 @@ func (app *kanbanBoardApp) scoutChatArtifactRefMessage(artifact meetingMemoryEnt
 		Text:      droppedTitle + " — dropped into this thread; feedback below re-runs it",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		Thread: &scoutChatThreadRef{
-			ID:         refID,
-			Mode:       refMode,
-			ProcessID:  refProcessID,
-			Query:      refQuery,
-			Status:     refStatus,
-			ArtifactID: refArtifactID,
+			ID:           refID,
+			Mode:         refMode,
+			ProcessID:    refProcessID,
+			Query:        refQuery,
+			Status:       refStatus,
+			ArtifactID:   refArtifactID,
+			OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(artifact), scoutChatOutputFamilyForMode(refMode)),
 		},
 	}
 }
@@ -8103,8 +8328,12 @@ func updateScoutChatThreadSummary(thread *scoutChatThreadRecord, userMessage sco
 		thread.Title = scoutChatThreadTitle(userMessage)
 	}
 	preview := strings.TrimSpace(assistantMessage.Text)
-	if oneOf(assistantMessage.Kind, "work_result", "work_record") && assistantMessage.Work != nil {
-		preview = firstNonEmptyString(strings.TrimSpace(assistantMessage.Work.Summary), strings.TrimSpace(assistantMessage.Work.Title))
+	if assistantMessage.Kind == "artifact" && assistantMessage.Thread != nil {
+		// Internal stage receipts live behind Activity/Inspect work. Recompute
+		// from the preceding customer work root instead of promoting this stage.
+		preview = ""
+	} else if closed, ok := scoutChatClosedWorkPreview(assistantMessage); ok {
+		preview = closed
 	}
 	thread.Preview = firstNonEmptyString(preview, scoutChatThreadPreview(*thread))
 }
@@ -8123,10 +8352,11 @@ func scoutChatThreadTitle(message scoutChatMessageRecord) string {
 func scoutChatThreadPreview(thread scoutChatThreadRecord) string {
 	for index := len(thread.Messages) - 1; index >= 0; index-- {
 		message := thread.Messages[index]
-		if oneOf(message.Kind, "work_result", "work_record") && message.Work != nil {
-			if preview := firstNonEmptyString(strings.TrimSpace(message.Work.Summary), strings.TrimSpace(message.Work.Title)); preview != "" {
-				return trimForStorage(preview, 140)
-			}
+		if message.Kind == "artifact" && message.Thread != nil {
+			continue
+		}
+		if closed, ok := scoutChatClosedWorkPreview(message); ok {
+			return closed
 		}
 		if text := strings.TrimSpace(message.Text); text != "" {
 			return trimForStorage(text, 140)

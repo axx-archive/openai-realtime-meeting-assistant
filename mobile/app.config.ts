@@ -43,12 +43,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 74 keeps the native private Realtime 2.1 voice-first surface
+      // Build 75 keeps the native private Realtime 2.1 voice-first surface
       // alongside authenticated PDF/PowerPoint save flows and phone/iPad Deck
       // and Document Studio polish. The global private voice island retains one
       // exact Scout thread across navigation and yields before room media.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '74',
+      buildNumber: '75',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

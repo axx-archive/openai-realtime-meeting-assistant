@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -182,6 +183,38 @@ func TestArtifactRenderTokenMintIsSessionGated(t *testing.T) {
 	recorder = mint(deck.ID)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("mint status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	exactMint := func(query string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/artifacts/render-token?id="+deck.ID+query, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		artifactRenderTokenHandler(recorder, req)
+		return recorder
+	}
+	exactDigest := artifactCapabilityDigest(deck)
+	if got := exactMint("&version=" + strconv.Itoa(artifactVersion(deck)) + "&digest=" + exactDigest); got.Code != http.StatusOK {
+		t.Fatalf("exact revision mint status=%d body=%s, want 200", got.Code, got.Body.String())
+	}
+	for _, target := range []string{
+		"&version=" + strconv.Itoa(artifactVersion(deck)),
+		"&digest=" + exactDigest,
+		"&version=0&digest=" + exactDigest,
+		"&version=" + strconv.Itoa(artifactVersion(deck)) + "&digest=not-a-digest",
+	} {
+		if got := exactMint(target); got.Code != http.StatusBadRequest {
+			t.Errorf("malformed binding %q status=%d, want 400", target, got.Code)
+		}
+	}
+	for _, target := range []string{
+		"&version=" + strconv.Itoa(artifactVersion(deck)+1) + "&digest=" + exactDigest,
+		"&version=" + strconv.Itoa(artifactVersion(deck)) + "&digest=" + strings.Repeat("f", 64),
+	} {
+		if got := exactMint(target); got.Code != http.StatusConflict {
+			t.Errorf("stale binding %q status=%d, want 409", target, got.Code)
+		}
 	}
 	payload := struct {
 		OK        bool   `json:"ok"`

@@ -5,12 +5,16 @@ import {
   ROOM_CONVERSATION_UNREAD_LIMIT,
   ROOM_TRANSCRIPT_HISTORY_LIMIT,
   createRoomConversationState,
+  latestRoomConversationActivity,
   parseMeetingTranscriptSnapshot,
   parseMemoryTranscriptEntry,
   parseRoomChatDelete,
   parseRoomChatHistory,
   parseRoomChatMessage,
   roomChatMessageIsOwn,
+  roomChatMessageBelongsInConversation,
+  roomConversationActivityMessages,
+  roomConversationFeedMessages,
   roomConversationReducer,
 } from '../realtime/roomConversation';
 
@@ -181,6 +185,119 @@ describe('native room conversation', () => {
 		assert.equal(state.messages[0]?.id, 'room-work-needs-attention');
 		assert.equal(state.messages[0]?.workStatus, 'needs_attention');
 	});
+
+  it('keeps room lifecycle in Activity and admits only an exact typed final deliverable to chat', () => {
+    const digest = 'd'.repeat(64);
+    const running = parseRoomChatMessage(chat('work-running', {
+      name: 'Scout', agentId: 'scout', artifactId: 'work-root-artifact',
+      workRunId: 'work-root', workRootRunId: 'work-root', workStatus: 'running',
+      workFamily: 'Visual', workTitle: 'Campaign image', workProgress: 42,
+    }))!;
+    const needsInput = parseRoomChatMessage(chat('work-input', {
+      name: 'Scout', agentId: 'scout', artifactId: 'work-root-artifact',
+      workRunId: 'work-root', workRootRunId: 'work-root', workStatus: 'needs_input',
+      workFamily: 'Visual', workTitle: 'Campaign image', workProgress: 68,
+    }))!;
+    const complete = parseRoomChatMessage(chat('work-complete', {
+      name: 'Scout', agentId: 'scout', artifactId: 'work-root-artifact',
+      workRunId: 'work-root', workRootRunId: 'work-root', workStatus: 'complete',
+      workFamily: 'Visual', workTitle: 'Campaign image', workProgress: 100,
+      resultArtifactId: 'campaign-image-result', resultArtifactType: 'image',
+      resultArtifactVersion: 3, resultArtifactDigest: digest, resultTitle: 'Campaign hero',
+    }))!;
+    const malformedComplete = parseRoomChatMessage(chat('work-malformed-complete', {
+      name: 'Scout', agentId: 'scout', artifactId: 'malformed-root',
+      workRunId: 'malformed', workRootRunId: 'malformed', workStatus: 'complete',
+      resultArtifactId: 'unsafe-result', resultArtifactType: 'image',
+      resultArtifactVersion: 4, resultArtifactDigest: '{"raw":"json"}',
+    }))!;
+    const ordinary = parseRoomChatMessage(chat('human-decision', { text: 'Use the second direction.' }))!;
+    const followThrough = parseRoomChatMessage(chat('follow-through', {
+      agentId: 'scout', followThroughId: 'follow-1', followThroughStatus: 'awaiting_input',
+    }))!;
+
+    assert.equal(complete.workRootRunId, 'work-root');
+    assert.equal(complete.resultArtifactVersion, 3);
+    assert.equal(complete.resultArtifactDigest, digest);
+    assert.equal(roomChatMessageBelongsInConversation(running), false);
+    assert.equal(roomChatMessageBelongsInConversation(needsInput), false);
+    assert.equal(roomChatMessageBelongsInConversation(malformedComplete), false);
+    assert.equal(roomChatMessageBelongsInConversation(complete), true);
+    assert.deepEqual(roomConversationFeedMessages([ordinary, running, needsInput, complete, malformedComplete, followThrough]).map(({ id }) => id), ['human-decision', 'work-complete']);
+    assert.deepEqual(roomConversationActivityMessages([ordinary, running, needsInput, complete, malformedComplete, followThrough]).map(({ id }) => id), ['work-complete', 'work-malformed-complete', 'follow-through']);
+  });
+
+  it('reorders a revised root to the newest Activity position after delegated work', () => {
+    const rootRunning = chat('root-running', {
+      agentId: 'scout', workRunId: 'root-run', workRootRunId: 'root-run', workStatus: 'running', workTitle: 'Build presentation',
+    });
+    const childRunning = chat('child-running', {
+      agentId: 'designer', workRunId: 'child-run', workRootRunId: 'root-run', workParentRunId: 'root-run', workStatus: 'running', workTitle: 'Design pass',
+    });
+    const rootComplete = chat('root-complete', {
+      agentId: 'scout', workRunId: 'root-run', workRootRunId: 'root-run', workStatus: 'complete', workTitle: 'Build presentation',
+      resultArtifactId: 'deck-result', resultArtifactType: 'html_deck', resultArtifactVersion: 3, resultArtifactDigest: 'f'.repeat(64),
+    });
+    let state = createRoomConversationState('the-office');
+    state = roomConversationReducer(state, { type: 'room_chat', payload: rootRunning, chatOpen: true });
+    state = roomConversationReducer(state, { type: 'room_chat', payload: childRunning, chatOpen: true });
+    state = roomConversationReducer(state, { type: 'room_chat', payload: rootComplete, chatOpen: true });
+
+    assert.deepEqual(state.messages.map(({ id }) => id), ['child-running', 'root-complete']);
+    assert.equal(latestRoomConversationActivity(state.messages)?.id, 'root-complete');
+    assert.deepEqual(roomConversationActivityMessages(state.messages).map(({ id }) => id), ['child-running', 'root-complete']);
+  });
+
+  it('rejects malformed result receipts and delegated results without explicit root topology', () => {
+    const exact = parseRoomChatMessage(chat('exact-result', {
+      workRunId: 'root-run',
+      workStatus: 'complete',
+      resultArtifactId: 'deck-1',
+      resultArtifactType: 'html_deck',
+      resultArtifactVersion: 7,
+      resultArtifactDigest: 'a'.repeat(64),
+    }))!;
+    assert.deepEqual(roomConversationFeedMessages([exact]).map(({ id }) => id), ['exact-result']);
+    assert.deepEqual(roomConversationFeedMessages([{ ...exact, id: 'zero-version', resultArtifactVersion: 0 }]), []);
+    assert.deepEqual(roomConversationFeedMessages([{ ...exact, id: 'bad-digest', resultArtifactDigest: 'a' }]), []);
+    assert.deepEqual(roomConversationFeedMessages([{
+      ...exact,
+      id: 'orphan-child',
+      workRunId: 'child-run',
+      workParentRunId: 'root-run',
+      workRootRunId: undefined,
+    }]), []);
+  });
+
+  it('does not turn lifecycle into unread chat and dedupes result supersession by explicit root and artifact identity', () => {
+    const viewer = { email: 'tom@shareability.com', name: 'Tom' };
+    const digestV1 = '1'.repeat(64);
+    const digestV2 = '2'.repeat(64);
+    const lifecycle = chat('delegated-running', {
+      name: 'Scout', agentId: 'scout', artifactId: 'child-owner',
+      workRunId: 'child-run', workRootRunId: 'root-run', workParentRunId: 'root-run',
+      workStatus: 'running', workTitle: 'Data pass',
+    });
+    const v1 = parseRoomChatMessage(chat('result-v1', {
+      name: 'Scout', agentId: 'scout', artifactId: 'root-owner', workRunId: 'root-run', workRootRunId: 'root-run', workStatus: 'complete',
+      resultArtifactId: 'table-result', resultArtifactType: 'table', resultArtifactVersion: 1, resultArtifactDigest: digestV1,
+    }))!;
+    const v2 = parseRoomChatMessage(chat('result-v2', {
+      name: 'Scout', agentId: 'scout', artifactId: 'root-owner', workRunId: 'revision-run', workRootRunId: 'root-run', workParentRunId: 'root-run', workStatus: 'complete',
+      resultArtifactId: 'table-result', resultArtifactType: 'table', resultArtifactVersion: 2, resultArtifactDigest: digestV2,
+    }))!;
+
+    let state = roomConversationReducer(createRoomConversationState('the-office'), {
+      type: 'room_chat', payload: lifecycle, chatOpen: false, viewer,
+    });
+    assert.equal(state.unreadCount, 0, 'generic progress never increments the chat badge');
+    state = roomConversationReducer(state, {
+      type: 'room_chat', payload: { ...v2 }, chatOpen: false, viewer,
+    });
+    assert.equal(state.unreadCount, 1, 'the exact typed result is a real conversation arrival');
+    assert.deepEqual(roomConversationFeedMessages([v1, v2]).map(({ id }) => id), ['result-v2']);
+    assert.equal(v2.workParentRunId, 'root-run');
+  });
 
   it('treats a valid room_chat_history array as authoritative, deduped, room-scoped, and bounded', () => {
     let state = createRoomConversationState('the-office');

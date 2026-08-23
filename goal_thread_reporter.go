@@ -206,13 +206,14 @@ func (app *kanbanBoardApp) postGoalCheckpointMessage(parentID string, question s
 		Role: "scout",
 		Text: "parked — " + compactAssistantLine(question),
 		Thread: &scoutChatThreadRef{
-			ID:         threadID,
-			Mode:       "goal",
-			ProcessID:  parent.Metadata["processId"],
-			Query:      firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadQuery"]), strings.TrimSpace(parent.Metadata["objective"])),
-			Status:     codexJobStatusApprovalRequired,
-			ArtifactID: parent.ID,
-			Checkpoint: scoutChatCheckpointRefForArtifact(parent),
+			ID:           threadID,
+			Mode:         "goal",
+			ProcessID:    parent.Metadata["processId"],
+			Query:        firstNonEmptyString(strings.TrimSpace(parent.Metadata["threadQuery"]), strings.TrimSpace(parent.Metadata["objective"])),
+			Status:       codexJobStatusApprovalRequired,
+			ArtifactID:   parent.ID,
+			OutputFamily: scoutChatOutputFamilyForArtifact(parent),
+			Checkpoint:   scoutChatCheckpointRefForArtifact(parent),
 		},
 	})
 }
@@ -243,10 +244,11 @@ func (app *kanbanBoardApp) postGoalSalvagedDraftMessage(parentID string, draftAr
 		Role: "scout",
 		Text: text,
 		Thread: &scoutChatThreadRef{
-			ArtifactID: draftArtifactID,
-			Mode:       firstNonEmptyString(strings.TrimSpace(draft.Metadata["mode"]), "artifacts"),
-			Query:      draftTitle,
-			Status:     "needs_attention",
+			ArtifactID:   draftArtifactID,
+			Mode:         firstNonEmptyString(strings.TrimSpace(draft.Metadata["mode"]), "artifacts"),
+			Query:        draftTitle,
+			Status:       "needs_attention",
+			OutputFamily: scoutChatOutputFamilyForArtifact(draft),
 		},
 	})
 }

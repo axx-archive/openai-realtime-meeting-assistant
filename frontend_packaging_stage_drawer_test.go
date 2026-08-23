@@ -16,17 +16,18 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 	html := string(body)
 	for _, want := range []string{
 		"const packagingStudioStagePresentation",
-		"const packagingStudioCustomerPhases",
+		"const studioCustomerPhaseDefinitions",
+		"packaging_studio: [",
+		"document_report: [",
 		"function packagingStudioCustomerProgress(plan, artifact, ref, status)",
 		"function packagingStudioPhaseListNode(progress)",
 		"function packagingStudioTechnicalWorkNode(plan)",
-		"Frame the decision",
-		"Ground the recommendation",
-		"stages: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence']",
-		"Build the story",
-		"Design the presentation",
-		"Finish the presentation",
-		"Phase ${customerProgress.currentNumber} of ${customerProgress.count}",
+		"id: 'frame', label: 'Frame'",
+		"id: 'build', label: 'Build'",
+		"id: 'compose', label: 'Compose'",
+		"id: 'review', label: 'Review & deliver'",
+		"stages: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence', 'red_team'",
+		"Phase ${customerProgress.currentNumber}/${customerProgress.count}",
 		"function packagingStudioTaskDisplayTitle(plan, task)",
 		"function packagingStudioCheckpointQuestion(plan, checkpoint)",
 		"Write the deck",
@@ -52,14 +53,17 @@ func TestPackagingStageDrawerProgressiveJudgmentContract(t *testing.T) {
 			t.Errorf("packaging stage drawer contract missing %q", want)
 		}
 	}
-	phaseMapStart := strings.Index(html, "const packagingStudioCustomerPhases = [")
-	phaseMapEnd := strings.Index(html[phaseMapStart:], "function packagingStudioCanonicalProgress")
-	if phaseMapStart < 0 || phaseMapEnd < 0 {
+	phaseMapStart := strings.Index(html, "packaging_studio: [")
+	if phaseMapStart < 0 {
 		t.Fatal("Packaging Studio customer phase map boundaries missing")
 	}
+	phaseMapEnd := strings.Index(html[phaseMapStart:], "document_report: [")
+	if phaseMapEnd < 0 {
+		t.Fatal("Packaging Studio customer phase map end missing")
+	}
 	phaseMap := html[phaseMapStart : phaseMapStart+phaseMapEnd]
-	if got := strings.Count(phaseMap, "id: '"); got != 5 {
-		t.Errorf("customer phase map has %d phases, want 5", got)
+	if got := strings.Count(phaseMap, "id: '"); got != 4 {
+		t.Errorf("customer phase map has %d phases, want 4", got)
 	}
 	stageCSSStart := strings.Index(html, ".artifact-stage-activity {")
 	stageCSSEnd := strings.Index(html[stageCSSStart:], ".artifact-stage__body--deck")
@@ -524,8 +528,8 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
    };
  },parent);
  assert.equal(quietChannel.title,'Packaging Studio');
- assert.equal(quietChannel.eyebrow,'Presentation · Draft · Phase 2 of 5');
- assert.match(quietChannel.meta,/verifying the proof points/i);
+ assert.equal(quietChannel.eyebrow,'Presentation · Draft · Phase 2 of 4');
+ assert.match(quietChannel.meta,/grounding and building the argument/i);
  assert.match(quietChannel.meta,/11%/);
  assert.equal(quietChannel.checkpoints,0);
  assert.doesNotMatch(quietChannel.eyebrow+quietChannel.meta,/Needs input/i);
@@ -533,7 +537,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  assert.equal(quietChannel.progressbars,0);
  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(60);
  const compactProgress=await page.locator('[data-work-artifact-id="packaging-run"].scout-chat-work-card--presentation').evaluate(card=>{const rect=node=>node.getBoundingClientRect().toJSON();const title=card.querySelector('.scout-chat-work-card__title');const project=card.querySelector('.scout-chat-work-card__project');const eyebrow=card.querySelector('.scout-chat-work-card__eyebrow');return {className:card.className,card:rect(card),title:rect(title),project:rect(project),eyebrow:eyebrow.textContent,titleText:title.textContent,projectText:project.textContent,titleWhiteSpace:getComputedStyle(title).whiteSpace,projectWhiteSpace:getComputedStyle(project).whiteSpace,scrollWidth:document.documentElement.scrollWidth};});
- assert.equal(compactProgress.eyebrow,'Presentation · Draft · Phase 2 of 5');
+ assert.equal(compactProgress.eyebrow,'Presentation · Draft · Phase 2 of 4');
  assert.equal(compactProgress.titleText,'Packaging Studio');
  assert.equal(compactProgress.projectText,'Like A Farmer');
  assert.equal(compactProgress.titleWhiteSpace,'nowrap',JSON.stringify(compactProgress));
@@ -546,11 +550,11 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  const activityDrawer=page.locator('#chatContextRail');
  await page.waitForFunction(()=>document.querySelector('#chatContextRail')?.hidden===false);
  assert.equal(await activityDrawer.locator('.chat-context-section-title').filter({hasText:'Presentation activity'}).count(),1);
- assert.equal(await activityDrawer.locator('.chat-context-phase-entry').count(),5);
- assert.equal(await activityDrawer.locator('.chat-context-phase-entry.is-current').getAttribute('data-phase'),'ground');
- assert.match(await activityDrawer.locator('.chat-context-phase-entry.is-current').textContent(),/Ground the recommendation.*verifying the proof points/is);
- assert.equal(await activityDrawer.locator('.chat-context-phase-entry[data-phase="design"] .chat-context-phase-entry__sentence').count(),0);
- assert.match(await activityDrawer.locator('#chatContextMeta').textContent(),/Phase 2 of 5.*11%/);
+ assert.equal(await activityDrawer.locator('.chat-context-phase-entry').count(),4);
+ assert.equal(await activityDrawer.locator('.chat-context-phase-entry.is-current').getAttribute('data-phase'),'build');
+ assert.match(await activityDrawer.locator('.chat-context-phase-entry.is-current').textContent(),/Build.*grounding and building the argument/is);
+ assert.equal(await activityDrawer.locator('.chat-context-phase-entry[data-phase="compose"] .chat-context-phase-entry__sentence').count(),0);
+ assert.match(await activityDrawer.locator('#chatContextMeta').textContent(),/Phase 2 of 4.*11%/);
  assert.equal(await activityDrawer.locator('.chat-context-technical').count(),0);
  assert.equal(await activityDrawer.getByText(/internal steps/i).count(),0);
  const inspectWork=activityDrawer.getByRole('button',{name:'Inspect work',exact:true});
@@ -587,7 +591,8 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  },parent);
  assert.equal(await activityDrawer.locator('.chat-context-technical').count(),0);
  assert.equal(await activityDrawer.getByRole('button',{name:'Hide work',exact:true}).count(),0);
- assert.equal(await activityDrawer.getByRole('button',{name:'Open',exact:true}).count(),1);
+ assert.equal(await activityDrawer.getByRole('button',{name:'Open',exact:true}).count(),0,'a completed run without an immutable result receipt must not open its process record as the customer deliverable');
+ assert.match(await activityDrawer.locator('.chat-context-event__note').textContent(),/without an exact deliverable attached/i);
  await page.locator('#chatContextClose').evaluate(node=>node.click());
  await page.locator('.scout-chat-work-card--presentation').evaluate(node=>node.remove());
 
@@ -601,8 +606,8 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
    document.body.appendChild(card);
    return {text:card.textContent,eyebrow:card.querySelector('.scout-chat-work-card__eyebrow')?.textContent,meta:card.querySelector('.scout-chat-work-card__meta')?.textContent,checkpoints:card.querySelectorAll('.scout-chat-work-card__checkpoint').length};
  },parent);
- assert.equal(blockedWithoutDecision.eyebrow,'Presentation · Blocked · Phase 2 of 5');
- assert.match(blockedWithoutDecision.meta,/recovering from an evidence check/i);
+ assert.equal(blockedWithoutDecision.eyebrow,'Presentation · Blocked · Phase 2 of 4');
+ assert.match(blockedWithoutDecision.meta,/strengthening the story before design begins/i);
  assert.equal(blockedWithoutDecision.checkpoints,0);
  assert.doesNotMatch(blockedWithoutDecision.text,/Needs input/i);
  await page.locator('[data-work-artifact-id="packaging-blocked-run"]').evaluate(node=>node.remove());
@@ -620,7 +625,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
    const progress=packagingStudioCustomerProgress(plan,artifact,null,'needs_attention');
    return {id:progress.current.id,status:progress.current.status,number:progress.currentNumber,sentence:progress.current.sentence};
  },parent);
- assert.deepEqual(blockedStoryPrecedesReadyDesign,{id:'story',status:'blocked',number:3,sentence:'Scout is revising the story against the brief.'});
+ assert.deepEqual(blockedStoryPrecedesReadyDesign,{id:'build',status:'blocked',number:2,sentence:'Scout is strengthening the story before design begins.'});
 
  const savedGoalCopy=await page.evaluate(()=>{
    const terminal=document.createElement('div');

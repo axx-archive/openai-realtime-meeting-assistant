@@ -192,7 +192,7 @@ func TestPD1GlobalRailAndContextualWorkMenuRemainTruthful(t *testing.T) {
 		`String(ref.artifactId || '').trim() === artifactId && String(ref.id || '').trim() === runId`,
 		`String(artifactMetadata.originId || '').trim() === String(candidate?.id || '').trim()`,
 		`thread: { ...ref, status: String(status || '') }`,
-		`artifactStatusValue(artifact) || message.thread.status`,
+		`hasArtifactStatus ? artifactStatusValue(artifact) : message.thread.status`,
 		`previewEl.textContent = activeWork ? 'Scout is working' : preview`,
 	} {
 		if !strings.Contains(html, marker) {

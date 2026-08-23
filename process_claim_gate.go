@@ -123,6 +123,8 @@ var (
 	processJSONFieldNamePattern                    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 	processJSONSlidePathPattern                    = regexp.MustCompile(`^\$\.slides\[\d+\]$`)
 	processJSONElementPathPattern                  = regexp.MustCompile(`^\$\.slides\[\d+\]\.elements\[\d+\]$`)
+	processJSONPlanningRoleLeadPattern             = regexp.MustCompile(`(?i)^\s*(?:establish|frame|introduce|surface|set\s+up|contrast|reveal|pivot|reframe|turn|connect|translate|move|build|earn|land|close|resolve|challenge|foreground|dramatize|explain|orient|show|confront|end|lead)\b`)
+	processJSONPlanningHiddenSyntaxPattern         = regexp.MustCompile(`(?i)(?:<!--|-->|\[\[\s*claim\s*:|stride-claim\s*:)`)
 	processJSONRootWrapperPathPattern              = regexp.MustCompile(`^\$\.(canvas|grid|palette|typography)$`)
 	processJSONSceneWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.(canvas|grid|palette|typography|style|position|dimensions|resolution)$`)
 	processJSONStyleWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.style\.(palette|typography|position|dimensions)$`)
@@ -835,6 +837,54 @@ func processJSONStructuralField(path, key string) bool {
 	return false
 }
 
+func processJSONPlanningRoleField(path, key string) bool {
+	return processJSONSlidePathPattern.MatchString(path) && strings.EqualFold(strings.TrimSpace(key), "role_in_argument")
+}
+
+type processFactualClaimPolicy struct {
+	allowPackagingStoryPlanningRole bool
+}
+
+func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) processFactualClaimPolicy {
+	return processFactualClaimPolicy{
+		allowPackagingStoryPlanningRole: plan != nil &&
+			plan.ProcessID == packagingStudioProcessID &&
+			stage.ID == "story_architects" &&
+			stage.OutputContract == "story_spine_v2",
+	}
+}
+
+// validateProcessPlanningRoleText recognizes one narrowly typed narrative-
+// planning field without turning it into a factual-claim escape hatch. A
+// role_in_argument value may start with a storytelling instruction such as
+// "Establish the current reality" even though the ordinary prose heuristic
+// treats an unlisted imperative with terminal punctuation as declarative. The
+// exception is one bare-imperative sentence: inspect the original text after
+// removing at most one final period or exclamation point. Numbers, URLs,
+// qualitative superlatives, factual predicates, and copula assertions remain
+// fail-closed, and a second clause cannot hide behind the imperative lead.
+func validateProcessPlanningRoleText(text, path string) error {
+	if processJSONPlanningHiddenSyntaxPattern.MatchString(text) {
+		return fmt.Errorf("%s: planning field cannot contain hidden comments or claim markers", path)
+	}
+	trimmed := strings.TrimSpace(text)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return fmt.Errorf("%s: planning field must be one line", path)
+	}
+	match := processJSONPlanningRoleLeadPattern.FindStringIndex(trimmed)
+	if match == nil || match[0] != 0 {
+		return fmt.Errorf("%s: planning field must begin with one bare narrative imperative", path)
+	}
+	inspect := trimmed
+	if strings.HasSuffix(inspect, ".") || strings.HasSuffix(inspect, "!") {
+		inspect = strings.TrimSpace(inspect[:len(inspect)-1])
+	}
+	if inspect == "" || strings.ContainsAny(inspect, ".!?;,:—–") || processForwardClausePattern.MatchString(inspect) {
+		return fmt.Errorf("%s: planning field must contain one sentence without a second clause", path)
+	}
+	return validateProcessFactText(inspect, path, nil, false)
+}
+
 func processJSONScalarStrings(value any) []string {
 	switch typed := value.(type) {
 	case string:
@@ -937,6 +987,10 @@ func validateProcessJSONFieldName(key, path string) error {
 }
 
 func validateProcessJSONClaimObject(object map[string]any, path string, manifest processAdmittedClaimManifest) error {
+	return validateProcessJSONClaimObjectWithPolicy(object, path, manifest, processFactualClaimPolicy{})
+}
+
+func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string, manifest processAdmittedClaimManifest, policy processFactualClaimPolicy) error {
 	for key := range object {
 		if err := validateProcessJSONFieldName(key, path); err != nil {
 			return err
@@ -986,6 +1040,16 @@ func validateProcessJSONClaimObject(object map[string]any, path string, manifest
 		if isID || isExact || isScope || strings.EqualFold(strings.TrimSpace(key), "statement_type") {
 			continue
 		}
+		if policy.allowPackagingStoryPlanningRole && processJSONPlanningRoleField(path, key) {
+			text, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("%s.%s: planning field %s must be a string", path, key, key)
+			}
+			if err := validateProcessPlanningRoleText(text, path+"."+key); err != nil {
+				return err
+			}
+			continue
+		}
 		for _, leaf := range processJSONScalarLeaves(value, path+"."+key) {
 			if processJSONStructuralField(path, key) {
 				if !processStructuralScalarSafe(key, leaf) {
@@ -1006,7 +1070,7 @@ func validateProcessJSONClaimObject(object map[string]any, path string, manifest
 	}
 	for key, value := range object {
 		if err := processJSONChildObjects(value, path+"."+key, func(child map[string]any, childPath string) error {
-			return validateProcessJSONClaimObject(child, childPath, manifest)
+			return validateProcessJSONClaimObjectWithPolicy(child, childPath, manifest, policy)
 		}); err != nil {
 			return err
 		}
@@ -1940,9 +2004,17 @@ func validateProcessScopedEvidenceOutput(body string, stage ProcessStage, author
 }
 
 func validateProcessFactualClaims(body string, manifest processAdmittedClaimManifest) error {
+	return validateProcessFactualClaimsWithPolicy(body, manifest, processFactualClaimPolicy{})
+}
+
+func validateProcessFactualClaimsForStage(body string, manifest processAdmittedClaimManifest, plan *goalPlan, stage ProcessStage) error {
+	return validateProcessFactualClaimsWithPolicy(body, manifest, processFactualClaimPolicyForStage(plan, stage))
+}
+
+func validateProcessFactualClaimsWithPolicy(body string, manifest processAdmittedClaimManifest, policy processFactualClaimPolicy) error {
 	body = strings.TrimSpace(body)
 	if object, ok := decodeProcessClaimJSON(body); ok {
-		return validateProcessJSONClaimObject(object, "$", manifest)
+		return validateProcessJSONClaimObjectWithPolicy(object, "$", manifest, policy)
 	}
 	paragraphs := processMarkdownParagraphPattern.Split(strings.ReplaceAll(body, "\r\n", "\n"), -1)
 	unitIndex := 0
@@ -1984,10 +2056,14 @@ func validateProcessFactualClaims(body string, manifest processAdmittedClaimMani
 // panel synthesis is the only text forwarded to downstream stages, so it still
 // receives the full scoped-evidence posture and decision validation below.
 func validateProcessPanelVoiceFactualClaims(body string, authority processEvidenceGateAuthority) error {
+	return validateProcessPanelVoiceFactualClaimsForStage(body, authority, nil, ProcessStage{})
+}
+
+func validateProcessPanelVoiceFactualClaimsForStage(body string, authority processEvidenceGateAuthority, plan *goalPlan, stage ProcessStage) error {
 	if authority.Adequacy == processEvidenceAdequacyInsufficient {
 		return fmt.Errorf("external research has no authorized question coverage; panel deliberation is not permitted")
 	}
-	return validateProcessFactualClaims(body, authority.Claims)
+	return validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage)
 }
 
 func validateProcessPanelVoiceStageFactualClaims(app *kanbanBoardApp, plan *goalPlan, parentID string, stage ProcessStage, body string) error {
@@ -1998,7 +2074,7 @@ func validateProcessPanelVoiceStageFactualClaims(app *kanbanBoardApp, plan *goal
 	if err != nil {
 		return fmt.Errorf("factual claim gate could not load authority: %w", err)
 	}
-	if err := validateProcessPanelVoiceFactualClaims(body, authority); err != nil {
+	if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err != nil {
 		return fmt.Errorf("factual claim gate rejected %s panel voice: %w", stage.ID, err)
 	}
 	return nil
@@ -2018,7 +2094,7 @@ func validateProcessStageFactualClaims(app *kanbanBoardApp, plan *goalPlan, pare
 	if stage.ID == "ship_deck" {
 		err = validateProcessDeckFactualClaims(body, authority.Claims)
 	} else {
-		err = validateProcessFactualClaims(body, authority.Claims)
+		err = validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage)
 	}
 	if err != nil {
 		return fmt.Errorf("factual claim gate rejected %s: %w", stage.ID, err)

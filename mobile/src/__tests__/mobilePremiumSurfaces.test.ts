@@ -43,7 +43,7 @@ test('Home Ember shortcut renders as one accessible direct action', async () => 
   await act(async () => { renderer!.unmount(); });
 });
 
-test('native Activity renders the quiet five-stage sheet and opens the final result', async () => {
+test('native Activity renders the compact four-phase sheet and opens the final result', async () => {
   registerTestStubModules('premium-activity-stub:', {
     'premium-activity-stub:react-native': `
       export const AccessibilityInfo={setAccessibilityFocus:()=>{}}; export const findNodeHandle=()=>1;
@@ -76,6 +76,8 @@ test('native Activity renders the quiet five-stage sheet and opens the final res
       progressPercent: 100,
       resultArtifactId: 'deck-1',
       resultArtifactType: 'html_deck',
+      resultArtifactVersion: 7,
+      resultArtifactDigest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       resultQualityState: 'admitted',
       resultCanPresent: true,
       resultCanEdit: true,
@@ -94,8 +96,9 @@ test('native Activity renders the quiet five-stage sheet and opens the final res
   });
   const modal = renderer!.root.findByType('Modal' as any);
   assert.equal(modal.props.presentationStyle, 'formSheet');
+  assert.equal(modal.props.allowSwipeDismissal, true);
   assert.equal(modal.props.animationType, 'none');
-  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Presentation stages' }).children.length, 5);
+  assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Presentation stages' }).children.length, 4);
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: '100% complete' }).props.accessibilityRole, 'progressbar');
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Open presentation' }).props.onPress(); });
   assert.equal(opened, 1);
@@ -118,6 +121,29 @@ test('native Activity renders the quiet five-stage sheet and opens the final res
     renderer!.root.findByProps({ children: 'Continue editing on desktop, then run a fresh review before sharing this version.' }).children.join(''),
     'Continue editing on desktop, then run a fresh review before sharing this version.',
   );
+  await act(async () => {
+    renderer!.update(React.createElement(WorkActivitySheet as React.ComponentType<any>, {
+      visible: true,
+      message: {
+        ...message,
+        id: 'active-with-unknown-progress',
+        thread: {
+          ...message.thread,
+          status: 'running',
+          currentStage: 'external_research',
+          progressPercent: undefined,
+          resultArtifactId: undefined,
+          resultArtifactType: undefined,
+          resultQualityState: undefined,
+          resultCanPresent: undefined,
+          resultCanEdit: undefined,
+        },
+      },
+      onClose: () => { closed += 1; },
+      onOpenResult: () => { opened += 1; },
+    }));
+  });
+  assert.equal(renderer!.root.findAll((node) => node.props.accessibilityRole === 'progressbar').length, 0);
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Close activity' }).props.onPress(); });
   assert.deepEqual({ opened, closed }, { opened: 1, closed: 1 });
   await act(async () => { renderer!.unmount(); });

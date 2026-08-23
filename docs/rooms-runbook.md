@@ -9,7 +9,7 @@ Audience: whoever operates thebonfire.xyz or debugs a room/guest incident.
   notifications, accounts). Only the media/presence/sitting plane is per-room
   (`room_live.go`). Rooms are **config** in `data/rooms.json`; a room costs nothing
   until someone joins it (lazy mixer/lane, `mediaGen`-fenced teardown after the
-  4-minute idle grace).
+  5-minute idle grace).
 - The office is room id `office`, seeded into `data/rooms.json` at boot, never
   archivable, no passcode by default — one-click join is preserved exactly.
 - One account holds one live room seat: joining room B evicts the same account's

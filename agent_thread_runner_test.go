@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1023,6 +1024,54 @@ func TestRoomAgentThreadStatusProjectsOneIdempotentRevisionPerState(t *testing.T
 	}
 	if asString(history[0]["workStatus"]) != "running" || asString(history[1]["workStatus"]) != "needs_attention" {
 		t.Fatalf("statuses=%q,%q", asString(history[0]["workStatus"]), asString(history[1]["workStatus"]))
+	}
+}
+
+func TestRoomAgentThreadStatusProjectsOnlyClosedExactResultAndExplicitTopology(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	meetingID := app.memory.ensureMeetingID(officeRoomID)
+	imageRef := strings.Repeat("a", 64)
+	artifact, _, err := app.createOSArtifactWithMetadata("artifacts", "campaign hero", "Generated image artifact.", scoutParticipantName, map[string]string{
+		"title": "Campaign hero", "type": artifactTypeImage, "status": "complete", "threadStatus": "complete",
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID, "originMeetingId": meetingID,
+		"rootRunId": "root-run", "parentRunId": "parent-run",
+		"assets": `[{"ref":"` + imageRef + `","mime":"image/png","name":"hero.png","kind":"image"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.projectRoomAgentThreadStatus(artifact, "child-run", "complete") {
+		t.Fatalf("closed image result projection failed: meeting=%q current=%q history=%v metadata=%v", meetingID, app.memory.currentMeetingID(officeRoomID), app.roomChatHistory(10), artifact.Metadata)
+	}
+	history := app.roomChatHistory(10)
+	if len(history) != 1 {
+		t.Fatalf("history=%v, want one result revision", history)
+	}
+	projected := history[0]
+	if asString(projected["workRunId"]) != "child-run" || asString(projected["workRootRunId"]) != "root-run" || asString(projected["workParentRunId"]) != "parent-run" {
+		t.Fatalf("topology=%v, want explicit child/root identity", projected)
+	}
+	if asString(projected["resultArtifactId"]) != artifact.ID || asString(projected["resultArtifactType"]) != artifactTypeImage || asString(projected["resultArtifactVersion"]) != strconv.Itoa(artifactVersion(artifact)) || asString(projected["resultArtifactDigest"]) != artifactCapabilityDigest(artifact) {
+		t.Fatalf("result tuple=%v, want exact closed artifact", projected)
+	}
+
+	malformed, _, err := app.createOSArtifactWithMetadata("artifacts", "raw substitute", `{"image":"not-a-file"}`, scoutParticipantName, map[string]string{
+		"title": "Raw substitute", "type": artifactTypeImage, "status": "complete", "threadStatus": "complete",
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID, "originMeetingId": meetingID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.projectRoomAgentThreadStatus(malformed, "malformed-run", "complete") {
+		t.Fatal("malformed lifecycle projection failed")
+	}
+	history = app.roomChatHistory(10)
+	if len(history) != 2 {
+		t.Fatalf("history=%v, want lifecycle retained in Activity", history)
+	}
+	unsafe := history[1]
+	if asString(unsafe["resultArtifactId"]) != "" || asString(unsafe["resultArtifactType"]) != "" || asString(unsafe["resultArtifactDigest"]) != "" {
+		t.Fatalf("malformed result leaked a typed feed envelope: %v", unsafe)
 	}
 }
 

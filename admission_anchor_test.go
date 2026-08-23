@@ -268,7 +268,7 @@ func TestAdmissionAnchorPersistsBeforeBothAccessGrantedBranches(t *testing.T) {
 		}
 		admitAt := strings.Index(branch.source, branch.anchoredCall)
 		prepareAt := strings.Index(branch.source, "prepareMeetingSittingID(connRoomID)")
-		commitAt := strings.Index(branch.source, "noteMeetingAdmissionForSitting(connRoomID, admittedName, sittingID)")
+		commitAt := strings.Index(branch.source, "publishAnchoredMeetingAdmission(admission)")
 		grantAt := strings.Index(branch.source, `sendKanbanEvent(c, "access_granted"`)
 		if prepareAt < 0 || commitAt < 0 || !(prepareAt < admitAt && admitAt < commitAt && commitAt < grantAt) {
 			t.Fatalf("%s branch order prepare=%d anchored-admit=%d meeting-commit=%d grant=%d", branch.name, prepareAt, admitAt, commitAt, grantAt)
@@ -281,9 +281,10 @@ func TestAdmissionAnchorPersistsBeforeBothAccessGrantedBranches(t *testing.T) {
 	for _, function := range []string{"admitParticipantWithAnchorResult", "admitGuestWithAnchorResult"} {
 		section := sourceSectionForAdmissionTest(t, string(anchorSource), "func (app *kanbanBoardApp) "+function, "\n}\n")
 		persistAt := strings.Index(section, "persistAdmissionAnchor(")
-		commitAt := strings.Index(section, "ParticipantSessionEndpointInRoomWithLeaseLocked(")
-		if persistAt < 0 || commitAt < 0 || persistAt >= commitAt {
-			t.Fatalf("%s does not persist before live-state commit", function)
+		meetingAt := strings.Index(section, "startMeetingDurable(")
+		liveAt := strings.Index(section, "ParticipantSessionEndpointInRoomWithLeaseLocked(")
+		if persistAt < 0 || meetingAt < 0 || liveAt < 0 || !(persistAt < meetingAt && meetingAt < liveAt) {
+			t.Fatalf("%s order anchor=%d meeting=%d live=%d", function, persistAt, meetingAt, liveAt)
 		}
 	}
 }
@@ -511,5 +512,235 @@ func TestTransferAnchorFailurePreservesExistingEndpointsAndMedia(t *testing.T) {
 	}
 	if got := room.participantMedia["AJ"]; got != wantLegacyMedia {
 		t.Fatalf("failed transfer changed legacy media=%+v want=%+v", got, wantLegacyMedia)
+	}
+}
+
+func TestMeetingRecordFailureAfterAnchorRecoversExactSittingOnRestart(t *testing.T) {
+	root := t.TempDir()
+	memoryPath := filepath.Join(root, "memory", "meeting-memory.jsonl")
+	meetingDir := filepath.Join(root, "meeting-store")
+	meetingPath := filepath.Join(meetingDir, "meetings.json")
+	anchorPath := filepath.Join(root, "anchors", "admission-anchors.json")
+	if err := os.MkdirAll(meetingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	memory, err := newMeetingMemoryStore(memoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := loadMeetingStore(meetingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &kanbanBoardApp{memory: memory, meetings: meetings}
+	if err := app.initializeAdmissionAnchorStore(anchorPath); err != nil {
+		t.Fatal(err)
+	}
+	sittingID := app.prepareMeetingSittingID("room-a")
+	if sittingID == "" {
+		t.Fatal("missing prepared sitting id")
+	}
+	if err := os.Remove(meetingDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(meetingDir, []byte("block atomic meeting replace"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = app.admitParticipantWithAnchor(context.Background(), "room-a", "AJ", "session-a", "endpoint-a", sittingID, memberAdmissionPrincipal("aj@example.com"))
+	if !errors.Is(err, ErrMeetingRecordStore) {
+		t.Fatalf("admission error=%v, want ErrMeetingRecordStore", err)
+	}
+	if _, found := meetings.activeRecord("room-a"); found {
+		t.Fatal("failed record-store commit left an in-memory ghost meeting")
+	}
+	app.mu.Lock()
+	seated := app.roomLiveLocked("room-a").participantCounts["AJ"]
+	app.mu.Unlock()
+	if seated != 0 {
+		t.Fatalf("failed record-store commit published %d live seats", seated)
+	}
+	starts, err := app.admissionAnchors.SittingStarts(context.Background())
+	if err != nil || len(starts) != 1 || starts[0].SittingID != sittingID {
+		t.Fatalf("durable anchors=%+v err=%v, want exact sitting %s", starts, err, sittingID)
+	}
+	wantStartedAt := starts[0].AdmittedAt
+
+	if err := os.Remove(meetingDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(meetingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	restartedMemory, err := newMeetingMemoryStore(memoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedMeetings, err := loadMeetingStore(meetingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := &kanbanBoardApp{memory: restartedMemory, meetings: restartedMeetings}
+	if err := restarted.initializeAdmissionAnchorStore(anchorPath); err != nil {
+		t.Fatal(err)
+	}
+	restarted.reconcileMeetingRecordsAtBoot()
+	restarted.reconcileMeetingRecordsAtBoot()
+
+	recovered, found := restarted.meetings.activeRecord("room-a")
+	if !found || recovered.ID != sittingID {
+		t.Fatalf("recovered=%+v found=%v, want sitting %s", recovered, found, sittingID)
+	}
+	gotStartedAt, err := time.Parse(time.RFC3339Nano, recovered.StartedAt)
+	if err != nil || !gotStartedAt.Equal(wantStartedAt) {
+		t.Fatalf("recovered start=%q err=%v, want anchor %s", recovered.StartedAt, err, wantStartedAt)
+	}
+	if got := restarted.memory.currentMeetingID("room-a"); got != sittingID {
+		t.Fatalf("resumed memory sitting=%q, want %q", got, sittingID)
+	}
+	if got := len(restarted.meetings.recent(0)); got != 1 {
+		t.Fatalf("repeated recovery produced %d meeting records, want 1", got)
+	}
+}
+
+func TestMeetingRecordFailureAfterIdleCancelRearmsEmptySitting(t *testing.T) {
+	root := t.TempDir()
+	memory, err := newMeetingMemoryStore(filepath.Join(root, "memory", "meeting-memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetingDir := filepath.Join(root, "meeting-store")
+	meetingPath := filepath.Join(meetingDir, "meetings.json")
+	meetings, err := loadMeetingStore(meetingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer meetings.stopIdleEndsAndWait()
+	app := &kanbanBoardApp{memory: memory, meetings: meetings}
+	if err := app.initializeAdmissionAnchorStore(filepath.Join(root, "anchors", "admission-anchors.json")); err != nil {
+		t.Fatal(err)
+	}
+	sittingID := app.prepareMeetingSittingID("room-a")
+	if _, _, err := meetings.startMeetingDurable("room-a", sittingID, time.Now().UTC().Add(-time.Minute), nil); err != nil {
+		t.Fatal(err)
+	}
+	meetings.armIdleEnd("room-a", func(generation uint64) { app.endMeetingForIdle("room-a", generation) })
+
+	// Force the anchored admission's participant-union persistence to fail
+	// after it has canceled the pending idle timer.
+	if err := os.Remove(meetingPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(meetingDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(meetingDir, []byte("block atomic meeting replace"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = app.admitParticipantWithAnchor(context.Background(), "room-a", "AJ", "session-a", "endpoint-a", sittingID, memberAdmissionPrincipal("aj@example.com"))
+	if !errors.Is(err, ErrMeetingRecordStore) {
+		t.Fatalf("admission error=%v, want ErrMeetingRecordStore", err)
+	}
+	app.mu.Lock()
+	seats := app.activeParticipantCountInRoomLocked(app.roomLiveLocked("room-a"))
+	app.mu.Unlock()
+	if seats != 0 {
+		t.Fatalf("failed admission exposed %d live seats", seats)
+	}
+	open, found := meetings.activeRecord("room-a")
+	if !found || open.ID != sittingID || open.EndedAt != "" {
+		t.Fatalf("open record=%+v found=%v, want original empty sitting", open, found)
+	}
+	meetings.mu.Lock()
+	rearmed := meetings.idleTimers[normalizeRoomID("room-a")] != nil
+	meetings.mu.Unlock()
+	if !rearmed {
+		t.Fatal("failed admission canceled the only idle-close guard")
+	}
+}
+
+func TestAnchoredAdmissionQueuesDefensivelyClosedPriorSittingInProcess(t *testing.T) {
+	root := t.TempDir()
+	memory, err := newMeetingMemoryStore(filepath.Join(root, "meeting-memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := loadMeetingStore(filepath.Join(root, "meetings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &kanbanBoardApp{memory: memory, meetings: meetings}
+	if err := app.initializeAdmissionAnchorStore(filepath.Join(root, "admission-anchors.json")); err != nil {
+		t.Fatal(err)
+	}
+	const priorID = "prior-open-sitting"
+	if _, _, err := meetings.startMeetingDurable("room-a", priorID, time.Now().UTC().Add(-time.Hour), nil); err != nil {
+		t.Fatal(err)
+	}
+	newSittingID := memory.ensureMeetingID("room-a")
+	if newSittingID == priorID {
+		t.Fatal("test requires a distinct durable sitting identity")
+	}
+	if _, _, err := app.admitParticipantWithAnchor(context.Background(), "room-a", "AJ", "session-a", "endpoint-a", newSittingID, memberAdmissionPrincipal("aj@example.com")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		prior, found := meetings.recordByID(priorID)
+		if found && prior.EndedReason == meetingEndedReasonRestart && meetingFinalizationReceiptReady(prior.Finalization) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("defensively closed prior sitting was not finalized in-process: %+v", prior.Finalization)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	current, found := meetings.activeRecord("room-a")
+	if !found || current.ID != newSittingID || current.EndedAt != "" {
+		t.Fatalf("current sitting=%+v found=%v, want open %s", current, found, newSittingID)
+	}
+}
+
+func TestTwoAnchoredSittingsRecoveryReceiptsOlderBoundary(t *testing.T) {
+	root := t.TempDir()
+	memory, err := newMeetingMemoryStore(filepath.Join(root, "meeting-memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := loadMeetingStore(filepath.Join(root, "meetings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchors, err := OpenAdmissionAnchorStore(filepath.Join(root, "anchors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	principal := memberAdmissionPrincipal("aj@example.com")
+	for index, sittingID := range []string{"sitting-one", "sitting-two"} {
+		candidate := admissionAnchorForTest(base.Add(time.Duration(index)*time.Hour), sittingID, principal, uint64(index+1))
+		candidate.TenantID = canonicalTenantID()
+		if _, err := anchors.RecordFirst(context.Background(), candidate); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app := &kanbanBoardApp{memory: memory, meetings: meetings, admissionAnchors: anchors}
+	app.reconcileMeetingRecordsAtBoot()
+
+	first, found := meetings.recordByID("sitting-one")
+	if !found || first.EndedAt != base.Add(time.Hour).Format(time.RFC3339Nano) || first.EndedReason != meetingEndedReasonRestart {
+		t.Fatalf("older recovered sitting=%+v found=%v", first, found)
+	}
+	if first.Finalization == nil || first.Finalization.State != meetingFinalizationClosing {
+		t.Fatalf("older recovered sitting receipt=%+v, want durable closing", first.Finalization)
+	}
+	second, found := meetings.activeRecord("room-a")
+	if !found || second.ID != "sitting-two" || second.EndedAt != "" {
+		t.Fatalf("latest recovered sitting=%+v found=%v", second, found)
+	}
+	needs := meetings.recordsNeedingFinalization()
+	if len(needs) != 1 || needs[0].ID != "sitting-one" {
+		t.Fatalf("restart finalization queue=%+v, want older sitting", needs)
 	}
 }

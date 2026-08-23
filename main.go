@@ -6471,8 +6471,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				participantSittingID = sittingID
 				admission, err := kanbanApp.admitGuestWithAnchorResult(context.Background(), connRoomID, guest.SessionKey, guest.Name, participantSessionID, sittingID)
 				if err != nil {
-					if errors.Is(err, ErrAdmissionAnchorStore) {
-						log.Errorf("Failed to persist guest admission anchor: %v", err)
+					if errors.Is(err, ErrAdmissionAnchorStore) || errors.Is(err, ErrMeetingRecordStore) {
+						log.Errorf("Failed to persist durable guest admission: %v", err)
 						_ = sendKanbanEvent(c, "access_denied", "could not establish a durable room admission.")
 						return
 					}
@@ -6490,7 +6490,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				if admitGuestCaps != nil {
 					admitGuestCaps()
 				}
-				if kanbanApp.noteMeetingAdmissionForSitting(connRoomID, admittedName, sittingID) == "" {
+				if kanbanApp.publishAnchoredMeetingAdmission(admission) == "" {
 					_ = sendKanbanEvent(c, "access_denied", "the room sitting changed while you joined; please reconnect.")
 					return
 				}
@@ -6586,8 +6586,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			participantSittingID = sittingID
 			admission, err := kanbanApp.admitParticipantWithAnchorResult(context.Background(), connRoomID, name, participantSessionID, endpointID, sittingID, memberAdmissionPrincipal(sessionEmail), transferExisting)
 			if err != nil {
-				if errors.Is(err, ErrAdmissionAnchorStore) {
-					log.Errorf("Failed to persist member admission anchor: %v", err)
+				if errors.Is(err, ErrAdmissionAnchorStore) || errors.Is(err, ErrMeetingRecordStore) {
+					log.Errorf("Failed to persist durable member admission: %v", err)
 					_ = sendKanbanEvent(c, "access_denied", "could not establish a durable room admission.")
 					return
 				}
@@ -6601,7 +6601,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			participantAccepted = true
 			participantAcceptedState.Store(true)
 			finalizeParticipantAdmissionRetirements(admission.retired, connRoomID)
-			if kanbanApp.noteMeetingAdmissionForSitting(connRoomID, admittedName, sittingID) == "" {
+			if kanbanApp.publishAnchoredMeetingAdmission(admission) == "" {
 				_ = sendKanbanEvent(c, "access_denied", "the room sitting changed while you joined; please reconnect.")
 				return
 			}

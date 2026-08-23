@@ -20,6 +20,12 @@ import {
 } from 'react-native';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { api } from '../api/client';
+import type {
+  ScoutResultAssetRef,
+  ScoutResultTableRef,
+  ScoutResultWorkbookRef,
+} from '../api/types';
 import { Waveform } from './Waveform';
 import { colors, hitMin, ink, radius, shadow, space, type } from '../theme/tokens';
 import { useComposerDictation } from '../voice/useComposerDictation';
@@ -33,27 +39,18 @@ import {
   type MeetingIntelligenceFact,
   type MeetingIntelligenceSnapshot,
 } from '../realtime/meetingIntelligence';
+import {
+  latestRoomConversationActivity,
+  roomConversationActivityMessages,
+  roomConversationFeedMessages,
+  type RoomChatMessage,
+} from '../realtime/roomConversation';
+import { InlineArtifactPreview, type InlineArtifactKind } from '../messaging/InlineArtifactPreview';
+import { workRefHasClosedResultEnvelope } from '../messaging/workTimeline';
 
 export type RoomConversationMode = 'recap' | 'transcript' | 'chat';
 
-type ChatItem = {
-  id: string;
-  name: string;
-  text: string;
-  createdAt: string;
-  authorEmail?: string;
-  agentId?: string;
-  artifactId?: string;
-  workRunId?: string;
-  workStatus?: 'queued' | 'running' | 'approval_required' | 'complete' | 'needs_attention';
-  workFamily?: string;
-  workTitle?: string;
-  workProgress?: number;
-  followThroughId?: string;
-  followThroughStatus?: 'queued' | 'delivering' | 'delivered' | 'awaiting_input';
-  transient?: boolean;
-  error?: boolean;
-};
+type ChatItem = RoomChatMessage;
 
 type TranscriptItem = {
   id: string;
@@ -63,6 +60,14 @@ type TranscriptItem = {
   metadata?: Record<string, unknown>;
 };
 
+export type RoomResultArtifactRef = Readonly<{
+  artifactId: string;
+  artifactType: 'html_deck' | 'markdown';
+  artifactVersion: number;
+  artifactDigest: string;
+  title: string;
+}>;
+
 type Props = {
   visible: boolean;
   mode: RoomConversationMode;
@@ -70,12 +75,14 @@ type Props = {
   messages: ChatItem[];
   transcriptEntries: TranscriptItem[];
   intelligence: MeetingIntelligenceSnapshot | null;
+  sessionToken: string;
   viewer: { name?: string; email?: string };
   onClose: () => void;
   onDeleteMessage: (id: string) => boolean;
   onModeChange: (mode: RoomConversationMode) => void;
   onSendMessage: (text: string) => boolean;
-  onOpenArtifact?: (artifactId: string, title: string) => void;
+  onOpenArtifact?: (result: RoomResultArtifactRef) => void;
+  onOpenResultAsset?: (asset: ScoutResultAssetRef) => void;
   meetingRecordAvailable?: boolean;
   onOpenMeetingRecord?: (mode: Exclude<RoomConversationMode, 'chat'>) => void;
 };
@@ -111,6 +118,198 @@ function transcriptSpeaker(item: TranscriptItem): string {
   }
   return 'Live transcript';
 }
+
+function resultAssets(metadata: Readonly<Record<string, string>>): ScoutResultAssetRef[] {
+  try {
+    const parsed = JSON.parse(String(metadata.assets ?? '')) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, 12).flatMap((candidate) => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+      const source = candidate as Record<string, unknown>;
+      const ref = String(source.ref ?? '').trim().toLowerCase();
+      const kind = String(source.kind ?? '').trim().toLowerCase();
+      if (!/^[0-9a-f]{64}$/u.test(ref) || kind === 'page_image') return [];
+      return [{
+        ref,
+        kind,
+        mime: String(source.mime ?? '').trim().toLowerCase() || 'application/octet-stream',
+        name: String(source.name ?? '').trim().slice(0, 180) || 'file',
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function resultTable(metadata: Readonly<Record<string, string>>): ScoutResultTableRef | undefined {
+  try {
+    const parsed = JSON.parse(String(metadata.tablePreview ?? '')) as Partial<ScoutResultTableRef>;
+    if (!Array.isArray(parsed.columns) || !parsed.columns.length || !Array.isArray(parsed.rows)) return undefined;
+    const columns = parsed.columns.slice(0, 12).map((value) => String(value ?? '').trim().slice(0, 180));
+    if (columns.some((value) => !value)) return undefined;
+    return {
+      columns,
+      rows: parsed.rows.slice(0, 20).filter(Array.isArray).map((row) => (
+        columns.map((_, index) => String(row[index] ?? '').trim().slice(0, 180))
+      )),
+      truncated: parsed.truncated === true || parsed.rows.length > 20,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function resultWorkbook(metadata: Readonly<Record<string, string>>): ScoutResultWorkbookRef | undefined {
+  try {
+    const parsed = JSON.parse(String(metadata.workbookPreview ?? '')) as Partial<ScoutResultWorkbookRef>;
+    const fileName = String(parsed.fileName ?? '').trim().slice(0, 180);
+    const sheetCount = Number(parsed.sheetCount);
+    const formulaCount = Number(parsed.formulaCount);
+    if (!fileName || !Number.isSafeInteger(sheetCount) || sheetCount < 1 || !Number.isSafeInteger(formulaCount) || formulaCount < 0) return undefined;
+    return {
+      fileName,
+      mime: String(parsed.mime ?? '').trim().toLowerCase() || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      sheetCount,
+      formulaCount,
+      inputPolicy: String(parsed.inputPolicy ?? '').trim() || undefined,
+      sheets: (Array.isArray(parsed.sheets) ? parsed.sheets : []).slice(0, 12).flatMap((sheet) => {
+        const name = String(sheet?.name ?? '').trim().slice(0, 180);
+        return name ? [{ name, purpose: String(sheet?.purpose ?? '').trim().slice(0, 180) || undefined }] : [];
+      }),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function roomResultKind(value: RoomChatMessage['resultArtifactType']): InlineArtifactKind | null {
+  if (value === 'html_deck') return 'html_deck';
+  if (value === 'markdown') return 'document';
+  if (value && ['pdf', 'image', 'table', 'workbook', 'bundle', 'file'].includes(value)) return value;
+  return null;
+}
+
+function roomActivityStatus(item: RoomChatMessage): string {
+  if (item.followThroughStatus === 'awaiting_input') return 'Needs input';
+  if (item.followThroughStatus === 'delivered') return 'Delivered';
+  if (item.followThroughStatus) return 'Working';
+  if (item.workStatus === 'complete') return 'Delivered';
+  if (item.workStatus === 'needs_attention') return 'Needs attention';
+  if (item.workStatus === 'needs_input' || item.workStatus === 'approval_required') return 'Needs input';
+  if (item.workStatus === 'queued') return 'Queued';
+  return 'Working';
+}
+
+const RoomTypedResult = memo(function RoomTypedResult({
+  message,
+  sessionToken,
+  onOpenArtifact,
+  onOpenResultAsset,
+}: {
+  message: RoomChatMessage;
+  sessionToken: string;
+  onOpenArtifact?: Props['onOpenArtifact'];
+  onOpenResultAsset?: Props['onOpenResultAsset'];
+}) {
+  const [result, setResult] = useState<{
+    kind: InlineArtifactKind;
+    title: string;
+    text: string;
+    assets: ScoutResultAssetRef[];
+    table?: ScoutResultTableRef;
+    workbook?: ScoutResultWorkbookRef;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const artifactId = String(message.resultArtifactId ?? '').trim();
+  const artifactVersion = Number(message.resultArtifactVersion ?? 0);
+  const artifactDigest = String(message.resultArtifactDigest ?? '').trim().toLowerCase();
+  const declaredType = message.resultArtifactType;
+  const openRef = declaredType === 'html_deck' || declaredType === 'markdown' ? {
+    artifactId,
+    artifactType: declaredType,
+    artifactVersion,
+    artifactDigest,
+    title: String(message.resultTitle ?? message.workTitle ?? '').trim() || 'Deliverable',
+  } satisfies RoomResultArtifactRef : null;
+
+  useEffect(() => {
+    let active = true;
+    setResult(null);
+    setLoading(true);
+    setFailed(false);
+    if (!sessionToken || !artifactId || !declaredType || !Number.isSafeInteger(artifactVersion) || artifactVersion < 1 || !/^[0-9a-f]{64}$/u.test(artifactDigest)) {
+      setLoading(false);
+      setFailed(true);
+      return () => { active = false; };
+    }
+    void api.artifact(sessionToken, artifactId).then((response) => {
+      if (!active) return;
+      const artifact = response.artifacts[0];
+      const metadata = artifact?.metadata ?? {};
+      const kind = roomResultKind(declaredType);
+      const loadedType = String(metadata.type ?? '').trim().toLowerCase();
+      const loadedVersion = Number(metadata.artifactVersion ?? 0);
+      const loadedDigest = String(metadata.contentDigest ?? '').trim().toLowerCase();
+      if (!artifact || artifact.id !== artifactId || !kind || loadedType !== declaredType
+        || loadedVersion !== artifactVersion || loadedDigest !== artifactDigest) {
+        throw new Error('Exact result revision is unavailable.');
+      }
+      const assets = resultAssets(metadata);
+      const table = resultTable(metadata);
+      const workbook = resultWorkbook(metadata);
+      if (declaredType !== 'html_deck' && declaredType !== 'markdown' && !workRefHasClosedResultEnvelope({
+        id: message.workRunId || artifactId,
+        mode: 'work',
+        query: message.workTitle || '',
+        status: 'complete',
+        resultArtifactId: artifactId,
+        resultArtifactType: declaredType,
+        resultArtifactVersion: artifactVersion,
+        resultArtifactDigest: artifactDigest,
+        resultAssets: assets,
+        resultTable: table,
+        resultWorkbook: workbook,
+      })) throw new Error('Closed result preview is unavailable.');
+      if (declaredType === 'markdown' && !String(artifact.text ?? '').trim()) throw new Error('Document preview is unavailable.');
+      setResult({
+        kind,
+        title: String(message.resultTitle ?? message.workTitle ?? metadata.title ?? '').trim() || 'Deliverable',
+        text: declaredType === 'markdown' ? String(artifact.text ?? '').trim() : '',
+        assets,
+        table,
+        workbook,
+      });
+      setLoading(false);
+    }).catch(() => {
+      if (!active) return;
+      setLoading(false);
+      setFailed(true);
+    });
+    return () => { active = false; };
+  }, [artifactDigest, artifactId, artifactVersion, declaredType, message.workRunId, message.workTitle, message.resultTitle, sessionToken]);
+
+  if (loading) return <View accessibilityRole="progressbar" style={styles.resultLoading}><ActivityIndicator color="#FF8A5B" /><Text style={styles.resultLoadingText}>Loading exact deliverable…</Text></View>;
+  if (failed || !result) return <View accessibilityRole="alert" style={styles.resultLoading}><SymbolView name="exclamationmark.triangle" tintColor="#FF9F0A" size={18} /><Text style={styles.resultLoadingText}>Exact preview unavailable</Text></View>;
+  return (
+    <InlineArtifactPreview
+      agentName="Scout"
+      artifactId={artifactId}
+      artifactVersion={artifactVersion}
+      artifactDigest={artifactDigest}
+      assets={result.assets}
+      kind={result.kind}
+      onExpand={result.kind === 'document' && openRef ? () => onOpenArtifact?.({ ...openRef, title: result.title }) : undefined}
+      onOpenAsset={onOpenResultAsset}
+      onPresent={result.kind === 'html_deck' && openRef ? () => onOpenArtifact?.({ ...openRef, title: result.title }) : undefined}
+      sessionToken={sessionToken}
+      table={result.table}
+      text={result.text}
+      title={result.title}
+      workbook={result.workbook}
+    />
+  );
+});
 
 const conversationMomentumGraceMs = 200;
 
@@ -225,12 +424,14 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   messages,
   transcriptEntries,
   intelligence,
+  sessionToken,
   viewer,
   onClose,
   onDeleteMessage,
   onModeChange,
   onSendMessage,
   onOpenArtifact,
+  onOpenResultAsset,
   meetingRecordAvailable,
   onOpenMeetingRecord,
 }: Props) {
@@ -243,12 +444,45 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const sheetRef = useRef<View>(null);
   const [draft, setDraft] = useState('');
   const [composerError, setComposerError] = useState<string | null>(null);
+  const [activityOpen, setActivityOpen] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(8);
   const recapListRef = useRef<ScrollView>(null);
   const meetingRecordButtonRef = useRef<React.ElementRef<typeof Pressable>>(null);
   const transcriptOffsetRef = useRef(0);
   const recapOffsetRef = useRef(0);
   const restoreMeetingOriginRef = useRef(false);
+  const feedMessages = useMemo(() => [...roomConversationFeedMessages(messages)], [messages]);
+  const activityMessages = useMemo(() => [...roomConversationActivityMessages(messages)], [messages]);
+  const activityRows = useMemo(() => [...activityMessages].reverse(), [activityMessages]);
+  const latestActivity = useMemo(() => latestRoomConversationActivity(messages), [messages]);
+
+  const renderActivityItem = useCallback(({ item }: { item: RoomChatMessage }) => {
+    const status = roomActivityStatus(item);
+    const delegated = Boolean(item.workParentRunId && item.workRootRunId);
+    const content = (
+      <>
+        <View style={styles.activityRowTop}>
+          <Text numberOfLines={1} style={styles.activityFamily}>{item.workFamily || (item.followThroughId ? 'Follow-through' : 'Scout work')}</Text>
+          <Text style={[styles.activityStatus, (status === 'Needs attention' || status === 'Needs input') && styles.activityStatusAttention]}>{status}</Text>
+        </View>
+        <Text numberOfLines={2} style={styles.activityRowTitle}>{item.workTitle || item.text || 'Scout activity'}</Text>
+        <Text style={styles.activityTopology}>{delegated ? 'Delegated work' : 'Root work'} · {timeLabel(item.createdAt)}</Text>
+        {typeof item.workProgress === 'number' ? (
+          <View style={styles.workProgressTrack}>
+            <View style={[styles.workProgressFill, { width: `${item.workProgress}%` as `${number}%` }]} />
+          </View>
+        ) : null}
+      </>
+    );
+    // Activity is the bounded process surface. Lifecycle artifacts may contain
+    // implementation JSON/HTML and are never opened as customer deliverables;
+    // exact typed results already have their own verified preview in the feed.
+    return <View style={styles.activityRow}>{content}</View>;
+  }, []);
+
+  useEffect(() => {
+    if (!visible || mode !== 'chat' || !activityMessages.length) setActivityOpen(false);
+  }, [activityMessages.length, mode, visible]);
 
   useEffect(() => {
     if (!visible || !restoreMeetingOriginRef.current || mode === 'chat') return;
@@ -351,47 +585,24 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
   const renderMessage = useCallback(({ item }: { item: ChatItem }) => {
     const own = chatItemIsOwn(item, viewer);
     const scout = normalizedIdentity(item.agentId) === 'scout';
+    const typedResult = Boolean(item.workRunId && item.resultArtifactId && item.resultArtifactType);
     return (
       <View style={[styles.messageRow, own && styles.messageRowOwn, scout && styles.messageRowScout]}>
-        <View style={[styles.messageBubble, own && styles.messageBubbleOwn, scout && styles.messageBubbleScout, item.error && styles.messageBubbleError]}>
+        <View style={[styles.messageBubble, typedResult && styles.messageBubbleResult, own && styles.messageBubbleOwn, scout && styles.messageBubbleScout, item.error && styles.messageBubbleError]}>
           <View style={styles.messageMeta}>
             <Text numberOfLines={1} style={[styles.messageAuthor, own && styles.messageAuthorOwn, scout && styles.messageAuthorScout]}>
               {own ? 'You' : scout ? 'Scout' : item.name}
             </Text>
             <Text style={[styles.messageTime, own && styles.messageTimeOwn]}>{timeLabel(item.createdAt)}</Text>
           </View>
-          <RoomMessageText own={own} scout={scout} text={item.text} />
-          {item.artifactId && item.workRunId && item.workStatus ? (
-            <Pressable
-              accessibilityHint="Opens the current activity or completed deliverable"
-              accessibilityLabel={`Open ${item.workTitle || item.workFamily || 'Scout work'}`}
-              accessibilityRole="button"
-              onPress={() => onOpenArtifact?.(item.artifactId!, item.workTitle || item.workFamily || 'Scout work')}
-              style={({ pressed }) => [styles.workCard, pressed && styles.pressed]}
-            >
-              <View style={styles.workCardHeader}>
-                <Text numberOfLines={1} style={styles.workCardFamily}>{item.workFamily || 'Scout work'}</Text>
-                <Text style={[styles.workCardStatus, item.workStatus === 'needs_attention' && styles.workCardStatusAttention]}>
-                  {item.workStatus === 'complete' ? 'Delivered' : item.workStatus === 'needs_attention' ? 'Needs attention' : item.workStatus === 'approval_required' ? 'Needs approval' : 'Working'}
-                </Text>
-              </View>
-              <Text numberOfLines={2} style={styles.workCardTitle}>{item.workTitle || 'Open work'}</Text>
-              {typeof item.workProgress === 'number' ? (
-                <View style={styles.workProgressTrack}>
-                  <View style={[styles.workProgressFill, { width: `${item.workProgress}%` as `${number}%` }]} />
-                </View>
-              ) : null}
-              <View style={styles.workCardOpenRow}>
-                <Text style={styles.workCardOpen}>Open</Text>
-                <SymbolView name="arrow.up.right" tintColor="#FF8A5B" size={12} />
-              </View>
-            </Pressable>
-          ) : null}
-          {item.followThroughId && item.followThroughStatus ? (
-            <Text style={styles.followThroughStatus}>
-              {item.followThroughStatus === 'awaiting_input' ? 'Needs a destination' : 'Scheduled work'}
-            </Text>
-          ) : null}
+          {typedResult ? (
+            <RoomTypedResult
+              message={item}
+              onOpenArtifact={onOpenArtifact}
+              onOpenResultAsset={onOpenResultAsset}
+              sessionToken={sessionToken}
+            />
+          ) : <RoomMessageText own={own} scout={scout} text={item.text} />}
         </View>
         {own ? (
           <Pressable
@@ -412,7 +623,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
         ) : null}
       </View>
     );
-  }, [deleteMessage, viewer]);
+  }, [deleteMessage, onOpenArtifact, onOpenResultAsset, sessionToken, viewer]);
 
   const renderTranscriptEntry = useCallback(({ item }: { item: TranscriptItem }) => (
     <View style={styles.transcriptEntry}>
@@ -517,8 +728,8 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                   <Text style={styles.emptyBody}>{emptyCopy.body}</Text>
                 </View>
               )}
-              contentContainerStyle={[styles.listContent, !messages.length && styles.emptyListContent]}
-              data={messages}
+              contentContainerStyle={[styles.listContent, !feedMessages.length && styles.emptyListContent]}
+              data={feedMessages}
               keyExtractor={(item) => item.id}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
@@ -534,6 +745,28 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               scrollEventThrottle={100}
               style={styles.list}
             />
+            {latestActivity ? (
+              <Pressable
+                accessibilityHint="Opens work progress, completion, failures, and requests for input outside the conversation"
+                accessibilityLabel={`Open Activity. ${latestActivity.workTitle || latestActivity.workFamily || 'Scout work'}`}
+                accessibilityRole="button"
+                onPress={() => setActivityOpen(true)}
+                style={({ pressed }) => [styles.activityPill, pressed && styles.pressed]}
+              >
+                <View style={styles.activityPillDot} />
+                <Text numberOfLines={1} style={styles.activityPillTitle}>Activity</Text>
+                <Text numberOfLines={1} style={styles.activityPillStatus}>
+                  {latestActivity.workStatus === 'complete'
+                    ? 'Delivered'
+                    : latestActivity.workStatus === 'needs_attention'
+                      ? 'Needs attention'
+                      : latestActivity.workStatus === 'needs_input' || latestActivity.workStatus === 'approval_required' || latestActivity.followThroughStatus === 'awaiting_input'
+                        ? 'Needs input'
+                        : 'Working'}
+                </Text>
+                <SymbolView name="chevron.up" tintColor="rgba(255,255,255,0.54)" size={12} />
+              </Pressable>
+            ) : null}
             <View style={[styles.composerShell, { paddingBottom: Math.max(safeArea.bottom, space[3]) }]}>
               {composerDictation.state === 'idle' && !/(^|[^\p{L}\p{N}])@scout(?![\p{L}\p{N}])/iu.test(draft) ? (
                 <Pressable
@@ -708,6 +941,40 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
           </ScrollView>
         )}
         </KeyboardAvoidingView>
+        <Modal
+          animationType="slide"
+          onRequestClose={() => setActivityOpen(false)}
+          presentationStyle="pageSheet"
+          visible={activityOpen}
+        >
+          <View style={[styles.activitySheet, { paddingTop: Math.max(safeArea.top, space[3]) }]}>
+            <View style={styles.activityHeader}>
+              <View style={styles.activityHeaderCopy}>
+                <Text accessibilityRole="header" style={styles.activityTitle}>Activity</Text>
+                <Text style={styles.activitySubtitle}>Scout work stays here, outside the conversation.</Text>
+              </View>
+              <Pressable
+                accessibilityLabel="Close Activity"
+                accessibilityRole="button"
+                onPress={() => setActivityOpen(false)}
+                style={({ pressed }) => [styles.activityClose, pressed && styles.pressed]}
+              >
+                <SymbolView name="xmark" tintColor="#FFFFFF" size={16} />
+              </Pressable>
+            </View>
+			<FlatList
+			  contentContainerStyle={[styles.activityList, { paddingBottom: Math.max(safeArea.bottom, space[5]) }]}
+			  data={activityRows}
+			  initialNumToRender={8}
+			  keyExtractor={(item) => item.workRunId || item.followThroughId || item.id}
+			  maxToRenderPerBatch={8}
+			  removeClippedSubviews={Platform.OS === 'android'}
+			  renderItem={renderActivityItem}
+			  showsVerticalScrollIndicator={false}
+			  windowSize={7}
+			/>
+          </View>
+        </Modal>
       </View>
     </Modal>
   );
@@ -752,6 +1019,7 @@ const styles = StyleSheet.create({
   messageRowOwn: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   messageRowScout: { maxWidth: '94%' },
   messageBubble: { maxWidth: '100%', paddingHorizontal: space[3], paddingVertical: 10, borderRadius: 18, borderBottomLeftRadius: 6, backgroundColor: ink[800] },
+  messageBubbleResult: { width: '100%', paddingHorizontal: 0, paddingBottom: 0, overflow: 'hidden', backgroundColor: 'transparent' },
   messageBubbleOwn: { borderBottomLeftRadius: 18, borderBottomRightRadius: 6, backgroundColor: '#FFFFFF' },
   messageBubbleScout: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,90,25,0.42)', backgroundColor: 'rgba(255,90,25,0.10)' },
   messageBubbleError: { borderColor: 'rgba(255,159,10,0.62)' },
@@ -765,6 +1033,8 @@ const styles = StyleSheet.create({
   messageTextOwn: { color: ink[950] },
   messageTextScout: { color: 'rgba(255,255,255,0.92)' },
   followThroughStatus: { ...type.captionMedium, marginTop: 7, color: '#FF8A5B' },
+	resultLoading: { minWidth: 240, minHeight: 120, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: space[2], padding: space[4], borderRadius: radius.lg, backgroundColor: ink[800] },
+	resultLoadingText: { ...type.captionMedium, color: 'rgba(255,255,255,0.68)' },
 	workCard: { minWidth: 230, gap: 7, marginTop: space[3], padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.35)', backgroundColor: 'rgba(9,9,11,0.48)' },
 	workCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
 	workCardFamily: { ...type.captionMedium, flex: 1, color: 'rgba(255,255,255,0.62)' },
@@ -801,6 +1071,24 @@ const styles = StyleSheet.create({
   recapFactMeta: { ...type.caption, color: 'rgba(255,255,255,0.46)' },
   meetingRecordAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.36)', backgroundColor: 'rgba(255,90,25,0.08)' },
   meetingRecordActionText: { ...type.button, color: '#FF8A5B' },
+  activityPill: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space[2], marginHorizontal: space[4], marginBottom: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.32)', backgroundColor: ink[850] },
+  activityPillDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF8A5B' },
+  activityPillTitle: { ...type.captionMedium, color: '#FFFFFF' },
+  activityPillStatus: { ...type.caption, flex: 1, textAlign: 'right', color: 'rgba(255,255,255,0.58)' },
+  activitySheet: { flex: 1, backgroundColor: ink[950] },
+  activityHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingBottom: space[3], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.09)' },
+  activityHeaderCopy: { minWidth: 0, flex: 1 },
+  activityTitle: { ...type.title2, color: '#FFFFFF' },
+  activitySubtitle: { ...type.caption, marginTop: 2, color: 'rgba(255,255,255,0.48)' },
+  activityClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.10)' },
+  activityList: { gap: space[3], padding: space[4] },
+  activityRow: { minHeight: 116, gap: space[2], padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[850] },
+  activityRowTop: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  activityFamily: { ...type.label, flex: 1, color: 'rgba(255,255,255,0.52)', textTransform: 'uppercase', letterSpacing: 0.6 },
+  activityStatus: { ...type.captionMedium, color: '#FF8A5B' },
+  activityStatusAttention: { color: '#FF9F0A' },
+  activityRowTitle: { ...type.body, color: '#FFFFFF' },
+  activityTopology: { ...type.caption, color: 'rgba(255,255,255,0.44)' },
   composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
   scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: 'rgba(255,90,25,0.10)' },
   scoutMentionShortcutLabel: { ...type.captionMedium, color: '#FF8A5B' },

@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1098,6 +1099,75 @@ func TestRoomChatDeleteEnforcesAuthorshipFromSession(t *testing.T) {
 	}
 	if entries := app.memory.snapshot(0); len(entries) != 0 {
 		t.Fatalf("memory entries=%d after delete, want the transcript entry hard-removed", len(entries))
+	}
+}
+
+// A waiting archive writer makes sync.RWMutex writer-preferring. The delete
+// path already owns a lifecycle read lease, so recursively taking a second
+// read lease deadlocks the reader and queued writer forever. TryRLock gives
+// this regression a deterministic proof that the writer is queued before the
+// delete continues; no scheduler sleep is involved.
+func TestRoomChatDeleteDoesNotRecursivelyReadLockBehindQueuedLifecycleWriter(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	payload, ok := app.recordRoomChatMessageWithMetadata(officeRoomID, "Tom", "remove after the archive writer queues", map[string]string{
+		"authorEmail": "tom@shareability.com",
+	})
+	if !ok {
+		t.Fatal("seed room chat message")
+	}
+	id, _ := payload["id"].(string)
+
+	deleteEntered := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	app.roomChatDeleteAfterLifecycleLease = func() {
+		close(deleteEntered)
+		<-releaseDelete
+	}
+	deleteDone := make(chan bool, 1)
+	go func() {
+		_, deleted := app.deleteRoomChatMessage(id, "tom@shareability.com", "Tom")
+		deleteDone <- deleted
+	}()
+	select {
+	case <-deleteEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("delete did not acquire its lifecycle read lease")
+	}
+
+	writerStarted := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		close(writerStarted)
+		app.meetingLifecycleMu.Lock()
+		app.meetingLifecycleMu.Unlock()
+		close(writerDone)
+	}()
+	<-writerStarted
+	deadline := time.Now().Add(2 * time.Second)
+	for app.meetingLifecycleMu.TryRLock() {
+		app.meetingLifecycleMu.RUnlock()
+		if time.Now().After(deadline) {
+			t.Fatal("lifecycle writer never queued behind the held delete lease")
+		}
+		runtime.Gosched()
+	}
+
+	close(releaseDelete)
+	select {
+	case deleted := <-deleteDone:
+		if !deleted {
+			t.Fatal("authorized delete failed after queued lifecycle writer")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("room-chat delete deadlocked on a recursive lifecycle read lock")
+	}
+	select {
+	case <-writerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued lifecycle writer remained stranded after delete")
+	}
+	if _, found := app.memory.entryByID(id); found {
+		t.Fatal("authorized delete returned before durable removal")
 	}
 }
 

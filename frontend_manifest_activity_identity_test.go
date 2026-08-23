@@ -43,7 +43,13 @@ func TestManifestDeckActivityUsesExactCompletedResultBinding(t *testing.T) {
 			t.Errorf("manifest deck activity identity contract missing %q", want)
 		}
 	}
-	if strings.Contains(html, "manifestDeckArtifactActivityMessage") || strings.Contains(html, "synthetic: true") {
+	manifestStart := strings.Index(html, "function manifestDeckDeliveryBinding(manifest, deliverable)")
+	manifestEnd := strings.Index(html[manifestStart:], "function scoutManifestCardNode(message)")
+	if manifestStart < 0 || manifestEnd < 0 {
+		t.Fatal("manifest activity helper boundaries missing")
+	}
+	manifestActivity := html[manifestStart : manifestStart+manifestEnd]
+	if strings.Contains(manifestActivity, "manifestDeckArtifactActivityMessage") || strings.Contains(manifestActivity, "synthetic: true") {
 		t.Fatal("manifest activity still fabricates a completed artifact work message")
 	}
 	start := strings.Index(html, "function openManifestDeckReceiptContext(manifest, binding, deckArtifact, trigger, options = {})")
@@ -121,7 +127,7 @@ const server=http.createServer((req,res)=>{
   if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}
   res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
 });
-const threadMessage=(id,runId,goalId,resultId,status,query,title,capabilities={})=>({id,kind:'thread',role:'scout',createdAt:'2026-08-22T13:57:00Z',thread:{id:runId,mode:'goal',artifactId:goalId,resultArtifactId:resultId,resultArtifactType:'html_deck',resultTitle:title||resultId,resultApprovalState:'approved_exact',resultQualityState:'admitted',status,query,...capabilities}});
+const threadMessage=(id,runId,goalId,resultId,status,query,title,capabilities={})=>{const bound=artifacts[resultId];return {id,kind:'thread',role:'scout',createdAt:'2026-08-22T13:57:00Z',thread:{id:runId,mode:'goal',artifactId:goalId,resultArtifactId:resultId,resultArtifactType:'html_deck',...(bound?{resultArtifactVersion:Number(bound.metadata.artifactVersion),resultArtifactDigest:bound.metadata.contentDigest}:{}),resultTitle:title||resultId,resultApprovalState:'approved_exact',resultQualityState:'admitted',status,query,...capabilities}}};
 const oldSameGoal=threadMessage('old-same-goal','run-old','goal-current','deck-current','needs_attention','Old 02:32 blocked prompt');
 const completed=threadMessage('completed-exact','run-complete','goal-current','deck-current','complete','Current completed request');
 const unrelated=threadMessage('unrelated-latest','run-unrelated','goal-unrelated','deck-unrelated','needs_attention','Unrelated latest blocked root');
@@ -152,10 +158,11 @@ const manifest=(id,goalId,artifact,title)=>({id,kind:'manifest',role:'scout',cre
 
   await page.evaluate(({currentManifest})=>document.body.appendChild(scoutManifestCardNode(currentManifest)),{currentManifest:manifest('manifest-current','goal-current',currentDeck,currentDeck.metadata.title)});
   await page.locator('.manifest-card').first().getByRole('button',{name:'View activity',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('#chatContextRail')?.hidden===false&&document.querySelector('#chatContextMeta')?.textContent.includes('100%'));
+  await page.waitForFunction(()=>document.querySelector('#chatContextRail')?.hidden===false&&document.querySelector('#chatContextMeta')?.textContent.includes('Delivered'));
   const exact=await page.evaluate(()=>({messageId:chatContextState?.messageId,title:chatContextTitle.textContent,meta:chatContextMeta.textContent,body:chatContextBody.textContent}));
   assert.equal(exact.messageId,'completed-exact',JSON.stringify(exact));
-  assert.match(exact.meta,/Phase 5 of 5.*100%/);
+  assert.match(exact.meta,/Delivered/);
+  assert.doesNotMatch(exact.meta,/Phase|100%/);
   assert.doesNotMatch(exact.body,/Old 02:32|Ground recommendation Up next|Unrelated latest blocked root/);
   await page.evaluate(()=>document.querySelector('#chatContextClose').click());
 

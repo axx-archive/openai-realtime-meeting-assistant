@@ -148,6 +148,10 @@ type STRIDEProductWorkRecord struct {
 	DestinationRecommendation *STRIDEProductDestinationRecommendation `json:"destinationRecommendation,omitempty"`
 	RunID                     string                                  `json:"runId,omitempty"`
 	ArtifactID                string                                  `json:"artifactId,omitempty"`
+	ResultArtifactID          string                                  `json:"resultArtifactId,omitempty"`
+	ResultArtifactType        string                                  `json:"resultArtifactType,omitempty"`
+	ResultArtifactVersion     int                                     `json:"resultArtifactVersion,omitempty"`
+	ResultArtifactDigest      string                                  `json:"resultArtifactDigest,omitempty"`
 	ArtifactHref              string                                  `json:"artifactHref,omitempty"`
 	BrainHref                 string                                  `json:"brainHref,omitempty"`
 	CompletionSummary         string                                  `json:"completionSummary,omitempty"`

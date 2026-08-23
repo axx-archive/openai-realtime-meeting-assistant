@@ -464,8 +464,10 @@ func externalEvidenceFreshResearchContextContract(contract string) bool {
 
 var (
 	externalEvidenceComparativeQuestionPattern   = regexp.MustCompile(`(?i)\b(?:compar(?:e|ed|ing|ison|ative)|comparables?|peers?|benchmarks?|analogs?|versus|vs\.?|how\s+do|how\s+does|differences?\s+between)\b`)
+	externalEvidenceStrongComparativePattern     = regexp.MustCompile(`(?i)\b(?:compar(?:e|ed|ing|ison|ative)|comparables?|peers?|benchmarks?|analogs?|versus|vs\.?|differences?\s+between|differs?)\b`)
 	externalEvidenceCurrentConstraintTimePattern = regexp.MustCompile(`(?i)\b(?:current|currently|latest|today|now|as\s+of)\b`)
 	externalEvidenceCurrentConstraintRulePattern = regexp.MustCompile(`(?i)\b(?:rules?|polic(?:y|ies)|regulations?|requirements?|requires?|guides?|guidelines?|standards?|compliance|disclosures?|attribution|reuse|branded[- ]content|terms?|laws?)\b`)
+	externalEvidenceEngagementArmyPattern        = regexp.MustCompile(`(?i)\bengagement[- ]+arm(?:y|ies)\b`)
 	externalEvidenceDecisionActionPattern        = regexp.MustCompile(`(?i)\b(?:recommend|recommendation|decide|decision|choose|proceed|pilot|launch|build|stop|delay|sequence|stage|scope|scale|guardrail|measure|measurement|prioritize)\b`)
 )
 
@@ -567,6 +569,32 @@ func externalEvidenceDecisionRelevanceValid(authority externalEvidenceResearchQu
 		externalEvidenceTextContainsExactPhrase(relevance, authority.ScopeAnchor) && externalEvidenceDecisionActionPattern.MatchString(relevance)
 }
 
+func canonicalExternalEvidenceResearchKind(authority externalEvidenceResearchQuestionAuthority) string {
+	// A model sometimes labels an otherwise valid comparator or current-rule
+	// question as direct_evidence. Retype only when the question itself proves
+	// exactly one alternate lane. Competing lane signals and multiple measures
+	// remain errors; choosing between them would change research authority.
+	if authority.ResearchKind != "direct_evidence" {
+		return authority.ResearchKind
+	}
+	question := authority.Question
+	measureCount := len(externalEvidenceMeasureKinds(question))
+	// Auto-retyping needs an explicit comparator. The broader legacy validator
+	// also recognizes "how does", but that phrase alone can ask for a mechanism
+	// ("How does the program work?") and does not authorize a comparator lane.
+	comparative := externalEvidenceStrongComparativePattern.MatchString(question)
+	rule := externalEvidenceCurrentConstraintRulePattern.MatchString(question)
+	currentRule := rule && externalEvidenceCurrentConstraintTimePattern.MatchString(question)
+	switch {
+	case comparative && !rule && measureCount <= 1:
+		return "comparative_evidence"
+	case currentRule && !comparative && measureCount == 0:
+		return "current_constraint"
+	default:
+		return authority.ResearchKind
+	}
+}
+
 func canonicalExternalEvidenceDirectQuestion(authority externalEvidenceResearchQuestionAuthority) string {
 	// Prefer the exact authorized quote. It preserves every entity, population,
 	// measure, predicate, geography, and time dimension while turning an
@@ -652,6 +680,7 @@ func decodeExternalEvidenceResearchQuestionAuthority(value any, index int) (exte
 		AuthorityQuote: values["authority_quote"], ScopeAnchor: values["scope_anchor"], DecisionEffect: strings.ToLower(values["decision_effect"]),
 		DecisionRelevance: values["decision_relevance"],
 	}
+	authority.ResearchKind = canonicalExternalEvidenceResearchKind(authority)
 	// Decision relevance is routing metadata, not an external claim. Once the
 	// model has supplied a valid bound anchor and decision-effect enum, normalize
 	// weak prose deterministically instead of spending another model revision on
@@ -2029,6 +2058,11 @@ func externalEvidencePredicateKinds(value string) map[string]bool {
 
 func externalEvidenceMeasureKinds(value string) map[string]bool {
 	lowered := strings.ToLower(value)
+	// "Engagement army" is an authorized category label for an opt-in creator
+	// community, not a request for an engagement metric. Remove only that exact
+	// compound before measure classification; an actual engagement rate/reach
+	// elsewhere in the question remains visible and governed.
+	lowered = externalEvidenceEngagementArmyPattern.ReplaceAllString(lowered, "creator community")
 	result := map[string]bool{}
 	containsAny := func(values ...string) bool {
 		for _, candidate := range values {

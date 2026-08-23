@@ -65,7 +65,7 @@ GPT Transcribe for committed/file input, GPT Image 2 high, and
 text-embedding-3-small. Stale model/effort variables are ignored and should be
 removed from the live environment rather than copied into a new release.
 
-Private native voice has two independent release keys. Build 74's production
+Private native voice has two independent release keys. Build 75's production
 EAS profile sets `EXPO_PUBLIC_NATIVE_REALTIME_VOICE_ENABLED=true`, and the VPS
 must separately set `PRIVATE_REALTIME_VOICE_QUALIFIED=true` before
 `/client-config` qualifies a signed-in launcher. Missing, empty, malformed, and

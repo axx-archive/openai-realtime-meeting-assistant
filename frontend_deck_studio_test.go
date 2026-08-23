@@ -60,10 +60,15 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"async function openDeckPresentation(artifactId, title, initialPayload = null)",
 		"data-present-action=\"next\"",
 		"data-present-action=\"notes\"",
+		"function deckImageObjectPosition(element)",
+		"element.crop = ['center', 'top', 'bottom', 'left', 'right', 'faces', 'safe_area']",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("Deck Studio contract missing %q", want)
 		}
+	}
+	if count := strings.Count(html, "image.style.objectPosition = deckImageObjectPosition(element)"); count != 3 {
+		t.Fatalf("locked crop/focal presentation reaches %d editor/presenter/channel image surfaces, want 3", count)
 	}
 	deckStart := strings.Index(html, "async function openDeckStudio")
 	if deckStart < 0 {

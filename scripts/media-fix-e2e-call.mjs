@@ -3,8 +3,9 @@
 // with getUserMedia/getDisplayMedia overridden to live canvas.captureStream()
 // MediaStreams (no physical camera/phone/screen needed, but the real WebRTC +
 // SFU + render paths all run). Reproduces what unit tests can't:
-//   [1] a real WebRTC remote track rendered in the Safari engine shows ZERO
-//       same-track srcObject reattaches over 18s (the flicker is gone);
+//   [1] a real WebRTC remote track rendered in the Safari engine starts as one
+//       muted combined A/V owner, promotes that exact owner on a trusted
+//       gesture, and shows ZERO same-track srcObject reattaches over 36s;
 //   [2] an iPhone-13-sized mobile peer joins portrait → detected mobile, capture
 //       has no landscape aspectRatio pin, zero applyConstraints (no camera
 //       restart), and existing landscape feeds do NOT flip to portrait;
@@ -85,8 +86,8 @@ async function archiveIsolatedRoom(control) {
 
 // init script: override getUserMedia/getDisplayMedia with live canvas streams,
 // record constraints, and count applyConstraints calls on the video track.
-function initScript(label, portrait) {
-  return `(${(label, portrait) => {
+function initScript(label, portrait, rewriteMdnsCandidates) {
+  return `(${(label, portrait, rewriteMdnsCandidates) => {
     const W = portrait ? 480 : 640, H = portrait ? 640 : 480
     window.__LABEL = label
     function makeStream(text) {
@@ -113,6 +114,42 @@ function initScript(label, portrait) {
       __gumCalls: { configurable: false, get: () => gumCalls },
       __applyConstraintsCalls: { configurable: false, get: () => applyConstraintsCalls }
     })
+    // Playwright's bundled WebKit intentionally exposes only an obfuscated
+    // mDNS host candidate. On macOS CI Pion cannot resolve that synthetic
+    // `.local` name (the browser and SFU still share the same host), leaving
+    // the otherwise-valid offer/answer in ICE `checking` until the 30s
+    // watchdog reconnects it. Translate only the harness's outbound WebKit
+    // candidate address to loopback; media still traverses the real browser
+    // ICE/DTLS/SRTP stack and real Go SFU.
+    let mdnsCandidateRewrites = 0
+    Object.defineProperty(window, '__mdnsCandidateRewrites', {
+      configurable: false,
+      get: () => mdnsCandidateRewrites
+    })
+    if (rewriteMdnsCandidates) {
+      const send = WebSocket.prototype.send
+      WebSocket.prototype.send = function(data) {
+        if (typeof data === 'string') {
+          try {
+            const message = JSON.parse(data)
+            if (message?.event === 'candidate' && typeof message.data === 'string') {
+              const payload = JSON.parse(message.data)
+              const candidate = String(payload?.candidate || '')
+              const rewritten = candidate.replace(/(\s)([a-z0-9-]+\.local)(\s)/i, (_match, before, _host, after) => `${before}127.0.0.1${after}`)
+              if (rewritten !== candidate) {
+                payload.candidate = rewritten
+                message.data = JSON.stringify(payload)
+                data = JSON.stringify(message)
+                mdnsCandidateRewrites += 1
+              }
+            }
+          } catch (_) {
+            // Preserve the exact application frame when it is not JSON.
+          }
+        }
+        return send.call(this, data)
+      }
+    }
     const wrapTrack = t => {
       if (!t) return t
       const orig = t.applyConstraints && t.applyConstraints.bind(t)
@@ -157,7 +194,7 @@ function initScript(label, portrait) {
       value: installMediaOverrides
     })
     window.__harnessMediaOverridesInstalled = installMediaOverrides()
-  }})(${JSON.stringify(label)}, ${JSON.stringify(portrait)})`
+  }})(${JSON.stringify(label)}, ${JSON.stringify(portrait)}, ${JSON.stringify(rewriteMdnsCandidates)})`
 }
 
 async function join(browserType, ctxOpts, label, portrait) {
@@ -170,7 +207,7 @@ async function join(browserType, ctxOpts, label, portrait) {
   // Install one context-owned script before any page exists. This avoids the
   // undefined ordering/lifecycle edge of multiple page-level init scripts and
   // makes an empty request recorder an explicit harness failure.
-  await context.addInitScript(initScript(label, portrait))
+  await context.addInitScript(initScript(label, portrait, browserType === webkit))
   // login -> cookie in context jar
   const resp = await context.request.post(BASE + '/auth/login', { data: { name: label, password: PW } })
   if (!resp.ok()) throw new Error(label+' login failed: '+resp.status())
@@ -198,8 +235,12 @@ async function join(browserType, ctxOpts, label, portrait) {
   await page.selectOption('#loginAccountSelect', label).catch(()=>{})
   await page.fill('#roomPassword', PW).catch(()=>{})
   await page.evaluate(async (roomId) => {
+    // Navigate through the canonical product route. Calling setActiveTool from
+    // `/` is intentionally ignored because Home owns that path; the old
+    // harness therefore decoded off-screen video and called zero-sized tiles
+    // a layout regression.
+    selectPD1Destination('Video', { focus: false })
     if (roomId) selectLobbyRoom(roomId)
-    setActiveTool('room')
     await joinRoom()
   }, roomControl?.id || '')
   // joinRoom can return after opening signaling but before the access-granted
@@ -226,6 +267,122 @@ async function join(browserType, ctxOpts, label, portrait) {
       await withTimeout(browser.close(), 10000, `${label} failed-join browser cleanup timed out`).catch(()=>{})
     }
   }
+}
+
+async function mediaStateSnapshot(page) {
+  return page.evaluate(() => {
+    const summarizeTrack = track => track ? {
+      id: track.id,
+      kind: track.kind,
+      readyState: track.readyState,
+      enabled: track.enabled,
+      muted: track.muted
+    } : null
+    const summarizeElement = element => ({
+      tag: element.tagName.toLowerCase(),
+      participant: element.dataset?.participant || '',
+      connected: element.isConnected,
+      paused: element.paused,
+      muted: element.muted,
+      defaultMuted: element.defaultMuted,
+      volume: element.volume,
+      currentTime: Number(element.currentTime || 0).toFixed(3),
+      readyState: element.readyState,
+      videoWidth: element.videoWidth || 0,
+      videoHeight: element.videoHeight || 0,
+      playback: element.dataset?.remotePlayback || '',
+      audibleState: element.dataset?.remoteAudibleState || '',
+      audibleGeneration: element.dataset?.remoteAudibleGeneration || '',
+      attachmentRevision: element.dataset?.videoAttachmentRevision || '',
+      audioTracks: (element.srcObject?.getAudioTracks?.() || []).map(summarizeTrack),
+      videoTracks: (element.srcObject?.getVideoTracks?.() || []).map(summarizeTrack),
+      rect: (() => {
+        const rect = element.getBoundingClientRect()
+        return { width: Math.round(rect.width), height: Math.round(rect.height) }
+      })()
+    })
+    const videos = [...document.querySelectorAll('#videoStack video')].map(summarizeElement)
+    const audioElements = [...document.querySelectorAll('audio')].map(summarizeElement)
+    const monitors = typeof audioMonitors === 'undefined' ? [] : [...audioMonitors.entries()].map(([key, monitor]) => ({
+      key,
+      name: monitor?.name || '',
+      track: summarizeTrack(monitor?.track),
+      ownerTag: monitor?.audio?.tagName?.toLowerCase?.() || '',
+      ownerParticipant: monitor?.audio?.dataset?.participant || '',
+      ownerIsCanonicalVideo: Boolean(monitor?.audio && remoteVideoElementForParticipant(monitor.name) === monitor.audio),
+      ownsAudioElement: Boolean(monitor?.ownsAudioElement),
+      playbackGeneration: monitor?.playbackGeneration || 0
+    }))
+    const receipts = typeof remoteAudiblePlaybackReceipts === 'undefined' ? [] : [...remoteAudiblePlaybackReceipts.values()].map(receipt => ({
+      name: receipt?.name || '',
+      generation: receipt?.generation || 0,
+      monitorGeneration: receipt?.monitorGeneration || 0,
+      track: summarizeTrack(receipt?.track),
+      current: remoteAudiblePlaybackReceiptIsCurrent(receipt),
+      element: summarizeElement(receipt.element)
+    }))
+    return {
+      peer: typeof pc === 'undefined' || !pc ? null : {
+        signalingState: pc.signalingState,
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        iceGatheringState: pc.iceGatheringState,
+        remoteDescriptionType: pc.remoteDescription?.type || '',
+        localDescriptionType: pc.localDescription?.type || ''
+      },
+      websocket: typeof ws === 'undefined' || !ws ? null : { readyState: ws.readyState, url: ws.url },
+      reconnect: {
+        active: typeof isSignalReconnecting !== 'undefined' && isSignalReconnecting,
+        attempts: typeof signalingReconnectAttempts !== 'undefined' ? signalingReconnectAttempts : 0,
+        reason: typeof lastSignalReconnectReason !== 'undefined' ? lastSignalReconnectReason : ''
+      },
+      pendingPlayback: typeof pendingRemotePlaybackElements === 'undefined' ? 0 : pendingRemotePlaybackElements.size,
+      proof: window.__bonfireMediaSoakProbe?.snapshot?.() || null,
+      videos,
+      audioElements,
+      monitors,
+      receipts
+    }
+  })
+}
+
+async function canonicalRemoteAVSnapshot(page, participantName) {
+  return page.evaluate(name => {
+    const wanted = String(name || '').trim().toLowerCase()
+    const video = [...document.querySelectorAll('#videoStack .video-tile video')]
+      .find(element => String(element.closest('[data-participant]')?.dataset?.participant || '').trim().toLowerCase() === wanted)
+    const monitorEntries = typeof audioMonitors === 'undefined' ? [] : [...audioMonitors.entries()]
+      .filter(([, monitor]) => String(monitor?.name || '').trim().toLowerCase() === wanted)
+    const monitor = monitorEntries[0]?.[1]
+    const receipt = video && typeof remoteAudiblePlaybackReceipts !== 'undefined'
+      ? remoteAudiblePlaybackReceipts.get(video)
+      : null
+    const participantMedia = [...document.querySelectorAll('video, audio')]
+      .filter(element => String(element.dataset?.participant || element.closest?.('[data-participant]')?.dataset?.participant || '').trim().toLowerCase() === wanted)
+    const audioBearing = participantMedia.filter(element => element.srcObject?.getAudioTracks?.().some(track => track.readyState === 'live'))
+    const audible = audioBearing.filter(element => !element.muted && !element.defaultMuted && Number(element.volume) > 0)
+    return {
+      exists: Boolean(video),
+      state: video?.dataset?.remoteAudibleState || '',
+      muted: video?.muted,
+      defaultMuted: video?.defaultMuted,
+      volume: video?.volume,
+      paused: video?.paused,
+      currentTime: Number(video?.currentTime || 0),
+      videoWidth: video?.videoWidth || 0,
+      videoHeight: video?.videoHeight || 0,
+      attachmentRevision: Number(video?.dataset?.videoAttachmentRevision || 0),
+      audioTracks: video?.srcObject?.getAudioTracks?.().filter(track => track.readyState === 'live').length || 0,
+      videoTracks: video?.srcObject?.getVideoTracks?.().filter(track => track.readyState === 'live').length || 0,
+      monitorCount: monitorEntries.length,
+      monitorOwnsVideo: Boolean(monitor && monitor.audio === video && !monitor.ownsAudioElement),
+      receiptCurrent: Boolean(receipt && remoteAudiblePlaybackReceiptIsCurrent(receipt)),
+      audioBearingElements: audioBearing.length,
+      audibleElements: audible.length,
+      separateAudioElements: participantMedia.filter(element => element.tagName === 'AUDIO').length,
+      pending: typeof pendingRemotePlaybackElements === 'undefined' ? 0 : pendingRemotePlaybackElements.size
+    }
+  }, participantName)
 }
 
 const sessions = []
@@ -259,9 +416,9 @@ try {
     return { light, dark }
   })
   console.log('   canvas colors:', JSON.stringify(roomCanvasTheme))
-  ok('Light room canvas uses the cool paper ground while video stays black',
-    roomCanvasTheme.light.presentation === 'rgb(237, 237, 240)'
-      && roomCanvasTheme.light.stage === 'rgb(237, 237, 240)'
+  ok('Light room canvas uses the warm paper ground while video stays black',
+    roomCanvasTheme.light.presentation === 'rgb(207, 197, 183)'
+      && roomCanvasTheme.light.stage === 'rgb(207, 197, 183)'
       && roomCanvasTheme.light.video === 'rgb(0, 0, 0)')
   ok('Dark room canvas and video remain true black',
     roomCanvasTheme.dark.presentation === 'rgb(0, 0, 0)'
@@ -294,18 +451,70 @@ try {
 
   console.log('\n[1] Flicker — WebKit (Safari engine) in a REAL WebRTC call')
   console.log('   conn:', JSON.stringify(conn))
+  if (!conn) {
+    console.log('   WebKit media diagnostics:', JSON.stringify(await mediaStateSnapshot(B.page)))
+  }
   ok('Safari-engine peer is in a real call (remote tile + live rendering video)', !!conn && conn.rendering>0)
+  const webkitMdnsRewrites = await B.page.evaluate(() => window.__mdnsCandidateRewrites || 0)
+  ok('Safari-engine harness crossed real ICE/DTLS/SRTP through its loopback mDNS adapter', webkitMdnsRewrites > 0)
   if (conn && conn.monId) {
-    // monitor the playback element's srcObject for 15s — each flicker reattaches a
-    // new MediaStream (setVideoElementStream force:true). This is the exact path
-    // the fix guards, now on a real WebRTC stream in the real Safari engine.
+    const mutedFirst = await canonicalRemoteAVSnapshot(B.page, conn.monitoredParticipant)
+    await sleep(300)
+    const mutedProgress = await canonicalRemoteAVSnapshot(B.page, conn.monitoredParticipant)
+    console.log('   muted-first canonical A/V:', JSON.stringify(mutedProgress))
+    ok('Safari-engine renders the exact combined owner muted before audio permission',
+      mutedFirst.exists
+        && mutedFirst.state === 'blocked'
+        && mutedFirst.muted === true
+        && mutedFirst.audioTracks === 1
+        && mutedFirst.videoTracks === 1
+        && mutedFirst.monitorCount === 1
+        && mutedFirst.monitorOwnsVideo === true
+        && mutedFirst.receiptCurrent === true
+        && mutedProgress.currentTime > mutedFirst.currentTime)
+    ok('Muted-first rendering has one canonical audio-bearing owner and no audio clone',
+      mutedFirst.audioBearingElements === 1
+        && mutedFirst.audibleElements === 0
+        && mutedFirst.separateAudioElements === 0)
+
+    // A real Playwright pointer input carries WebKit user activation. The
+    // document-level unlock path must promote this exact receipt without
+    // creating or waking a second audio owner, and video must keep advancing.
+    await B.page.mouse.click(12, 12)
+    const audible = await B.page.waitForFunction(name => {
+      const wanted = String(name || '').trim().toLowerCase()
+      const video = [...document.querySelectorAll('#videoStack .video-tile video')]
+        .find(element => String(element.closest('[data-participant]')?.dataset?.participant || '').trim().toLowerCase() === wanted)
+      return video?.dataset?.remoteAudibleState === 'audible'
+        && video.muted === false
+        && video.defaultMuted === false
+        && Number(video.volume) === 1
+        && video.videoWidth > 0
+    }, conn.monitoredParticipant, { timeout: 5000 }).then(() => canonicalRemoteAVSnapshot(B.page, conn.monitoredParticipant)).catch(() => null)
+    console.log('   after trusted gesture:', JSON.stringify(audible))
+    ok('Trusted gesture promotes the exact current owner to audible without duplicating it',
+      audible?.state === 'audible'
+        && audible?.audioBearingElements === 1
+        && audible?.audibleElements === 1
+        && audible?.separateAudioElements === 0
+        && audible?.monitorOwnsVideo === true
+        && audible?.receiptCurrent === true
+        && audible?.pending === 0)
+
+    // Monitor beyond the server's 30s watchdog. Each flicker reattaches a new
+    // MediaStream (force:true); a failed ICE/signaling session replaces both
+    // WebSocket and PeerConnection. All three identities must remain stable.
     const churn = await B.page.evaluate(async (id) => {
       const v = document.getElementById(id)
       const tid = el => el.srcObject?.getVideoTracks?.()[0]?.id || ''
+      const initialWs = ws, initialPc = pc
       let lastObj = v.srcObject, lastTid = tid(v)
+      const initialObj = lastObj, initialTid = lastTid
+      const initialAttachmentRevision = Number(v.dataset.videoAttachmentRevision || 0)
+      const initialCurrentTime = Number(v.currentTime || 0)
       let totalSwaps = 0, flickerSwaps = 0, contentSwitches = 0
       const t0 = performance.now()
-      while (performance.now() - t0 < 18000) {
+      while (performance.now() - t0 < 36000) {
         await new Promise(r=>setTimeout(r,150))
         if (v.srcObject !== lastObj) {
           totalSwaps++
@@ -315,11 +524,25 @@ try {
           lastObj = v.srcObject; lastTid = now
         }
       }
-      return { totalSwaps, flickerSwaps, contentSwitches, playing: !v.paused && v.readyState>=2, vw: v.videoWidth }
+      return {
+        totalSwaps,
+        flickerSwaps,
+        contentSwitches,
+        playing: !v.paused && v.readyState>=2,
+        vw: v.videoWidth,
+        currentTimeAdvanced: Number(v.currentTime || 0) > initialCurrentTime,
+        sameWebsocket: ws === initialWs && ws?.readyState === WebSocket.OPEN,
+        samePeer: pc === initialPc && pc?.connectionState === 'connected',
+        sameElementStream: v.srcObject === initialObj,
+        sameTrack: tid(v) === initialTid,
+        sameAttachmentRevision: Number(v.dataset.videoAttachmentRevision || 0) === initialAttachmentRevision
+      }
     }, conn.monId)
-    console.log('   playback element over 18s:', JSON.stringify(churn))
+    console.log('   playback element over 36s:', JSON.stringify(churn))
     ok('Safari-engine: ZERO same-track srcObject reattaches (the flicker is gone)', churn.flickerSwaps === 0)
-    ok('Safari-engine playback element keeps rendering throughout', churn.playing === true && churn.vw>0)
+    ok('Safari-engine playback element keeps rendering throughout', churn.playing === true && churn.vw>0 && churn.currentTimeAdvanced)
+    ok('Safari-engine session and exact attachment stay stable beyond the 30s watchdog',
+      churn.sameWebsocket && churn.samePeer && churn.sameElementStream && churn.sameTrack && churn.sameAttachmentRevision)
   }
 
   console.log('\n[2] Mobile orientation — C joins as a real iPhone (portrait), effect on others')

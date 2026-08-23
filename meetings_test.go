@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -49,12 +50,12 @@ func meetingArchiveFilesOnDisk(t *testing.T) []string {
 }
 
 // The session-end rule (card 078, founder decision 2026-07-08): a sitting ends
-// after the room has been empty for a few minutes. The 4-minute default IS the
-// rule; the env override stays.
+// after the room has been empty for five minutes. The exact default is the
+// reconnection contract; the env override stays.
 func TestMeetingIdleEndGraceDefaultsToAFewMinutes(t *testing.T) {
 	t.Setenv("MEETING_IDLE_END_GRACE", "")
-	if got := meetingIdleEndGrace(); got != 4*time.Minute {
-		t.Fatalf("meetingIdleEndGrace()=%v, want 4m (the founder's few-minutes sitting boundary)", got)
+	if got := meetingIdleEndGrace(); got != 5*time.Minute {
+		t.Fatalf("meetingIdleEndGrace()=%v, want 5m reconnection boundary", got)
 	}
 	t.Setenv("MEETING_IDLE_END_GRACE", "45m")
 	if got := meetingIdleEndGrace(); got != 45*time.Minute {
@@ -479,6 +480,189 @@ func TestRejoinWithinGraceCancelsIdleEnd(t *testing.T) {
 	}
 }
 
+func TestIdleDeadlinePersistsAndRejoinClearsItDurably(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+	app.noteMeetingOccupancy(officeRoomID)
+	empty, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok || strings.TrimSpace(empty.IdleDeadlineAt) == "" {
+		t.Fatalf("empty sitting did not persist its grace deadline: %+v", empty)
+	}
+	deadline := empty.IdleDeadlineAt
+
+	app.meetings.stopIdleEndsAndWait()
+	reloaded, err := loadMeetingStore(meetingsPath())
+	if err != nil {
+		t.Fatalf("reload meetings: %v", err)
+	}
+	persisted, ok := reloaded.activeRecord(officeRoomID)
+	if !ok || persisted.ID != open.ID || persisted.IdleDeadlineAt != deadline {
+		t.Fatalf("restart changed sitting/deadline: got %+v want id=%s deadline=%s", persisted, open.ID, deadline)
+	}
+
+	// A reconnect inside that exact grace preserves the sitting but clears the
+	// durable empty boundary in the same record write.
+	app.meetings = reloaded
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	rejoined, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok || rejoined.ID != open.ID || rejoined.IdleDeadlineAt != "" {
+		t.Fatalf("rejoin did not durably preserve/clear the sitting: %+v", rejoined)
+	}
+	reloadedAgain, err := loadMeetingStore(meetingsPath())
+	if err != nil {
+		t.Fatalf("reload cleared deadline: %v", err)
+	}
+	confirmed, _ := reloadedAgain.activeRecord(officeRoomID)
+	if confirmed.IdleDeadlineAt != "" {
+		t.Fatalf("cleared idle deadline was not durable: %+v", confirmed)
+	}
+}
+
+func TestIdleCloseReconcilesAmbiguousCommittedReplacementAndRunsCloseEffects(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+	app.noteMeetingOccupancy(officeRoomID)
+	armed, _ := app.meetings.activeRecord(officeRoomID)
+	if strings.TrimSpace(armed.IdleDeadlineAt) == "" {
+		t.Fatal("empty sitting lacks durable idle deadline")
+	}
+
+	persistCalls := 0
+	app.meetings.persistState = func(state meetingStoreState) error {
+		persistCalls++
+		if err := writeJSONFileAtomically(app.meetings.path, "ambiguous idle close fixture", state); err != nil {
+			return err
+		}
+		if persistCalls == 1 {
+			return fmt.Errorf("%w: injected parent directory fsync uncertainty", ErrDurableReplaceAmbiguous)
+		}
+		return nil
+	}
+
+	fireIdleEndNow(app)
+	closed, found := app.meetings.recordByID(open.ID)
+	if !found || closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle || closed.Finalization == nil {
+		t.Fatalf("ambiguous committed close was not reconciled: %+v found=%v", closed, found)
+	}
+	if _, active := app.meetings.activeRecord(officeRoomID); active {
+		t.Fatal("ambiguous committed close remained active")
+	}
+	if current := app.memory.currentMeetingID(officeRoomID); current != "" {
+		t.Fatalf("idempotent close effects did not rotate memory id: %q", current)
+	}
+	app.meetings.mu.Lock()
+	calls := persistCalls
+	app.meetings.mu.Unlock()
+	if calls < 1 {
+		t.Fatal("test did not exercise the injected ambiguous replacement")
+	}
+}
+
+func TestIdleCloseDefinitePersistenceFailureRetainsDeadlineAndRetriesInProcess(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+	app.noteMeetingOccupancy(officeRoomID)
+	armed, _ := app.meetings.activeRecord(officeRoomID)
+	deadline := armed.IdleDeadlineAt
+	if strings.TrimSpace(deadline) == "" {
+		t.Fatal("empty sitting lacks durable idle deadline")
+	}
+
+	persistCalls := 0
+	app.meetings.persistState = func(state meetingStoreState) error {
+		persistCalls++
+		if persistCalls == 1 {
+			return errors.New("injected definite meetings write failure")
+		}
+		return writeJSONFileAtomically(app.meetings.path, "idle close retry fixture", state)
+	}
+
+	fireIdleEndNow(app)
+	stillOpen, active := app.meetings.activeRecord(officeRoomID)
+	if !active || stillOpen.ID != open.ID || stillOpen.EndedAt != "" || stillOpen.IdleDeadlineAt != deadline {
+		t.Fatalf("definite failure did not preserve the past-due close authority: %+v active=%v", stillOpen, active)
+	}
+	app.meetings.mu.Lock()
+	attemptsAfterFailure := persistCalls
+	retryArmed := app.meetings.idleTimers[officeRoomID] != nil
+	app.meetings.mu.Unlock()
+	if attemptsAfterFailure != 1 || !retryArmed {
+		t.Fatalf("definite failure calls=%d retryArmed=%v, want one failed write and a bounded retry", attemptsAfterFailure, retryArmed)
+	}
+
+	waitDeadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(waitDeadline) {
+		closed, found := app.meetings.recordByID(open.ID)
+		if found && closed.EndedAt != "" {
+			if closed.EndedReason != meetingEndedReasonIdle {
+				t.Fatalf("retry ended as %q, want idle", closed.EndedReason)
+			}
+			app.meetings.mu.Lock()
+			calls := persistCalls
+			app.meetings.mu.Unlock()
+			if calls < 2 {
+				t.Fatalf("close repaired without retrying persistence: calls=%d", calls)
+			}
+			if current := app.memory.currentMeetingID(officeRoomID); current != "" {
+				t.Fatalf("retry closed record but stranded memory id %q", current)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("definite idle close failure stranded the past-due sitting instead of retrying")
+}
+
+func TestBootUsesExpiredDurableIdleDeadlineInsteadOfGrantingFreshGrace(t *testing.T) {
+	t.Setenv("MEETING_IDLE_END_GRACE", "1h")
+	app := newIsolatedKanbanBoardApp(t)
+	app.noteMeetingAdmission(officeRoomID, "AJ")
+	open, ok := app.meetings.activeRecord(officeRoomID)
+	if !ok {
+		t.Fatal("no open record after admission")
+	}
+	if _, _, err := app.memory.appendTranscript("restart-deadline-source", "", "Durable source keeps the sitting identity resumable."); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	app.meetings.mu.Lock()
+	index := app.meetings.openRecordIndexLocked(officeRoomID)
+	app.meetings.records[index].IdleDeadlineAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	if err := app.meetings.persistLocked(); err != nil {
+		app.meetings.mu.Unlock()
+		t.Fatalf("persist expired deadline: %v", err)
+	}
+	app.meetings.mu.Unlock()
+
+	restarted := newKanbanBoardApp()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		closed, found := restarted.meetings.recordByID(open.ID)
+		if found && closed.EndedAt != "" {
+			if closed.EndedReason != meetingEndedReasonIdle {
+				t.Fatalf("expired durable deadline closed as %q, want idle", closed.EndedReason)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("boot granted a fresh one-hour grace instead of honoring the expired durable deadline")
+}
+
 func TestMeetingIdleTimerShutdownJoinsInFlightCallback(t *testing.T) {
 	t.Setenv("MEETING_IDLE_END_GRACE", "1ms")
 	store := &meetingStore{
@@ -847,6 +1031,13 @@ func TestArchiveMeetingWithEmptyRoomLeavesNoSuccessor(t *testing.T) {
 	if _, _, err := app.memory.appendTranscript("event-1", "item-1", "Boot Barn kickoff planning notes."); err != nil {
 		t.Fatalf("append transcript: %v", err)
 	}
+	oldGeneration := app.ensureRoomMedia(officeRoomID)
+	app.mu.Lock()
+	if got := app.roomLiveLocked(officeRoomID).mediaSittingID; got != app.memory.currentMeetingID(officeRoomID) {
+		app.mu.Unlock()
+		t.Fatalf("media sitting=%q before archive, want active meeting", got)
+	}
+	app.mu.Unlock()
 	app.forgetParticipant("AJ")
 
 	if _, err := app.archiveMeeting("AJ"); err != nil {
@@ -854,6 +1045,13 @@ func TestArchiveMeetingWithEmptyRoomLeavesNoSuccessor(t *testing.T) {
 	}
 	if record, ok := app.meetings.activeRecord(officeRoomID); ok {
 		t.Fatalf("record=%#v, want no successor for an empty room", record)
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	mediaSittingID, mediaActor, generation := state.mediaSittingID, state.mediaActor, state.mediaGen
+	app.mu.Unlock()
+	if mediaSittingID != "" || mediaActor != nil || generation <= oldGeneration {
+		t.Fatalf("empty archive retained predecessor media: sitting=%q actor=%v generation=%d old=%d", mediaSittingID, mediaActor != nil, generation, oldGeneration)
 	}
 }
 
@@ -1859,15 +2057,13 @@ func TestMissionPulseCarriesHistogramAndRealCounters(t *testing.T) {
 	}
 }
 
-/* ---------- Track-2 Wave 4: the idle-close boundary flush ---------- */
+/* ---------- durable idle-close finalization ---------- */
 
-// The idle-close hole: before this wave, endMeetingForIdle rotated the id
-// without any final rollup, so idle-closed meetings never got a digest and
-// "what did I miss" silently skipped them. Now the close chain runs BEFORE the
-// rotation, so the tail brain, the meeting digest, the day fold, the ledger
-// consolidation, and the company digest all key to the CLOSING meeting id —
-// and the auto-archive that follows embeds them.
-func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
+// Rotation and archive publication happen against a durable closing receipt;
+// core, meeting-scoped outputs then settle asynchronously and refresh that
+// archive. Wider day/company/ledger rollups remain queued and cannot lengthen
+// the media close path.
+func TestEndMeetingForIdleRotatesBeforeCoreAndRefreshesArchiveTruth(t *testing.T) {
 	t.Setenv("MEETING_TIME_ZONE", "America/Los_Angeles")
 	app := newIsolatedKanbanBoardApp(t)
 	app.mu.Lock()
@@ -1920,42 +2116,50 @@ func TestEndMeetingForIdleFlushesRollupChainBeforeRotation(t *testing.T) {
 	if closed.EndedAt == "" || closed.EndedReason != meetingEndedReasonIdle {
 		t.Fatalf("record=%+v, want ended for idle", closed)
 	}
-
-	// the flush ran BEFORE rotation: every rollup keys to the CLOSED meeting.
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
+		t.Fatalf("meeting id %q not rotated before asynchronous core finalization", got)
+	}
+	closed = waitForMeetingFinalizationState(t, app, closedID, meetingFinalizationFinalized)
+	closed = waitForMeetingArchiveFinalizationSync(t, app, closedID)
+	if closed.Finalization == nil || closed.Finalization.State != meetingFinalizationFinalized || closed.Finalization.Brain.State != meetingFinalizationStageComplete || closed.Finalization.Digest.State != meetingFinalizationStageComplete || closed.Finalization.Actions.State != meetingFinalizationStageComplete {
+		t.Fatalf("core finalization receipt=%+v, want finalized stages", closed.Finalization)
+	}
+	// Async core synthesis is explicitly keyed to the CLOSED meeting even though
+	// the room already released its current id for a successor.
 	brains := app.memory.entriesOfKind(meetingMemoryKindBrain, 0)
-	if len(brains) != 1 || strings.TrimSpace(brains[0].Metadata["meetingId"]) != closedID {
-		t.Fatalf("brains=%d meetingId=%q, want one final brain keyed to %s", len(brains), brains[0].Metadata["meetingId"], closedID)
+	if len(brains) != 1 {
+		t.Fatalf("brains=%d, want one final brain keyed to %s", len(brains), closedID)
+	}
+	if got := strings.TrimSpace(brains[0].Metadata["meetingId"]); got != closedID {
+		t.Fatalf("brain meetingId=%q, want %s", got, closedID)
 	}
 	digest, ok := app.memory.latestDigestPerMeeting()[closedID]
 	if !ok {
 		t.Fatalf("no meeting_digest for the idle-closed meeting %s", closedID)
 	}
 	if got := strings.TrimSpace(digest.Metadata["meetingId"]); got != closedID {
-		t.Fatalf("digest meetingId=%q, want the closing id %s (pre-rotation flush)", got, closedID)
+		t.Fatalf("digest meetingId=%q, want the closed id %s", got, closedID)
 	}
-	if entries := app.memory.entriesOfKind(meetingMemoryKindDayDigest, 0); len(entries) == 0 {
-		t.Fatal("idle flush did not fold a day digest")
-	}
-	decisions := ledgerRecordsOfEntity(app.memory.ledgerState(), ledgerEntityDecision)
-	if len(decisions) == 0 {
-		t.Fatal("idle flush did not consolidate the digest facts into the ledger")
-	}
-	company, ok := app.memory.latestCompanyDigest()
-	if !ok {
-		t.Fatal("idle flush did not refresh the company digest")
-	}
-	if payload, parsed := parseCompanyDigest(company.Text); !parsed || payload.Narrative == "" || len(payload.State.Decisions) == 0 {
-		t.Fatalf("company digest = %s, want state + narrative", company.Text)
-	}
-
-	// liveness: the id rotated and the silent auto-archive still landed,
-	// pinned to the closed meeting.
-	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
-		t.Fatalf("meeting id %q not rotated after the flush", got)
-	}
+	// The silent auto-archive landed before model completion, then was refreshed
+	// to the same finalized receipt.
 	archives := app.memory.entriesOfKind(meetingMemoryKindArchive, 0)
 	if len(archives) != 1 || strings.TrimSpace(archives[0].Metadata["meetingId"]) != closedID {
 		t.Fatalf("archives=%d, want one idle auto-archive pinned to %s", len(archives), closedID)
+	}
+	files := meetingArchiveFilesOnDisk(t)
+	if len(files) != 1 {
+		t.Fatalf("archive files=%v, want one", files)
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(meetingMemoryPath()), "archives", files[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived meetingArchive
+	if err := json.Unmarshal(raw, &archived); err != nil {
+		t.Fatal(err)
+	}
+	if archived.Meeting == nil || archived.Meeting.Finalization == nil || archived.Meeting.Finalization.State != meetingFinalizationFinalized {
+		t.Fatalf("archive embedded finalization=%+v, want finalized", archived.Meeting)
 	}
 }
 
@@ -1991,7 +2195,12 @@ func TestEndMeetingForIdleModelFailureNeverBlocksRotation(t *testing.T) {
 		t.Fatalf("record=%+v, want ended for idle despite the model failure", closed)
 	}
 	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
-		t.Fatalf("meeting id %q not rotated after a failed flush", got)
+		t.Fatalf("meeting id %q not rotated before the failed model call settled", got)
+	}
+	closed = waitForMeetingFinalizationState(t, app, closedID, meetingFinalizationDegraded)
+	closed = waitForMeetingArchiveFinalizationSync(t, app, closedID)
+	if closed.Finalization == nil || closed.Finalization.State != meetingFinalizationDegraded {
+		t.Fatalf("failed model receipt=%+v, want degraded", closed.Finalization)
 	}
 	if digests := app.memory.entriesOfKind(meetingMemoryKindMeetingDigest, 0); len(digests) != 0 {
 		t.Fatalf("digests=%d, want none persisted from a failed flush", len(digests))
@@ -1999,6 +2208,21 @@ func TestEndMeetingForIdleModelFailureNeverBlocksRotation(t *testing.T) {
 	archives := app.memory.entriesOfKind(meetingMemoryKindArchive, 0)
 	if len(archives) != 1 || strings.TrimSpace(archives[0].Metadata["meetingId"]) != closedID {
 		t.Fatalf("archives=%d, want the silent auto-archive despite the model failure", len(archives))
+	}
+	files := meetingArchiveFilesOnDisk(t)
+	if len(files) != 1 {
+		t.Fatalf("archive files=%v, want one", files)
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(meetingMemoryPath()), "archives", files[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archived meetingArchive
+	if err := json.Unmarshal(raw, &archived); err != nil {
+		t.Fatal(err)
+	}
+	if archived.Meeting == nil || archived.Meeting.Finalization == nil || archived.Meeting.Finalization.State != meetingFinalizationDegraded {
+		t.Fatalf("archive falsely implied finalized: %+v", archived.Meeting)
 	}
 }
 

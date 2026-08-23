@@ -52,7 +52,10 @@ const (
 	maxGuestNameRunes      = 40
 )
 
-var errRoomNotFound = errors.New("room not found")
+var (
+	errRoomNotFound = errors.New("room not found")
+	errRoomArchived = errors.New("room is archived")
+)
 
 // normalizeRoomID maps the migration invariant (§9: absent roomId == office)
 // onto every record-layer lookup: a blank room id — legacy entries, legacy
@@ -313,6 +316,34 @@ func (s *roomStore) restore(id string) error {
 		s.resolvePersistFailureLocked(err, func() { s.rooms[index].Archived = prior })
 		return err
 	}
+	return nil
+}
+
+// archiveNamedRoom and restoreNamedRoom serialize joinability with the same
+// lifecycle fence held by member/guest admission and sitting close. An
+// admission that entered first either commits fully and is then closed, or it
+// enters after this flag is durable and fails the authoritative recheck.
+func (app *kanbanBoardApp) archiveNamedRoom(roomID string) error {
+	if app == nil {
+		return ErrMeetingRecordStore
+	}
+	roomID = normalizeRoomID(roomID)
+	app.meetingLifecycleMu.Lock()
+	defer app.meetingLifecycleMu.Unlock()
+	return appRoomStore().archive(roomID)
+}
+
+func (app *kanbanBoardApp) restoreNamedRoom(roomID string) error {
+	if app == nil {
+		return ErrMeetingRecordStore
+	}
+	roomID = normalizeRoomID(roomID)
+	app.meetingLifecycleMu.Lock()
+	defer app.meetingLifecycleMu.Unlock()
+	if err := appRoomStore().restore(roomID); err != nil {
+		return err
+	}
+	app.cancelRoomArchiveCloseRetry(roomID)
 	return nil
 }
 
@@ -768,7 +799,7 @@ func roomActionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "passcodeRequired": strings.TrimSpace(payload.Passcode) != ""})
 	case action == "archive" && r.Method == http.MethodPost:
-		if err := appRoomStore().archive(roomID); err != nil {
+		if err := kanbanApp.archiveNamedRoom(roomID); err != nil {
 			writeRoomActionError(w, err)
 			return
 		}
@@ -780,7 +811,7 @@ func roomActionHandler(w http.ResponseWriter, r *http.Request) {
 		go kanbanApp.closeRoomForArchive(roomID)
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true})
 	case action == "restore" && r.Method == http.MethodPost:
-		if err := appRoomStore().restore(roomID); err != nil {
+		if err := kanbanApp.restoreNamedRoom(roomID); err != nil {
 			writeRoomActionError(w, err)
 			return
 		}

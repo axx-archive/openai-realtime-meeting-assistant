@@ -998,8 +998,10 @@ const (
 	artifactTypeHTMLDeck = "html_deck"
 	artifactTypePDF      = "pdf"
 	artifactTypeImage    = "image"
+	artifactTypeTable    = "table"
 	artifactTypeBundle   = "bundle"
 	artifactTypeWorkbook = "workbook"
+	artifactTypeFile     = "file"
 )
 
 // artifactType resolves an artifact's render type. Explicit binary/container
@@ -1007,7 +1009,7 @@ const (
 // the render route and the model must never disagree about what is a deck.
 func artifactType(entry meetingMemoryEntry) string {
 	switch declared := strings.ToLower(strings.TrimSpace(entry.Metadata["type"])); declared {
-	case artifactTypePDF, artifactTypeImage, artifactTypeBundle, artifactTypeWorkbook:
+	case artifactTypePDF, artifactTypeImage, artifactTypeTable, artifactTypeBundle, artifactTypeWorkbook, artifactTypeFile:
 		return declared
 	}
 	if artifactIsHTMLDocument(entry) {

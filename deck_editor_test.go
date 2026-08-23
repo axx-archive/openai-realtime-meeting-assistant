@@ -147,7 +147,7 @@ func TestImportLegacyDeckPreservesDataDeckGeometryAndFigAsset(t *testing.T) {
 		"type": artifactTypeHTMLDeck, artifactAssetsMetadataKey: string(assets),
 	}, Text: `<!doctype html><html><body><div id="stage"><section class="pg on" data-deck-slide="cover" style="background:#123456">
 		<div class="copy" data-deck-element="headline" data-deck-type="text" style="position:absolute;left:96px;top:120px;width:920px;height:220px;z-index:4;opacity:1;transform:rotate(0deg);font-size:104px;font-family:Arial;font-weight:700;color:#ffffff">Like a Farmer</div>
-		<div class="image-plate fig-1" data-deck-element="hero-image" data-deck-type="image" style="position:absolute;left:1080px;top:0;width:840px;height:1080px;z-index:2;opacity:1;transform:rotate(0deg);object-fit:cover"><div class="ph"></div></div>
+		<div class="image-plate fig-1" data-deck-element="hero-image" data-deck-type="image" data-deck-crop="safe_area" data-deck-focal-x="0.25" data-deck-focal-y="0.75" style="position:absolute;left:1080px;top:0;width:840px;height:1080px;z-index:2;opacity:1;transform:rotate(0deg);object-fit:cover;object-position:25% 75%"><div class="ph"></div></div>
 	</section></div></body></html>`}
 
 	deck, imported, quality, err := loadDeckDocument(artifact)
@@ -161,8 +161,21 @@ func TestImportLegacyDeckPreservesDataDeckGeometryAndFigAsset(t *testing.T) {
 		t.Fatalf("deck=%+v, want two faithful elements", deck)
 	}
 	image := deck.Slides[0].Elements[1]
-	if image.Type != "image" || image.Ref != ref || image.Name != "fig-1.png" || image.X != 1080 || image.Width != 840 || image.Height != 1080 {
+	if image.Type != "image" || image.Ref != ref || image.Name != "fig-1.png" || image.X != 1080 || image.Width != 840 || image.Height != 1080 || image.Crop != "safe_area" || image.FocalX == nil || *image.FocalX != .25 || image.FocalY == nil || *image.FocalY != .75 {
 		t.Fatalf("image=%+v, want exact fig asset and geometry", image)
+	}
+	if err := validateDeckDocument(deck, map[string]struct{}{ref: {}}); err != nil {
+		t.Fatalf("validate imported crop/focal scene: %v", err)
+	}
+	compiled := compileDeckDocumentHTML(deck, "Crop roundtrip")
+	for _, want := range []string{`data-deck-crop="safe_area"`, `data-deck-focal-x="0.25"`, `data-deck-focal-y="0.75"`, `object-fit:cover;object-position:25% 75%`} {
+		if !strings.Contains(compiled, want) {
+			t.Fatalf("compiled native deck lost locked image presentation %q: %s", want, compiled)
+		}
+	}
+	deck.Slides[0].Elements[1].Crop = ""
+	if err := validateDeckDocument(deck, map[string]struct{}{ref: {}}); err == nil || !strings.Contains(err.Error(), "requires a closed crop token") {
+		t.Fatalf("orphan focal point validation error=%v, want fail closed", err)
 	}
 }
 

@@ -1,5 +1,6 @@
 import type { ScoutMessage } from '../api/types';
 import { workHasDecisionCard } from './workPresentation';
+import { workActivityThreadRef } from './workTimeline';
 
 export const workActivityDismissalLedgerVersion = 1 as const;
 export const maxWorkActivityDismissals = 20;
@@ -45,7 +46,7 @@ function normalizedStatus(status: unknown): string {
 }
 
 function semanticWorkState(message: ScoutMessage): string {
-  const work = message.thread;
+  const work = workActivityThreadRef(message);
   const status = normalizedStatus(work?.status);
   if (['complete', 'completed', 'published'].includes(status)) return 'delivered';
   if (['error', 'failed', 'needs_attention', 'rejected', 'blocked'].includes(status)) return 'attention';
@@ -62,7 +63,7 @@ export function workActivitySurfaceIdentity(
   threadId: string,
   message: ScoutMessage | null | undefined,
 ): WorkActivitySurfaceIdentity | null {
-  const work = message?.thread;
+  const work = workActivityThreadRef(message);
   if (!work) return null;
   const owner = String(work.artifactId ?? work.id ?? message?.id ?? '').trim();
   if (!owner) return null;

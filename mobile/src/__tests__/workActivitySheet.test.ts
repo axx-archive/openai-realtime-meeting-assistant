@@ -25,15 +25,18 @@ function packagingMessage(status: string, currentStage: string): ScoutMessage {
   };
 }
 
-test('native Activity sheet presents five quiet customer stages instead of internal cards', () => {
+test('native Activity sheet presents four quiet customer phases for decks and documents', () => {
   assert.deepEqual(
     workActivityPhaseStates(packagingMessage('running', 'layout_plan')),
-    ['complete', 'complete', 'complete', 'current', 'upcoming'],
+    ['complete', 'complete', 'current', 'upcoming'],
   );
   assert.deepEqual(
     workActivityPhaseStates(packagingMessage('complete', 'ship_approval')),
-    ['complete', 'complete', 'complete', 'complete', 'complete'],
+    ['complete', 'complete', 'complete', 'complete'],
   );
+  const document = packagingMessage('running', 'draft_render');
+  document.thread = { ...document.thread!, processId: 'document_report' };
+  assert.deepEqual(workActivityPhaseStates(document), ['complete', 'complete', 'current', 'upcoming']);
   assert.deepEqual(workActivityPhaseStates({ ...packagingMessage('running', 'layout_plan'), thread: { ...packagingMessage('running', 'layout_plan').thread!, processId: 'research' } }), []);
 });
 
@@ -44,6 +47,9 @@ test('Activity opens only the exact admitted presentation revision', () => {
     thread: {
       ...base.thread!,
       resultArtifactId: 'deck-1',
+      resultArtifactType: 'html_deck',
+      resultArtifactVersion: 7,
+      resultArtifactDigest: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       resultQualityState: 'admitted',
       resultCanPresent: true,
       resultCanEdit: true,
@@ -79,5 +85,35 @@ test('Activity opens only the exact admitted presentation revision', () => {
     state: 'desktop_only',
     title: 'Presentation unavailable on mobile',
     body: 'Open Stride on desktop to review this version and its sharing state.',
+  });
+});
+
+test('generic governed completion opens from Activity without becoming timeline media', () => {
+  const governed: ScoutMessage = {
+    id: 'governed-result',
+    kind: 'work_result',
+    role: 'scout',
+    createdAt: '2026-08-22T12:00:00Z',
+    work: {
+      id: 'record-1',
+      runId: 'run-1',
+      title: 'Completed work',
+      status: 'complete',
+      workerName: 'Scout',
+      currentStage: 'done',
+      summary: 'Ready.',
+      artifactId: 'artifact-1',
+      artifactHref: '/api/stride/v1/work/runs/run-1/artifact',
+      evidenceHref: '',
+      providerExecutionFenced: false,
+    },
+  };
+  assert.deepEqual(workActivityPhaseStates(governed), []);
+  assert.deepEqual(workActivityResultPresentation(governed), {
+    kind: 'work',
+    state: 'open',
+    title: 'Work complete',
+    body: 'The completed work is available here and in Files.',
+    actionLabel: 'Open completed work',
   });
 });

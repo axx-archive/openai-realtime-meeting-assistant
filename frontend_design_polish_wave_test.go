@@ -140,7 +140,7 @@ func TestDiscoveryComposerInvitesNaturalLanguage(t *testing.T) {
 	}
 }
 
-func TestPD1PresentationRejectionFixtureRendersOneConversationAndOneWorkState(t *testing.T) {
+func TestPD1PresentationRejectionFixtureKeepsOneActivityStateOutOfConversation(t *testing.T) {
 	html := readIndexForComposerPolish(t)
 	fixture := functionBody(html, "function pd1PresentationWorkFixtureThread(")
 	for _, want := range []string{
@@ -158,38 +158,23 @@ func TestPD1PresentationRejectionFixtureRendersOneConversationAndOneWorkState(t 
 		}
 	}
 	if strings.Count(fixture, "kind: 'thread'") != 1 {
-		t.Fatalf("PD1 presentation fixture must contain one work card, got %d", strings.Count(fixture, "kind: 'thread'"))
+		t.Fatalf("PD1 presentation fixture must contain one durable work activity ref, got %d", strings.Count(fixture, "kind: 'thread'"))
 	}
-	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
-	for _, want := range []string{"desktopWorkFamily", "desktopSafeWorkNote", "In progress", "View activity", "No progress bar with fake percents", "openDesktopWorkContext", "aria-expanded", "scoutInlineWorkDetailsExpanded", "expandedWorkDetails.add"} {
-		if !strings.Contains(renderer, want) {
-			t.Errorf("compact presentation work card missing %q", want)
+	projection := functionBody(html, "function scoutChatRecordBelongsInTimeline(message)")
+	if !strings.Contains(projection, "projection.richResult || projection.checkpoint") || !strings.Contains(projection, "scoutThreadTimelineProjection(resultMessage).richResult") {
+		t.Fatal("generic work lifecycle must stay out of the conversation while rich results and decisions remain")
+	}
+	for _, name := range []string{"function syncDesktopActiveWorkIndicator()", "function renderDesktopWorkContext(message, artifact)"} {
+		if !strings.Contains(html, name) {
+			t.Errorf("presentation activity sidecar contract missing %q", name)
 		}
-	}
-	if strings.Contains(renderer, "packaging_studio") || strings.Contains(renderer, "Packaging Studio") {
-		t.Fatal("compact presentation work card exposes internal process identity")
-	}
-	responsive := functionBody(html, "function scoutGoalRefRecordNode(")
-	for _, want := range []string{"scoutDesktopGoalWorkCardNode(message, artifact)", ".scout-chat-work-card[data-work-artifact-id="} {
-		if !strings.Contains(responsive, want) {
-			t.Errorf("responsive presentation work card missing %q", want)
-		}
-	}
-	for _, forbidden := range []string{"goalCardNodeFor(artifact)", "goal loop"} {
-		if strings.Contains(responsive, forbidden) {
-			t.Errorf("responsive presentation path exposes legacy runtime UI %q", forbidden)
-		}
-	}
-	cleanup := functionBody(html, "function clearScoutChatThreadNodes(")
-	if !strings.Contains(cleanup, ".scout-chat-work-card") {
-		t.Fatal("compact presentation work card is not retired before a thread rebuild and can duplicate")
 	}
 }
 
 func TestPD1RecurringWorkUsesOnePremiumPresentationGrammar(t *testing.T) {
 	html := readIndexForComposerPolish(t)
 	family := functionBody(html, "function desktopWorkFamily(")
-	for _, want := range []string{"Financial model", "Presentation", "Design", "Research", "Document", "Meeting recap", "Revision", "Scheduled work", "Build", "Mixed package", "Data visualization", "Project plan"} {
+	for _, want := range []string{"Financial model", "Presentation", "Design", "Research", "Document", "Meeting recap", "Revision", "Scheduled work", "Build", "Data visualization", "Project plan"} {
 		if !strings.Contains(family, want) {
 			t.Errorf("desktop work family grammar missing %q", want)
 		}

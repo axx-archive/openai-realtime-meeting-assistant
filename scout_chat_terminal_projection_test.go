@@ -12,6 +12,70 @@ import (
 	"time"
 )
 
+func TestScoutChatThreadRefsEqualSupportsStructuredResults(t *testing.T) {
+	left := scoutChatThreadRef{
+		ID:                    "work-1",
+		ResultArtifactID:      "result-1",
+		ResultArtifactType:    artifactTypeWorkbook,
+		ResultArtifactVersion: 4,
+		ResultAssets: []scoutChatResultAssetRef{{
+			Ref:  "sha256:workbook",
+			Mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			Name: "forecast.xlsx",
+			Kind: "export",
+		}},
+		ResultTable: &scoutChatResultTableRef{
+			Columns: []string{"Scenario", "Revenue"},
+			Rows:    [][]string{{"Base", "$1.2M"}},
+		},
+		ResultWorkbook: &scoutChatResultWorkbookRef{
+			FileName:   "forecast.xlsx",
+			Mime:       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			SheetCount: 1,
+			Sheets:     []scoutChatResultWorkbookSheetRef{{Name: "Forecast", Purpose: "Operating model"}},
+		},
+	}
+	right := left
+	right.ResultAssets = append([]scoutChatResultAssetRef(nil), left.ResultAssets...)
+	right.ResultTable = &scoutChatResultTableRef{
+		Columns: append([]string(nil), left.ResultTable.Columns...),
+		Rows:    [][]string{append([]string(nil), left.ResultTable.Rows[0]...)},
+	}
+	right.ResultWorkbook = &scoutChatResultWorkbookRef{
+		FileName:   left.ResultWorkbook.FileName,
+		Mime:       left.ResultWorkbook.Mime,
+		SheetCount: left.ResultWorkbook.SheetCount,
+		Sheets:     append([]scoutChatResultWorkbookSheetRef(nil), left.ResultWorkbook.Sheets...),
+	}
+	if !scoutChatThreadRefsEqual(left, right) {
+		t.Fatal("equivalent structured result refs were reported as changed")
+	}
+	right.ResultAssets[0].Ref = "sha256:changed"
+	if scoutChatThreadRefsEqual(left, right) {
+		t.Fatal("nested structured result change was not detected")
+	}
+}
+
+func TestScoutChatWorkbookEnvelopeRequiresExactXLSXAsset(t *testing.T) {
+	workbook := &scoutChatResultWorkbookRef{
+		FileName: "forecast.xlsx", Mime: scoutChatWorkbookMIME, SheetCount: 2, FormulaCount: 19,
+	}
+	exact := scoutChatResultAssetRef{Ref: strings.Repeat("a", 64), Kind: "export", Mime: scoutChatWorkbookMIME, Name: "forecast.xlsx"}
+	if !scoutChatResultHasWorkbookAsset([]scoutChatResultAssetRef{exact}, workbook) {
+		t.Fatal("exact XLSX export should qualify")
+	}
+	for name, asset := range map[string]scoutChatResultAssetRef{
+		"pdf export":   {Ref: strings.Repeat("b", 64), Kind: "export", Mime: "application/pdf", Name: "forecast.pdf"},
+		"text export":  {Ref: strings.Repeat("c", 64), Kind: "export", Mime: "text/plain", Name: "forecast.xlsx"},
+		"wrong suffix": {Ref: strings.Repeat("d", 64), Kind: "export", Mime: scoutChatWorkbookMIME, Name: "forecast.pdf"},
+		"wrong name":   {Ref: strings.Repeat("e", 64), Kind: "export", Mime: scoutChatWorkbookMIME, Name: "other.xlsx"},
+	} {
+		if scoutChatResultHasWorkbookAsset([]scoutChatResultAssetRef{asset}, workbook) {
+			t.Errorf("%s must fail closed", name)
+		}
+	}
+}
+
 func seedScoutTerminalProjection(t *testing.T, app *kanbanBoardApp, status string, metadata map[string]string) (scoutChatThreadRecord, meetingMemoryEntry, string) {
 	t.Helper()
 	thread, err := app.createScoutChatThread("aj@shareability.com", "AJ", "terminal projection", scoutChatVisibilityPublic)
@@ -81,7 +145,7 @@ func TestScoutTerminalProjectionUsesCurrentMetadataAndIsRestartStable(t *testing
 	if got := running.Messages[1].Text; got != "Research in progress" {
 		t.Fatalf("running text=%q, want bounded active copy", got)
 	}
-	if running.Preview != "Research in progress" {
+	if running.Preview != "Document · Building" {
 		t.Fatalf("running preview=%q", running.Preview)
 	}
 
@@ -107,7 +171,7 @@ func TestScoutTerminalProjectionUsesCurrentMetadataAndIsRestartStable(t *testing
 	if got := completed.Messages[1].Text; got != wantTerminal {
 		t.Fatalf("terminal text=%q, want exact current metadata count", got)
 	}
-	if got := completed.Preview; got != wantTerminal {
+	if got := completed.Preview; got != "Document · Delivered" {
 		t.Fatalf("terminal preview=%q", got)
 	}
 	payload := app.scoutChatThreadUpdatePayload(thread.OwnerEmail, completed, completed.Messages[1])
@@ -350,6 +414,197 @@ func TestScoutChatViewerProjectionSuppressesInternalMarkdownAndProjectsStandalon
 	}
 }
 
+func TestScoutChatViewerProjectionUsesClosedStructuredResultEnvelopes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	imageRef, err := putBlob([]byte("exact image bytes"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workbookRef, err := putBlob([]byte("exact workbook bytes"), ventureWorkbookMime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleRef, err := putBlob([]byte("exact bundle pdf"), "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileRef, err := putBlob([]byte("exact standalone file"), "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageRef, err := putBlob([]byte("flattened review page"), "image/jpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assetsJSON := func(assets ...artifactAsset) string {
+		raw, marshalErr := json.Marshal(assets)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		return string(raw)
+	}
+	workbookPreview, err := json.Marshal(ventureWorkbookPreview{
+		Version: 1, FileName: "forecast.xlsx", Mime: ventureWorkbookMime,
+		SheetCount: 2, FormulaCount: 19, InputPolicy: ventureWorkbookPolicyLocked,
+		Sheets: []ventureWorkbookSheetPreview{{Name: "Inputs", Purpose: "Controlled assumptions"}, {Name: "Forecast", Purpose: "Operating model"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tablePreview, err := json.Marshal(scoutChatResultTableRef{
+		Columns: []string{"Scenario", "Revenue"}, Rows: [][]string{{"Base", "$1.2M"}, {"Upside", "$1.5M"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type expected struct {
+		kind           string
+		family         string
+		assets         []artifactAsset
+		metadata       map[string]string
+		wantAssets     int
+		wantTable      bool
+		wantWorkbook   bool
+		wantPrimaryRef string
+	}
+	cases := []expected{
+		{kind: artifactTypeImage, family: "Image", assets: []artifactAsset{{Ref: imageRef, Mime: "image/png", Name: "campaign.png", Kind: "image"}, {Ref: pageRef, Mime: "image/jpeg", Name: "page-01.jpg", Kind: "page_image"}}, wantAssets: 1, wantPrimaryRef: imageRef},
+		{kind: artifactTypeTable, family: "Data table", metadata: map[string]string{"tablePreview": string(tablePreview)}, wantTable: true},
+		{kind: artifactTypeWorkbook, family: "Workbook", assets: []artifactAsset{{Ref: workbookRef, Mime: ventureWorkbookMime, Name: "forecast.xlsx", Kind: "export"}}, metadata: map[string]string{ventureWorkbookPreviewKey: string(workbookPreview)}, wantAssets: 1, wantWorkbook: true, wantPrimaryRef: workbookRef},
+		{kind: artifactTypeBundle, family: "Files", assets: []artifactAsset{{Ref: bundleRef, Mime: "application/pdf", Name: "brief.pdf", Kind: "export"}}, wantAssets: 1, wantPrimaryRef: bundleRef},
+		{kind: artifactTypeFile, family: "Files", assets: []artifactAsset{{Ref: fileRef, Mime: "text/plain", Name: "notes.txt", Kind: "export"}}, wantAssets: 1, wantPrimaryRef: fileRef},
+		{kind: artifactTypePDF, family: "Document", assets: []artifactAsset{{Ref: bundleRef, Mime: "application/pdf", Name: "brief.pdf", Kind: "export"}}, wantAssets: 1, wantPrimaryRef: bundleRef},
+	}
+
+	thread := scoutChatThreadRecord{}
+	artifacts := make([]meetingMemoryEntry, 0, len(cases))
+	for index, testCase := range cases {
+		runID := fmt.Sprintf("structured-run-%d", index)
+		metadata := map[string]string{
+			"type": testCase.kind, "source": "scout_thread", "threadId": runID,
+			"status": "complete", "threadStatus": "complete", "visibility": scoutChatVisibilityPrivate,
+			"ownerEmail": "aj@shareability.com", "requestedBy": "aj@shareability.com",
+		}
+		for key, value := range testCase.metadata {
+			metadata[key] = value
+		}
+		if len(testCase.assets) > 0 {
+			metadata[artifactAssetsMetadataKey] = assetsJSON(testCase.assets...)
+		}
+		artifact, _, createErr := app.createOSArtifactWithMetadata("workflow", "Exact "+testCase.kind, "opaque body that must never become the preview", "AJ", metadata)
+		if createErr != nil {
+			t.Fatalf("create %s: %v", testCase.kind, createErr)
+		}
+		artifacts = append(artifacts, artifact)
+		thread.Messages = append(thread.Messages, scoutChatMessageRecord{
+			ID: runID, Kind: "thread", Role: "scout",
+			Thread: &scoutChatThreadRef{ID: runID, Mode: "artifacts", Status: "complete", ArtifactID: artifact.ID},
+		})
+	}
+
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	for index, testCase := range cases {
+		ref := projected.Messages[index].Thread
+		artifact := artifacts[index]
+		if ref.ResultArtifactID != artifact.ID || ref.ResultArtifactType != testCase.kind || ref.ResultArtifactVersion != artifactVersion(artifact) || ref.ResultArtifactDigest != artifactCapabilityDigest(artifact) {
+			t.Errorf("%s lost exact artifact tuple: %+v", testCase.kind, ref)
+		}
+		if ref.OutputFamily != testCase.family || ref.RootRunID != ref.ID || ref.ParentRunID != "" {
+			t.Errorf("%s lost server-owned family/root identity: %+v", testCase.kind, ref)
+		}
+		if len(ref.ResultAssets) != testCase.wantAssets || (testCase.wantPrimaryRef != "" && (len(ref.ResultAssets) == 0 || ref.ResultAssets[0].Ref != testCase.wantPrimaryRef)) {
+			t.Errorf("%s assets=%+v", testCase.kind, ref.ResultAssets)
+		}
+		if (ref.ResultTable != nil) != testCase.wantTable || (ref.ResultWorkbook != nil) != testCase.wantWorkbook {
+			t.Errorf("%s structured envelope table=%+v workbook=%+v", testCase.kind, ref.ResultTable, ref.ResultWorkbook)
+		}
+		if ref.ResultPreview != "" {
+			t.Errorf("%s substituted prose preview %q", testCase.kind, ref.ResultPreview)
+		}
+	}
+	if table := projected.Messages[1].Thread.ResultTable; table == nil || len(table.Rows) != 2 || table.Rows[1][0] != "Upside" {
+		t.Fatalf("table grid was not preserved: %+v", table)
+	}
+	if workbook := projected.Messages[2].Thread.ResultWorkbook; workbook == nil || workbook.SheetCount != 2 || workbook.FormulaCount != 19 || len(workbook.Sheets) != 2 {
+		t.Fatalf("workbook facts were not preserved: %+v", workbook)
+	}
+
+	denied := app.projectScoutChatThreadForViewer("tim@shareability.com", thread)
+	for index, message := range denied.Messages {
+		ref := message.Thread
+		if ref.ResultArtifactID != "" || ref.ResultArtifactType != "" || ref.ResultArtifactVersion != 0 || ref.ResultArtifactDigest != "" || len(ref.ResultAssets) != 0 || ref.ResultTable != nil || ref.ResultWorkbook != nil || ref.ResultPreview != "" || ref.ResultCanEdit || ref.ResultCanExport {
+			t.Errorf("denied structured result %d leaked: %+v", index, ref)
+		}
+	}
+}
+
+func TestScoutChatViewerProjectionRejectsMalformedStructuredResultSubstitutes(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	thread := scoutChatThreadRecord{}
+	invalidPDFRef, err := putBlob([]byte("plain text pretending to be a PDF"), "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidPDFAssets, err := json.Marshal([]artifactAsset{{Ref: invalidPDFRef, Mime: "text/plain", Name: "not-a-pdf.txt", Kind: "export"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, kind := range []string{artifactTypeImage, artifactTypeTable, artifactTypeWorkbook, artifactTypeBundle, artifactTypeFile, artifactTypePDF} {
+		runID := fmt.Sprintf("malformed-run-%d", index)
+		metadata := map[string]string{
+			"type": kind, "source": "scout_thread", "threadId": runID, "status": "complete", "threadStatus": "complete",
+		}
+		if kind == artifactTypePDF {
+			metadata[artifactAssetsMetadataKey] = string(invalidPDFAssets)
+		}
+		artifact, _, err := app.createOSArtifactWithMetadata("workflow", "Malformed "+kind, `{"raw":"json and prose are not a deliverable"}`, "AJ", metadata)
+		if err != nil {
+			t.Fatal(err)
+		}
+		thread.Messages = append(thread.Messages, scoutChatMessageRecord{ID: runID, Kind: "thread", Thread: &scoutChatThreadRef{ID: runID, Mode: "artifacts", Status: "complete", ArtifactID: artifact.ID}})
+	}
+	projected := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	for _, message := range projected.Messages {
+		if ref := message.Thread; ref.ResultArtifactID != "" || ref.ResultPreview != "" || len(ref.ResultAssets) != 0 || ref.ResultTable != nil || ref.ResultWorkbook != nil {
+			t.Errorf("malformed result was promoted or substituted: %+v", ref)
+		}
+	}
+}
+
+func TestScoutChatGovernedWorkResultProjectionRequiresImmutableAuthorizedTuple(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	result, _, err := app.createOSArtifactWithMetadata("research", "Governed result", "# Governed result\n\nDecision-ready evidence brief.", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "stride_product_work", "status": "complete", "threadStatus": "complete",
+		"visibility": scoutChatVisibilityPrivate, "ownerEmail": "aj@shareability.com", "requestedBy": "aj@shareability.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := &scoutChatWorkRecordRef{
+		ID: "work-1", RunID: "run-1", RootRunID: "run-1", Status: "completed", Title: "Governed result", OutputFamily: "Document",
+		ResultArtifactID: result.ID, ResultArtifactType: artifactTypeMarkdown, ResultArtifactVersion: artifactVersion(result), ResultArtifactDigest: artifactCapabilityDigest(result),
+	}
+	thread := scoutChatThreadRecord{Messages: []scoutChatMessageRecord{{ID: "work-result-1", Kind: "work_result", Role: "scout", Work: work}}}
+	owner := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	ref := owner.Messages[0].Work
+	if ref.ResultArtifactID != result.ID || ref.ResultArtifactType != artifactTypeMarkdown || ref.ResultArtifactVersion != artifactVersion(result) || ref.ResultArtifactDigest != artifactCapabilityDigest(result) || strings.TrimSpace(ref.ResultPreview) == "" {
+		t.Fatalf("authorized governed result lost immutable envelope: %+v", ref)
+	}
+	denied := app.projectScoutChatThreadForViewer("tim@shareability.com", thread)
+	if deniedRef := denied.Messages[0].Work; deniedRef.ResultArtifactID != "" || deniedRef.ResultArtifactVersion != 0 || deniedRef.ResultArtifactDigest != "" || deniedRef.ResultPreview != "" {
+		t.Fatalf("denied governed result leaked: %+v", deniedRef)
+	}
+	if _, _, err := app.updateOSArtifact(result.ID, "Governed result", result.Text+"\n\nRevised after delivery.", "Scout"); err != nil {
+		t.Fatal(err)
+	}
+	drifted := app.projectScoutChatThreadForViewer("aj@shareability.com", thread)
+	if driftedRef := drifted.Messages[0].Work; driftedRef.ResultArtifactID != "" || driftedRef.ResultArtifactVersion != 0 || driftedRef.ResultArtifactDigest != "" || driftedRef.ResultPreview != "" {
+		t.Fatalf("revision-drifted governed result did not fail closed: %+v", driftedRef)
+	}
+}
+
 func TestScoutChatViewerProjectionRequiresCurrentResultACL(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	goal, _, err := app.createOSArtifactWithMetadata("workflow", "Private report goal", "goal", "Scout", map[string]string{
@@ -416,6 +671,46 @@ func TestScoutChatViewerProjectionRejectsResultRevisionRace(t *testing.T) {
 	app.projectScoutChatResultRef(context.Background(), accountStore().findUser("aj@shareability.com"), &message, index)
 	if ref := message.Thread; ref.ResultArtifactID != "" || ref.ResultPreview != "" {
 		t.Fatalf("stale result survived revision race: %+v", ref)
+	}
+}
+
+func TestScoutChatViewerProjectionRejectsStructuredResultRevisionRace(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	imageRef, err := putBlob([]byte("authorized image revision"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raceAssets, err := json.Marshal([]artifactAsset{{Ref: imageRef, Mime: "image/png", Name: "race.png", Kind: "image"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, _, err := app.createOSArtifactWithMetadata("workflow", "Race image", "image result record", "Scout", map[string]string{
+		"type": artifactTypeImage, "source": "scout_thread", "threadId": "race-image", "status": "complete", "threadStatus": "complete", "visibility": "organization",
+		artifactAssetsMetadataKey: string(raceAssets),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := app.scoutChatResultIndex()
+	previousProbe := artifactAuthorizationAfterCheckProbe
+	mutated := false
+	artifactAuthorizationAfterCheckProbe = func() {
+		if mutated {
+			return
+		}
+		mutated = true
+		if _, _, updateErr := app.updateOSArtifact(image.ID, "Race image", "changed after authorization", "Scout"); updateErr != nil {
+			t.Fatalf("race update: %v", updateErr)
+		}
+	}
+	t.Cleanup(func() { artifactAuthorizationAfterCheckProbe = previousProbe })
+	message := scoutChatMessageRecord{Thread: &scoutChatThreadRef{ID: "race-image", Mode: "artifacts", Status: "complete", ArtifactID: image.ID}}
+	app.projectScoutChatResultRef(context.Background(), accountStore().findUser("aj@shareability.com"), &message, index)
+	if ref := message.Thread; ref.ResultArtifactID != "" || ref.ResultArtifactDigest != "" || len(ref.ResultAssets) != 0 || ref.ResultTable != nil || ref.ResultWorkbook != nil {
+		t.Fatalf("stale structured result survived revision race: %+v", ref)
 	}
 }
 
@@ -1038,7 +1333,7 @@ func TestScoutTerminalProjectionRetryRunningReplacesDeliveredPreviewAndRestarts(
 	})
 	app.updateScoutChatThreadRefs(agentThreadID, "complete", artifact.ID)
 	delivered, _, err := app.scoutChatThreadByID(thread.OwnerEmail, thread.ID)
-	if err != nil || !strings.Contains(delivered.Preview, "Research delivered") {
+	if err != nil || delivered.Preview != "Document · Delivered" {
 		t.Fatalf("initial delivery thread=%+v err=%v", delivered, err)
 	}
 
@@ -1053,16 +1348,16 @@ func TestScoutTerminalProjectionRetryRunningReplacesDeliveredPreviewAndRestarts(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if running.Messages[1].Text != "Research in progress" || running.Preview != "Research in progress" || strings.Contains(strings.ToLower(running.Messages[1].Text+running.Preview), "delivered") {
+	if running.Messages[1].Text != "Research in progress" || running.Preview != "Document · Building" || strings.Contains(strings.ToLower(running.Messages[1].Text+running.Preview), "delivered") {
 		t.Fatalf("running retry retained terminal projection: text=%q preview=%q", running.Messages[1].Text, running.Preview)
 	}
 	payload := app.scoutChatThreadUpdatePayload(thread.OwnerEmail, running, running.Messages[1])
-	if got, _ := payload["preview"].(string); got != "Research in progress" {
+	if got, _ := payload["preview"].(string); got != "Document · Building" {
 		t.Fatalf("running event preview=%q", got)
 	}
 	restarted := newKanbanBoardApp()
 	afterRestart, _, err := restarted.scoutChatThreadByID(thread.OwnerEmail, thread.ID)
-	if err != nil || afterRestart.Messages[1].Text != "Research in progress" || afterRestart.Preview != "Research in progress" {
+	if err != nil || afterRestart.Messages[1].Text != "Research in progress" || afterRestart.Preview != "Document · Building" {
 		t.Fatalf("running restart projection=%+v err=%v", afterRestart, err)
 	}
 
@@ -1074,7 +1369,7 @@ func TestScoutTerminalProjectionRetryRunningReplacesDeliveredPreviewAndRestarts(
 	}
 	restarted.updateScoutChatThreadRefs(agentThreadID, "complete", artifact.ID)
 	redelivered, _, err := restarted.scoutChatThreadByID(thread.OwnerEmail, thread.ID)
-	if err != nil || redelivered.Messages[1].Text != "Research delivered · 4 cited source links · 3 domains" || redelivered.Preview != redelivered.Messages[1].Text {
+	if err != nil || redelivered.Messages[1].Text != "Research delivered · 4 cited source links · 3 domains" || redelivered.Preview != "Document · Delivered" {
 		t.Fatalf("retry completion projection=%+v err=%v", redelivered, err)
 	}
 }
@@ -1183,7 +1478,8 @@ func TestScoutTerminalProjectionReconcilesLegacyCompletedRefAfterRestart(t *test
 		t.Fatal(err)
 	}
 	want := "Research delivered · 7 cited source links · 6 domains"
-	if reconciled.Messages[1].Text != want || reconciled.Preview != want {
+	wantPreview := "Document · Delivered"
+	if reconciled.Messages[1].Text != want || reconciled.Preview != wantPreview {
 		t.Fatalf("legacy terminal projection not reconciled: text=%q preview=%q", reconciled.Messages[1].Text, reconciled.Preview)
 	}
 	updatedAt := reconciled.UpdatedAt
@@ -1192,7 +1488,7 @@ func TestScoutTerminalProjectionReconcilesLegacyCompletedRefAfterRestart(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replayed.UpdatedAt != updatedAt || replayed.Messages[1].Text != want || replayed.Preview != want {
+	if replayed.UpdatedAt != updatedAt || replayed.Messages[1].Text != want || replayed.Preview != wantPreview {
 		t.Fatalf("legacy reconciliation was not idempotent: %#v", replayed)
 	}
 }
@@ -1279,7 +1575,8 @@ func TestScoutTerminalProjectionRegisteredAdminReconciliationIsExactAndIdempoten
 		t.Fatal(err)
 	}
 	want := "Research delivered · 9 cited source links · 8 domains"
-	if !response.OK || !response.Reconciled || response.Thread.Preview != want || response.Message.Text != want || response.Message.Thread == nil || response.Message.Thread.Status != "complete" {
+	wantPreview := "Document · Delivered"
+	if !response.OK || !response.Reconciled || response.Thread.Preview != wantPreview || response.Message.Text != want || response.Message.Thread == nil || response.Message.Thread.Status != "complete" {
 		t.Fatalf("reconciliation response=%+v", response)
 	}
 	replay := reconcileAs(adminCookies, body)
@@ -1296,7 +1593,7 @@ func TestScoutTerminalProjectionRegisteredAdminReconciliationIsExactAndIdempoten
 		t.Fatal("exact replay reported a second mutation")
 	}
 	persisted, _, err := kanbanApp.scoutChatThreadByID(thread.OwnerEmail, thread.ID)
-	if err != nil || persisted.Preview != want || persisted.Messages[1].Text != want {
+	if err != nil || persisted.Preview != wantPreview || persisted.Messages[1].Text != want {
 		t.Fatalf("durable reconciliation thread=%+v err=%v", persisted, err)
 	}
 }

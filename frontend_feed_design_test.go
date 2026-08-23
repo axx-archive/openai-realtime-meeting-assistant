@@ -68,7 +68,9 @@ func TestIndexArtifactStageContract(t *testing.T) {
 		// An evolving room/work card can arrive before the newest-100 artifact
 		// window. Opening must fetch the exact authorized artifact instead of
 		// dumping the reader into an empty Intelligence library.
-		"entry = await fetchArtifactEntryById(id)",
+		// Exact result controls force a refresh so an older cached revision can
+		// never be substituted for the version/digest bound in the channel.
+		"entry = await fetchArtifactEntryById(id, { refresh: Boolean(expectedBinding) })",
 		// dispatch mirrors the read pane: sandboxed deck iframe, injection-safe
 		// renderer, newest-pdf embed for text-less pdf payloads
 		"artifactIsHTMLDeck(entry)",

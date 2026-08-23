@@ -29,10 +29,10 @@ import (
 	"time"
 )
 
-// meetingArchiveFlushTimeout is the OVERALL ceiling on the close-time flush
-// chain — the nine sequential passes of closeFlushChain (brain → decision
-// ledger → board → mission intel → narrative → meeting digest → day digest →
-// entity ledger → company digest). A8: each pass ALSO gets its own
+// meetingArchiveFlushTimeout is the OVERALL ceiling on the legacy explicit
+// close-chain test seam. Durable meeting close now runs Brain → meeting digest
+// → action extraction as the synchronous core and only nudges the six non-core
+// rollups below. A8: each invoked pass ALSO gets its own
 // meetingArchiveFlushPassTimeout so one slow upstream pass can no longer starve
 // the mission / narrative / digest passes behind it out of a single shared
 // budget (the old single 3-minute deadline shared across every call). Both are
@@ -1661,42 +1661,44 @@ func (app *kanbanBoardApp) setAmbientAgentBaselineIDLocked(name string, baseline
 	app.agentBaselineIDs[name] = baselineID
 }
 
-// closeFlushChain is the ordered agent chain a CLOSING meeting flushes, in
-// dependency order so each stage consumes what the previous one just landed:
-// brain summarizes the final transcript window, the decision ledger consumes
-// it, mission intel titles the RIGHT record before rotation, then the narrative maintainer (axx/main: storyline
-// dossiers fold the meeting in), then the Track-2 rollup tiers — meeting digest
-// (consumes the fresh brains: the closing meeting's cumulative T2 digest),
-// day digest (folds the fresh meeting digests into the local-day T3 slices),
-// entity ledger (consolidates the digest's facts plus new decision rows into
-// the canonical registry), and company digest (refreshes T4 from the fresh
-// ledger deltas). Every stage is cursor-gated and upsert-idempotent, so a
-// double flush (archive racing idle, or a flush racing the ticker) is safe.
-//
-// The Item B research-suggestion worker (suggestion_agent.go) is deliberately
-// ABSENT here: it volunteers a confirm-first proposal for a LIVE room to act on,
-// so firing it as a closing meeting empties out — when no one is present to
-// confirm — would only mint an orphan card. It rides its ticker floor only.
-func closeFlushChain() []ambientAgentConfig {
+// closeCoreFlushChain names the two model stages in the durable synchronous
+// core. Action extraction is deterministic validation of meeting_digest and is
+// receipted by meeting_finalization.go rather than represented as another agent.
+func closeCoreFlushChain() []ambientAgentConfig {
+	return []ambientAgentConfig{meetingBrainAgent(), meetingDigestAgent()}
+}
+
+// closeNonCoreFlushChain contains useful but non-blocking rollups. Meeting
+// close only nudges these workers after the core receipt is finalized/degraded;
+// they remain cursor-gated, idempotent, and best-effort.
+func closeNonCoreFlushChain() []ambientAgentConfig {
 	return []ambientAgentConfig{
-		meetingBrainAgent(),
 		decisionLedgerAgent(),
 		missionIntelligenceAgent(),
 		narrativeMaintainerAgent(),
-		meetingDigestAgent(),
 		dayDigestAgent(),
 		entityLedgerAgent(),
 		companyDigestAgent(),
 	}
 }
 
-// flushAmbientAgentsForArchive synchronously runs the close flush chain with a
-// batch minimum of one before the archive snapshot is taken (and before
-// rotateMeetingID — a later ambient tick would otherwise consume the
-// pre-archive write-ups and stamp the old meeting's output onto the successor
-// id). Skips silently when no API key is configured or nothing new exists.
-// The explicit archive path is an office seam, and the office sitting's latch
-// rides along so a listen-only office archive still skips the board stage.
+// closeFlushChain remains the deterministic full-chain test/explicit recovery
+// seam: core first, then every non-core rollup. Production idle close does not
+// synchronously execute this full list.
+//
+// The Item B research-suggestion worker (suggestion_agent.go) is deliberately
+// ABSENT here: it volunteers a confirm-first proposal for a LIVE room to act on,
+// so firing it as a closing meeting empties out — when no one is present to
+// confirm — would only mint an orphan card. It rides its ticker floor only.
+func closeFlushChain() []ambientAgentConfig {
+	chain := append([]ambientAgentConfig(nil), closeCoreFlushChain()...)
+	return append(chain, closeNonCoreFlushChain()...)
+}
+
+// flushAmbientAgentsForArchive is retained as an explicit full-chain recovery
+// and test seam. Production close paths use the receipted meeting-scoped core
+// runner and merely nudge these wider rollups, so company maintenance cannot
+// block archive, rotation, or media teardown.
 func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 	listenOnly := false
 	if app != nil && app.meetings != nil {
@@ -1707,12 +1709,9 @@ func (app *kanbanBoardApp) flushAmbientAgentsForArchive() {
 	app.flushAmbientAgentsForClose("archive", officeRoomID, listenOnly)
 }
 
-// flushAmbientAgentsForClose is the shared boundary flush for BOTH meeting
-// close seams — explicit archive and idle end (the Track-2 idle-close hole:
-// that path previously wrote no final rollup at all, so idle-closed meetings
-// never got a digest and "what did I miss" silently skipped them). Bounded by
-// meetingArchiveFlushTimeout and best-effort throughout: every failure only
-// logs, the caller always proceeds. W4 §7.4: the flush is ROOM-scoped — each
+// flushAmbientAgentsForClose is the deterministic full-chain recovery/test
+// seam. It is bounded by meetingArchiveFlushTimeout and best-effort throughout:
+// every failure only logs. W4 §7.4: each room-scoped stage runs only the
 // room-scoped stage runs only the closing room's window under its own
 // (agent, room) lock, so two rooms closing concurrently neither serialize nor
 // deadlock; the company-global rollup stages keep their single cursor. A
@@ -1790,12 +1789,12 @@ func (store *meetingMemoryStore) unconsumedEntriesAfter(inputKind string, artifa
 
 // unconsumedEntriesAfterForRoom is unconsumedEntriesAfter with the W4 room
 // dimension (§7.4 — the make-or-break): a non-empty roomID filters BOTH sides
-// by room, so the cursor for (agent, room) is the newest artifact-of-kind
-// stamped with that roomId — legacy artifacts without a roomId stamp read as
-// office, which is exactly how the office pipeline resumes seamlessly across
-// the deploy — and the inputs are only that room's. One room's pass can never
-// advance another room's window. roomID == "" keeps the company-global
-// single-cursor scan unchanged.
+// by room. The effective cursor is the FURTHEST authorized input referenced by
+// any artifact of that scope, not merely the newest artifact row. That monotonic
+// rule lets a restart-finalized older meeting append its delayed Brain after a
+// successor without rewinding the room cursor and replaying newer transcripts.
+// Legacy artifacts without roomId still read as office. roomID == "" keeps the
+// company-global scan.
 func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string, roomID string) []meetingMemoryEntry {
 	return store.unconsumedEntriesAfterForRoomForPrincipal(inputKind, artifactKind, cursorKey, limit, baselineID, roomID, RecallPrincipal{})
 }
@@ -1812,36 +1811,33 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	entries := store.entries
+	inputIndexes := make(map[string]int)
+	for index, entry := range entries {
+		if entry.Kind != inputKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
+			continue
+		}
+		inputIndexes[entry.ID] = index
+	}
 
 	startIndex := 0
 	baselineID = strings.TrimSpace(baselineID)
 	if baselineID != "" {
-		for index := len(entries) - 1; index >= 0; index-- {
-			if entries[index].ID == baselineID && entries[index].Kind == inputKind && !memoryEntryHiddenFromRecall(entries[index]) && matchesRoom(entries[index]) && (principal.Audience == "" || recallEntryScopeAllowed(entries[index].Metadata, principal)) {
-				startIndex = index + 1
-				break
-			}
+		if index, ok := inputIndexes[baselineID]; ok {
+			startIndex = index + 1
 		}
 	}
-	for index := len(entries) - 1; index >= 0; index-- {
-		entry := entries[index]
+	for index, entry := range entries {
 		if entry.Kind != artifactKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
 			continue
 		}
 		cursorID := strings.TrimSpace(entry.Metadata[cursorKey])
 		if cursorID != "" {
-			for inputIndex := len(entries) - 1; inputIndex >= 0; inputIndex-- {
-				if entries[inputIndex].ID == cursorID && entries[inputIndex].Kind == inputKind && !memoryEntryHiddenFromRecall(entries[inputIndex]) && matchesRoom(entries[inputIndex]) && (principal.Audience == "" || recallEntryScopeAllowed(entries[inputIndex].Metadata, principal)) {
-					if inputIndex+1 > startIndex {
-						startIndex = inputIndex + 1
-					}
-					break
-				}
+			if inputIndex, ok := inputIndexes[cursorID]; ok && inputIndex+1 > startIndex {
+				startIndex = inputIndex + 1
 			}
 		} else if index+1 > startIndex {
 			startIndex = index + 1
 		}
-		break
 	}
 
 	inputs := make([]meetingMemoryEntry, 0, limit)

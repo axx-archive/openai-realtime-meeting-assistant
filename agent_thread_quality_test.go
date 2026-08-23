@@ -868,6 +868,124 @@ func TestFreshResearchAuthorityAllowsBoundedComparatorAndCurrentRuleLanes(t *tes
 	}
 }
 
+func TestFreshResearchAuthorityRetypesUnambiguousMisclassifiedLanes(t *testing.T) {
+	app, plan, _ := authorizedExternalEvidenceTestContext(t)
+	base := externalEvidenceResearchAuthorityObjectForTest(t, plan, "What is the official program's 2026 opted-in creator count?")
+	tests := []struct {
+		name     string
+		question string
+		wantKind string
+	}{
+		{
+			name:     "single comparative lane",
+			question: "How does the official program's 2026 opted-in creator count compare with peer programs?",
+			wantKind: "comparative_evidence",
+		},
+		{
+			name:     "single current constraint lane",
+			question: "What current rules govern the official program?",
+			wantKind: "current_constraint",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["question"] = test.question
+			value["research_kind"] = "direct_evidence"
+			body := externalEvidenceContextWithQuestionsForTest(t, plan, []any{value})
+			authorized, mode, canonical, err := authorizeAndCanonicalizeExternalEvidenceResearchText(app, &plan, body)
+			if err != nil || mode != "external" || len(authorized.Authorities) != 1 || authorized.Authorities[0].ResearchKind != test.wantKind {
+				t.Fatalf("misclassified lane was not safely retyped: authority=%+v mode=%q err=%v", authorized, mode, err)
+			}
+			parsed, parsedMode, err := externalEvidenceResearchQuestionAuthoritiesFromText(canonical)
+			if err != nil || parsedMode != "external" || len(parsed) != 1 || parsed[0].ResearchKind != test.wantKind {
+				t.Fatalf("canonical context did not persist repaired lane: parsed=%+v mode=%q err=%v\n%s", parsed, parsedMode, err, canonical)
+			}
+		})
+	}
+}
+
+func TestFreshResearchAuthorityRetypeFailsClosedOnAmbiguousLanes(t *testing.T) {
+	_, plan, _ := authorizedExternalEvidenceTestContext(t)
+	base := externalEvidenceResearchAuthorityObjectForTest(t, plan, "What is the official program's 2026 opted-in creator count?")
+	tests := []struct {
+		name     string
+		question string
+	}{
+		{
+			name:     "comparative question with multiple measures",
+			question: "How do the official program's market size and advertising spend compare with peer programs?",
+		},
+		{
+			name:     "comparative current-rule ambiguity",
+			question: "How do current rules for the official program compare with peer programs?",
+		},
+		{
+			name:     "rule without current-constraint time scope",
+			question: "What rules govern the official program?",
+		},
+		{
+			name:     "bare how-does mechanism question",
+			question: "How does the official program work?",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value := cloneResearchAuthorityObjectForTest(base)
+			value["question"] = test.question
+			value["research_kind"] = "direct_evidence"
+			body := externalEvidenceContextWithQuestionsForTest(t, plan, []any{value})
+			if authorities, _, err := externalEvidenceResearchQuestionAuthoritiesFromText(body); err == nil {
+				t.Fatalf("ambiguous lane was retyped instead of failing closed: %+v", authorities)
+			}
+		})
+	}
+}
+
+func TestExternalEvidenceEngagementArmyIsCategoryNotMeasure(t *testing.T) {
+	if measures := externalEvidenceMeasureKinds("What current disclosure rules govern a Western-culture engagement army?"); len(measures) != 0 {
+		t.Fatalf("engagement-army category was treated as a metric: %+v", measures)
+	}
+	measures := externalEvidenceMeasureKinds("How does the engagement army's engagement rate compare with peers?")
+	if !measures["rate"] || !measures["engagement"] {
+		t.Fatalf("real engagement-rate measure disappeared with category normalization: %+v", measures)
+	}
+}
+
+func TestFreshResearchAuthorityRetypesProductionShapedEngagementArmyLanes(t *testing.T) {
+	tests := []struct {
+		name     string
+		question string
+		wantKind string
+	}{
+		{
+			name:     "current disclosure constraint",
+			question: "What current disclosure rules govern a Western-culture engagement army?",
+			wantKind: "current_constraint",
+		},
+		{
+			name:     "single market-size comparison",
+			question: "What market size benchmarks compare a Western-culture engagement army with adjacent creator programs?",
+			wantKind: "comparative_evidence",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value := map[string]any{
+				"question": test.question, "research_kind": "direct_evidence", "importance": "load_bearing",
+				"source_ref":      "goal_objective_id=engagement-army digest=" + strings.Repeat("a", 64),
+				"authority_quote": "Assess the market opportunity for a Western-culture engagement army as an opt-in creator community.",
+				"scope_anchor":    "engagement army", "decision_effect": "guardrail",
+				"decision_relevance": "Evidence about the engagement army could change a launch guardrail.",
+			}
+			authority, err := decodeExternalEvidenceResearchQuestionAuthority(value, 0)
+			if err != nil || authority.ResearchKind != test.wantKind {
+				t.Fatalf("production-shaped category lane was not retyped: authority=%+v err=%v", authority, err)
+			}
+		})
+	}
+}
+
 func TestExternalEvidenceApprovedDisplayClaimIsExtractiveAndScopePreserving(t *testing.T) {
 	const candidate = "In 2026, the official program has 4,200 opted-in creators in the United States."
 	const question = "What is the official program's 2026 opted-in creator count in the United States?"

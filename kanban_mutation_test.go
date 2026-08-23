@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBoardMutationsNoopWhenStateAlreadyMatches(t *testing.T) {
@@ -432,7 +433,27 @@ func newIsolatedKanbanBoardApp(t *testing.T) *kanbanBoardApp {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
 
-	return newKanbanBoardApp()
+	app := newKanbanBoardApp()
+	// Manual/idle meeting closes intentionally finalize in the background. Keep
+	// every isolated test's TempDir alive until those workers have released all
+	// archive and receipt writes; test-specific cleanup callbacks run first and
+	// release any deliberately blocked responder.
+	t.Cleanup(func() {
+		app.stopMeetingFinalizationRetries()
+		app.stopRoomArchiveCloseRetries()
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			app.meetingFinalizationRunMu.Lock()
+			idle := !app.meetingFinalizationWorker && len(app.meetingFinalizationQueue) == 0 && len(app.meetingFinalizationBacklog) == 0 && len(app.meetingFinalizationRunning) == 0
+			app.meetingFinalizationRunMu.Unlock()
+			if idle {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Errorf("meeting finalization workers did not quiesce before isolated data cleanup")
+	})
+	return app
 }
 
 func stringsToAny(values []string) []any {

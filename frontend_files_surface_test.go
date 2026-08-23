@@ -241,7 +241,7 @@ func TestIndexArtifactStageSaveToFiles(t *testing.T) {
 	}
 	stage := html[start:end]
 	for _, want := range []string{
-		"const saveToFilesControl = artifactSaveToFilesControl(entry)",
+		"const saveToFilesControl = artifactSaveToFilesControl(entry, { expectedBinding })",
 		"headActions.appendChild(saveToFilesControl)",
 	} {
 		if !strings.Contains(stage, want) {

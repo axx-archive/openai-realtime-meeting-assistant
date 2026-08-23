@@ -2,6 +2,8 @@ export type WorkPresentationInput = {
   query?: unknown;
   mode?: unknown;
   processId?: unknown;
+  outputFamily?: unknown;
+  resultArtifactType?: unknown;
   status?: unknown;
   currentStage?: unknown;
   progressPercent?: unknown;
@@ -23,27 +25,103 @@ export type WorkPhasePresentation = {
 type CustomerPhaseDefinition = {
   id: string;
   label: string;
-  stages: ReadonlyArray<string>;
+  working: string;
+  stagesByProcess: Readonly<Record<'packaging_studio' | 'document_report', ReadonlyArray<string>>>;
   /** Inclusive lower bound used only when the server projects the parent but not its active child stage. */
   startsAtPercent: number;
 };
 
 /**
- * The five customer-visible Packaging Studio phases used by web Activity.
- * Raw execution stages remain a durable implementation detail; native uses
- * this single map for work cards, channel continuity, and activity sheets.
+ * The shared four-phase customer grammar for authored presentations and
+ * documents. Raw execution stages remain a durable implementation detail;
+ * native uses this one projection for status pills and Activity.
  */
-export const packagingStudioCustomerPhases: ReadonlyArray<CustomerPhaseDefinition> = [
-  { id: 'frame', label: 'Frame the decision', stages: ['intake', 'context_snapshot'], startsAtPercent: 0 },
-  { id: 'ground', label: 'Ground the recommendation', stages: ['external_research', 'evidence'], startsAtPercent: 11 },
-  { id: 'story', label: 'Build the story', stages: ['red_team', 'story_architects', 'compete_architects', 'compete_judges', 'compete_choice', 'write', 'gate', 'voice', 'founder_pass', 'copy_edit'], startsAtPercent: 24 },
-  { id: 'design', label: 'Design the presentation', stages: ['identity', 'imagery_direction', 'imagery_generate', 'layout_plan'], startsAtPercent: 56 },
-  { id: 'finish', label: 'Finish the presentation', stages: ['ship_deck', 'draft_compile', 'ship_compile', 'slide_jury', 'quality_gate', 'ship_approval'], startsAtPercent: 79 },
+export const workCustomerPhases: ReadonlyArray<CustomerPhaseDefinition> = [
+  {
+    id: 'frame',
+    label: 'Frame',
+    working: 'Scout is aligning the request, audience, and company context.',
+    stagesByProcess: {
+      packaging_studio: ['intake', 'context_snapshot'],
+      document_report: ['context_snapshot'],
+    },
+    startsAtPercent: 0,
+  },
+  {
+    id: 'build',
+    label: 'Build',
+    working: 'Scout is grounding the argument in the context and evidence that matter.',
+    stagesByProcess: {
+      packaging_studio: [
+        'external_research', 'source_snapshot', 'evidence_entailment', 'evidence',
+        'red_team', 'story_architects', 'compete_architects', 'compete_judges', 'compete_choice',
+        'write', 'gate', 'voice', 'founder_pass', 'copy_edit',
+      ],
+      document_report: ['external_research', 'source_snapshot', 'evidence_entailment', 'evidence', 'story', 'write'],
+    },
+    startsAtPercent: 25,
+  },
+  {
+    id: 'compose',
+    label: 'Compose',
+    working: 'Scout is composing the finished deliverable.',
+    stagesByProcess: {
+      packaging_studio: [
+        'identity_candidates', 'identity_judges', 'identity_critic', 'identity',
+        'imagery_direction', 'imagery_generate', 'layout_plan', 'ship_deck',
+      ],
+      document_report: ['quality_gate', 'draft_render'],
+    },
+    startsAtPercent: 50,
+  },
+  {
+    id: 'review',
+    label: 'Review & deliver',
+    working: 'Scout is reviewing the exact output and preparing it for delivery.',
+    stagesByProcess: {
+      packaging_studio: ['draft_compile', 'slide_jury', 'quality_gate', 'ship_compile', 'ship_approval'],
+      document_report: ['document_jury', 'rendered_admission', 'publish'],
+    },
+    startsAtPercent: 75,
+  },
 ] as const;
 
-function canonicalWorkPercent(work?: WorkPresentationInput | null): number {
-  const value = Number(work?.progressPercent ?? 0);
-  return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
+/** Compatibility export for callers compiled against the earlier name. */
+export const packagingStudioCustomerPhases = workCustomerPhases;
+
+type AuthoredProcessId = 'packaging_studio' | 'document_report';
+
+const serverOutputFamilies: ReadonlySet<string> = new Set([
+  'Presentation',
+  'Document',
+  'Image',
+  'Workbook',
+  'Data table',
+  'Files',
+  'Work',
+  'Scheduled work',
+  'Revision',
+  'Meeting recap',
+  'Data visualization',
+  'Build',
+  'Project plan',
+  'Financial model',
+  'Design',
+  'Research',
+]);
+
+function authoredProcessId(work?: WorkPresentationInput | null): AuthoredProcessId | null {
+  const processId = String(work?.processId ?? '').trim().toLowerCase();
+  return processId === 'packaging_studio' || processId === 'document_report'
+    ? processId
+    : null;
+}
+
+function canonicalWorkPercent(work?: WorkPresentationInput | null): number | null {
+  const raw = work?.progressPercent;
+  if (raw === undefined || raw === null || raw === '') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : null;
 }
 
 export function workHasDecisionCard(work?: WorkPresentationInput | null): boolean {
@@ -57,34 +135,50 @@ export function workNeedsInput(work?: WorkPresentationInput | null): boolean {
   return ['approval_required', 'needs_input', 'parked'].includes(status) && workHasDecisionCard(work);
 }
 
-export function packagingStudioPhase(work?: WorkPresentationInput | null): WorkPhasePresentation | null {
+export function workCustomerPhase(work?: WorkPresentationInput | null): WorkPhasePresentation | null {
   const stage = String(work?.currentStage ?? '').trim().toLowerCase();
-  const processId = String(work?.processId ?? '').trim().toLowerCase();
-  const stagePhase = packagingStudioCustomerPhases.find((phase) => phase.stages.includes(stage));
-  if (!processId.startsWith('packaging_studio')) return null;
+  const processId = authoredProcessId(work);
+  if (!processId) return null;
+  const stagePhase = workCustomerPhases.find((phase) => phase.stagesByProcess[processId].includes(stage));
   const percent = canonicalWorkPercent(work);
-  const phase = stagePhase ?? [...packagingStudioCustomerPhases].reverse().find((candidate) => percent >= candidate.startsAtPercent) ?? packagingStudioCustomerPhases[0];
-  const index = packagingStudioCustomerPhases.indexOf(phase);
+  const phase = stagePhase
+    ?? (percent === null
+      ? null
+      : [...workCustomerPhases].reverse().find((candidate) => percent >= candidate.startsAtPercent))
+    ?? workCustomerPhases[0];
+  const index = workCustomerPhases.indexOf(phase);
   return {
     id: phase.id,
     label: phase.label,
     number: index + 1,
-    count: packagingStudioCustomerPhases.length,
-    displayLabel: `Phase ${index + 1} of ${packagingStudioCustomerPhases.length} · ${phase.label}`,
+    count: workCustomerPhases.length,
+    displayLabel: `Phase ${index + 1}/${workCustomerPhases.length}`,
   };
 }
+
+/** Compatibility alias for the earlier presentation-only helper. */
+export const packagingStudioPhase = workCustomerPhase;
 
 /**
  * Work family label — NOT inferred from query (locked plan).
  *
- * Returns a stable family based on mode only (not the user's prompt).
- * Falls back to "Work" for any unknown or untyped work.
+ * Process and exact result type are the server-owned output contract and must
+ * outrank a transient worker mode such as Research. Falls back to mode for
+ * ordinary ungoverned work, never to the user's prompt.
  */
 export function workFamilyLabel(work?: WorkPresentationInput | null): string {
-  // Only use mode, never infer from query (the prompt)
-  const mode = String(work?.mode ?? '').toLowerCase();
-  const processId = String(work?.processId ?? '').toLowerCase();
-  if (processId.startsWith('packaging_studio')) return 'Presentation';
+  const mode = String(work?.mode ?? '').trim().toLowerCase();
+  const processId = authoredProcessId(work);
+  const resultType = String(work?.resultArtifactType ?? '').trim().toLowerCase();
+  if (processId === 'packaging_studio') return 'Presentation';
+  if (processId === 'document_report') return 'Document';
+  if (/^(?:html_deck|deck|presentation|slides?)$/u.test(resultType)) return 'Presentation';
+  if (/^(?:markdown|document|doc|memo|brief|report|analysis)$/u.test(resultType)) return 'Document';
+  if (/^(?:table|data_table|spreadsheet)$/u.test(resultType)) return 'Data';
+  if (/^(?:image|generated_image|design)$/u.test(resultType)) return 'Design';
+  if (/^(?:research|deep_research)$/u.test(resultType)) return 'Research';
+  const outputFamily = String(work?.outputFamily ?? '').trim();
+  if (serverOutputFamilies.has(outputFamily)) return outputFamily;
   if (/schedul|recurring/u.test(mode)) return 'Scheduled work';
   if (/revis|redline|translat|regenerat/u.test(mode)) return 'Revision';
   if (/mixed|package/u.test(mode)) return 'Mixed package';
@@ -105,7 +199,7 @@ function genericWorkPhaseLabel(work?: WorkPresentationInput | null): string {
   const stage = String(work?.currentStage ?? '').toLowerCase();
   if (['complete', 'completed', 'published'].includes(status)) return 'Delivered';
   if (workNeedsInput(work)) return 'Needs input';
-  if (['error', 'failed', 'needs_attention', 'rejected'].includes(status)) return 'Needs attention';
+  if (['error', 'failed', 'needs_attention', 'rejected', 'blocked'].includes(status)) return 'Needs attention';
   if (/deliver|verify_goal_completed/u.test(stage)) return 'Delivering';
   if (/gate|review|verif/u.test(stage)) return 'Verifying';
   if (/(^|_)ship(_|$)/u.test(stage)) return 'Delivering';
@@ -118,20 +212,38 @@ function genericWorkPhaseLabel(work?: WorkPresentationInput | null): string {
 export function workPhaseLabel(work?: WorkPresentationInput | null): string {
   const status = String(work?.status ?? '').toLowerCase();
   if (['complete', 'completed', 'published'].includes(status)) return 'Delivered';
-  const presentationPhase = packagingStudioPhase(work);
-  return presentationPhase?.displayLabel ?? genericWorkPhaseLabel(work);
+  if (workNeedsInput(work)) return 'Needs input';
+  if (['error', 'failed', 'needs_attention', 'rejected', 'blocked'].includes(status)) return 'Needs attention';
+  const customerPhase = workCustomerPhase(work);
+  return customerPhase?.displayLabel ?? genericWorkPhaseLabel(work);
 }
 
 export function workProgressPresentation(work?: WorkPresentationInput | null) {
-  const phase = packagingStudioPhase(work);
+  const phase = workCustomerPhase(work);
   const phaseLabel = workPhaseLabel(work);
+  const definition = phase ? workCustomerPhases.find((candidate) => candidate.id === phase.id) : null;
+  const terminalCopy = ['Delivered', 'Needs input', 'Needs attention'].includes(phaseLabel);
   return {
     phase,
     phaseLabel,
     percent: canonicalWorkPercent(work),
     needsInput: workNeedsInput(work),
-    progressCopy: safeWorkProgressNote(work?.progressNote, phaseLabel),
+    progressCopy: safeWorkProgressNote(work?.progressNote, terminalCopy ? phaseLabel : definition?.working ?? phaseLabel),
   };
+}
+
+/** The one-line status grammar used by the persistent native work pill. */
+export function workActivityPillLabel(work?: WorkPresentationInput | null): string {
+  const family = workFamilyLabel(work);
+  const phaseLabel = workPhaseLabel(work);
+  const phase = workCustomerPhase(work);
+  if (!phase || ['Delivered', 'Needs input', 'Needs attention'].includes(phaseLabel)) {
+    return `${family} · ${phaseLabel}`;
+  }
+  const percent = canonicalWorkPercent(work);
+  return percent === null
+    ? `${family} · ${phase.displayLabel}`
+    : `${family} · ${phase.displayLabel} · ${percent}%`;
 }
 
 export function safeWorkProgressNote(note: unknown, fallback: string): string {

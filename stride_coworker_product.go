@@ -916,7 +916,8 @@ func (poster strideCoworkerFilePoster) PostFileExactlyOnce(ctx context.Context, 
 	reservationID := "stride-coworker-" + messageID
 	if source.Artifact != nil {
 		message.Kind = "thread"
-		message.Thread = &scoutChatThreadRef{ID: source.Artifact.ID, Mode: firstNonEmptyString(source.Artifact.Metadata["mode"], "artifact"), Query: source.Row.Name, Status: firstNonEmptyString(agentThreadStatusValue(*source.Artifact), "complete"), ArtifactID: source.Artifact.ID}
+		mode := firstNonEmptyString(source.Artifact.Metadata["mode"], "artifact")
+		message.Thread = &scoutChatThreadRef{ID: source.Artifact.ID, Mode: mode, ProcessID: source.Artifact.Metadata["processId"], Query: source.Row.Name, Status: firstNonEmptyString(agentThreadStatusValue(*source.Artifact), "complete"), ArtifactID: source.Artifact.ID, OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(*source.Artifact), scoutChatOutputFamilyForMode(mode))}
 	} else {
 		grant, grantErr := poster.app.grantPendingAttachmentUpload(user, thread, source.BlobRef, source.BlobMeta)
 		if grantErr != nil {

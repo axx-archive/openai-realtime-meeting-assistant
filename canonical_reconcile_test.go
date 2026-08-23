@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +30,67 @@ func canonicalParityACLFromPlan(plan CanonicalImportPlan) canonicalTestParityACL
 		}
 	}
 	return resolver
+}
+
+type mutableCanonicalSnapshotACL struct {
+	mu            sync.Mutex
+	current       canonicalTestParityACL
+	snapshotCalls int
+	liveCalls     int
+	frozenCalls   int
+	blockNext     bool
+	loaded        chan struct{}
+	release       chan struct{}
+	returnNil     bool
+}
+
+func (resolver *mutableCanonicalSnapshotACL) CanReadCanonicalObject(_ context.Context, principal string, event CanonicalEvent) (bool, error) {
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	resolver.liveCalls++
+	return resolver.current[event.AggregateType+"\x00"+event.AggregateID][principal], nil
+}
+
+func (resolver *mutableCanonicalSnapshotACL) SnapshotCanonicalParityACL(_ context.Context, _ []CanonicalEvent) (CanonicalParityACLResolver, error) {
+	resolver.mu.Lock()
+	resolver.snapshotCalls++
+	frozen := cloneCanonicalTestParityACL(resolver.current)
+	block := resolver.blockNext
+	resolver.blockNext = false
+	loaded, release := resolver.loaded, resolver.release
+	returnNil := resolver.returnNil
+	resolver.mu.Unlock()
+	if block {
+		close(loaded)
+		<-release
+	}
+	if returnNil {
+		return nil, nil
+	}
+	return countedFrozenCanonicalACL{parent: resolver, allowed: frozen}, nil
+}
+
+type countedFrozenCanonicalACL struct {
+	parent  *mutableCanonicalSnapshotACL
+	allowed canonicalTestParityACL
+}
+
+func (resolver countedFrozenCanonicalACL) CanReadCanonicalObject(_ context.Context, principal string, event CanonicalEvent) (bool, error) {
+	resolver.parent.mu.Lock()
+	resolver.parent.frozenCalls++
+	resolver.parent.mu.Unlock()
+	return resolver.allowed[event.AggregateType+"\x00"+event.AggregateID][principal], nil
+}
+
+func cloneCanonicalTestParityACL(source canonicalTestParityACL) canonicalTestParityACL {
+	clone := make(canonicalTestParityACL, len(source))
+	for key, principals := range source {
+		clone[key] = make(map[string]bool, len(principals))
+		for principal, allowed := range principals {
+			clone[key][principal] = allowed
+		}
+	}
+	return clone
 }
 
 func TestReconcileCanonicalPlanTreatsExactLegacyBaselineAsVisibleCheckpoint(t *testing.T) {
@@ -213,6 +276,117 @@ func TestCanonicalReconcilerTargetVisibilityComesFromACLResolver(t *testing.T) {
 	}
 	if !missing || !extra || !report.Diverged || !report.PrincipalParityProven {
 		t.Fatalf("ACL parity report=%+v", report)
+	}
+}
+
+func TestCanonicalReconcilerUsesOneSnapshotAcrossObjectPrincipalMatrix(t *testing.T) {
+	paths := canonicalImportFixture(t)
+	plan, registry := buildCanonicalFixturePlan(t, paths, filepath.Join(t.TempDir(), "versions.json"))
+	store := NewMemoryCanonicalEventStore(registry)
+	if err := plan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	extraPrincipals := make([]string, 250)
+	for index := range extraPrincipals {
+		extraPrincipals[index] = fmt.Sprintf("user:query-budget-%03d@example.com", index)
+	}
+	resolver := &mutableCanonicalSnapshotACL{current: canonicalParityACLFromPlan(plan)}
+	report, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{
+		ACL: resolver, TestedPrincipals: append(append([]string(nil), plan.TestedPrincipals...), extraPrincipals...),
+	})
+	if err != nil || report.Diverged {
+		t.Fatalf("snapshot parity diverged=%v candidates=%+v err=%v", report.Diverged, report.Candidates, err)
+	}
+	tested := append(append([]string(nil), plan.TestedPrincipals...), extraPrincipals...)
+	for _, object := range plan.Objects {
+		tested = append(tested, object.Principals...)
+	}
+	tested = uniqueSortedStrings(tested)
+	resolver.mu.Lock()
+	snapshotCalls, liveCalls, frozenCalls := resolver.snapshotCalls, resolver.liveCalls, resolver.frozenCalls
+	resolver.mu.Unlock()
+	if snapshotCalls != 1 || liveCalls != 0 || frozenCalls != len(plan.Objects)*len(tested) {
+		t.Fatalf("authorization budget snapshot=%d live=%d frozen=%d want snapshot=1 live=0 frozen=%d", snapshotCalls, liveCalls, frozenCalls, len(plan.Objects)*len(tested))
+	}
+}
+
+func TestCanonicalReconcilerSnapshotFailsClosedWhenUnavailable(t *testing.T) {
+	paths := canonicalImportFixture(t)
+	plan, registry := buildCanonicalFixturePlan(t, paths, filepath.Join(t.TempDir(), "versions.json"))
+	store := NewMemoryCanonicalEventStore(registry)
+	if err := plan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &mutableCanonicalSnapshotACL{current: canonicalParityACLFromPlan(plan), returnNil: true}
+	if _, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{ACL: resolver}); err == nil || !strings.Contains(err.Error(), "snapshot is unavailable") {
+		t.Fatalf("unavailable ACL snapshot error=%v", err)
+	}
+}
+
+func TestCanonicalReconcilerConcurrentRevocationRequiresFreshFollowUpSnapshot(t *testing.T) {
+	paths := canonicalImportFixture(t)
+	plan, registry := buildCanonicalFixturePlan(t, paths, filepath.Join(t.TempDir(), "versions.json"))
+	store := NewMemoryCanonicalEventStore(registry)
+	if err := plan.Apply(context.Background(), store); err != nil {
+		t.Fatal(err)
+	}
+	var target CanonicalImportedObject
+	for _, object := range plan.Objects {
+		if len(object.Principals) > 0 {
+			target = object
+			break
+		}
+	}
+	if target.ObjectID == "" {
+		t.Fatal("fixture has no authorized target")
+	}
+	principal := target.Principals[0]
+	resolver := &mutableCanonicalSnapshotACL{
+		current: canonicalParityACLFromPlan(plan), blockNext: true,
+		loaded: make(chan struct{}), release: make(chan struct{}),
+	}
+	firstDone := make(chan struct {
+		report CanonicalReconcileReport
+		err    error
+	}, 1)
+	go func() {
+		report, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{ACL: resolver, TestedPrincipals: plan.TestedPrincipals})
+		firstDone <- struct {
+			report CanonicalReconcileReport
+			err    error
+		}{report: report, err: err}
+	}()
+	<-resolver.loaded
+	resolver.mu.Lock()
+	resolver.current[target.Family+"\x00"+target.ObjectID][principal] = false
+	resolver.mu.Unlock()
+	close(resolver.release)
+	first := <-firstDone
+	if first.err != nil || first.report.Diverged {
+		t.Fatalf("point-in-time snapshot changed underneath pass: diverged=%v candidates=%+v err=%v", first.report.Diverged, first.report.Candidates, first.err)
+	}
+	var targetEvent CanonicalEvent
+	for _, event := range plan.Events {
+		if event.AggregateType == target.Family && event.AggregateID == target.ObjectID {
+			targetEvent = event
+			break
+		}
+	}
+	if allowed, err := resolver.CanReadCanonicalObject(context.Background(), principal, targetEvent); err != nil || allowed {
+		t.Fatalf("live resolver cached pre-revocation authority: allowed=%v err=%v", allowed, err)
+	}
+	second, err := ReconcileCanonicalPlanWithOptions(context.Background(), plan, store, CanonicalReconcileOptions{ACL: resolver, TestedPrincipals: plan.TestedPrincipals})
+	if err != nil || !second.Diverged {
+		t.Fatalf("fresh follow-up missed revocation: diverged=%v candidates=%+v err=%v", second.Diverged, second.Candidates, err)
+	}
+	found := false
+	for _, candidate := range second.Candidates {
+		if candidate.Family == target.Family && candidate.ObjectID == target.ObjectID && candidate.Principal == principal && candidate.Kind == "principal_missing_access" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("fresh follow-up did not report revoked principal: %+v", second.Candidates)
 	}
 }
 

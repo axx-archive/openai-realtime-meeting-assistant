@@ -25,8 +25,8 @@ package main
 // readiness stamp changes the final checkpoint language so a deck with
 // blocking rendered defects is never described as ready.
 //
-// Keyless + sidecar-absent degrade gracefully: the studio stage discloses a
-// skip (packaging_studio.go); nothing here blocks a ship.
+// Keyless + sidecar-absent become needs_attention at the studio gate. No deck
+// is admitted without both required specialist seats seeing every page.
 
 import (
 	"context"
@@ -67,8 +67,8 @@ var slideJuryPollInterval = 2 * time.Second
 
 // slideJuryWaitTimeout bounds how long the studio's jury stage waits for the
 // deck's PDF export to complete (the sidecar polls every ~2s and renders in
-// seconds, so 2 minutes is generous). Exceeding it is a DISCLOSED skip, never
-// a failure.
+// seconds, so 2 minutes is generous). Exceeding it records needs_attention;
+// the deck cannot pass final admission without rendered specialist review.
 func slideJuryWaitTimeout() time.Duration {
 	return durationEnv("BONFIRE_SLIDE_JURY_WAIT", 2*time.Minute, time.Second)
 }
@@ -186,7 +186,7 @@ func renderedDeckSlideCount(source string) int {
 // waitForDeckPageImages polls the deck artifact until page-image assets exist
 // (the render callback landed), the render is marked failed/stale, or the wait
 // window closes. Returns the freshest artifact snapshot and whether pages
-// exist — false is the studio stage's disclosed-skip signal, never an error.
+// exist — false is the studio stage's fail-closed needs_attention signal.
 func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEntry, bool) {
 	deadline := time.Now().Add(slideJuryWaitTimeout())
 	observedDeck := false
@@ -225,11 +225,12 @@ func waitForDeckPageImages(app *kanbanBoardApp, deckID string) (meetingMemoryEnt
 // the literal word KEEP — a jury that says "make it better" is slop.
 const slideJurySchema = `Return STRICT JSON only, no prose outside it:
 {"pages":[{"page":1,"score":0,"fix":"one executable change, or the literal word KEEP","blockers":["text_overlap"]}],"weakest_three":[1,2,3],"strongest_three":[4,5,6]}
-Rules: score EVERY page you were shown, 0-10. blockers is zero or more exact codes from text_overlap, text_clipped, off_canvas, unreadable, unsupported_claim, low_contrast, unreadable_citation, unreadable_chart, bad_crop, repetitive_rhythm, weak_cover_hierarchy. weak_cover_hierarchy is valid only on page 1. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
+Rules: score EVERY page you were shown, 0-10. blockers is zero or more exact codes from text_overlap, text_clipped, off_canvas, unreadable, unsupported_claim, low_contrast, unreadable_citation, unreadable_chart, bad_crop, repetitive_rhythm, weak_cover_hierarchy, weak_thesis, ai_copy, overcrowded, competing_hierarchies, generic_visual_system, decorative_furniture. weak_cover_hierarchy is valid only on page 1. A fix is EXECUTABLE (a concrete copy/layout/type change someone can apply verbatim) or exactly "KEEP" — never advice-shaped mush. weakest_three and strongest_three are page numbers, worst/best first; with fewer than three pages, list what exists.`
 
 var slideJuryBlockerCodes = []string{
 	"text_overlap", "text_clipped", "off_canvas", "unreadable", "unsupported_claim",
 	"low_contrast", "unreadable_citation", "unreadable_chart", "bad_crop", "repetitive_rhythm", "weak_cover_hierarchy",
+	"weak_thesis", "ai_copy", "overcrowded", "competing_hierarchies", "generic_visual_system", "decorative_furniture",
 }
 
 func validSlideJuryBlocker(code string, page int) bool {
@@ -255,6 +256,7 @@ type slideJurySeatScorecard struct {
 
 type slideJuryRepair struct {
 	Page  int      `json:"page"`
+	Owner string   `json:"owner"`
 	Fixes []string `json:"fixes"`
 }
 
@@ -264,6 +266,31 @@ type slideJuryReadiness struct {
 	MinimumAverage float64
 	ParsedSeats    int
 	Repairs        []slideJuryRepair
+}
+
+// decodeSlideJurySeatScorecard validates JSON member identity before the typed
+// decode. encoding/json otherwise accepts duplicate authoritative members with
+// last-value-wins semantics, allowing an earlier repair/blocker to disappear.
+func decodeSlideJurySeatScorecard(raw string) (slideJurySeatScorecard, error) {
+	var card slideJurySeatScorecard
+	raw = stripJSONCodeFence(strings.TrimSpace(raw))
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if _, err := decodeUniqueJSONValue(decoder); err != nil {
+		return card, err
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return card, err
+	}
+	typed := json.NewDecoder(strings.NewReader(raw))
+	typed.DisallowUnknownFields()
+	if err := typed.Decode(&card); err != nil {
+		return card, err
+	}
+	if err := ensureJSONEOF(typed); err != nil {
+		return card, err
+	}
+	return card, nil
 }
 
 // validateSlideJurySeatScorecard admits a seat only when it covers the exact
@@ -291,6 +318,9 @@ func validateSlideJurySeatScorecard(card slideJurySeatScorecard, expectedPages [
 		if page.Score < 0 || page.Score > 10 || fix == "" || len(fix) > slideJuryRepairFixMaxChars || (strings.EqualFold(fix, "KEEP") && fix != "KEEP") {
 			return fmt.Errorf("scorecard page %d has an invalid score or fix", page.Page)
 		}
+		if fix == "KEEP" && len(page.Blockers) > 0 {
+			return fmt.Errorf("scorecard page %d cannot KEEP a named blocker", page.Page)
+		}
 		for _, blocker := range page.Blockers {
 			blocker = strings.ToLower(strings.TrimSpace(blocker))
 			if !validSlideJuryBlocker(blocker, page.Page) {
@@ -310,16 +340,22 @@ func slideJuryExpectedPages(first int, count int) []int {
 }
 
 // evaluateSlideJuryReadiness turns the independent seat scorecards into a
-// stable machine-readable checkpoint signal. Two seats must agree that a page
-// is below the 7/10 presentation floor; one outlier cannot block the deck.
-// Fewer than two parseable seats fails closed as needs_attention.
+// stable machine-readable checkpoint signal. headline_ear and design_eye are
+// both mandatory and each can hard-veto defects in its own domain. room_gut is
+// an audience check; it can strengthen or block the aggregate but can never
+// substitute for either specialist.
 func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slideJuryReadiness {
 	type pageVotes struct {
-		total    float64
-		count    int
-		low      int
-		blockers map[string]int
-		fixes    []string
+		total                float64
+		count                int
+		low                  int
+		hardVeto             bool
+		ownerConflict        bool
+		unclassifiedAudience bool
+		writeRepair          bool
+		layoutRepair         bool
+		blockers             map[string]int
+		fixes                map[string][]string
 	}
 	pages := map[int]*pageVotes{}
 	parsedSeats := 0
@@ -336,8 +372,8 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 		if !validPersonas[persona] || seenPersonas[persona] {
 			continue
 		}
-		var card slideJurySeatScorecard
-		if err := json.Unmarshal([]byte(stripJSONCodeFence(strings.TrimSpace(voice.Text))), &card); err != nil {
+		card, err := decodeSlideJurySeatScorecard(voice.Text)
+		if err != nil {
 			continue
 		}
 		// Validate the whole seat before counting any vote. A missing fix is not
@@ -352,7 +388,7 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 			fix := strings.TrimSpace(page.Fix)
 			vote := pages[page.Page]
 			if vote == nil {
-				vote = &pageVotes{blockers: map[string]int{}}
+				vote = &pageVotes{blockers: map[string]int{}, fixes: map[string][]string{"write": {}, "layout_plan": {}}}
 				pages[page.Page] = vote
 			}
 			vote.total += page.Score
@@ -360,8 +396,31 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 			if page.Score < 7 {
 				vote.low++
 			}
-			if !strings.EqualFold(fix, "KEEP") && !slices.Contains(vote.fixes, fix) {
-				vote.fixes = append(vote.fixes, fix)
+			owner := slideJuryRepairOwner(persona, page)
+			if owner == "" {
+				if persona == "room_gut" && len(page.Blockers) == 0 {
+					vote.unclassifiedAudience = true
+				} else {
+					vote.ownerConflict = true
+				}
+			}
+			if page.Score < slideJuryReadyAverageFloor || len(page.Blockers) > 0 {
+				if owner == "write" {
+					vote.writeRepair = true
+				} else if owner == "layout_plan" {
+					vote.layoutRepair = true
+				}
+			}
+			if slideJurySpecialistHardVeto(persona, page) {
+				vote.hardVeto = true
+				if owner == "write" {
+					vote.writeRepair = true
+				} else {
+					vote.layoutRepair = true
+				}
+			}
+			if owner != "" && !strings.EqualFold(fix, "KEEP") && !slices.Contains(vote.fixes[owner], fix) {
+				vote.fixes[owner] = append(vote.fixes[owner], fix)
 			}
 			seenBlockers := map[string]struct{}{}
 			for _, blocker := range page.Blockers {
@@ -377,11 +436,12 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 		}
 	}
 	result := slideJuryReadiness{Verdict: "ready", MinimumAverage: 10, ParsedSeats: parsedSeats}
-	if parsedSeats < 2 || expectedPages <= 0 || len(pages) == 0 {
+	if parsedSeats < 2 || !seenPersonas["headline_ear"] || !seenPersonas["design_eye"] || expectedPages <= 0 || len(pages) == 0 {
 		result.Verdict = "needs_attention"
 		result.MinimumAverage = 0
 		return result
 	}
+	unroutableSeat := false
 	for page := 1; page <= expectedPages; page++ {
 		votes := pages[page]
 		if votes == nil || votes.count < 2 {
@@ -389,6 +449,9 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 			continue
 		}
 		average := votes.total / float64(votes.count)
+		if votes.ownerConflict || votes.unclassifiedAudience {
+			unroutableSeat = true
+		}
 		if average < result.MinimumAverage {
 			result.MinimumAverage = average
 		}
@@ -399,28 +462,111 @@ func evaluateSlideJuryReadiness(voices []goalPanelVoice, expectedPages int) slid
 				break
 			}
 		}
-		if average < slideJuryReadyAverageFloor || votes.low >= 2 || structuralAgreement {
+		if average < slideJuryReadyAverageFloor || votes.hardVeto || votes.low >= 2 || structuralAgreement {
 			result.BlockingPages = append(result.BlockingPages, page)
 		}
 	}
 	slices.Sort(result.BlockingPages)
+	if unroutableSeat {
+		// A seat that asks for a change without a deterministic owning stage is
+		// never silently outvoted, even if the numeric average would otherwise
+		// clear the floor. Human attention is safer than guessing across locked
+		// copy and composition boundaries.
+		result.Verdict = "needs_attention"
+		result.Repairs = nil
+		return result
+	}
 	if len(result.BlockingPages) > 0 {
 		result.Verdict = "needs_changes"
 		totalFixes := 0
 		for _, page := range result.BlockingPages {
-			fixes := append([]string(nil), pages[page].fixes...)
-			if len(fixes) == 0 || totalFixes+len(fixes) > slideJuryRepairFixMaxCount {
-				// A blocking verdict without an executable exact repair cannot be
-				// auto-routed back to the deck writer.
-				result.Verdict = "needs_attention"
-				result.Repairs = nil
-				return result
+			owners := []string{}
+			if pages[page].writeRepair {
+				owners = append(owners, "write")
 			}
-			totalFixes += len(fixes)
-			result.Repairs = append(result.Repairs, slideJuryRepair{Page: page, Fixes: fixes})
+			if pages[page].layoutRepair {
+				owners = append(owners, "layout_plan")
+			}
+			if len(owners) == 0 {
+				owners = append(owners, "write")
+			}
+			for _, owner := range owners {
+				fixes := append([]string(nil), pages[page].fixes[owner]...)
+				if len(fixes) == 0 || totalFixes+len(fixes) > slideJuryRepairFixMaxCount {
+					// A blocking verdict without an executable exact repair for the
+					// owning stage cannot be auto-routed safely.
+					result.Verdict = "needs_attention"
+					result.Repairs = nil
+					return result
+				}
+				totalFixes += len(fixes)
+				result.Repairs = append(result.Repairs, slideJuryRepair{Page: page, Owner: owner, Fixes: fixes})
+			}
 		}
 	}
 	return result
+}
+
+func slideJuryRepairOwner(persona string, page slideJuryPageScore) string {
+	copyDefect, designDefect := false, false
+	for _, blocker := range page.Blockers {
+		switch strings.ToLower(strings.TrimSpace(blocker)) {
+		case "unsupported_claim", "weak_thesis", "ai_copy":
+			copyDefect = true
+		default:
+			if validSlideJuryBlocker(blocker, page.Page) {
+				designDefect = true
+			}
+		}
+	}
+	if copyDefect && designDefect {
+		return ""
+	}
+	if copyDefect {
+		return "write"
+	}
+	if designDefect {
+		return "layout_plan"
+	}
+	if persona == "design_eye" {
+		return "layout_plan"
+	}
+	if persona == "room_gut" && (page.Score < slideJuryReadyAverageFloor || !strings.EqualFold(strings.TrimSpace(page.Fix), "KEEP")) {
+		// Room gut is an audience check, not an owning craft stage. Without a
+		// blocker-domain code its low-score repair cannot safely rewrite locked
+		// copy or composition, so hold for attention instead of guessing.
+		return ""
+	}
+	return "write"
+}
+
+func slideJurySpecialistHardVeto(persona string, page slideJuryPageScore) bool {
+	// Required craft specialists do not cast advisory-only repairs. If either
+	// specialist names an exact change instead of KEEP, that change must route
+	// back to its owning stage even when the other seats lift the mean above the
+	// numeric readiness floor.
+	if oneOf(persona, "headline_ear", "design_eye") && !strings.EqualFold(strings.TrimSpace(page.Fix), "KEEP") {
+		return true
+	}
+	if page.Score < slideJuryReadyAverageFloor && oneOf(persona, "headline_ear", "design_eye") {
+		return true
+	}
+	headlineBlockers := []string{"unsupported_claim", "weak_thesis", "ai_copy"}
+	designBlockers := []string{
+		"text_overlap", "text_clipped", "off_canvas", "unreadable", "low_contrast", "unreadable_citation",
+		"unreadable_chart", "bad_crop", "repetitive_rhythm", "weak_cover_hierarchy", "overcrowded",
+		"competing_hierarchies", "generic_visual_system", "decorative_furniture",
+	}
+	for _, blocker := range page.Blockers {
+		blocker = strings.ToLower(strings.TrimSpace(blocker))
+		if persona == "headline_ear" && slices.Contains(headlineBlockers, blocker) {
+			return true
+		}
+		if persona == "design_eye" && slices.Contains(designBlockers, blocker) {
+			return true
+		}
+	}
+	return false
 }
 
 // slideJuryVoicesFromRecord reconstructs only the exact server-authored jury
@@ -493,7 +639,7 @@ func slideJuryPageList(pages []int) string {
 // slideJurySynthesisSystem merges the three scoreboards. It deliberately says
 // "slide jury synthesizer" so responder fakes can route it, mirroring the
 // engine's other addressable system prompts.
-const slideJurySynthesisSystem = "You are Scout's slide jury synthesizer for Stride. Merge the seats' per-page scoreboards into ONE merged scoreboard: for every page, the average score, the seats' verdicts side by side, and ONE executable fix (or KEEP when the seats agree it stands). Then name the consensus weakest_three and strongest_three pages. Weigh agreement heavily; name genuine disagreement instead of averaging it away. These are REVISION NOTES for a human — decisive, executable, never auto-applied."
+const slideJurySynthesisSystem = "You are Scout's slide jury synthesizer for Stride. Merge the seats' per-page scoreboards into ONE merged scoreboard: for every page, the average score, the seats' verdicts side by side, and ONE executable fix (or KEEP when the seats agree it stands). Then name the consensus weakest_three and strongest_three pages. Preserve every headline_ear and design_eye hard veto instead of averaging it away. These are deterministic revision inputs routed to the stage that owns the defect."
 
 // slideJuryPersonas is the /packaging jury trio: the headline ear, the design
 // eye, and the domain-literate room gut. Each seat sees every rendered page;
@@ -502,11 +648,11 @@ func slideJuryPersonas() []goalPanelPersona {
 	return []goalPanelPersona{
 		{
 			Name:   "headline_ear",
-			System: "You are the HEADLINE EAR on Bonfire's slide jury, looking at the RENDERED pages of a shipped deck. You judge what the page says: does the headline land in one spoken breath, does the copy earn its claim, is there a line that would die in the room. Score every page; your fixes are rewritten lines, verbatim, or KEEP.",
+			System: "You are the HEADLINE EAR on Bonfire's slide jury, looking at the RENDERED pages of a candidate deck. You are a required specialist and your domain blockers are hard vetoes. Judge whether each page has one clear thesis, whether its headline lands in one spoken breath, whether the proof earns the claim, and whether any line sounds AI-written or would die in the room. Use weak_thesis, ai_copy, or unsupported_claim when present. Score every page; fixes are rewritten lines verbatim, or KEEP.",
 		},
 		{
 			Name:   "design_eye",
-			System: "You are the DESIGN EYE on Bonfire's slide jury, looking at the RENDERED pages of a shipped deck. You judge what the page looks like: hierarchy, type scale, alignment, color discipline, whether the eye knows where to go first, whether a chart and its citations read at presentation distance, whether contrast is sufficient, whether image crops damage the subject, whether page-to-page composition has rhythm, and whether the cover has an unmistakable first hierarchy. Use the exact blocker codes low_contrast, unreadable_citation, unreadable_chart, bad_crop, repetitive_rhythm, and weak_cover_hierarchy when those defects exist. When a page carries a photographic image, judge whether it EARNS its place: does it drive the emotional beat and advance the story, or is it decoration a cleaner typographic page would beat? An image that earns nothing costs the page — your fix names it ('drop the image, let the headline carry the page' / 'replace with a shot of X') or KEEP. These are ADVISORY revision notes, never auto-applied. Score every page; your fixes are concrete layout/type/color/imagery changes, or KEEP.",
+			System: "You are the DESIGN EYE on Bonfire's slide jury, looking at the RENDERED pages of a candidate deck. You are a required specialist and your domain blockers are hard vetoes. Judge hierarchy, type scale, alignment, color restraint, presentation-distance legibility, collision, crop, rhythm, cover power, and whether every image earns its place. Use the exact design blocker codes when present, including overcrowded, competing_hierarchies, generic_visual_system, and decorative_furniture. Score every page; fixes are concrete layout/type/color/imagery changes routed into composition, or KEEP.",
 		},
 		{
 			Name:   "room_gut",
@@ -608,8 +754,9 @@ func finalizeSlideJurySeatScorecard(card *slideJurySeatScorecard) {
 
 // mergeSlideJuryBatchVoices reconstitutes one full-deck scorecard per persona.
 // A persona is admitted only if every batch returned the exact global page set;
-// a missing or malformed batch marks that whole seat unavailable, preserving
-// the existing two-complete-seat readiness floor without manufacturing votes.
+// a missing or malformed batch marks that whole seat unavailable. The final
+// readiness gate still requires complete headline_ear and design_eye seats;
+// room_gut remains the audience check and cannot substitute for either.
 func mergeSlideJuryBatchVoices(records []slideJuryBatchRecord, expectedPages int) []goalPanelVoice {
 	personas := slideJuryPersonas()
 	merged := make([]goalPanelVoice, len(personas))
@@ -626,8 +773,8 @@ func mergeSlideJuryBatchVoices(records []slideJuryBatchRecord, expectedPages int
 				voice.Err = fmt.Errorf("jury batch %d (%s), %s seat: %w", batchIndex+1, slideJuryPageList(record.Pages), persona.Name, part.Err)
 				break
 			}
-			var batchCard slideJurySeatScorecard
-			if err := json.Unmarshal([]byte(stripJSONCodeFence(strings.TrimSpace(part.Text))), &batchCard); err != nil {
+			batchCard, err := decodeSlideJurySeatScorecard(part.Text)
+			if err != nil {
 				voice.Err = fmt.Errorf("jury batch %d (%s), %s seat returned invalid JSON: %w", batchIndex+1, slideJuryPageList(record.Pages), persona.Name, err)
 				break
 			}
@@ -694,8 +841,8 @@ func withSlideJuryOpenAIPageContent(base openAITextResponder, pageContent []open
 // runSlideJury runs the 3-seat vision jury over a deck artifact's rendered
 // page images and files the merged scoreboard as a slide_jury_v1 artifact.
 // The deck must already carry {kind: image} page assets (the render callback
-// persists them); a deck without pages is the caller's disclosed-skip case,
-// surfaced here as an error so no jury ever runs blind.
+// persists them); a deck without pages is surfaced as an error and becomes
+// needs_attention at the stage boundary, so no jury ever runs blind.
 func runSlideJury(ctx context.Context, app *kanbanBoardApp, goalID string, artifact meetingMemoryEntry) (meetingMemoryEntry, error) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, fmt.Errorf("artifact memory is unavailable")

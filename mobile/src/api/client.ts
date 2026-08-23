@@ -676,8 +676,12 @@ export const api = {
   artifactRenderToken(
     sessionToken: string,
     artifactId: string,
+    expected?: { version: number; digest: string },
   ): Promise<{ ok: boolean; url: string; expiresAt?: string }> {
-    return request(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}`, {
+    const binding = expected
+      ? `&version=${encodeURIComponent(String(expected.version))}&digest=${encodeURIComponent(expected.digest)}`
+      : '';
+    return request(`/artifacts/render-token?id=${encodeURIComponent(artifactId)}${binding}`, {
       sessionToken,
     });
   },

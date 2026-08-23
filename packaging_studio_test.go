@@ -436,8 +436,8 @@ func TestLegacyPackagingStudioV2StageWiring(t *testing.T) {
 
 func TestPackagingStudioV6IsInvisibleConditionalAndFailClosed(t *testing.T) {
 	def := packagingStudioDefinition()
-	if def.Version != 7 || def.ImplementationRevision != "packaging_studio.runtime.v7.scoped-evidence-image-authority.v2" || def.Budgets.MaxSubtasks != 20 {
-		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v6 authority-bound identity runtime and 20-subtask budget", def.Version, def.ImplementationRevision, def.Budgets)
+	if def.Version != 8 || def.ImplementationRevision != "packaging_studio.runtime.v8.premium-design-contract.v1" || def.Budgets.MaxSubtasks != 20 {
+		t.Fatalf("version/implementation/budget=%d/%q/%+v, want v8 premium design runtime and 20-subtask budget", def.Version, def.ImplementationRevision, def.Budgets)
 	}
 	if len(def.Stages) != 19 {
 		t.Fatalf("v6 stage count=%d, want exactly 19", len(def.Stages))
@@ -654,10 +654,10 @@ func TestPackagingStudioQualityGateRepairsDeckAndRerunsRenderedReview(t *testing
 	if calls.Load() != 0 || quality.Status != subtaskPending || quality.Revisions != 1 {
 		t.Fatalf("deterministic jury repair did not re-arm without a scorer: calls=%d gate=%+v", calls.Load(), quality)
 	}
-	if ship := fixture.plan.subtaskByID("ship_deck"); ship.Status != subtaskReady || ship.Review == nil || !strings.Contains(ship.Review.Reasons, exactFix) {
-		t.Fatalf("exact repair notes did not reach ship_deck: %+v", ship)
+	if layout := fixture.plan.subtaskByID("layout_plan"); layout.Status != subtaskReady || layout.Review == nil || !strings.Contains(layout.Review.Reasons, exactFix) {
+		t.Fatalf("exact repair notes did not reach layout_plan: %+v", layout)
 	}
-	for _, id := range []string{"draft_compile", "slide_jury"} {
+	for _, id := range []string{"ship_deck", "draft_compile", "slide_jury"} {
 		if got := fixture.plan.subtaskByID(id); got.Status != subtaskPending {
 			t.Fatalf("%s status=%q, want pending so the repaired deck is re-rendered and re-reviewed", id, got.Status)
 		}
@@ -671,6 +671,32 @@ func TestPackagingStudioQualityGateRepairsDeckAndRerunsRenderedReview(t *testing
 	draft := hold.plan.subtaskByID("draft_compile")
 	if holdCalls.Load() != 0 || hold.plan.State != goalStateBlocked || hold.plan.Checkpoint != nil || holdGate.Status != subtaskPending || draft == nil || draft.Status != subtaskBlocked || !strings.Contains(hold.plan.Blocker, "fresh rendered review before delivery") {
 		t.Fatalf("spent quality gate did not fail closed on a recoverable fresh-render seam: calls=%d state=%q checkpoint=%+v draft=%+v gate=%+v blocker=%q", holdCalls.Load(), hold.plan.State, hold.plan.Checkpoint, draft, holdGate, hold.plan.Blocker)
+	}
+}
+
+func TestPackagingStudioQualityGateRoutesCopyAndCompositionToTheirOwners(t *testing.T) {
+	const copyFix = "Replace the slide 1 headline with: The audience already moved."
+	const layoutFix = "Give slide 1 one 80px headline and remove the decorative rule."
+	fixture := newPackagingQualityGateFixture(t, "needs_changes", []slideJuryRepair{
+		{Page: 1, Owner: "write", Fixes: []string{copyFix}},
+		{Page: 1, Owner: "layout_plan", Fixes: []string{layoutFix}},
+	})
+	var calls atomic.Int32
+	fixture.runQualityGate(t, `{}`, &calls)
+	if calls.Load() != 0 {
+		t.Fatalf("deterministic rendered repairs spent %d scorer calls", calls.Load())
+	}
+	write := fixture.plan.subtaskByID("write")
+	layout := fixture.plan.subtaskByID("layout_plan")
+	ship := fixture.plan.subtaskByID("ship_deck")
+	if write.Status != subtaskReady || write.Review == nil || !strings.Contains(write.Review.Reasons, copyFix) || strings.Contains(write.Review.Reasons, layoutFix) {
+		t.Fatalf("copy repair did not route only to deck_copy_v3 ownership: %+v", write)
+	}
+	if layout.Review == nil || !strings.Contains(layout.Review.Reasons, layoutFix) || strings.Contains(layout.Review.Reasons, copyFix) {
+		t.Fatalf("composition repair did not survive the upstream copy cascade: %+v", layout)
+	}
+	if ship.Status != subtaskPending {
+		t.Fatalf("ship_deck retained a stale completed render after upstream repairs: %+v", ship)
 	}
 }
 
@@ -725,7 +751,7 @@ func TestPackagingStudioQualityGateBindsJuryMetricsAndReadyFloor(t *testing.T) {
 func TestPackagingStudioShipDeckCarriesPrintChassis(t *testing.T) {
 	def := packagingStudioDefinition()
 	shipDeck := packagingStudioStage(t, def, "ship_deck")
-	for _, need := range []string{"@page", "@media print", ".pg", "break-after:page", "#stage", "data: URIs"} {
+	for _, need := range []string{"@page", "@media print", ".pg", "break-after:page", "#stage", "margin:0", "data: URIs"} {
 		if !strings.Contains(shipDeck.PromptBody, need) {
 			t.Errorf("ship_deck prompt missing the print-chassis contract %q:\n%s", need, shipDeck.PromptBody)
 		}
@@ -735,7 +761,7 @@ func TestPackagingStudioShipDeckCarriesPrintChassis(t *testing.T) {
 func TestPackagingStudioShipDeckCarriesFirstClassDesignAndEditorContract(t *testing.T) {
 	shipDeck := packagingStudioStage(t, packagingStudioDefinition(), "ship_deck")
 	for _, need := range []string{
-		"12-column grid", "minimum 96px safe zone", "COMPOSITION RHYTHM",
+		"editorial_12 uses 12 columns", "modular_12", "split_6_6", "single_axis", "minimum 96px safe zone", "COMPOSITION RHYTHM",
 		"no more than 45 client-facing words", "data-deck-element", "FULL-BLEED LAW",
 		"native presenter owns navigation", "Do not add custom JavaScript", "class=\"notes\" hidden",
 		`<figure class="image-plate fig-N"`, `add class "bleed"`, "left:0;top:0;width:1920px;height:1080px",
@@ -872,26 +898,26 @@ func packagingIdentityDirectionValueForTest() map[string]any {
 	return map[string]any{
 		"selected_candidate_id": "direction_a",
 		"selection_rationale":   "Direction A has the strongest hierarchy and audience fit.",
-		"strategy":              "Use type for proof and imagery only for emotional turns.",
-		"visual_system":         "warm paper, ink black, one clay accent, natural photography",
+		"strategy":              "balanced_editorial",
+		"visual_system":         "editorial_restraint",
 		"identity": map[string]any{
-			"palette": "paper, ink, clay", "type": "grotesk plus editorial serif", "spacing": "8px base rhythm",
-			"grid": "12 columns", "graphic_motif": "thin evidence rules", "image_treatment": "natural color with quiet grain",
-			"data_viz_treatment": "direct labels, no legends", "refusals": "no gradients, glass, or decorative charts",
+			"palette": "background=#F7F3EA;foreground=#171711;accent=#C85A36;surface=#E8E1D3;muted=#6F6B63", "type": "heading=modern_grotesk;body=humanist_sans;accent=editorial_serif", "spacing": "airy",
+			"grid": "editorial_12", "graphic_motif": "rules", "image_treatment": "natural_editorial",
+			"data_viz_treatment": "direct_labels", "refusals": "gradients,glass,decorative_charts,logos",
 		},
 		"shots": []any{
 			map[string]any{
-				"fig": 1, "slide_id": "cover", "slot": "bleed", "subject": "non-identifying rooftop crowd mid-laugh",
-				"composition": "wide eyeline with negative space on the left", "temperature": "joy",
-				"treatment": "natural 35mm grain; the single crescendo", "aspect": "landscape",
-				"caption": "FIG. 1 — the room", "place": "", "why": "opens on shared belief",
+				"fig": 1, "slide_id": "cover", "slot": "bleed", "subject": "non-identifying people in motion",
+				"composition": "wide_negative_space_left", "temperature": "joy",
+				"treatment": "natural_editorial", "aspect": "landscape",
+				"caption": "", "place": "", "why": "opening_tension",
 				"depiction_kind": "generic", "depiction_entity": "", "depiction_ref": "",
 			},
 			map[string]any{
-				"fig": 2, "slide_id": "proof", "slot": "plate", "subject": "hands arranging evidence cards",
-				"composition": "top-down crop with clear center detail", "temperature": "focus",
-				"treatment": "natural color, restrained grain", "aspect": "square",
-				"caption": "FIG. 2 — proof in hand", "place": "Nashville", "why": "makes the operating proof tangible",
+				"fig": 2, "slide_id": "proof", "slot": "plate", "subject": "authorized depiction of Nashville",
+				"composition": "top_down", "temperature": "focus",
+				"treatment": "natural_editorial", "aspect": "square",
+				"caption": "", "place": "Nashville", "why": "evidence_texture",
 				"depiction_kind": "claim", "depiction_entity": "Nashville", "depiction_ref": strings.Repeat("a", 64),
 			},
 		},
@@ -939,7 +965,7 @@ func TestParseImageryDirection(t *testing.T) {
 	if shots[0].Fig != 1 || shots[0].Temperature != "joy" || shots[1].Place != "" || !strings.Contains(shots[1].Description, "Nashville") {
 		t.Fatalf("generator shots=%+v", shots)
 	}
-	for _, propagated := range []string{"generic, non-identifying", "bleed slot", "natural full-color editorial photography", "landscape"} {
+	for _, propagated := range []string{"closed generic subject", "bleed slot", "natural editorial photography", "landscape", "negative space on the left"} {
 		if !strings.Contains(shots[0].Description, propagated) {
 			t.Errorf("generator prompt lost validated field %q:\n%s", propagated, shots[0].Description)
 		}
@@ -1069,6 +1095,7 @@ func TestPackagingStudioGeneratedPlacementsPreserveValidatedDirection(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	doc.Shots[1] = packagingStudioServerBoundNamedShot(doc.Shots[1])
 	placements, err := enrichedPackagingStudioGeneratedShots([]imageryGeneratedShot{{Fig: 2, Ref: "sha256:abc", Mime: "image/png"}}, doc.Shots)
 	if err != nil {
 		t.Fatal(err)
@@ -1152,11 +1179,14 @@ func TestApplyDeckImageryPlacesAndDiscloses(t *testing.T) {
 		{Fig: 1, DataURI: "data:image/png;base64,AAAA"},
 		{Fig: 3, DataURI: "data:image/jpeg;base64,BBBB"}, // no fig-3 slot in the deck
 	}
-	out, note := applyDeckImagery(deck, images, 2, 0)
+	out, note, err := applyDeckImagery(deck, images, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, `<style id="bonfire-imagery">`) {
 		t.Fatalf("imagery style block not injected:\n%s", out)
 	}
-	if !strings.Contains(out, ".fig-1 .ph{background-image:url(data:image/png;base64,AAAA)") {
+	if !strings.Contains(out, ".fig-1 .ph{") || !strings.Contains(out, "background-image:url(data:image/png;base64,AAAA)!important") {
 		t.Fatalf("fig-1 rule missing:\n%s", out)
 	}
 	if hi, bi := strings.Index(out, `<style id="bonfire-imagery">`), strings.Index(out, "<body>"); hi < 0 || hi > bi {
@@ -1165,9 +1195,51 @@ func TestApplyDeckImageryPlacesAndDiscloses(t *testing.T) {
 	if !strings.Contains(note, "1 image(s) inlined") || !strings.Contains(note, "no matching slot") {
 		t.Fatalf("note did not disclose placed + missing-slot: %q", note)
 	}
-	out2, note2 := applyDeckImagery(deck, nil, 0, 0)
+	out2, note2, err := applyDeckImagery(deck, nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if out2 != deck || !strings.Contains(note2, "typographic") {
 		t.Fatalf("zero-image path must pass the deck through untouched with a typographic note: %q", note2)
+	}
+
+	locked := []deckImage{{Fig: 1, DataURI: "data:image/png;base64,CCCC", Fit: "contain", Crop: "safe_area", FocalX: .25, FocalY: .75, PresentationLocked: true}}
+	lockedSource := strings.Replace(deck, `class="pg on bleed fig-1"`, `class="pg on bleed fig-1" data-deck-crop="safe_area"`, 1)
+	lockedOut, _, err := applyDeckImagery(lockedSource, locked, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(lockedOut, `bonfire-imagery`) {
+		t.Fatalf("premium locked imagery must not reopen a stylesheet cascade:\n%s", lockedOut)
+	}
+	for _, want := range []string{`class="ph" style="position:absolute`, `display:block`, `visibility:visible`, `opacity:1`, `background-image:url(data:image/png;base64,CCCC)`, `background-size:contain`, `background-position:25% 75%`, `background-repeat:no-repeat`} {
+		if !strings.Contains(lockedOut, want) {
+			t.Fatalf("locked FIG pixels lost %q:\n%s", want, lockedOut)
+		}
+	}
+	authoredPixels := strings.Replace(lockedSource, `<div class="ph"></div>`, `<div class="ph" style="position:absolute;inset:0;width:100%;height:100%;display:block;visibility:visible;opacity:1;background-image:url(data:image/png;base64,QUJD);background-size:contain;background-position:25% 75%;background-repeat:no-repeat"></div>`, 1)
+	if _, _, err := applyDeckImagery(authoredPixels, locked, 1, 0); err == nil || !strings.Contains(err.Error(), "must be empty before server materialization") {
+		t.Fatalf("authored pixels impersonated the server-owned FIG payload: %v", err)
+	}
+}
+
+func TestPackagingStudioDeckImagePresentationsRejectsDrift(t *testing.T) {
+	base := `<!doctype html><html><body><div id="stage"><section class="pg on" data-deck-slide="cover"><figure class="image-plate fig-1" data-deck-element="hero" data-deck-type="image" data-deck-fig="1" data-deck-crop="safe_area" data-deck-focal-x="0.25" data-deck-focal-y="0.75" style="position:absolute;left:0;top:0;width:1920px;height:1080px;z-index:1;opacity:1;object-fit:cover;object-position:25% 75%"><div class="ph"></div></figure></section></div></body></html>`
+	presentations, err := packagingStudioDeckImagePresentations(base)
+	if err != nil || len(presentations) != 1 || presentations[1].Fit != "cover" || presentations[1].Crop != "safe_area" || presentations[1].FocalX != .25 || presentations[1].FocalY != .75 {
+		t.Fatalf("locked presentation=%+v err=%v", presentations, err)
+	}
+	for name, source := range map[string]string{
+		"missing fit":      strings.Replace(base, `object-fit:cover;`, "", 1),
+		"bad crop":         strings.Replace(base, `data-deck-crop="safe_area"`, `data-deck-crop="freeform"`, 1),
+		"focal mismatch":   strings.Replace(base, `object-position:25% 75%`, `object-position:50% 50%`, 1),
+		"duplicate figure": strings.Replace(base, `</section>`, `<figure class="fig-1" data-deck-element="other" data-deck-type="image" data-deck-fig="1" data-deck-crop="center" data-deck-focal-x="0.5" data-deck-focal-y="0.5" style="position:absolute;left:0;top:0;width:100px;height:100px;object-fit:cover;object-position:50% 50%"></figure></section>`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := packagingStudioDeckImagePresentations(source); err == nil {
+				t.Fatalf("unsafe presentation was admitted: %s", source)
+			}
+		})
 	}
 }
 
@@ -1499,6 +1571,17 @@ func studioTestDeckHTML() string {
 		"<div class=\"notes\" hidden>Opening note [BEAT]</div></section>" +
 		"<section class=\"pg\" data-deck-slide=\"slide-2\" style=\"background:#f4efe5\">" +
 		"<div data-deck-element=\"headline-2\" data-deck-type=\"text\" style=\"position:absolute;left:120px;top:140px;width:1600px;height:240px;z-index:2;opacity:1;transform:rotate(0deg);font-size:92px;font-family:Arial;font-weight:700;color:#111111;text-align:left;line-height:1.05;letter-spacing:normal\">Slide 2 — Close</div>" +
+		"<div class=\"notes\" hidden>Closing note [BEAT]</div></section></div></body></html>"
+}
+
+func studioPremiumTestDeckHTML() string {
+	stack, _ := packagingStudioResolvedFontStack("modern_grotesk")
+	return "<!doctype html><html><head><style>" + packagingDeckChassisCSS + "</style></head><body><div id=\"stage\"" + packagingPremiumStageIdentityAttributesForTest() + ">" +
+		"<section class=\"pg on\" data-deck-slide=\"slide-1\" style=\"background:#101014\">" +
+		"<div data-deck-element=\"headline-1\" data-deck-type=\"text\" style=\"position:absolute;left:120px;top:140px;width:1680px;height:240px;z-index:2;opacity:1;transform:rotate(0deg);font-size:92px;font-family:" + stack + ";font-weight:700;color:#ffffff;text-align:left;line-height:1.05;letter-spacing:normal\">Slide 1 — " + studioTestFounderPhrase + "</div>" +
+		"<div class=\"notes\" hidden>Opening note [BEAT]</div></section>" +
+		"<section class=\"pg\" data-deck-slide=\"slide-2\" style=\"background:#f4efe5\">" +
+		"<div data-deck-element=\"headline-2\" data-deck-type=\"text\" style=\"position:absolute;left:120px;top:140px;width:1680px;height:240px;z-index:2;opacity:1;transform:rotate(0deg);font-size:92px;font-family:" + stack + ";font-weight:700;color:#111111;text-align:left;line-height:1.05;letter-spacing:normal\">Slide 2 — Close</div>" +
 		"<div class=\"notes\" hidden>Closing note [BEAT]</div></section></div></body></html>"
 }
 

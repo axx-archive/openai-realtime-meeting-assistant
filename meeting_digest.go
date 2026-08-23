@@ -1198,6 +1198,11 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		if highWater := meetingIntelligenceBrainGroupCaptureHighWater(app.memory, group.brains); highWater > 0 {
 			metadata[meetingDigestCaptureMetadataKey] = strconv.FormatUint(highWater, 10)
 		}
+		if sourceDigest := meetingFinalizationSourceDigestFromContext(ctx); sourceDigest != "" {
+			metadata[meetingFinalizationSourceDigestMetadataKey] = sourceDigest
+			metadata[meetingFinalizationOutputRevisionMetadataKey] = "1"
+			metadata[meetingFinalizationOutputDigestMetadataKey] = sha256Hex(canonical)
+		}
 		metadata = applyAmbientDerivedScope(metadata, group.brains)
 		// item 1.3a: mirror the clamped aliases into searchable metadata text.
 		if aliases := digestAliasesMetadata(payload.Aliases); aliases != "" {

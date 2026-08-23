@@ -53,6 +53,7 @@ import type {
 	ScoutAnswerSource,
   ScoutFileAttachment,
   ScoutMessage,
+  ScoutResultAssetRef,
   ThreadDigestResponse,
 } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -272,6 +273,7 @@ type ThreadMessageRowProps = {
   onOpenCatchUp: () => void;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage, returnFocusHandle?: number) => void;
+  onOpenWorkAsset: (asset: ScoutResultAssetRef) => void;
   onResolveWorkCheckpoint: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onOpenThread: (message: ScoutMessage) => void;
@@ -311,6 +313,7 @@ const ThreadMessageRow = React.memo(
     onOpenCatchUp,
     onOpenLongMessage,
     onOpenWorkArtifact,
+    onOpenWorkAsset,
     onResolveWorkCheckpoint,
     onChangeWorkProject,
     onOpenThread,
@@ -381,6 +384,7 @@ const ThreadMessageRow = React.memo(
           resolvingProposal={resolvingProposal}
           onOpenLongMessage={onOpenLongMessage}
           onOpenWorkArtifact={onOpenWorkArtifact}
+          onOpenWorkAsset={onOpenWorkAsset}
           onResolveWorkCheckpoint={onResolveWorkCheckpoint}
           onChangeWorkProject={onChangeWorkProject}
           retryingReply={retryingReply}
@@ -429,6 +433,7 @@ const ThreadMessageRow = React.memo(
     previous.onOpenCatchUp === next.onOpenCatchUp &&
     previous.onOpenLongMessage === next.onOpenLongMessage &&
     previous.onOpenWorkArtifact === next.onOpenWorkArtifact &&
+    previous.onOpenWorkAsset === next.onOpenWorkAsset &&
     previous.onResolveWorkCheckpoint === next.onResolveWorkCheckpoint &&
     previous.onChangeWorkProject === next.onChangeWorkProject &&
     previous.onOpenThread === next.onOpenThread,
@@ -2775,6 +2780,19 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openAttachment = useCallback((file: ScoutFileAttachment) => {
     setPreviewFile(file);
   }, []);
+  const openWorkAsset = useCallback((asset: ScoutResultAssetRef) => {
+    const ref = String(asset.ref ?? '').trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/u.test(ref)) {
+      setError('This deliverable file is not available.');
+      return;
+    }
+    setPreviewFile({
+      ref,
+      name: String(asset.name ?? '').trim() || 'Deliverable',
+      mime: String(asset.mime ?? '').trim().toLowerCase() || 'application/octet-stream',
+      kind: String(asset.kind ?? '').trim() || undefined,
+    });
+  }, []);
   const openCatchUp = useCallback(() => {
     setCatchUpOpen(true);
   }, []);
@@ -2788,10 +2806,58 @@ export function ThreadScreen({ route, navigation }: Props) {
   const openWorkArtifact = useCallback(
     async (message: ScoutMessage, returnFocusHandle?: number) => {
       expandedMessageReturnFocusHandleRef.current = returnFocusHandle ?? null;
-      const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
+      const explicitResultArtifactId = String(
+        message.thread?.resultArtifactId ?? message.work?.resultArtifactId ?? '',
+      ).trim();
       const resultArtifactId = explicitResultArtifactId
         || String(message.thread?.artifactId ?? '').trim();
-      const resultArtifactType = workResultArtifactKind(message.thread);
+      const resultArtifactType = workResultArtifactKind(message.thread)
+        || String(message.work?.resultArtifactType ?? '').trim().toLowerCase();
+      const resultArtifactVersion = Number(message.thread?.resultArtifactVersion ?? message.work?.resultArtifactVersion ?? 0);
+      const resultArtifactDigest = String(message.thread?.resultArtifactDigest ?? message.work?.resultArtifactDigest ?? '').trim().toLowerCase();
+      if (explicitResultArtifactId) {
+        if (!Number.isSafeInteger(resultArtifactVersion) || resultArtifactVersion < 1 || !/^[0-9a-f]{64}$/u.test(resultArtifactDigest) || !sessionToken) {
+          setError('This exact deliverable is unavailable. Refresh the channel and try again.');
+          return;
+        }
+        try {
+          const response = await api.artifact(sessionToken, explicitResultArtifactId);
+          const artifact = response.artifacts[0];
+          const metadata = artifact?.metadata ?? {};
+          const loadedVersion = Number(metadata.artifactVersion ?? 0);
+          const loadedDigest = String(metadata.contentDigest ?? '').trim().toLowerCase();
+          const loadedType = String(metadata.type ?? metadata.artifactType ?? '').trim().toLowerCase();
+          const declaredStudioKind = artifactStudioKind(resultArtifactType);
+          const loadedStudioKind = artifactStudioKind(loadedType);
+          if (!artifact || artifact.id !== explicitResultArtifactId || loadedVersion !== resultArtifactVersion || loadedDigest !== resultArtifactDigest ||
+            (declaredStudioKind ? loadedStudioKind !== declaredStudioKind : loadedType !== resultArtifactType)) {
+            throw new Error('The exact deliverable revision is no longer available.');
+          }
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : 'Could not open that exact deliverable.');
+          return;
+        }
+      }
+      const structuredResult = /^(?:pdf|image|table|workbook|bundle|file)$/u.test(resultArtifactType);
+      if (explicitResultArtifactId && structuredResult) {
+        const assets = Array.isArray(message.thread?.resultAssets)
+          ? message.thread.resultAssets
+          : Array.isArray(message.work?.resultAssets)
+            ? message.work.resultAssets
+            : [];
+        const asset = resultArtifactType === 'image'
+          ? assets.find((candidate) => String(candidate.kind ?? '').toLowerCase() === 'image')
+          : resultArtifactType === 'pdf'
+            ? assets.find((candidate) => String(candidate.mime ?? '').toLowerCase() === 'application/pdf')
+          : resultArtifactType === 'workbook'
+              ? assets.find((candidate) => String(candidate.kind ?? '').toLowerCase() === 'export'
+                && String(candidate.mime ?? '').trim().toLowerCase() === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                && /\.xlsx$/iu.test(String(candidate.name ?? '').trim()))
+              : assets[0];
+        if (asset) openWorkAsset(asset);
+        else if (resultArtifactType !== 'table') setError('This deliverable file is not available.');
+        return;
+      }
       const resultStudioKind = artifactStudioKind(resultArtifactType)
         ?? artifactStudioKind(message.thread?.mode);
       const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
@@ -2811,13 +2877,15 @@ export function ThreadScreen({ route, navigation }: Props) {
           }
           navigation.navigate('DeckViewer', {
             artifactId: resultArtifactId,
+            artifactVersion: resultArtifactVersion,
+            artifactDigest: resultArtifactDigest,
             title: String(message.thread?.resultTitle ?? 'Presentation').trim() || 'Presentation',
             desktopEditable: message.thread?.resultCanEdit === true,
           });
           return;
         }
         navigation.navigate('OSWeb', {
-          path: artifactStudioPath(resultArtifactId, resultStudioKind, message.thread?.resultCanEdit === true ? 'edit' : 'present'),
+          path: artifactStudioPath(resultArtifactId, resultStudioKind, message.thread?.resultCanEdit === true ? 'edit' : 'present', { version: resultArtifactVersion, digest: resultArtifactDigest }),
           title: String(
             message.thread?.resultTitle
               ?? 'Document',
@@ -2847,6 +2915,8 @@ export function ThreadScreen({ route, navigation }: Props) {
             }
             navigation.navigate('DeckViewer', {
               artifactId: explicitResultArtifactId,
+              artifactVersion: resultArtifactVersion,
+              artifactDigest: resultArtifactDigest,
               title,
               desktopEditable: message.thread?.resultCanEdit === true,
             });
@@ -2858,6 +2928,7 @@ export function ThreadScreen({ route, navigation }: Props) {
                 explicitResultArtifactId,
                 discoveredKind,
                 message.thread?.resultCanEdit === true ? 'edit' : 'present',
+                { version: resultArtifactVersion, digest: resultArtifactDigest },
               ),
               title,
             });
@@ -2981,7 +3052,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         );
       }
     },
-    [navigation, sessionToken],
+    [navigation, openWorkAsset, sessionToken],
   );
 
   const resolveWorkCheckpoint = useCallback(
@@ -3053,7 +3124,16 @@ export function ThreadScreen({ route, navigation }: Props) {
 
   const viewArtifactFullscreen = useCallback(
     (message: ScoutMessage) => {
-      const artifactId = String(message.thread?.resultArtifactId ?? "").trim()
+      const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? "").trim();
+      // Finished conversation results are immutable receipts, not aliases for
+      // whatever revision currently owns the stable artifact id. Route every
+      // exact result doorway through the verifier used by Open so Present and
+      // fullscreen cannot silently drop version/digest authority.
+      if (explicitResultArtifactId) {
+        void openWorkArtifact(message);
+        return;
+      }
+      const artifactId = explicitResultArtifactId
         || String(message.thread?.artifactId ?? "").trim();
       const mode = workResultArtifactKind(message.thread)
         || String(message.thread?.mode ?? "").toLowerCase();
@@ -3070,7 +3150,6 @@ export function ThreadScreen({ route, navigation }: Props) {
         return;
       }
 
-      const explicitResultArtifactId = String(message.thread?.resultArtifactId ?? '').trim();
       const qualityState = String(message.thread?.resultQualityState ?? '').trim().toLowerCase();
       const managedAuthoredResult = Boolean(explicitResultArtifactId)
         && (String(message.thread?.mode ?? '').trim().toLowerCase() === 'goal' || qualityState !== '');
@@ -3350,6 +3429,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         onOpenCatchUp={openCatchUp}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onOpenWorkAsset={openWorkAsset}
         onResolveWorkCheckpoint={resolveWorkCheckpoint}
         onChangeWorkProject={openWorkstreamCorrection}
         onOpenThread={openThreadContext}
@@ -3366,6 +3446,7 @@ export function ThreadScreen({ route, navigation }: Props) {
       openMessageActions,
       openLongMessage,
       openWorkArtifact,
+      openWorkAsset,
       resolveWorkCheckpoint,
       openWorkstreamCorrection,
       openSavedWorkArtifact,
@@ -3840,6 +3921,7 @@ export function ThreadScreen({ route, navigation }: Props) {
         resolvingProposalID={resolvingProposalID}
         onOpenLongMessage={openLongMessage}
         onOpenWorkArtifact={openWorkArtifact}
+        onOpenWorkAsset={openWorkAsset}
         onResolveWorkCheckpoint={resolveWorkCheckpoint}
         onChangeWorkProject={openWorkstreamCorrection}
         onSaveWorkArtifact={beginSaveWorkArtifact}
@@ -3896,7 +3978,10 @@ export function ThreadScreen({ route, navigation }: Props) {
         onOpenResult={(message) => {
           setWorkActivityReturnFocusHandle(null);
           setWorkActivityMessage(null);
-          requestAnimationFrame(() => viewArtifactFullscreen(message));
+          requestAnimationFrame(() => {
+            if (message.work) void openWorkArtifact(message);
+            else viewArtifactFullscreen(message);
+          });
         }}
       />
 

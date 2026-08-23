@@ -16,7 +16,7 @@ import { SymbolView } from 'expo-symbols';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { api } from '../api/client';
-import type { ChatMentionCandidate, HomeProjectChoice, ScoutFileAttachment, ScoutMessage } from '../api/types';
+import type { ChatMentionCandidate, HomeProjectChoice, ScoutFileAttachment, ScoutMessage, ScoutResultAssetRef } from '../api/types';
 import { Glass } from '../theme/glass';
 import { colors, hitMin, radius, space, type } from '../theme/tokens';
 import { isOwnMessageForViewer } from './messagePresentation';
@@ -64,6 +64,7 @@ type Props = {
   resolvingProposalID?: string | null;
   onOpenLongMessage: (text: string, authorName: string, scout: boolean) => void;
   onOpenWorkArtifact: (message: ScoutMessage) => void;
+  onOpenWorkAsset: (asset: ScoutResultAssetRef) => void;
   onResolveWorkCheckpoint: (message: ScoutMessage, option: { id: string; label: string; action: string }) => void;
   onChangeWorkProject: (message: ScoutMessage, returnFocusHandle?: number) => void;
   onSaveWorkArtifact: (message: ScoutMessage) => void;
@@ -112,6 +113,7 @@ export function ThreadDetailSheet({
   resolvingProposalID,
   onOpenLongMessage,
   onOpenWorkArtifact,
+  onOpenWorkAsset,
   onResolveWorkCheckpoint,
   onChangeWorkProject,
   onSaveWorkArtifact,
@@ -342,6 +344,7 @@ export function ThreadDetailSheet({
                       resolvingProposal={resolvingProposalID === String(message.id)}
                       onOpenLongMessage={onOpenLongMessage}
                       onOpenWorkArtifact={onOpenWorkArtifact}
+                      onOpenWorkAsset={onOpenWorkAsset}
                       onResolveWorkCheckpoint={onResolveWorkCheckpoint}
                       onChangeWorkProject={onChangeWorkProject}
                       onSaveWorkArtifact={onSaveWorkArtifact}

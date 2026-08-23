@@ -1605,7 +1605,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 	var resultViewer *userAccount
 	if includeArtifactResults {
 		for _, message := range thread.Messages {
-			if scoutChatThreadRefMayExposeResult(message.Thread) {
+			if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatWorkRefMayExposeResult(message.Work) {
 				resultIndex = app.scoutChatResultIndex()
 				resultViewer = accountStore().findUser(normalizeAccountEmail(viewerEmail))
 				break
@@ -1698,8 +1698,30 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 			messageProjectionProbe(projected.Messages[messageIndex].ID)
 		}
 		original := projected.Messages[messageIndex]
+		// Normalize work topology on the server-owned read projection. Legacy
+		// direct runs acquire an explicit self root; an explicitly delegated run
+		// is never guessed into a root when its durable root is missing.
+		if original.Thread != nil {
+			ref := *original.Thread
+			ref.RootRunID = strings.TrimSpace(ref.RootRunID)
+			ref.ParentRunID = strings.TrimSpace(ref.ParentRunID)
+			if ref.RootRunID == "" && ref.ParentRunID == "" {
+				ref.RootRunID = strings.TrimSpace(ref.ID)
+			}
+			projected.Messages[messageIndex].Thread = &ref
+		}
+		if original.Work != nil {
+			work := *original.Work
+			work.RootRunID = strings.TrimSpace(work.RootRunID)
+			work.ParentRunID = strings.TrimSpace(work.ParentRunID)
+			if work.RootRunID == "" && work.ParentRunID == "" {
+				work.RootRunID = strings.TrimSpace(work.RunID)
+			}
+			projected.Messages[messageIndex].Work = &work
+		}
 		if includeArtifactResults {
 			app.projectScoutChatResultRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
+			app.projectScoutChatWorkResultRef(projectionContext, resultViewer, &projected.Messages[messageIndex], resultIndex)
 		}
 		projected.Messages[messageIndex].SourceOperationID = ""
 		projected.Messages[messageIndex].SourceOperationDigest = ""
@@ -2060,8 +2082,13 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 	ref := message.Thread
 	ref.ResultArtifactID = ""
 	ref.ResultArtifactType = ""
+	ref.ResultArtifactVersion = 0
+	ref.ResultArtifactDigest = ""
 	ref.ResultTitle = ""
 	ref.ResultPreview = ""
+	ref.ResultAssets = nil
+	ref.ResultTable = nil
+	ref.ResultWorkbook = nil
 	ref.ResultApprovalState = ""
 	ref.ResultQualityState = ""
 	ref.ResultCanEdit = false
@@ -2104,6 +2131,9 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 		return
 	}
 	result = currentResult
+	if family := scoutChatOutputFamilyForArtifact(result); family != "" {
+		ref.OutputFamily = family
+	}
 	resultCanEdit := app.artifactAuthorized(ctx, viewer, ACLWrite, result)
 	// Export is an independent viewer capability. Read authority (and even an
 	// admitted authored revision) may allow presenting without allowing a file
@@ -2141,31 +2171,278 @@ func (app *kanbanBoardApp) projectScoutChatResultRef(ctx context.Context, viewer
 			(resultQualityState == authoredResultQualityEditedAfterAdmission && plan.State == goalStateVerified))
 	}
 	resultType := artifactType(result)
-	if resultType == artifactTypeHTMLDeck && artifactIsHTMLDocument(result) {
+	resultVersion := artifactVersion(result)
+	resultDigest := strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(result)))
+	if resultVersion < 1 || !isHexDigest(resultDigest) {
+		return
+	}
+	stampResult := func(titleFallback string) {
 		ref.ResultArtifactID = result.ID
-		ref.ResultArtifactType = artifactTypeHTMLDeck
-		ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Presentation")
+		ref.ResultArtifactType = resultType
+		ref.ResultArtifactVersion = resultVersion
+		ref.ResultArtifactDigest = resultDigest
+		ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), titleFallback)
 		ref.ResultQualityState = resultQualityState
 		ref.ResultCanEdit = resultCanEdit
 		ref.ResultCanContinue = resultCanContinue
-		ref.ResultCanPresent = !goalResult || (resultPublicationStable && resultCanPublish)
 		ref.ResultCanExport = resultCanExportAuthority && (!goalResult || (resultPublicationStable && resultCanPublish))
+	}
+	if resultType == artifactTypeHTMLDeck && artifactIsHTMLDocument(result) {
+		stampResult("Presentation")
+		ref.ResultCanPresent = !goalResult || (resultPublicationStable && resultCanPublish)
 		if selectedAcceptedDeck {
 			ref.ResultApprovalState = acceptedBinding.State
 		}
 		return
 	}
-	if resultType != artifactTypeMarkdown || (strings.TrimSpace(artifact.Metadata["mode"]) != "goal" && !oneOf(strings.ToLower(strings.TrimSpace(result.Metadata["threadStatus"])), codexJobStatusComplete, artifactStatusApproved, artifactStatusPublished)) {
+	if resultType == artifactTypeMarkdown {
+		if strings.TrimSpace(artifact.Metadata["mode"]) != "goal" && !oneOf(strings.ToLower(strings.TrimSpace(result.Metadata["threadStatus"])), codexJobStatusComplete, artifactStatusApproved, artifactStatusPublished) {
+			return
+		}
+		stampResult("Document")
+		ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
 		return
 	}
-	ref.ResultArtifactID = result.ID
-	ref.ResultArtifactType = artifactTypeMarkdown
-	ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), "Document")
-	ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
-	ref.ResultQualityState = resultQualityState
-	ref.ResultCanEdit = resultCanEdit
-	ref.ResultCanContinue = resultCanContinue
-	ref.ResultCanExport = resultCanExportAuthority && (!goalResult || (resultPublicationStable && resultCanPublish))
+
+	assets := scoutChatResultAssets(result)
+	switch resultType {
+	case artifactTypePDF:
+		if !scoutChatResultHasPDFAsset(assets) {
+			return
+		}
+		stampResult("Document")
+		ref.ResultAssets = assets
+	case artifactTypeImage:
+		if !scoutChatResultHasImageAsset(assets) {
+			return
+		}
+		stampResult("Image")
+		ref.ResultAssets = assets
+	case artifactTypeTable:
+		table := scoutChatResultTablePreview(result)
+		if table == nil {
+			return
+		}
+		stampResult("Data table")
+		ref.ResultTable = table
+		ref.ResultAssets = assets
+	case artifactTypeWorkbook:
+		workbook := scoutChatResultWorkbookPreview(result)
+		if !scoutChatResultHasWorkbookAsset(assets, workbook) {
+			return
+		}
+		stampResult("Workbook")
+		ref.ResultWorkbook = workbook
+		ref.ResultAssets = assets
+	case artifactTypeBundle, artifactTypeFile:
+		if len(assets) == 0 {
+			return
+		}
+		stampResult("Files")
+		ref.ResultAssets = assets
+	}
+}
+
+const (
+	scoutChatResultMaxAssets    = 12
+	scoutChatResultMaxColumns   = 12
+	scoutChatResultMaxRows      = 20
+	scoutChatResultMaxCellRunes = 180
+)
+
+func scoutChatResultAssets(result meetingMemoryEntry) []scoutChatResultAssetRef {
+	assets := make([]scoutChatResultAssetRef, 0, scoutChatResultMaxAssets)
+	for _, asset := range artifactAssets(result) {
+		if len(assets) >= scoutChatResultMaxAssets || !validBlobRef(asset.Ref) || artifactAssetIsPageImage(asset) {
+			continue
+		}
+		assets = append(assets, scoutChatResultAssetRef{
+			Ref: strings.TrimSpace(asset.Ref), Mime: strings.TrimSpace(asset.Mime),
+			Name: strings.TrimSpace(asset.Name), Kind: strings.ToLower(strings.TrimSpace(asset.Kind)),
+		})
+	}
+	return assets
+}
+
+func scoutChatResultHasAssetKind(assets []scoutChatResultAssetRef, kinds ...string) bool {
+	for _, asset := range assets {
+		for _, kind := range kinds {
+			if asset.Kind == kind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func scoutChatResultHasImageAsset(assets []scoutChatResultAssetRef) bool {
+	for _, asset := range assets {
+		if asset.Kind == "image" && strings.HasPrefix(strings.ToLower(asset.Mime), "image/") {
+			return true
+		}
+	}
+	return false
+}
+
+func scoutChatResultHasPDFAsset(assets []scoutChatResultAssetRef) bool {
+	for _, asset := range assets {
+		if oneOf(asset.Kind, "pdf", "export") && strings.EqualFold(strings.TrimSpace(asset.Mime), "application/pdf") {
+			return true
+		}
+	}
+	return false
+}
+
+const scoutChatWorkbookMIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+// A workbook doorway is truthful only when the bounded preview and one exact
+// content-addressed export agree that the bytes are an XLSX file. A generic
+// `export` kind is not enough: it could otherwise turn a PDF or text blob into
+// a misleading "Download XLSX" action in every client.
+func scoutChatResultHasWorkbookAsset(assets []scoutChatResultAssetRef, workbook *scoutChatResultWorkbookRef) bool {
+	if workbook == nil || !strings.EqualFold(strings.TrimSpace(workbook.Mime), scoutChatWorkbookMIME) ||
+		!strings.EqualFold(filepath.Ext(strings.TrimSpace(workbook.FileName)), ".xlsx") {
+		return false
+	}
+	for _, asset := range assets {
+		if asset.Kind != "export" || !strings.EqualFold(strings.TrimSpace(asset.Mime), scoutChatWorkbookMIME) ||
+			!strings.EqualFold(filepath.Ext(strings.TrimSpace(asset.Name)), ".xlsx") {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(asset.Name), strings.TrimSpace(workbook.FileName)) {
+			return true
+		}
+	}
+	return false
+}
+
+// scoutChatArtifactHasClosedResultEnvelope is the shared admission predicate
+// for conversation and live-room result handoffs. A terminal artifact gets a
+// typed doorway only when the client can render a real closed preview; opaque
+// prose, JSON, or a filename-shaped claim never qualifies as a substitute.
+func scoutChatArtifactHasClosedResultEnvelope(result meetingMemoryEntry) bool {
+	assets := scoutChatResultAssets(result)
+	switch artifactType(result) {
+	case artifactTypeHTMLDeck:
+		return artifactIsHTMLDocument(result)
+	case artifactTypeMarkdown:
+		return strings.TrimSpace(result.Text) != ""
+	case artifactTypePDF:
+		return scoutChatResultHasPDFAsset(assets)
+	case artifactTypeImage:
+		return scoutChatResultHasImageAsset(assets)
+	case artifactTypeTable:
+		return scoutChatResultTablePreview(result) != nil
+	case artifactTypeWorkbook:
+		return scoutChatResultHasWorkbookAsset(assets, scoutChatResultWorkbookPreview(result))
+	case artifactTypeBundle, artifactTypeFile:
+		return len(assets) > 0
+	default:
+		return false
+	}
+}
+
+func scoutChatResultBoundCell(value string) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) <= scoutChatResultMaxCellRunes {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:scoutChatResultMaxCellRunes-1])) + "…"
+}
+
+func scoutChatResultSplitTableRow(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
+	parts := strings.Split(line, "|")
+	if len(parts) > scoutChatResultMaxColumns {
+		parts = parts[:scoutChatResultMaxColumns]
+	}
+	for index := range parts {
+		parts[index] = scoutChatResultBoundCell(parts[index])
+	}
+	return parts
+}
+
+func scoutChatResultTableSeparator(line string) bool {
+	parts := scoutChatResultSplitTableRow(line)
+	if len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		part = strings.Trim(strings.TrimSpace(part), ":")
+		if len(part) < 3 || strings.Trim(part, "-") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func scoutChatResultTablePreview(result meetingMemoryEntry) *scoutChatResultTableRef {
+	if raw := strings.TrimSpace(result.Metadata["tablePreview"]); raw != "" {
+		var preview scoutChatResultTableRef
+		if json.Unmarshal([]byte(raw), &preview) == nil && len(preview.Columns) > 0 {
+			preview.Columns = preview.Columns[:min(len(preview.Columns), scoutChatResultMaxColumns)]
+			for index := range preview.Columns {
+				preview.Columns[index] = scoutChatResultBoundCell(preview.Columns[index])
+			}
+			if len(preview.Rows) > scoutChatResultMaxRows {
+				preview.Rows = preview.Rows[:scoutChatResultMaxRows]
+				preview.Truncated = true
+			}
+			for rowIndex := range preview.Rows {
+				if len(preview.Rows[rowIndex]) > len(preview.Columns) {
+					preview.Rows[rowIndex] = preview.Rows[rowIndex][:len(preview.Columns)]
+				}
+				for cellIndex := range preview.Rows[rowIndex] {
+					preview.Rows[rowIndex][cellIndex] = scoutChatResultBoundCell(preview.Rows[rowIndex][cellIndex])
+				}
+			}
+			return &preview
+		}
+	}
+	lines := strings.Split(strings.ReplaceAll(result.Text, "\r\n", "\n"), "\n")
+	for index := 0; index+1 < len(lines); index++ {
+		if !strings.Contains(lines[index], "|") || !scoutChatResultTableSeparator(lines[index+1]) {
+			continue
+		}
+		columns := scoutChatResultSplitTableRow(lines[index])
+		if len(columns) == 0 {
+			return nil
+		}
+		preview := &scoutChatResultTableRef{Columns: columns}
+		for rowIndex := index + 2; rowIndex < len(lines); rowIndex++ {
+			if !strings.Contains(lines[rowIndex], "|") || strings.TrimSpace(lines[rowIndex]) == "" {
+				break
+			}
+			if len(preview.Rows) >= scoutChatResultMaxRows {
+				preview.Truncated = true
+				break
+			}
+			preview.Rows = append(preview.Rows, scoutChatResultSplitTableRow(lines[rowIndex]))
+		}
+		return preview
+	}
+	return nil
+}
+
+func scoutChatResultWorkbookPreview(result meetingMemoryEntry) *scoutChatResultWorkbookRef {
+	var preview ventureWorkbookPreview
+	if json.Unmarshal([]byte(strings.TrimSpace(result.Metadata[ventureWorkbookPreviewKey])), &preview) != nil || strings.TrimSpace(preview.FileName) == "" {
+		return nil
+	}
+	projected := &scoutChatResultWorkbookRef{
+		FileName: preview.FileName, Mime: preview.Mime, SheetCount: preview.SheetCount,
+		FormulaCount: preview.FormulaCount, InputPolicy: preview.InputPolicy,
+	}
+	for _, sheet := range preview.Sheets {
+		if len(projected.Sheets) >= 12 {
+			break
+		}
+		projected.Sheets = append(projected.Sheets, scoutChatResultWorkbookSheetRef{Name: scoutChatResultBoundCell(sheet.Name), Purpose: scoutChatResultBoundCell(sheet.Purpose)})
+	}
+	return projected
 }
 
 // authorizedScoutChatResultArtifact performs the authorization check against
@@ -2217,6 +2494,86 @@ func scoutChatThreadRefMayExposeResult(ref *scoutChatThreadRef) bool {
 	}
 }
 
+func scoutChatWorkRefMayExposeResult(ref *scoutChatWorkRecordRef) bool {
+	if ref == nil || strings.TrimSpace(ref.ResultArtifactID) == "" || strings.TrimSpace(ref.ResultArtifactType) == "" || ref.ResultArtifactVersion < 1 || !isHexDigest(strings.ToLower(strings.TrimSpace(ref.ResultArtifactDigest))) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(ref.Status)) {
+	case codexJobStatusComplete, "completed", artifactStatusPublished, artifactStatusApproved, "verified":
+		return true
+	default:
+		return false
+	}
+}
+
+func clearScoutChatWorkResultRef(message *scoutChatMessageRecord) {
+	if message == nil || message.Work == nil {
+		return
+	}
+	ref := *message.Work
+	ref.ResultArtifactID = ""
+	ref.ResultArtifactType = ""
+	ref.ResultArtifactVersion = 0
+	ref.ResultArtifactDigest = ""
+	ref.ResultTitle = ""
+	ref.ResultPreview = ""
+	ref.ResultAssets = nil
+	ref.ResultTable = nil
+	ref.ResultWorkbook = nil
+	message.Work = &ref
+}
+
+// projectScoutChatWorkResultRef turns a governed completion into the same
+// immutable rich-result envelope as an agent thread. The persisted result id
+// is only a selection hint: every viewer read reauthorizes the current exact
+// artifact and clears the entire envelope on ACL, revision, or shape drift.
+func (app *kanbanBoardApp) projectScoutChatWorkResultRef(ctx context.Context, viewer *userAccount, message *scoutChatMessageRecord, index scoutChatResultProjectionIndex) {
+	if message == nil || message.Work == nil {
+		return
+	}
+	targetID := strings.TrimSpace(message.Work.ResultArtifactID)
+	expectedType := strings.ToLower(strings.TrimSpace(message.Work.ResultArtifactType))
+	expectedVersion := message.Work.ResultArtifactVersion
+	expectedDigest := strings.ToLower(strings.TrimSpace(message.Work.ResultArtifactDigest))
+	clearScoutChatWorkResultRef(message)
+	ref := message.Work
+	if !oneOf(message.Kind, "work_result", "work_record") || targetID == "" || expectedType == "" || expectedVersion < 1 || !isHexDigest(expectedDigest) || !oneOf(strings.ToLower(strings.TrimSpace(ref.Status)), codexJobStatusComplete, "completed", artifactStatusPublished, artifactStatusApproved, "verified") {
+		return
+	}
+	indexed, found := index.byID[targetID]
+	if !found || !app.scoutChatIndexedArtifactCurrent(indexed) {
+		return
+	}
+	result, authorized := app.authorizedScoutChatResultArtifact(ctx, viewer, targetID)
+	if !authorized || !scoutChatArtifactHasClosedResultEnvelope(result) {
+		return
+	}
+	resultType := artifactType(result)
+	resultVersion := artifactVersion(result)
+	resultDigest := strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(result)))
+	if resultType != expectedType || resultVersion != expectedVersion || resultDigest != expectedDigest || resultVersion < 1 || !isHexDigest(resultDigest) {
+		return
+	}
+	ref.ResultArtifactID = result.ID
+	ref.ResultArtifactType = resultType
+	ref.ResultArtifactVersion = resultVersion
+	ref.ResultArtifactDigest = resultDigest
+	ref.ResultTitle = firstNonEmptyString(strings.TrimSpace(result.Metadata["title"]), strings.TrimSpace(ref.Title), "Deliverable")
+	ref.OutputFamily = firstNonEmptyString(scoutChatOutputFamilyForArtifact(result), ref.OutputFamily)
+	if resultType == artifactTypeMarkdown {
+		ref.ResultPreview = truncateAgentThreadText(strings.TrimSpace(stripOpenAIWebCitationReceipt(result.Text)), 1200)
+		return
+	}
+	assets := scoutChatResultAssets(result)
+	ref.ResultAssets = assets
+	if resultType == artifactTypeTable {
+		ref.ResultTable = scoutChatResultTablePreview(result)
+	}
+	if resultType == artifactTypeWorkbook {
+		ref.ResultWorkbook = scoutChatResultWorkbookPreview(result)
+	}
+}
+
 func clearScoutChatMessageResultRef(message *scoutChatMessageRecord) {
 	if message == nil || message.Thread == nil {
 		return
@@ -2224,8 +2581,13 @@ func clearScoutChatMessageResultRef(message *scoutChatMessageRecord) {
 	ref := *message.Thread
 	ref.ResultArtifactID = ""
 	ref.ResultArtifactType = ""
+	ref.ResultArtifactVersion = 0
+	ref.ResultArtifactDigest = ""
 	ref.ResultTitle = ""
 	ref.ResultPreview = ""
+	ref.ResultAssets = nil
+	ref.ResultTable = nil
+	ref.ResultWorkbook = nil
 	ref.ResultApprovalState = ""
 	ref.ResultQualityState = ""
 	ref.ResultCanEdit = false
@@ -2237,7 +2599,7 @@ func clearScoutChatMessageResultRef(message *scoutChatMessageRecord) {
 
 func (app *kanbanBoardApp) projectScoutChatMessageForViewer(viewerEmail string, thread scoutChatThreadRecord, message scoutChatMessageRecord, contexts ...context.Context) scoutChatMessageRecord {
 	var resultIndex *scoutChatResultProjectionIndex
-	if scoutChatThreadRefMayExposeResult(message.Thread) {
+	if scoutChatThreadRefMayExposeResult(message.Thread) || scoutChatWorkRefMayExposeResult(message.Work) {
 		index := app.scoutChatResultIndex()
 		resultIndex = &index
 	}
@@ -2278,12 +2640,22 @@ func (app *kanbanBoardApp) projectScoutChatMessageForViewerWithResultIndex(viewe
 	// paying for a store scan. Terminal events start from the same resultless
 	// baseline, then repopulate only an exact authorized current snapshot.
 	clearScoutChatMessageResultRef(&result)
+	if resultIndex == nil {
+		clearScoutChatWorkResultRef(&result)
+	}
 	if resultIndex != nil && result.Thread != nil {
 		projectionContext := context.Background()
 		if len(contexts) > 0 && contexts[0] != nil {
 			projectionContext = contexts[0]
 		}
 		app.projectScoutChatResultRef(projectionContext, accountStore().findUser(normalizeAccountEmail(viewerEmail)), &result, *resultIndex)
+	}
+	if resultIndex != nil && result.Work != nil {
+		projectionContext := context.Background()
+		if len(contexts) > 0 && contexts[0] != nil {
+			projectionContext = contexts[0]
+		}
+		app.projectScoutChatWorkResultRef(projectionContext, accountStore().findUser(normalizeAccountEmail(viewerEmail)), &result, *resultIndex)
 	}
 	return result
 }

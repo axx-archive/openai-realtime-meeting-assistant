@@ -435,8 +435,9 @@ func (app *kanbanBoardApp) startAcceptedPublicScoutWork(
 		}
 	}
 
-	rootCard.Thread = &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
-		ProjectID: launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"]}
+	rootCard.Thread = &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
+		OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(launched.Artifact), scoutChatOutputFamilyForMode(launched.Mode)),
+		ProjectID:    launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"]}
 	rootCard.Text = firstNonEmptyString(strings.TrimSpace(label), "Work") + " in progress"
 	if delegated {
 		rootCard.AuthorName = delegatedProfile.DisplayName

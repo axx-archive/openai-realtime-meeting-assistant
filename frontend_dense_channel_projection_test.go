@@ -80,7 +80,7 @@ const server=http.createServer((req,res)=>{
       syncMs:returnedAt-started,
       state:scoutChatThread.dataset.projectionState,
       status:document.querySelector('.scout-chat-history-loading')?.textContent||'',
-      firstPresent:Boolean(document.querySelector('[data-message-id="dense-0"]')),
+      firstPresent:Boolean(document.querySelector('[data-message-id="dense-1"]')),
       lastPresent:Boolean(document.querySelector('[data-message-id="dense-199"]')),
       projected:document.querySelectorAll('#scoutChatThread > .scout-chat-msg, #scoutChatThread > .manifest-card').length,
       tail:scoutChatThread.scrollHeight-scoutChatThread.scrollTop-scoutChatThread.clientHeight
@@ -98,17 +98,17 @@ const server=http.createServer((req,res)=>{
   assert.ok(first.firstPaintMs<1000,'exact tail did not paint promptly: '+JSON.stringify(first));
   assert.ok(Math.abs(first.tail)<=1,'initial exact tail was not at the true bottom: '+JSON.stringify(first));
 
-  await page.waitForFunction(()=>scoutChatThread.dataset.projectionState==='complete'&&!scoutChatProgressiveAnchorSettle&&document.querySelector('[data-message-id="dense-0"]'),null,{timeout:15000});
+  await page.waitForFunction(()=>scoutChatThread.dataset.projectionState==='complete'&&!scoutChatProgressiveAnchorSettle&&document.querySelector('[data-message-id="dense-1"]'),null,{timeout:15000});
   const complete=await page.evaluate(()=>({
     count:document.querySelectorAll('#scoutChatThread > .scout-chat-msg, #scoutChatThread > .manifest-card').length,
     statusCount:document.querySelectorAll('.scout-chat-history-loading').length,
-    firstTitle:document.querySelector('[data-message-id="dense-0"] .manifest-card__title')?.textContent||'',
+    firstText:document.querySelector('[data-message-id="dense-1"]')?.textContent||'',
     lastText:document.querySelector('[data-message-id="dense-199"]')?.textContent||'',
     tail:scoutChatThread.scrollHeight-scoutChatThread.scrollTop-scoutChatThread.clientHeight
   }));
-  assert.equal(complete.count,200,JSON.stringify(complete));
+  assert.equal(complete.count,160,JSON.stringify(complete));
   assert.equal(complete.statusCount,0,JSON.stringify(complete));
-  assert.equal(complete.firstTitle,'Retained package 0',JSON.stringify(complete));
+  assert.match(complete.firstText,/Decision 1/);
   assert.match(complete.lastText,/Decision 199/);
   assert.ok(Math.abs(complete.tail)<=1,'eventual full projection lost the true tail: '+JSON.stringify(complete));
 
@@ -119,7 +119,7 @@ const server=http.createServer((req,res)=>{
     selectScoutChatThread('dense');
     scoutChatThread.dispatchEvent(new WheelEvent('wheel',{bubbles:true}));
     const stateAtIntent=scoutChatThread.dataset.projectionState;
-    document.querySelector('[data-message-id="dense-190"]').scrollIntoView({block:'start'});
+    document.querySelector('[data-message-id="dense-191"]').scrollIntoView({block:'start'});
 	await new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
 	const viewport=scoutChatProgressiveProjection?.readerViewport||captureScoutChatViewport();
     viewport.anchor.dataset.readerAnchor='true';
@@ -130,7 +130,7 @@ const server=http.createServer((req,res)=>{
   // callback; that is not a failure as long as the reader anchor survives.
   assert.equal(readerStart.stateAtIntent,'partial',JSON.stringify(readerStart));
   assert.ok(['partial','complete'].includes(readerStart.state),JSON.stringify(readerStart));
-  await page.waitForFunction(()=>scoutChatThread.dataset.projectionState==='complete'&&!scoutChatProgressiveAnchorSettle&&document.querySelector('[data-message-id="dense-0"]'),null,{timeout:15000});
+  await page.waitForFunction(()=>scoutChatThread.dataset.projectionState==='complete'&&!scoutChatProgressiveAnchorSettle&&document.querySelector('[data-message-id="dense-1"]'),null,{timeout:15000});
   const readerEnd=await page.evaluate(()=>({top:document.querySelector('[data-reader-anchor="true"]').getBoundingClientRect().top,distance:scoutChatThread.scrollHeight-scoutChatThread.scrollTop-scoutChatThread.clientHeight}));
   assert.ok(Math.abs(readerEnd.top-readerStart.top)<=1,'retained history moved the reader anchor: '+JSON.stringify({readerStart,readerEnd}));
   assert.ok(readerEnd.distance>48,'reader intent was pulled back to the tail: '+JSON.stringify(readerEnd));
@@ -145,7 +145,7 @@ const server=http.createServer((req,res)=>{
       if(acted||scoutChatThread.dataset.projectionState!=='complete'||!scoutChatProgressiveAnchorSettle)return;
       acted=true;observer.disconnect();
       scoutChatThread.dispatchEvent(new WheelEvent('wheel',{bubbles:true}));
-      const next=document.querySelector('[data-message-id="dense-195"]');
+      const next=document.querySelector('[data-message-id="dense-196"]');
       next.scrollIntoView({block:'start'});
       const before=next.getBoundingClientRect().top;
       requestAnimationFrame(()=>requestAnimationFrame(()=>resolve({before,after:next.getBoundingClientRect().top,settleActive:Boolean(scoutChatProgressiveAnchorSettle),distance:scoutChatThread.scrollHeight-scoutChatThread.scrollTop-scoutChatThread.clientHeight})));
@@ -153,7 +153,7 @@ const server=http.createServer((req,res)=>{
     observer.observe(scoutChatThread,{attributes:true,attributeFilter:['data-projection-state']});
     selectScoutChatThread('dense');
     scoutChatThread.dispatchEvent(new WheelEvent('wheel',{bubbles:true}));
-    document.querySelector('[data-message-id="dense-190"]').scrollIntoView({block:'start'});
+    document.querySelector('[data-message-id="dense-191"]').scrollIntoView({block:'start'});
   }));
   assert.equal(secondGesture.settleActive,false,JSON.stringify(secondGesture));
   assert.ok(Math.abs(secondGesture.after-secondGesture.before)<=1,'a later reader gesture was overridden by anchor settle: '+JSON.stringify(secondGesture));

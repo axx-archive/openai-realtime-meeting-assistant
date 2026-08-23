@@ -199,7 +199,8 @@ func meetingRecordSegments(entries []meetingMemoryEntry, meetingID string) []mee
 	}
 	segments := make([]meetingRecordTranscriptSegment, 0)
 	for _, entry := range entries {
-		if entry.Kind != meetingMemoryKindTranscript || strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID || memoryEntryHiddenFromRecall(entry) {
+		retainedTranscript := strings.EqualFold(strings.TrimSpace(entry.Metadata[retainedRawTranscriptMetadataKey]), "true")
+		if entry.Kind != meetingMemoryKindTranscript || strings.TrimSpace(entry.Metadata["meetingId"]) != meetingID || (memoryEntryHiddenFromRecall(entry) && !retainedTranscript) {
 			continue
 		}
 		state := meetingRecordCorrectionState(entry)

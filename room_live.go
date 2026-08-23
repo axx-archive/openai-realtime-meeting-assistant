@@ -228,10 +228,12 @@ type participantSessionRetirement struct {
 }
 
 type participantAdmissionResult struct {
-	name          string
-	firstEndpoint bool
-	lease         *participantAdmissionLease
-	retired       []participantSessionRetirement
+	name           string
+	firstEndpoint  bool
+	lease          *participantAdmissionLease
+	retired        []participantSessionRetirement
+	meeting        meetingRecord
+	meetingChanged bool
 }
 
 func newParticipantAdmissionLease(roomID, name, sessionID string) *participantAdmissionLease {
@@ -1036,24 +1038,28 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	}
 }
 
-// rolloverOfficeMediaAfterManualArchive retires the exact predecessor media
-// generation while people remain in the office. Existing signaling sockets are
-// closed so their normal reconnect path is admitted against the successor; no
-// old transcript/provider callback can be re-labeled as the new sitting.
-func (app *kanbanBoardApp) rolloverOfficeMediaAfterManualArchive(previousSittingID, successorSittingID string) {
+type officeManualArchiveMediaRollover struct {
+	oldGeneration uint64
+	lane          *meetingTranscriptionLane
+	changed       bool
+}
+
+// rolloverOfficeMediaAfterManualArchiveLocked publishes the successor media
+// identity while the caller holds app.mu. Manual archive invokes it in the same
+// critical section that installs the already-durable successor meeting id, so
+// no observer can see a new generation without its anchors and meeting record.
+func (app *kanbanBoardApp) rolloverOfficeMediaAfterManualArchiveLocked(previousSittingID, successorSittingID string) officeManualArchiveMediaRollover {
 	if app == nil {
-		return
+		return officeManualArchiveMediaRollover{}
 	}
 	previousSittingID = strings.TrimSpace(previousSittingID)
 	successorSittingID = strings.TrimSpace(successorSittingID)
-	if previousSittingID == "" || successorSittingID == "" || previousSittingID == successorSittingID {
-		return
+	if previousSittingID == "" || previousSittingID == successorSittingID {
+		return officeManualArchiveMediaRollover{}
 	}
-	app.mu.Lock()
 	state := app.roomLiveLocked(officeRoomID)
 	if strings.TrimSpace(state.mediaSittingID) != previousSittingID {
-		app.mu.Unlock()
-		return
+		return officeManualArchiveMediaRollover{}
 	}
 	oldGeneration := state.mediaGen
 	lane := app.transcriptLane
@@ -1076,13 +1082,23 @@ func (app *kanbanBoardApp) rolloverOfficeMediaAfterManualArchive(previousSitting
 	}
 	closeRoomMediaActorOwned(officeRoomID, mediaActor)
 	app.clearOfficeScoutRequesterBindingsLocked()
-	app.mu.Unlock()
+	return officeManualArchiveMediaRollover{oldGeneration: oldGeneration, lane: lane, changed: true}
+}
 
-	app.teardownRealtimePeerForIdle()
-	if lane != nil {
-		lane.close()
+// finishOfficeMediaAfterManualArchive performs potentially blocking transport
+// teardown after the identity/generation transition and its lifecycle fence
+// are released. Any stale callback is still rejected by the exact
+// sitting/generation checks, while socket/provider latency cannot stall current
+// successor input.
+func (app *kanbanBoardApp) finishOfficeMediaAfterManualArchive(rollover officeManualArchiveMediaRollover) {
+	if app == nil || !rollover.changed {
+		return
 	}
-	closeRoomGenerationConnectionsForRestart(officeRoomID, oldGeneration)
+	app.teardownRealtimePeerForIdle()
+	if rollover.lane != nil {
+		rollover.lane.close()
+	}
+	closeRoomGenerationConnectionsForRestart(officeRoomID, rollover.oldGeneration)
 }
 
 func (app *kanbanBoardApp) roomMediaGeneration(roomID string) uint64 {
@@ -1318,6 +1334,78 @@ func closeSessionMedia(sessionID string) {
 	}
 }
 
+const (
+	roomArchiveCloseRetryBase = time.Second
+	roomArchiveCloseRetryMax  = 30 * time.Second
+)
+
+func (app *kanbanBoardApp) scheduleRoomArchiveCloseRetry(roomID string) {
+	if app == nil {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	app.roomArchiveCloseRetryMu.Lock()
+	if app.roomArchiveCloseRetryTimers == nil {
+		app.roomArchiveCloseRetryTimers = map[string]*time.Timer{}
+	}
+	if app.roomArchiveCloseRetryAttempts == nil {
+		app.roomArchiveCloseRetryAttempts = map[string]int{}
+	}
+	app.roomArchiveCloseRetryAttempts[roomID]++
+	delay := roomArchiveCloseRetryBase
+	for attempt := 1; attempt < app.roomArchiveCloseRetryAttempts[roomID] && delay < roomArchiveCloseRetryMax; attempt++ {
+		delay *= 2
+		if delay > roomArchiveCloseRetryMax {
+			delay = roomArchiveCloseRetryMax
+		}
+	}
+	if existing := app.roomArchiveCloseRetryTimers[roomID]; existing != nil {
+		existing.Stop()
+	}
+	var timer *time.Timer
+	timer = time.AfterFunc(delay, func() {
+		app.roomArchiveCloseRetryMu.Lock()
+		if app.roomArchiveCloseRetryTimers[roomID] != timer {
+			app.roomArchiveCloseRetryMu.Unlock()
+			return
+		}
+		delete(app.roomArchiveCloseRetryTimers, roomID)
+		app.roomArchiveCloseRetryMu.Unlock()
+		app.closeRoomForArchive(roomID)
+	})
+	app.roomArchiveCloseRetryTimers[roomID] = timer
+	app.roomArchiveCloseRetryMu.Unlock()
+}
+
+func (app *kanbanBoardApp) cancelRoomArchiveCloseRetry(roomID string) {
+	if app == nil {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	app.roomArchiveCloseRetryMu.Lock()
+	if timer := app.roomArchiveCloseRetryTimers[roomID]; timer != nil {
+		timer.Stop()
+		delete(app.roomArchiveCloseRetryTimers, roomID)
+	}
+	delete(app.roomArchiveCloseRetryAttempts, roomID)
+	app.roomArchiveCloseRetryMu.Unlock()
+}
+
+func (app *kanbanBoardApp) stopRoomArchiveCloseRetries() {
+	if app == nil {
+		return
+	}
+	app.roomArchiveCloseRetryMu.Lock()
+	for roomID, timer := range app.roomArchiveCloseRetryTimers {
+		if timer != nil {
+			timer.Stop()
+		}
+		delete(app.roomArchiveCloseRetryTimers, roomID)
+	}
+	app.roomArchiveCloseRetryAttempts = map[string]int{}
+	app.roomArchiveCloseRetryMu.Unlock()
+}
+
 // closeRoomForArchive ends an archived room's live sitting so occupants are
 // never marooned in a half-dead room: every seated socket hears room_closed
 // (on the guest write allowlist — guests are exactly who must be told),
@@ -1330,12 +1418,50 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 	if app == nil || roomID == officeRoomID {
 		return
 	}
+	app.meetingLifecycleMu.Lock()
+	defer app.meetingLifecycleMu.Unlock()
 	// This runs async after the archive response; a restore may have landed in
 	// the gap. Restore is an undo — if the room is live again, leave the
 	// sitting and its occupants alone.
-	if room, ok := appRoomStore().byID(roomID); ok && !room.Archived {
+	if room, ok := appRoomStore().byID(roomID); !ok || !room.Archived {
+		app.cancelRoomArchiveCloseRetry(roomID)
 		return
 	}
+	if app.meetings == nil {
+		// Without durable record truth we cannot prove teardown is safe. The
+		// archived room flag survives restart, and the bounded retry handles a
+		// store that becomes available again in this process.
+		app.scheduleRoomArchiveCloseRetry(roomID)
+		return
+	}
+
+	// Close the record before broadcasting or touching any seat/media state.
+	// If the write definitely failed, the sitting remains intact and the
+	// durable archived flag drives bounded same-process plus boot recovery. If
+	// the atomic replacement committed ambiguously, the meeting store reconciles
+	// the exact postimage and returns changed=true so this chain continues.
+	var closed meetingRecord
+	if record, ok := app.meetings.activeRecord(roomID); ok {
+		source := app.meetingFinalizationSource(record.ID)
+		var changed bool
+		var closeErr error
+		closed, changed, closeErr = app.meetings.endMeetingWithFinalization(record.ID, time.Now().UTC(), meetingEndedReasonRoomClosed, "", source)
+		if closeErr != nil {
+			log.Errorf("Could not durably begin room-archive finalization for %s: %v", record.ID, closeErr)
+			app.scheduleRoomArchiveCloseRetry(roomID)
+			return
+		}
+		if !changed && closed.EndedAt == "" {
+			app.scheduleRoomArchiveCloseRetry(roomID)
+			return
+		}
+	}
+	if stillOpen, ok := app.meetings.activeRecord(roomID); ok {
+		log.Errorf("Refusing room-archive teardown while meeting %s remains open", stillOpen.ID)
+		app.scheduleRoomArchiveCloseRetry(roomID)
+		return
+	}
+	app.cancelRoomArchiveCloseRetry(roomID)
 
 	broadcastRoomKanbanEvent(roomID, "room_closed", map[string]any{"roomId": roomID})
 
@@ -1398,26 +1524,18 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 		log.Infof("room_seat_closed participant=%s room=%s sessions=%d; room archived", seat.name, roomID, len(seat.sessionIDs))
 	}
 
-	// The sitting close chain — endMeetingForIdle without the idle generation
-	// gate (an archive is an unconditional close; presence above is already
-	// zero, so no admission can race the record back open on the OLD id — a
-	// post-archive join is refused by the room store regardless).
-	if app.meetings != nil {
-		if record, ok := app.meetings.activeRecord(roomID); ok {
-			if closed, changed := app.meetings.endMeeting(record.ID, time.Now().UTC(), meetingEndedReasonRoomClosed, ""); changed {
-				if app.meetingSpecialists != nil {
-					app.meetingSpecialists.CloseScope(roomID, closed.ID, "room_closed")
-				}
-				app.flushDeferredNotifications("meeting_end")
-				app.flushAmbientAgentsForClose("room-archive", roomID, closed.ListenOnly)
-				app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "room_archive")
-				if app.memory != nil {
-					app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
-				}
-				app.broadcastMeetingRecord(closed)
-				app.autoArchiveIdleMeeting(closed)
-			}
+	if closed.ID != "" {
+		if app.meetingSpecialists != nil {
+			app.meetingSpecialists.CloseScope(roomID, closed.ID, "room_closed")
 		}
+		app.flushDeferredNotifications("meeting_end")
+		if app.memory != nil {
+			app.memory.rotateMeetingIDIfCurrent(roomID, closed.ID)
+		}
+		app.broadcastMeetingRecord(closed)
+		app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "room_archive")
+		app.autoArchiveIdleMeeting(closed)
+		app.scheduleMeetingCoreFinalization(closed.ID)
 	}
 	app.teardownRoomMediaAfterIdle(roomID)
 	broadcastRoomsSnapshot()

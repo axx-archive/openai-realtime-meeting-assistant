@@ -46,7 +46,8 @@ func TestIndexUsesSyncedStableWebRTCVideoSettings(t *testing.T) {
 		"function remoteVideoStreamForTrack(stream, videoTrack)",
 		"function mediaStreamTrackSignature(stream)",
 		"function videoPlaybackStreamForElement(video, stream)",
-		"return new MediaStream(stream.getTracks().filter(liveTrack))",
+		"liveTrack(track) && (video.dataset.remotePlayback === 'synced' || track.kind === 'video')",
+		"return new MediaStream(tracks)",
 		"function primaryVideoElementForParticipant(name)",
 		"if (isIOSDevice) {",
 		"const useLocalMirrorCanvas = isIOSDevice",
@@ -1639,7 +1640,7 @@ func TestIndexPrunesDeadRemoteVideoTiles(t *testing.T) {
 	}
 }
 
-func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
+func TestIndexUsesUnifiedRemoteAVPlayback(t *testing.T) {
 	rawHTML, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
@@ -1656,13 +1657,15 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"function scheduleUnidentifiedAudioMonitorRepair(key)",
 		"function remoteAudioMonitors()",
 		"function shouldUseSyncedRemoteAudioPlayback()",
+		"function remoteAVPlaybackPath(monitor, video = remoteVideoElementForParticipant(monitor?.name))",
+		"function remoteAVSyncTimingSnapshot(timings, warningMs = remoteAVSyncSkewWarningMs)",
 		"function shouldUseElementRemoteAudioPlayback()",
 		"return true",
 		"function retuneRemoteAudioPlaybackForRoomLoad()",
 		"function shouldRenderBoardDockVideo()",
 		"return !useCrowdedVideoLimits()",
 		"const useWebAudioPlayback = options.play && context.createGain && context.destination && !shouldUseElementRemoteAudioPlayback()",
-		"return false",
+		"video.dataset.remotePlayback === 'synced' || track.kind === 'video'",
 		"demoteRemotePlaybackElementFromVideo(video, tile.dataset.participant)",
 		"audio = createRemoteAudioElement(stream, name)",
 		"remoteVideoTracksByParticipant.set(participantName, track)",
@@ -1672,6 +1675,8 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"monitor.playbackGain?.disconnect()",
 		"function remoteAudioSignalSnapshot(monitors = remoteAudioMonitors())",
 		"remoteAudioPlaybackPaths: audioSignal.playbackPaths",
+		"remoteAVPlaybackPaths: audioSignal.avPlaybackPaths",
+		"snapshot.remoteAVSyncEstimate = remoteAVSyncTimingSnapshot(remoteAVTimings)",
 		"remoteAudioMaxLevel: audioSignal.maxLevel",
 		"function startRoomStateRefresh()",
 		"function stopRoomStateRefresh()",
@@ -1679,6 +1684,13 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"startRoomStateRefresh()",
 		"stopRoomStateRefresh()",
 		"function remotePlaybackNeedsGesture(element)",
+		"const remoteAudiblePlaybackReceipts = new Map()",
+		"function remoteAudiblePlaybackReceiptIsCurrent(receipt)",
+		"function configureRemoteCanonicalAVPlayback(key, monitor, element, stream, name)",
+		"function attemptRemoteAudiblePlayback(receipt, options = {})",
+		"function startRemoteCanonicalAVPlayback(receipt)",
+		"element.dataset.remoteAudibleState = 'blocked'",
+		"if (event && event.isTrusted === false)",
 		"function remotePlaybackPendingCount(options = {})",
 		"function roomAudioPlaybackBlocked()",
 		"function unlockRoomAudioPlaybackFromGesture(event)",
@@ -1694,8 +1706,16 @@ func TestIndexKeepsRemoteAudioSeparateForLowLatency(t *testing.T) {
 		"const visibleSpeakerName = participantDisplayNameInRoom(loudestName)",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("index.html missing low-latency remote audio hardening %q", want)
+			t.Fatalf("index.html missing unified remote A/V hardening %q", want)
 		}
+	}
+	syncedStart := strings.Index(html, "function shouldUseSyncedRemoteAudioPlayback()")
+	if syncedStart < 0 {
+		t.Fatal("remote A/V synchronized playback function is missing")
+	}
+	syncedEnd := strings.Index(html[syncedStart:], "function shouldUseElementRemoteAudioPlayback()")
+	if syncedEnd < 0 || !strings.Contains(html[syncedStart:syncedStart+syncedEnd], "return true") {
+		t.Fatal("remote A/V synchronized playback is not enabled")
 	}
 }
 
@@ -1728,6 +1748,14 @@ func TestIndexReportsBrowserMediaQualityDiagnostics(t *testing.T) {
 		"videoAttachmentRevision += 1",
 		"remoteAudioSignalSnapshot(audioMonitorsForRemoteParticipants)",
 		"remoteAudioPlaybackPaths: audioSignal.playbackPaths",
+		"remoteAVPlaybackPaths: audioSignal.avPlaybackPaths",
+		"remoteAVSyncEstimate: {}",
+		"estimatedPlayoutTimestamp",
+		"const remoteAVSyncTelemetryParticipantCap = 16",
+		"omittedParticipants: Math.max(0, totalParticipants - boundedSamples.length)",
+		"warningParticipantsTruncated: warningParticipantCount > warningParticipants.length",
+		"proof: 'estimate-only'",
+		"disposition: warningParticipantCount > 0",
 		"remoteAudioLevels: audioSignal.levels",
 		"function syncRoomAudioPlaybackState()",
 		"pendingRemotePlaybackElements.add(element)",
