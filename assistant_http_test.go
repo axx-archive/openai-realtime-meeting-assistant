@@ -604,6 +604,18 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 		t.Fatalf("stored big artifact missing right after create")
 	}
 	fullBody := storedBig.Text
+	currentCapabilityDigest := artifactCapabilityDigest(storedBig)
+	// Model a legacy native edit whose authorization/disposition stamp was not
+	// rewritten. Client result binding must still receive the current body
+	// capability as a separate response-only field.
+	kanbanApp.memory.mu.Lock()
+	if index, found := kanbanApp.memory.artifactEntryIndexByIDLocked(big.ID); found {
+		kanbanApp.memory.entries[index].Metadata[artifactContentDigestMetadataKey] = strings.Repeat("0", 64)
+	} else {
+		kanbanApp.memory.mu.Unlock()
+		t.Fatal("stored big artifact disappeared")
+	}
+	kanbanApp.memory.mu.Unlock()
 	smallBody := "# Small\n\nJust a line."
 	if _, _, err := kanbanApp.createOSArtifact("research", "small brief", smallBody, "AJ"); err != nil {
 		t.Fatalf("createOSArtifact small: %v", err)
@@ -640,6 +652,9 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 			}
 			if !strings.HasPrefix(entry.Text, "# Big Report") {
 				t.Fatalf("excerpt lost its leading prefix: %q", entry.Text[:20])
+			}
+			if _, ok := entry.Metadata[artifactCapabilityDigestViewMetadataKey]; ok {
+				t.Fatal("list must not pay the full-body capability hash cost")
 			}
 		case "":
 			// skip
@@ -685,6 +700,9 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 	if idPayload.Artifacts[0].Metadata["bodyTrimmed"] == "true" {
 		t.Fatalf("?id= must not flag bodyTrimmed")
 	}
+	if idPayload.Artifacts[0].Metadata[artifactCapabilityDigestViewMetadataKey] != currentCapabilityDigest {
+		t.Fatalf("?id capability digest=%q, want %q", idPayload.Artifacts[0].Metadata[artifactCapabilityDigestViewMetadataKey], currentCapabilityDigest)
+	}
 	if idPayload.DispositionRef.Validate() != nil || idPayload.DispositionRef.ArtifactID != big.ID {
 		t.Fatalf("?id= disposition ref=%+v", idPayload.DispositionRef)
 	}
@@ -699,6 +717,9 @@ func TestArtifactsHandlerListTrimsLargeBodiesButIDReturnsFull(t *testing.T) {
 	}
 	if stored.Metadata["bodyTrimmed"] == "true" {
 		t.Fatalf("list view leaked bodyTrimmed into stored metadata")
+	}
+	if _, leaked := stored.Metadata[artifactCapabilityDigestViewMetadataKey]; leaked {
+		t.Fatal("response-only capability digest leaked into stored metadata")
 	}
 }
 

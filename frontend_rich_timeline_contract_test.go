@@ -145,9 +145,10 @@ func TestWebExactResultHydrationRetriesAndSaveRefusesRevisionDrift(t *testing.T)
 		"options?.expectedBinding",
 		"refreshedArtifact",
 		"metadata?.artifactVersion",
-		"metadata?.contentDigest",
+		"artifactEntryCapabilityDigest(refreshedArtifact)",
+		"validArtifactDispositionRef(dispositionRef)",
 		"dispositionRef.contentRevision",
-		"dispositionRef.contentDigest",
+		"sameArtifactDispositionRef(receipt?.artifact, dispositionRef)",
 		"This deliverable changed before it could be saved",
 	} {
 		if !strings.Contains(save, want) {

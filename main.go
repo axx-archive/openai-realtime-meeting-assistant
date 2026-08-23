@@ -2980,6 +2980,13 @@ func isArtifactApprovalAdmin(user *userAccount) bool {
 // on demand via GET /artifacts?id=<id> only when a deliverable is opened.
 const artifactListExcerptRunes = 1500
 
+// artifactCapabilityDigestViewMetadataKey is a response-only projection of
+// the current full artifact body. Legacy rows can retain an older
+// metadata.contentDigest used by their authorization/disposition history after
+// native edits. Clients that bind an editor/export result need the current
+// capability digest without rewriting that durable authority record on read.
+const artifactCapabilityDigestViewMetadataKey = "capabilityDigest"
+
 // artifactListMetaFieldCap bounds the free-text metadata fields the list carries.
 // query / threadQuery / objective are near-duplicate copies of the user's
 // request (measured live: 1.3 MB across 100 artifacts, one objective 35 KB) and
@@ -3009,6 +3016,18 @@ func artifactListRunePrefix(value string, limit int) (string, bool) {
 		runes++
 	}
 	return value, false
+}
+
+// artifactCapabilityEntryView returns a COPY with the current full-body
+// capability digest. The durable metadata map is never mutated.
+func artifactCapabilityEntryView(entry meetingMemoryEntry) meetingMemoryEntry {
+	meta := make(map[string]string, len(entry.Metadata)+1)
+	for key, value := range entry.Metadata {
+		meta[key] = value
+	}
+	meta[artifactCapabilityDigestViewMetadataKey] = artifactCapabilityDigest(entry)
+	entry.Metadata = meta
+	return entry
 }
 
 // artifactListEntryView returns one lightweight COPY for a list response. Any
@@ -3182,6 +3201,7 @@ func artifactsHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusConflict, "artifact authority changed")
 			return
 		}
+		artifact = artifactCapabilityEntryView(artifact)
 		writeAuthJSON(w, http.StatusOK, map[string]any{
 			"ok":             true,
 			"artifacts":      []meetingMemoryEntry{artifact},

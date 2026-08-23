@@ -35,6 +35,8 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 		`function studioProjectResultIsFinal(project)`,
 		`submitCheckpointOption(project.rootArtifactId, checkpoint.id, option.id, checkpointNote)`,
 		`expectedBinding`,
+		`artifactEntryCapabilityDigest(refreshedArtifact)`,
+		`metadata?.capabilityDigest || entry?.metadata?.contentDigest`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("Studio workspace contract missing %q", marker)
@@ -81,7 +83,11 @@ const path=require('path');
 const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.STUDIO_INDEX,'utf8');
 const digest='d'.repeat(64);
+const sceneRef='e'.repeat(64);
+const pdfRef='f'.repeat(64);
+const legacyDisposition={tenantId:'tenant-studio',artifactId:'deck-final',contentRevision:4,contentDigest:'a'.repeat(64),aclVersion:3,audienceDigest:'b'.repeat(64)};
 const actions=[];
+const driveSaves=[];
 const requestLog=[];
 let reviewAttempts=0;
 const phases=(active)=>['brief','build','polish','ready'].map((id,index)=>({id,label:id[0].toUpperCase()+id.slice(1),status:index<active?'complete':index===active?'active':'upcoming'}));
@@ -99,6 +105,11 @@ const server=http.createServer((req,res)=>{
  if(req.url==='/api/stride/v1/mobile/surfaces/organizations'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({availability:'available',surface:'organizations',revision:1,items:[{id:'membership',title:'Synthetic Lab',status:'current',kind:'organization-summary',detail:{kind:'organization-summary',isCurrent:true,role:'owner'},actions:[]}]}));}
  if(req.url.startsWith('/api/studio-projects/v1')){const parsed=new URL(req.url,'http://local');const id=parsed.searchParams.get('id');if(id){if(id==='older-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:olderProject}));}res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({error:'studio project not found'}));}if(parsed.searchParams.get('before')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,projects:[olderProject],hasMore:false}));}res.writeHead(200,{'content-type':'application/json','etag':'"studio-v1"'});return res.end(JSON.stringify({ok:true,projects,hasMore:true,nextBefore:'page-one'}));}
  if(req.url.startsWith('/assistant/chat-threads/source-older?')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({thread:{id:'source-older',title:'Earlier private source',visibility:'private',updatedAt:'2026-08-20T12:11:00Z',messages:[]},history:{mode:'tail',hasEarlier:false,messageCount:0}}));}
+ if(req.url==='/artifacts/deck?id=deck-final'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({artifact:{id:'deck-final',title:'Western engagement army',type:'html_deck',version:4,contentDigest:digest,sceneRef},deck:{schemaVersion:1,width:1920,height:1080,slides:[]},canWrite:true}));}
+ if(req.url==='/artifacts?id=deck-final'){const artifact={id:'deck-final',kind:'os_artifact',text:'<!doctype html><title>Deck</title>',metadata:{title:'Western engagement army',type:'html_deck',artifactVersion:'4',contentDigest:'0'.repeat(64),capabilityDigest:digest,deckSceneRef:sceneRef,assets:JSON.stringify([{ref:pdfRef,kind:'pdf',mime:'application/pdf',name:'Western engagement army.pdf'}]),renderPdfArtifactVersion:'4',renderPdfSourceSceneRef:sceneRef,renderPdfAssetRef:pdfRef}};res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifacts:[artifact],dispositionRef:legacyDisposition}));}
+ if(req.url==='/artifacts/export-pptx'&&req.method==='POST'){res.writeHead(200,{'content-type':'application/vnd.openxmlformats-officedocument.presentationml.presentation'});return res.end('pptx');}
+ if(req.url.startsWith('/artifacts/blob?')){res.writeHead(200,{'content-type':'application/pdf'});return res.end('%PDF-1.4\n%%EOF');}
+ if(req.url==='/api/artifact-drive-saves/v1'&&req.method==='POST'){let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{const save=JSON.parse(body);driveSaves.push(save);const drive={id:'deck-final',sourceArtifactId:'deck-final',name:save.fileName,folderId:save.folderId,artifact:save.artifact};res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,receipt:{operationId:save.operationId,action:'save',outcome:'saved',artifact:save.artifact,drive}}));});return;}
  if(req.url==='/artifacts/action'&&req.method==='POST'){let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{const action=JSON.parse(body);actions.push(action);if(action.action==='review_changes'&&++reviewAttempts===1){res.writeHead(409,{'content-type':'application/json'});return res.end(JSON.stringify({error:'This exact draft changed. Refresh and try again.'}));}res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true}));});return;}
  if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/artifacts')){res.writeHead(404,{'content-type':'application/json'});return res.end('{}');}
  res.writeHead(200,{'content-type':'text/html; charset=utf-8'});res.end(html);
@@ -116,6 +127,21 @@ const server=http.createServer((req,res)=>{
  assert.equal(await page.locator('#studioProjectList .studio-project-row').count(),1);
  assert.equal(await page.locator('#studioProjectDetail .studio-project-detail__title').innerText(),'Western engagement army');
  assert.deepEqual(await page.locator('#studioProjectDetail .studio-project-detail__actions button').allInnerTexts(),['Present','Edit','PowerPoint','PDF']);
+ const pptxToast=await page.evaluate(async project=>{await downloadStudioProjectResult(project,'pptx',null);return document.querySelector('#toastRegion')?.textContent||'';},projects[0]);
+ assert.match(pptxToast,/PowerPoint downloaded/);
+ const pdfToast=await page.evaluate(async project=>{await downloadStudioProjectResult(project,'pdf',null);return document.querySelector('#toastRegion')?.textContent||'';},projects[0]);
+ assert.match(pdfToast,/PDF downloaded/);
+ assert.ok(requestLog.includes('/artifacts/export-pptx'),JSON.stringify(requestLog));
+ assert.ok(requestLog.filter(url=>url==='/artifacts/deck?id=deck-final').length>=2,JSON.stringify(requestLog));
+ assert.ok(requestLog.includes('/artifacts?id=deck-final'),JSON.stringify(requestLog));
+ await page.evaluate(project=>{const entry={id:'deck-final',kind:'os_artifact',text:'',metadata:{title:'Western engagement army',type:'html_deck',artifactVersion:'4',source:'scout_thread',status:'complete'}};const button=artifactSaveToFilesControl(entry,{expectedBinding:studioProjectExpectedBinding(project),readyLabel:'Save exact deck'});if(!button)throw new Error('Save control unavailable');button.id='driveSplitAuthorityProof';document.body.appendChild(button);},projects[0]);
+ await page.click('#driveSplitAuthorityProof');
+ await page.waitForSelector('.drive-save-dialog[open]');
+ await page.fill('.drive-save-dialog__input','Western engagement army — filed');
+ await page.click('.drive-save-dialog__button[data-primary="true"]');
+ await page.waitForFunction(()=>document.querySelector('#driveSplitAuthorityProof')?.dataset.state==='saved');
+ assert.equal(driveSaves.length,1,JSON.stringify(driveSaves));
+ assert.deepEqual(driveSaves[0].artifact,legacyDisposition);
  assert.deepEqual(await page.locator('.studio-project-phase__label').allInnerTexts(),['Brief','Build','Polish','Ready']);
  const geometry=await page.evaluate(()=>{const workspace=document.querySelector('.studio-projects__workspace').getBoundingClientRect();const detail=document.querySelector('.studio-projects__detail').getBoundingClientRect();return{workspace:workspace.toJSON(),detail:detail.toJSON(),fits:document.documentElement.scrollWidth<=innerWidth};});
  assert.equal(geometry.fits,true,JSON.stringify(geometry));assert.ok(geometry.workspace.width>900&&geometry.detail.width>500,JSON.stringify(geometry));
@@ -225,7 +251,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(new URL(page.url()).searchParams.has('project'),false);
  assert.deepEqual(pageErrors,[]);
  await browser.close();server.close();
-})().catch(error=>{console.error(error,{actions,requestLog});server.close();process.exit(1)});`
+})().catch(error=>{console.error(error,{actions,driveSaves,requestLog});server.close();process.exit(1)});`
 	cmd := exec.Command("node", "-e", script)
 	nodeModules := "/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules"
 	if _, err := os.Stat(filepath.Join(nodeModules, "playwright")); err != nil {

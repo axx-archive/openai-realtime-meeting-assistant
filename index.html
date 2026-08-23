@@ -53884,12 +53884,15 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			}
 			if (expectedBinding && (!refreshedArtifact || String(refreshedArtifact.id || '') !== artifactId ||
 			  Number(refreshedArtifact?.metadata?.artifactVersion || 0) !== expectedVersion ||
-			  String(refreshedArtifact?.metadata?.contentDigest || '').trim().toLowerCase() !== expectedDigest ||
-			  Number(dispositionRef.contentRevision || 0) !== expectedVersion ||
-			  String(dispositionRef.contentDigest || '').trim().toLowerCase() !== expectedDigest)) {
+			  artifactEntryCapabilityDigest(refreshedArtifact) !== expectedDigest ||
+			  Number(dispositionRef.contentRevision || 0) !== expectedVersion)) {
 			  saveAttempt = null
 			  throw new Error('This deliverable changed before it could be saved. Refresh the channel for the current result.')
 			}
+			// The result tuple binds the current body capability above. The
+			// disposition reference separately binds the server's durable ACL and
+			// audience generation; legacy authority digests are not substituted for
+			// the current editor/export digest.
             const response = await fetch('/api/artifact-drive-saves/v1', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -54085,7 +54088,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		if (!expectedID || expectedVersion < 1 || !/^[0-9a-f]{64}$/.test(expectedDigest)) return false
 		return String(entry?.id || '') === expectedID
 		  && Number(entry?.metadata?.artifactVersion || 0) === expectedVersion
-		  && String(entry?.metadata?.contentDigest || '').trim().toLowerCase() === expectedDigest
+		  && artifactEntryCapabilityDigest(entry) === expectedDigest
+	  }
+
+	  function artifactEntryCapabilityDigest(entry) {
+		return String(entry?.metadata?.capabilityDigest || entry?.metadata?.contentDigest || '').trim().toLowerCase()
 	  }
 
 	  function assertArtifactExpectedBinding(entry, expectedBinding) {
