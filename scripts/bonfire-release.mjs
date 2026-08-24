@@ -29,24 +29,6 @@ const baseEnvPatchReceiptSchema = 'bonfire.base-env-patch-receipt.v1'
 const privateRealtimeVoiceQualificationKey = 'PRIVATE_REALTIME_VOICE_QUALIFIED'
 const privateRealtimeVoiceQualificationValue = 'true'
 const baseEnvPatchBackupRoot = '/opt/meetingassist-backups'
-const generation212LivenessRecoveryCommand = 'recover-generation-212-liveness-lineage'
-const generation212LivenessRecovery = Object.freeze({
-  generation: 212,
-  targetReleaseDir: '/opt/meetingassist-releases/39108281d6e1f02532b80cbefd057c0f3ae31487',
-  targetReleaseCommit: '39108281d6e1f02532b80cbefd057c0f3ae31487',
-  targetBundleSha256: '78885530034e3b2338a281e0e22363c4aec913f5479f20648d8d7c915e196fab',
-  targetMeetingassistImageId: 'sha256:e45f9eeb11c16fa9d7a67edbe40daadeff6eb72d8baa21a8abf33556d57ece63',
-  targetRenderRunnerImageId: 'sha256:338ad88a005bf6bafdc4f7ee3807c4d4e66a519b682bf2539a901159d6ba90dd',
-  currentReleaseDir: '/opt/meetingassist-releases/8d013afdba0904f0eca69cbc0f78a7c56ab37f75',
-  currentReleaseCommit: '8d013afdba0904f0eca69cbc0f78a7c56ab37f75',
-  currentBundleSha256: 'bef453eb640a63745ec9ddeeccc425bae64ed9e8e6fb0cd39d3dd3c54e3b7090',
-  currentMeetingassistImageId: 'sha256:f797b197a7a9290e0d94d32d7970dda1665ffc490ae8d41ea4dec4fae1745d83',
-  currentRenderRunnerImageId: 'sha256:bd809d0d138399901ba3e7fbee6af1a5733b231a51521da81ed3500aa5b46aff',
-  qualificationRollbackReceipt: '/opt/meetingassist-backups/base-env-8d013afdba0904f0eca69cbc0f78a7c56ab37f75-073e7607-5c14-41a4-a5fe-722f51e24142.receipt.json',
-  baseEnv: '/opt/meetingassist/deploy/digitalocean/.env',
-  healthUrl: 'https://thebonfire.xyz/healthz',
-  readyUrl: 'https://thebonfire.xyz/readyz'
-})
 const shaPattern = /^[0-9a-f]{64}$/
 const commitPattern = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 const imageRefPattern = /^.+@sha256:[0-9a-f]{64}$/
@@ -1296,14 +1278,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
   validateExactEnvironment('caddy', config.services.caddy.environment, [])
 
   validateHealthcheck('meetingassist', config.services.meetingassist.healthcheck, {
-    // The current retained rollback window still contains the exact /readyz
-    // transition release. Keep both reviewed commands admissible until one
-    // /livez release is active with another /livez release as its predecessor;
-    // the next strict successor can then remove the compatibility branch.
-    tests: [
-      ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz'],
-      ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/livez']
-    ], interval: ['30s', 30_000_000_000],
+    test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/livez'], interval: ['30s', 30_000_000_000],
     timeout: ['5s', 5_000_000_000], startPeriod: ['5m0s', 300_000_000_000], retries: 3
   })
   validateHealthcheck('canonical-postgres', config.services['canonical-postgres'].healthcheck, {
@@ -3096,88 +3071,6 @@ export async function verifyRetainedReleaseActivator(executingPath, rollbackPath
   await verifyExecutingReleaseTool(rollbackSource.configFiles['scripts/bonfire-release.mjs'], path)
 }
 
-export function validateGeneration212LivenessRecoveryRequest(options) {
-  const expectedKeys = ['baseEnv', 'command', 'healthUrl', 'qualificationRollbackReceipt', 'readyUrl',
-    'recoveryReleaseDir', 'releaseDir', 'rollbackReleaseDir'].sort()
-  if (options?.command !== generation212LivenessRecoveryCommand ||
-      JSON.stringify(Object.keys(options || {}).sort()) !== JSON.stringify(expectedKeys)) {
-    throw new Error('generation-212 liveness recovery arguments are not exact')
-  }
-  const exact = {
-    releaseDir: generation212LivenessRecovery.targetReleaseDir,
-    rollbackReleaseDir: generation212LivenessRecovery.currentReleaseDir,
-    qualificationRollbackReceipt: generation212LivenessRecovery.qualificationRollbackReceipt,
-    baseEnv: generation212LivenessRecovery.baseEnv,
-    healthUrl: generation212LivenessRecovery.healthUrl,
-    readyUrl: generation212LivenessRecovery.readyUrl
-  }
-  for (const [name, expected] of Object.entries(exact)) {
-    if (String(options[name] || '') !== expected) throw new Error(`generation-212 liveness recovery ${name} is not exact`)
-  }
-  const recoveryDir = resolve(String(options.recoveryReleaseDir || ''))
-  if (dirname(recoveryDir) !== dirname(generation212LivenessRecovery.currentReleaseDir) ||
-      !commitPattern.test(basename(recoveryDir)) || recoveryDir === generation212LivenessRecovery.currentReleaseDir ||
-      recoveryDir === generation212LivenessRecovery.targetReleaseDir) {
-    throw new Error('generation-212 liveness recovery utility release directory is invalid')
-  }
-  return { ...generation212LivenessRecovery, recoveryReleaseDir: recoveryDir }
-}
-
-function assertGeneration212RecoveryReceipt(receipt, prefix, expected) {
-  if (receipt?.source?.releaseCommit !== expected.releaseCommit || receipt?.bundleSha256 !== expected.bundleSha256 ||
-      receipt?.images?.meetingassist?.imageId !== expected.meetingassistImageId ||
-      receipt?.images?.renderRunner?.imageId !== expected.renderRunnerImageId) {
-    throw new Error(`generation-212 liveness recovery ${prefix} bundle identity differs from the reviewed plan`)
-  }
-}
-
-export function validateGeneration212LivenessRecoveryState(plan, targetReceipt, currentReceipt, ledger) {
-  if (!plan || plan.generation !== generation212LivenessRecovery.generation) {
-    throw new Error('generation-212 liveness recovery plan is invalid')
-  }
-  assertGeneration212RecoveryReceipt(targetReceipt, 'target', {
-    releaseCommit: plan.targetReleaseCommit, bundleSha256: plan.targetBundleSha256,
-    meetingassistImageId: plan.targetMeetingassistImageId, renderRunnerImageId: plan.targetRenderRunnerImageId
-  })
-  assertGeneration212RecoveryReceipt(currentReceipt, 'current', {
-    releaseCommit: plan.currentReleaseCommit, bundleSha256: plan.currentBundleSha256,
-    meetingassistImageId: plan.currentMeetingassistImageId, renderRunnerImageId: plan.currentRenderRunnerImageId
-  })
-  if (ledger?.generation !== plan.generation) throw new Error('generation-212 liveness recovery ledger generation differs from the reviewed plan')
-  return plan
-}
-
-async function verifyGeneration212RecoveryActivator(options, plan) {
-  const recoveryOptions = { ...options, releaseDir: plan.recoveryReleaseDir }
-  const recovery = await loadReleaseBundle(recoveryOptions, { verifyTool: false })
-  if (recovery.receipt.source.releaseCommit !== basename(plan.recoveryReleaseDir) ||
-      resolve(process.argv[1]) !== resolve(recovery.paths.releaseTool)) {
-    throw new Error('generation-212 liveness recovery is not executing its exact reviewed release tool')
-  }
-  await verifyExecutingReleaseTool(recovery.source.configFiles['scripts/bonfire-release.mjs'], process.argv[1])
-  verifyReleaseEnvironmentFile(await readFile(recovery.paths.runtimeEnv, 'utf8'), recovery.receipt)
-  await verifyReleaseImages(recovery.receipt)
-  return recovery
-}
-
-export function retainedDurableRecoveryArgs(options, targetReleaseDir, retainedToolPath) {
-  for (const [name, value] of [['--release-dir', targetReleaseDir], ['--base-env', options?.baseEnv],
-    ['--health-url', options?.healthUrl], ['--ready-url', options?.readyUrl], ['--retained-tool-path', retainedToolPath]]) required(name, value)
-  return [resolve(retainedToolPath), 'recover',
-    '--release-dir', resolve(targetReleaseDir),
-    '--base-env', resolve(options.baseEnv),
-    '--health-url', options.healthUrl,
-    '--ready-url', options.readyUrl]
-}
-
-async function recoverGeneration212WithRetainedTool(options, targetReleaseDir, rollback) {
-  const args = retainedDurableRecoveryArgs(options, targetReleaseDir, rollback.paths.releaseTool)
-  await verifyExecutingReleaseTool(rollback.source.configFiles['scripts/bonfire-release.mjs'], args[0])
-  await execFileAsync(process.execPath, args, {
-    cwd: dirname(rollback.paths.releaseTool), env: releaseComposeEnvironment(process.env, options.baseEnv), maxBuffer: 32 << 20
-  })
-}
-
 // This entrypoint is invoked from the verified retained rollback module, not
 // from the candidate module whose activation failed. It is intentionally
 // transaction-internal: the caller must prove the still-held sibling lock and
@@ -3335,7 +3228,7 @@ export async function executeDurableReleaseRecoveryPhaseMachine({ phase, effects
   return current
 }
 
-async function loadDurableReleaseContext(options, operationLock, journal, generation212RecoveryPlan = null) {
+async function loadDurableReleaseContext(options, operationLock, journal) {
   const targetDir = resolve(operationLock.targetDir)
   const rollbackDir = resolve(operationLock.rollbackDir)
   if (journal.baseEnvPatch && resolve(options.baseEnv) !== journal.baseEnvPatch.baseEnvPath) {
@@ -3345,12 +3238,7 @@ async function loadDurableReleaseContext(options, operationLock, journal, genera
   const rollbackOptions = { ...options, releaseDir: rollbackDir, rollbackReleaseDir: targetDir }
   const target = await loadReleaseBundle(targetOptions, { verifyTool: false })
   const rollback = await loadReleaseBundle(rollbackOptions, { verifyTool: false })
-  if (generation212RecoveryPlan) {
-    await verifyGeneration212RecoveryActivator(options, generation212RecoveryPlan)
-    validateGeneration212LivenessRecoveryState(generation212RecoveryPlan, target.receipt, rollback.receipt, journal.priorLedger)
-  } else {
-    await verifyRetainedReleaseActivator(process.argv[1], rollback.paths, rollback.source)
-  }
+  await verifyRetainedReleaseActivator(process.argv[1], rollback.paths, rollback.source)
   await loadRetainedRollbackTool(rollback.paths.releaseTool, rollback.source.configFiles['scripts/bonfire-release.mjs'])
   if (target.receipt.bundleSha256 !== journal.targetBundleSha256 || rollback.receipt.bundleSha256 !== journal.rollbackBundleSha256) {
     throw new Error('release transaction bundles differ from the durable receipt binding')
@@ -3382,8 +3270,8 @@ export function releaseTransactionCompletionEvidence(journal, initialPhase) {
   }
 }
 
-async function resumeDurableReleaseTransaction(options, operationLock, journal, generation212RecoveryPlan = null) {
-  const context = await loadDurableReleaseContext(options, operationLock, journal, generation212RecoveryPlan)
+async function resumeDurableReleaseTransaction(options, operationLock, journal) {
+  const context = await loadDurableReleaseContext(options, operationLock, journal)
   let current = journal
   const advance = async (phase, evidence) => {
     if (phase === 'target_preflighted') {
@@ -3462,8 +3350,8 @@ async function resumeDurableReleaseTransaction(options, operationLock, journal, 
   return releaseTransactionCompletionEvidence(current, journal.phase)
 }
 
-async function recoverDurableReleaseTransaction(options, operationLock, journal, generation212RecoveryPlan = null) {
-  const context = await loadDurableReleaseContext(options, operationLock, journal, generation212RecoveryPlan)
+async function recoverDurableReleaseTransaction(options, operationLock, journal) {
+  const context = await loadDurableReleaseContext(options, operationLock, journal)
   let current = journal
   if (forwardReleasePhases.includes(current.phase)) {
     current = await writeReleaseTransactionJournal(operationLock, {
@@ -3566,7 +3454,7 @@ async function recoverDurableReleaseTransaction(options, operationLock, journal,
   return { recovered: true, action: current.action, ledgerGeneration: current.priorLedger.generation }
 }
 
-async function activateRelease(options, action, recoveryPlan = null) {
+async function activateRelease(options, action) {
   for (const [name, value] of [['--release-dir', options.releaseDir], ['--base-env', options.baseEnv],
     ['--health-url', options.healthUrl], ['--ready-url', options.readyUrl],
     ['--rollback-release-dir', options.rollbackReleaseDir]]) required(name, value)
@@ -3577,18 +3465,13 @@ async function activateRelease(options, action, recoveryPlan = null) {
   if (targetDir === rollbackDir || dirname(targetDir) !== dirname(rollbackDir)) {
     throw new Error('target and rollback release directories must be distinct siblings')
   }
-  if (recoveryPlan) await verifyGeneration212RecoveryActivator(options, recoveryPlan)
   const operationLock = await acquireReleaseOperationLock(targetDir, rollbackDir)
   let transactionStarted = false
   try {
     const target = await loadReleaseBundle(options, { verifyTool: false })
     const rollbackOptions = { ...options, releaseDir: rollbackDir }
     const rollback = await loadReleaseBundle(rollbackOptions, { verifyTool: false })
-    if (recoveryPlan) {
-      validateGeneration212LivenessRecoveryState(recoveryPlan, target.receipt, rollback.receipt, { generation: recoveryPlan.generation })
-    } else {
-      await verifyRetainedReleaseActivator(process.argv[1], rollback.paths, rollback.source)
-    }
+    await verifyRetainedReleaseActivator(process.argv[1], rollback.paths, rollback.source)
     await loadRetainedRollbackTool(rollback.paths.releaseTool, rollback.source.configFiles['scripts/bonfire-release.mjs'])
     verifyReleaseEnvironmentFile(await readFile(target.paths.runtimeEnv, 'utf8'), target.receipt)
     verifyReleaseEnvironmentFile(await readFile(rollback.paths.runtimeEnv, 'utf8'), rollback.receipt)
@@ -3613,7 +3496,6 @@ async function activateRelease(options, action, recoveryPlan = null) {
     }
     const ledger = await readActiveReleaseLedger(targetDir)
     validateReleaseTransition(action, ledger, targetDir, target.receipt, rollbackDir, rollback.receipt)
-    if (recoveryPlan) validateGeneration212LivenessRecoveryState(recoveryPlan, target.receipt, rollback.receipt, ledger)
     await assertActiveReleaseLedgerUnchanged(targetDir, ledger)
     const nextLedger = nextActiveReleaseLedger(targetDir, target.receipt, rollbackDir, rollback.receipt, ledger)
     // Planning reads and hashes only. The first base-env write occurs later in
@@ -3678,15 +3560,11 @@ async function activateRelease(options, action, recoveryPlan = null) {
       baselineProjectContainers, baselineProjectResources, createdAt: now, updatedAt: now
     })
     try {
-      const completed = await resumeDurableReleaseTransaction(options, operationLock, journal, recoveryPlan)
+      const completed = await resumeDurableReleaseTransaction(options, operationLock, journal)
       process.stdout.write(`${JSON.stringify({ [action]: true, ...completed })}\n`)
     } catch (error) {
       try {
-        if (recoveryPlan) {
-          await recoverGeneration212WithRetainedTool(options, targetDir, rollback)
-        } else {
-          await recoverDurableReleaseTransaction(options, operationLock, await readReleaseTransactionJournal(operationLock))
-        }
+        await recoverDurableReleaseTransaction(options, operationLock, await readReleaseTransactionJournal(operationLock))
       } catch (recoveryError) {
         throw new AggregateError([error, recoveryError], 'release transaction failed and durable recovery remains resumable under the retained lock')
       }
@@ -3914,7 +3792,7 @@ async function main() {
   if (options.command !== 'activate' && targetBaseEnvPatchOptionNames.some(name => String(options[name] || '').trim())) {
     throw new Error('target base-env patch arguments are permitted only for activate')
   }
-  if (!['rollback', generation212LivenessRecoveryCommand].includes(options.command) && String(options.qualificationRollbackReceipt || '').trim()) {
+  if (options.command !== 'rollback' && String(options.qualificationRollbackReceipt || '').trim()) {
     throw new Error('--qualification-rollback-receipt is permitted only for rollback')
   }
   if (options.command === 'scope') await scope(options)
@@ -3923,13 +3801,9 @@ async function main() {
   else if (options.command === 'verify') await verifyRunning(options)
   else if (options.command === 'activate') await activateRelease(options, 'activated')
   else if (options.command === 'rollback') await activateRelease(options, 'rolledBack')
-  else if (options.command === generation212LivenessRecoveryCommand) {
-    const recoveryPlan = validateGeneration212LivenessRecoveryRequest(options)
-    await activateRelease(options, 'rolledBack', recoveryPlan)
-  }
   else if (options.command === 'resume') await resumeRelease(options, false)
   else if (options.command === 'recover') await resumeRelease(options, true)
-  else throw new Error(`command must be scope, prepare, build, verify, activate, rollback, resume, recover, or ${generation212LivenessRecoveryCommand}`)
+  else throw new Error('command must be scope, prepare, build, verify, activate, rollback, resume, or recover')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
