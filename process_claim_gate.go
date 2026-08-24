@@ -852,6 +852,7 @@ func processJSONPlanningRoleField(path, key string) bool {
 type processFactualClaimPolicy struct {
 	allowPackagingStoryPlanningRole   bool
 	allowPackagingStoryMissingProof   bool
+	allowPackagingLayoutIdentity      bool
 	allowDocumentStoryReaderDecision  bool
 	allowStoryPlanningImperative      bool
 	allowStoryInternalMetadata        bool
@@ -872,9 +873,14 @@ func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) proce
 		plan.ProcessID == documentReportProcessID &&
 		stage.ID == "story" &&
 		stage.OutputContract == "report_story_spine_v1"
+	packagingLayout := plan != nil &&
+		plan.ProcessID == packagingStudioProcessID &&
+		stage.ID == "layout_plan" &&
+		stage.OutputContract == "layout_plan_v3"
 	return processFactualClaimPolicy{
 		allowPackagingStoryPlanningRole:   packagingStory,
 		allowPackagingStoryMissingProof:   packagingStory,
+		allowPackagingLayoutIdentity:      packagingLayout,
 		allowDocumentStoryReaderDecision:  documentStory,
 		allowStoryPlanningImperative:      packagingStory || documentStory,
 		allowStoryInternalMetadata:        packagingStory || documentStory,
@@ -1216,6 +1222,15 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 			return err
 		}
 	}
+	if policy.allowPackagingLayoutIdentity && path == "$.visual_identity.tokens" {
+		if _, err := parseIdentityTokens(object, "layout_plan_v3 visual_identity tokens"); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		// The layout contract later binds this closed token object byte-for-byte
+		// to the selected canonical identity. Its #RRGGBB digits are structural,
+		// not factual numbers, and must not be reinterpreted as claim material.
+		return nil
+	}
 	ids, exactClaims := []string{}, []string{}
 	for key, value := range object {
 		isID, isExact := processJSONAnchorField(key)
@@ -1271,22 +1286,31 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 			continue
 		}
 		if policy.allowDocumentStoryReaderDecision && path == "$.report_story_spine_v1" && strings.EqualFold(strings.TrimSpace(key), "reader_decision") {
-			text, ok := value.(string)
-			if !ok {
-				return fmt.Errorf("%s.%s: reader decision must be a string", path, key)
-			}
-			if err := validateProcessReaderDecisionText(text, path+"."+key); err != nil {
-				return err
-			}
-			continue
-		}
-		if policy.allowDocumentAuthorizedConstraint && path == "$.report_story_spine_v1" && strings.EqualFold(strings.TrimSpace(key), "evidence_boundary") {
-			leaves := processJSONScalarLeaves(value, path+"."+key)
-			if len(leaves) == 0 {
-				if _, ok := value.([]any); !ok {
-					return fmt.Errorf("%s.%s: evidence boundary must be an array of strings", path, key)
+			if text, ok := value.(string); ok && strings.HasPrefix(strings.ToLower(strings.TrimSpace(text)), "decide whether ") {
+				if err := validateProcessReaderDecisionText(text, path+"."+key); err != nil {
+					return err
 				}
 				continue
+			}
+		}
+		if policy.allowDocumentAuthorizedConstraint && path == "$.report_story_spine_v1" && strings.EqualFold(strings.TrimSpace(key), "evidence_boundary") {
+			if value == nil {
+				continue
+			}
+			leaves := make([]processJSONScalarLeaf, 0)
+			switch typed := value.(type) {
+			case string:
+				leaves = append(leaves, processJSONScalarLeaf{Text: typed, Path: path + "." + key})
+			case []any:
+				for index, item := range typed {
+					text, ok := item.(string)
+					if !ok {
+						return fmt.Errorf("%s.%s[%d]: evidence boundary entries must be strings", path, key, index)
+					}
+					leaves = append(leaves, processJSONScalarLeaf{Text: text, Path: fmt.Sprintf("%s.%s[%d]", path, key, index)})
+				}
+			default:
+				return fmt.Errorf("%s.%s: evidence boundary must be a string or an array of strings", path, key)
 			}
 			for _, leaf := range leaves {
 				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(leaf.Text)), "authorized constraint:") {
@@ -1295,7 +1319,7 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 					}
 					continue
 				}
-				if err := validateProcessFactText(leaf.Text, leaf.Path, anchors, leaf.ForceNumber); err != nil {
+				if err := validateProcessStoryInternalMetadataText(leaf.Text, leaf.Path); err != nil {
 					return err
 				}
 			}
