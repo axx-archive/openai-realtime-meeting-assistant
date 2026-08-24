@@ -123,7 +123,11 @@ var (
 	processJSONFieldNamePattern                    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 	processJSONSlidePathPattern                    = regexp.MustCompile(`^\$\.slides\[\d+\]$`)
 	processJSONElementPathPattern                  = regexp.MustCompile(`^\$\.slides\[\d+\]\.elements\[\d+\]$`)
-	processJSONPlanningRoleLeadPattern             = regexp.MustCompile(`(?i)^\s*(?:establish|frame|introduce|surface|set\s+up|contrast|reveal|pivot|reframe|turn|connect|translate|move|build|earn|land|close|resolve|challenge|foreground|dramatize|explain|orient|show|confront|end|lead)\b`)
+	processJSONPlanningRoleLeadPattern             = regexp.MustCompile(`(?i)^\s*(?:establish|frame|introduce|surface|set\s+up|contrast|reveal|pivot|reframe|turn|connect|translate|move|build|earn|land|close|resolve|challenge|foreground|dramatize|explain|orient|show|confront|end|lead|retain|preserve|keep|carry|reuse|echo|combine|weave|borrow|graft|use|make|complete)\b`)
+	processJSONPlanningFactualClausePattern        = regexp.MustCompile(`(?i)\b(?:because|since|given\s+that|based\s+on|according\s+to|although|despite|whereas|last\s+(?:year|month|week)|yesterday|previously|historically)\b`)
+	processJSONPlanningSeparatorPattern            = regexp.MustCompile(`[,;:—–]`)
+	processJSONPlanningContinuationLeadPattern     = regexp.MustCompile(`(?i)^\s*(?:retaining|preserving|keeping|carrying|reusing|echoing|combining|weaving|borrowing|grafting|using|making|completing|showing|connecting|ending|landing|framing|turning|translating|ensuring|reinforcing|holding|leaving)\b`)
+	processJSONPlanningConnectorPattern            = regexp.MustCompile(`(?i)^\s*(?:and|then|while|with|by|without)\s+`)
 	processJSONPlanningHiddenSyntaxPattern         = regexp.MustCompile(`(?i)(?:<!--|-->|\[\[\s*claim\s*:|stride-claim\s*:)`)
 	processJSONMissingProofStatusPathPattern       = regexp.MustCompile(`^\$(?:\.story_spine_v2)?\.claims_needing_proof\[\d+\]\.proof_status$`)
 	processMissingProofSubjectPattern              = regexp.MustCompile(`(?i)\b(?:claim|evidence|proof|source|support|verification)\b`)
@@ -845,25 +849,34 @@ func processJSONPlanningRoleField(path, key string) bool {
 }
 
 type processFactualClaimPolicy struct {
-	allowPackagingStoryPlanningRole  bool
-	allowPackagingStoryMissingProof  bool
-	allowDocumentStoryReaderDecision bool
+	allowPackagingStoryPlanningRole   bool
+	allowPackagingStoryMissingProof   bool
+	allowDocumentStoryReaderDecision  bool
+	allowStoryPlanningImperative      bool
+	allowDocumentAuthorizedConstraint bool
+	authorizedObjective               string
 }
 
 func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) processFactualClaimPolicy {
+	objective := ""
+	if plan != nil {
+		objective = plan.Objective
+	}
+	packagingStory := plan != nil &&
+		plan.ProcessID == packagingStudioProcessID &&
+		stage.ID == "story_architects" &&
+		stage.OutputContract == "story_spine_v2"
+	documentStory := plan != nil &&
+		plan.ProcessID == documentReportProcessID &&
+		stage.ID == "story" &&
+		stage.OutputContract == "report_story_spine_v1"
 	return processFactualClaimPolicy{
-		allowPackagingStoryPlanningRole: plan != nil &&
-			plan.ProcessID == packagingStudioProcessID &&
-			stage.ID == "story_architects" &&
-			stage.OutputContract == "story_spine_v2",
-		allowPackagingStoryMissingProof: plan != nil &&
-			plan.ProcessID == packagingStudioProcessID &&
-			stage.ID == "story_architects" &&
-			stage.OutputContract == "story_spine_v2",
-		allowDocumentStoryReaderDecision: plan != nil &&
-			plan.ProcessID == documentReportProcessID &&
-			stage.ID == "story" &&
-			stage.OutputContract == "report_story_spine_v1",
+		allowPackagingStoryPlanningRole:   packagingStory,
+		allowPackagingStoryMissingProof:   packagingStory,
+		allowDocumentStoryReaderDecision:  documentStory,
+		allowStoryPlanningImperative:      packagingStory || documentStory,
+		allowDocumentAuthorizedConstraint: documentStory,
+		authorizedObjective:               objective,
 	}
 }
 
@@ -872,10 +885,11 @@ func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) proce
 // role_in_argument value may start with a storytelling instruction such as
 // "Establish the current reality" even though the ordinary prose heuristic
 // treats an unlisted imperative with terminal punctuation as declarative. The
-// exception is one bare-imperative sentence: inspect the original text after
-// removing at most one final period or exclamation point. Numbers, URLs,
-// qualitative superlatives, factual predicates, and copula assertions remain
-// fail-closed, and a second clause cannot hide behind the imperative lead.
+// exception is one imperative planning sentence: inspect the original text
+// after removing at most one final period or exclamation point. Internal
+// commas/dashes remain available for normal narrative direction, while a
+// second sentence, factual causal clause, number, URL, qualitative
+// superlative, factual predicate, or copula assertion remains fail-closed.
 func validateProcessPlanningRoleText(text, path string) error {
 	if processJSONPlanningHiddenSyntaxPattern.MatchString(text) {
 		return fmt.Errorf("%s: planning field cannot contain hidden comments or claim markers", path)
@@ -892,10 +906,75 @@ func validateProcessPlanningRoleText(text, path string) error {
 	if strings.HasSuffix(inspect, ".") || strings.HasSuffix(inspect, "!") {
 		inspect = strings.TrimSpace(inspect[:len(inspect)-1])
 	}
-	if inspect == "" || strings.ContainsAny(inspect, ".!?;,:—–") || processForwardClausePattern.MatchString(inspect) {
-		return fmt.Errorf("%s: planning field must contain one sentence without a second clause", path)
+	if inspect == "" || strings.ContainsAny(inspect, ".!?") || processJSONPlanningFactualClausePattern.MatchString(inspect) {
+		return fmt.Errorf("%s: planning field must contain one imperative sentence without a factual causal clause", path)
 	}
-	return validateProcessFactText(inspect, path, nil, false)
+	parts := processJSONPlanningSeparatorPattern.Split(inspect, -1)
+	for index, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return fmt.Errorf("%s: planning field contains an empty punctuation-delimited clause", path)
+		}
+		if index == 0 {
+			continue
+		}
+		continuation := strings.TrimSpace(processJSONPlanningConnectorPattern.ReplaceAllString(part, ""))
+		if processStoryPlanningImperativeText(continuation) || processJSONPlanningContinuationLeadPattern.MatchString(continuation) {
+			continue
+		}
+		words := strings.Fields(continuation)
+		first, _ := utf8.DecodeRuneInString(continuation)
+		if len(words) > 0 && len(words) <= 5 && unicode.IsLower(first) {
+			continue
+		}
+		return fmt.Errorf("%s: planning field contains a non-planning punctuation-delimited clause", path)
+	}
+	if tokens := processMaterialTokens(inspect); len(tokens) > 0 {
+		return fmt.Errorf("%s: planning field contains material %s %q", path, tokens[0].Kind, compactAssistantLine(tokens[0].Value))
+	}
+	if processDeclarativeAuxiliaryPattern.MatchString(inspect) || processLikelyFactualHeadlineFragment(inspect) {
+		return fmt.Errorf("%s: planning field contains an unsupported factual proposition", path)
+	}
+	return nil
+}
+
+func processStoryPlanningImperativeText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	match := processJSONPlanningRoleLeadPattern.FindStringIndex(trimmed)
+	return match != nil && match[0] == 0
+}
+
+// validateProcessAuthorizedConstraintText recognizes a constraint copied from
+// the current authorized objective inside Document Studio's story-only
+// evidence boundary. It is deliberately not a general label escape hatch: the
+// body must be an exact current-objective excerpt, must read as a directive,
+// and cannot carry claim markers, URLs, numbers, or factual-status language.
+func validateProcessAuthorizedConstraintText(text, path, objective string) error {
+	if processJSONPlanningHiddenSyntaxPattern.MatchString(text) {
+		return fmt.Errorf("%s: authorized constraint cannot contain hidden comments or claim markers", path)
+	}
+	trimmed := strings.TrimSpace(text)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return fmt.Errorf("%s: authorized constraint must be one line", path)
+	}
+	const prefix = "authorized constraint:"
+	if len(trimmed) <= len(prefix) || !strings.EqualFold(trimmed[:len(prefix)], prefix) {
+		return fmt.Errorf("%s: authorized constraint must begin with Authorized constraint:", path)
+	}
+	body := strings.TrimSpace(trimmed[len(prefix):])
+	body = strings.TrimSpace(strings.TrimRight(body, ".!?"))
+	if body == "" || !processStoryPlanningImperativeText(body) {
+		return fmt.Errorf("%s: authorized constraint must contain an objective-grounded directive", path)
+	}
+	if tokens := processMaterialTokens(body); len(tokens) > 0 {
+		return fmt.Errorf("%s: authorized constraint contains material %s %q", path, tokens[0].Kind, compactAssistantLine(tokens[0].Value))
+	}
+	canonicalBody := strings.ToLower(canonicalEvidenceText(body))
+	canonicalObjective := strings.ToLower(canonicalEvidenceText(objective))
+	if canonicalBody == "" || !strings.Contains(canonicalObjective, canonicalBody) {
+		return fmt.Errorf("%s: authorized constraint is not an exact excerpt of the current objective", path)
+	}
+	return nil
 }
 
 // validateProcessReaderDecisionText recognizes the document story spine's one
@@ -1141,6 +1220,27 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 			}
 			continue
 		}
+		if policy.allowDocumentAuthorizedConstraint && path == "$.report_story_spine_v1" && strings.EqualFold(strings.TrimSpace(key), "evidence_boundary") {
+			leaves := processJSONScalarLeaves(value, path+"."+key)
+			if len(leaves) == 0 {
+				if _, ok := value.([]any); !ok {
+					return fmt.Errorf("%s.%s: evidence boundary must be an array of strings", path, key)
+				}
+				continue
+			}
+			for _, leaf := range leaves {
+				if strings.HasPrefix(strings.ToLower(strings.TrimSpace(leaf.Text)), "authorized constraint:") {
+					if err := validateProcessAuthorizedConstraintText(leaf.Text, leaf.Path, policy.authorizedObjective); err != nil {
+						return err
+					}
+					continue
+				}
+				if err := validateProcessFactText(leaf.Text, leaf.Path, anchors, leaf.ForceNumber); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if policy.allowPackagingStoryMissingProof && processJSONMissingProofStatusPathPattern.MatchString(path) && strings.EqualFold(strings.TrimSpace(key), "text") {
 			text, ok := value.(string)
 			if !ok {
@@ -1155,6 +1255,12 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 			if processJSONStructuralField(path, key) {
 				if !processStructuralScalarSafe(key, leaf) {
 					return fmt.Errorf("%s: structural field %s has non-structural scalar %q", leaf.Path, key, compactAssistantLine(leaf.Text))
+				}
+				continue
+			}
+			if policy.allowStoryPlanningImperative && !leaf.ForceNumber && processStoryPlanningImperativeText(leaf.Text) {
+				if err := validateProcessPlanningRoleText(leaf.Text, leaf.Path); err != nil {
+					return err
 				}
 				continue
 			}

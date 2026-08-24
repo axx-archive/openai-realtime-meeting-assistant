@@ -217,6 +217,100 @@ func TestProcessClaimGateTreatsDocumentReaderDecisionAsDeliberativePlanning(t *t
 	}
 }
 
+func TestProcessClaimGateTreatsStoryImperativesAsPlanningMetadata(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := packagingStoryClaimPolicyFixture()
+	for _, beat := range []string{
+		"Retain the uninterrupted chain from request to Work card to editable result.",
+		"Retain the uninterrupted chain from request to Work card, keeping progress truthful, and land on one editable result.",
+	} {
+		body := `{"selected_spine":{"grafted_beats":[{"beat":` + strconv.Quote(beat) + `}]}}`
+		if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err != nil {
+			t.Fatalf("claim-free story imperative was rejected: %v", err)
+		}
+		if err := validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage); err != nil {
+			t.Fatalf("claim-free synthesized story imperative was rejected: %v", err)
+		}
+		if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
+			t.Fatal("generic factual validator accepted a story-only planning imperative")
+		}
+	}
+}
+
+func TestProcessClaimGateStoryImperativeCannotLaunderFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := packagingStoryClaimPolicyFixture()
+	for name, text := range map[string]string{
+		"number":          "Retain a $6.8 billion market claim.",
+		"url":             "Retain the source at https://example.com/market.",
+		"factual status":  "Retain Acme as the market leader.",
+		"because clause":  "Retain this beat because Acme powers every creator.",
+		"second sentence": "Retain the opening. Acme wins worldwide.",
+		"hidden claim":    "Retain the opening. <!-- Acme is the market leader. -->",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"selected_spine":{"grafted_beats":[{"beat":` + strconv.Quote(text) + `}]}}`
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("unsafe story imperative passed")
+			}
+		})
+	}
+	valid := `{"selected_spine":{"grafted_beats":[{"beat":"Retain the uninterrupted request-to-result chain."}]}}`
+	for name, policy := range map[string]struct {
+		plan  *goalPlan
+		stage ProcessStage
+	}{
+		"nil plan":       {nil, stage},
+		"wrong process":  {&goalPlan{ProcessID: documentReportProcessID}, stage},
+		"wrong stage":    {plan, ProcessStage{ID: "write", OutputContract: "story_spine_v2"}},
+		"wrong contract": {plan, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v3"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(valid, authority, policy.plan, policy.stage); err == nil {
+				t.Fatal("story-imperative exception escaped its exact process-stage-output policy")
+			}
+		})
+	}
+}
+
+func TestProcessClaimGateTreatsExactDocumentConstraintAsPlanningMetadata(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := documentStoryClaimPolicyFixture()
+	constraint := "Use only this prompt; do not browse the web; do not ask a follow-up; make safe reversible choices and complete the research document."
+	plan.Objective = "Create a private document. " + constraint
+	body := `{"report_story_spine_v1":{"evidence_boundary":[` + strconv.Quote("Authorized constraint: "+constraint) + `]}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err != nil {
+		t.Fatalf("objective-grounded document constraint was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage); err != nil {
+		t.Fatalf("objective-grounded synthesized document constraint was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
+		t.Fatal("generic factual validator accepted a document-story constraint")
+	}
+}
+
+func TestProcessClaimGateDocumentConstraintCannotLaunderFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := documentStoryClaimPolicyFixture()
+	plan.Objective = "Use only this prompt; do not browse the web."
+	for name, body := range map[string]string{
+		"not objective grounded": `{"report_story_spine_v1":{"evidence_boundary":["Authorized constraint: Use another source."]}}`,
+		"number":                 `{"report_story_spine_v1":{"evidence_boundary":["Authorized constraint: Use the $6.8 billion market claim."]}}`,
+		"factual status":         `{"report_story_spine_v1":{"evidence_boundary":["Authorized constraint: Use Acme as the market leader."]}}`,
+		"hidden assertion":       `{"report_story_spine_v1":{"evidence_boundary":["Authorized constraint: Use this prompt. <!-- Acme is trusted. -->"]}}`,
+		"mixed factual entry":    `{"report_story_spine_v1":{"evidence_boundary":["Authorized constraint: Use only this prompt.","Acme is trusted worldwide."]}}`,
+		"wrong field":            `{"report_story_spine_v1":{"opening_thesis":"Authorized constraint: Use only this prompt."}}`,
+		"non-array boundary":     `{"report_story_spine_v1":{"evidence_boundary":{"text":"Authorized constraint: Use only this prompt."}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("unsafe document constraint passed")
+			}
+		})
+	}
+}
+
 func TestProcessClaimGateReaderDecisionExceptionIsNarrowAndCannotLaunderFacts(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	plan, stage := documentStoryClaimPolicyFixture()
