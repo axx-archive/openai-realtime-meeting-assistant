@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions, type ColorValue } from 'react-native';
-import Svg, { Path, Circle, Ellipse } from 'react-native-svg';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Glass } from '../theme/glass';
 import { colors, radius, space, type } from '../theme/tokens';
@@ -34,13 +34,12 @@ type Props = {
 };
 
 /**
- * Destination marks copied from the live web stroke family (45e2f7c1 / thebonfire.xyz).
- * Stroke width 1.8 matching the web dest marks. viewBox 0 0 24 24.
+ * Destination marks use one coherent 1.8pt stroke family in a 24pt view box.
  *   • home-mark: hearth (flame shape with inner circle)
- *   • meet-mark: two faces (overlapping ellipses with pupils)
+ *   • meet-camera: video camera
  *   • chat-bubble: one speech bubble (rounded rect + lower-left tail)
+ *   • work-pencil: authoring pencil
  *   • stacked-sheets: three stacked rectangles with depth
- * NOT house, NOT camera, NOT SF Symbols, NOT Lucide, NOT Expo stock.
  */
 function DestMark({ icon, size, color }: { icon: string; size: number; color: ColorValue }) {
   const strokeWidth = 1.8;
@@ -65,39 +64,22 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: Co
           />
         </Svg>
       );
-    case 'meet-mark':
-      // Two faces: overlapping ellipses with pupils (live web line 30962)
+    case 'meet-camera':
       return (
         <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
-          <Ellipse
-            cx="8"
-            cy="12"
-            rx="5"
-            ry="6"
+          <Path
+            d="M4 8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"
             stroke={color}
             strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
-          <Ellipse
-            cx="16"
-            cy="12"
-            rx="5"
-            ry="6"
+          <Path
+            d="m16 10 4-2v8l-4-2"
             stroke={color}
             strokeWidth={strokeWidth}
-          />
-          <Circle
-            cx="8"
-            cy="12"
-            r="1.5"
-            stroke={color}
-            strokeWidth={strokeWidth}
-          />
-          <Circle
-            cx="16"
-            cy="12"
-            r="1.5"
-            stroke={color}
-            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
         </Svg>
       );
@@ -107,6 +89,25 @@ function DestMark({ icon, size, color }: { icon: string; size: number; color: Co
         <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
           <Path
             d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </Svg>
+      );
+    case 'work-pencil':
+      return (
+        <Svg style={styles.destMark} width={size} height={size} viewBox="0 0 24 24" fill="none">
+          <Path
+            d="m5 16.5-.8 3.3 3.3-.8L18.7 7.8a2.1 2.1 0 0 0-3-3L5 15.5v1Z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path
+            d="m13.9 6.6 3.5 3.5M4.2 19.8h15.6"
             stroke={color}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
@@ -327,7 +328,7 @@ function ShellItem({
 
 /**
  * Slim rail width for iPad sidebar — matches live web narrow rail.
- * No wordmark, no tagline, just the four dest marks.
+ * No tagline or labels, just the five destination marks.
  */
 const SIDEBAR_WIDTH = 68;
 

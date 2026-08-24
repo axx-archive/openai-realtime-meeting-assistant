@@ -6,20 +6,20 @@ import test from 'node:test';
 const mobileRoot = path.resolve(import.meta.dirname, '..', '..');
 const source = (...parts: string[]) => fs.readFileSync(path.join(mobileRoot, ...parts), 'utf8');
 
-test('Work stays behind the four-destination native shell', () => {
+test('Work is a first-class destination in the five-item native shell', () => {
   const shell = source('src', 'navigation', 'nativeShellModel.ts');
   const root = source('src', 'navigation', 'RootNavigator.tsx');
   const types = source('src', 'navigation', 'types.ts');
 
-  assert.match(shell, /Four destinations only — Home \/ Meet \/ Chat \/ Files/u);
+  assert.match(shell, /Five first-class destinations — Home \/ Meet \/ Chat \/ Work \/ Files/u);
   assert.deepEqual(
-    [...shell.matchAll(/\{ id: '(home|video|chat|files)', label: '(Home|Meet|Chat|Files)'/gu)].map((match) => match[1]),
-    ['home', 'video', 'chat', 'files'],
+    [...shell.matchAll(/\{ id: '(home|video|chat|work|files)', label: '(Home|Meet|Chat|Work|Files)'/gu)].map((match) => match[1]),
+    ['home', 'video', 'chat', 'work', 'files'],
   );
   assert.match(root, /name="WorkHome" component=\{WorkHubScreen\}/u);
   assert.match(root, /name="Board" component=\{WorkHubScreen\}/u);
   assert.match(types, /WorkHome: \{ projectId\?: string; rootRunId\?: string \} \| undefined/u);
-  assert.doesNotMatch(shell, /label: 'Work'/u);
+  assert.match(shell, /\{ id: 'work', label: 'Work', route: 'WorkHome', icon: 'work-pencil' \}/u);
 });
 
 test('the Work hub is one filtered, virtualized project library with calm sections', () => {
