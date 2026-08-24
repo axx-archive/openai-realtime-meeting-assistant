@@ -454,6 +454,143 @@ func TestScoutHomeOpeningHandlerReturnsBeforeProviderAndCompletesPlaceholder(t *
 	}
 }
 
+func TestScoutHomeOpeningDirectAuthoredRequestsStartOnceWithoutProposal(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-test-key"
+	kanbanApp = app
+	t.Cleanup(func() {
+		_ = app.Close()
+		kanbanApp = previousApp
+	})
+	previousStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		t.Fatalf("direct authored opening reached provider workflow %q", request.Workflow)
+		return "", nil
+	})
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+
+	for _, scenario := range []struct {
+		name, key, prompt, processID, kind string
+	}{
+		{name: "presentation", key: "home-direct-presentation", prompt: "Create a private editable three-slide presentation for the release review.", processID: packagingStudioProcessID, kind: studioProjectKindPresentation},
+		{name: "research document", key: "home-direct-document", prompt: "Create one private editable Markdown document with the release findings.", processID: documentReportProcessID, kind: studioProjectKindDocument},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			thread, created, err := app.ensureScoutHomeOpening(user, scenario.key, scenario.prompt)
+			if err != nil || !created {
+				t.Fatalf("ensure opening created=%v err=%v", created, err)
+			}
+			claimed, userMessage, leaseID, ok := app.claimScoutOpeningReply(thread.ID)
+			if !ok || leaseID == "" {
+				t.Fatal("opening reply was not claimed")
+			}
+			resolved, err := app.resolveScoutOpeningReply(context.Background(), user, claimed, userMessage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Proposal != nil || resolved.Thread == nil || resolved.IntentOutcome != string(conversationIntentStartPrivateWork) || resolved.Thread.ProcessID != scenario.processID {
+				t.Fatalf("resolved=%+v, want direct %s work card", resolved, scenario.processID)
+			}
+			app.finishScoutOpeningReply(thread.ID, leaseID, resolved, nil)
+
+			completed, ok := app.scoutOpeningThreadByID(thread.ID)
+			if !ok || len(completed.Messages) != 2 || completed.OpeningOperation == nil {
+				t.Fatalf("completed=%+v", completed)
+			}
+			replyIndex := scoutChatMessageIndex(completed, completed.OpeningOperation.ReplyMessageID)
+			if replyIndex < 0 {
+				t.Fatal("opening reply disappeared")
+			}
+			reply := completed.Messages[replyIndex]
+			if reply.Reply == nil || reply.Reply.State != scoutReplyStateCompleted || reply.Thread == nil || reply.Thread.ID != resolved.Thread.ID {
+				t.Fatalf("completed reply=%+v", reply)
+			}
+			projected := app.projectScoutChatThreadForViewer(user.Email, completed)
+			projectedReply := projected.Messages[replyIndex]
+			if projectedReply.StudioProject == nil || projectedReply.StudioProject.ID != resolved.Thread.ArtifactID ||
+				projectedReply.StudioProject.Kind != scenario.kind || projectedReply.StudioProject.Href != "/work?project="+resolved.Thread.ArtifactID {
+				t.Fatalf("projected reply=%+v", projectedReply)
+			}
+			root, found := app.osArtifactByID(resolved.Thread.ArtifactID)
+			rootKind, plan, canonical, recognized := studioProjectClassification(root)
+			if !found || !canonical || !recognized || rootKind != scenario.kind || plan.ProcessID != scenario.processID {
+				t.Fatalf("root found=%v kind=%q canonical=%v recognized=%v plan=%+v", found, rootKind, canonical, recognized, plan)
+			}
+		})
+	}
+}
+
+func TestScoutHomeOpeningDirectWorkReclaimsLeaseWithoutDuplicateRoot(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	app := newIsolatedKanbanBoardApp(t)
+	app.apiKey = "openai-test-key"
+	kanbanApp = app
+	t.Cleanup(func() {
+		_ = app.Close()
+		kanbanApp = previousApp
+	})
+	previousStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		t.Fatalf("direct authored replay reached provider workflow %q", request.Workflow)
+		return "", nil
+	})
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seed user missing")
+	}
+	thread, _, err := app.ensureScoutHomeOpening(user, "home-direct-reclaim", "Create a private editable three-slide presentation for restart QA.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, userMessage, firstLease, ok := app.claimScoutOpeningReply(thread.ID)
+	if !ok {
+		t.Fatal("first opening reply was not claimed")
+	}
+	first, err := app.resolveScoutOpeningReply(context.Background(), user, claimed, userMessage)
+	if err != nil || first.Thread == nil {
+		t.Fatalf("first resolution=%+v err=%v", first, err)
+	}
+	app.requeueExpiredScoutOpeningReply(thread.ID, firstLease)
+	claimed, userMessage, secondLease, ok := app.claimScoutOpeningReply(thread.ID)
+	if !ok || secondLease == firstLease {
+		t.Fatal("reclaimed opening reply did not mint a new lease")
+	}
+	second, err := app.resolveScoutOpeningReply(context.Background(), user, claimed, userMessage)
+	if err != nil || second.Thread == nil || second.Thread.ID != first.Thread.ID || second.Thread.ArtifactID != first.Thread.ArtifactID {
+		firstID, firstArtifactID, secondID, secondArtifactID := "", "", "", ""
+		if first.Thread != nil {
+			firstID, firstArtifactID = first.Thread.ID, first.Thread.ArtifactID
+		}
+		if second.Thread != nil {
+			secondID, secondArtifactID = second.Thread.ID, second.Thread.ArtifactID
+		}
+		t.Fatalf("second id=%q artifact=%q first id=%q artifact=%q err=%v", secondID, secondArtifactID, firstID, firstArtifactID, err)
+	}
+	app.finishScoutOpeningReply(thread.ID, secondLease, second, nil)
+
+	rootCount := 0
+	for _, entry := range app.memory.snapshot(0) {
+		if _, _, canonical := studioProjectCandidate(entry); canonical && entry.Metadata["operationId"] == thread.OpeningOperation.OperationID &&
+			entry.Metadata["operationBodyDigest"] == thread.OpeningOperation.BodyDigest && entry.Metadata["originId"] == thread.ID {
+			rootCount++
+		}
+	}
+	completed, ok := app.scoutOpeningThreadByID(thread.ID)
+	if !ok || len(completed.Messages) != 2 || rootCount != 1 || completed.Messages[1].Thread == nil || completed.Messages[1].Thread.ID != first.Thread.ID || completed.Messages[1].Reply == nil || completed.Messages[1].Reply.State != scoutReplyStateCompleted {
+		t.Fatalf("completed=%+v rootCount=%d", completed, rootCount)
+	}
+}
+
 func TestScoutHomeOpeningUsesAuthorizedMeetingBriefingBeforeGenericProvider(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
@@ -601,13 +738,16 @@ func TestScoutHomeOpeningQueuedReplyRecoversAfterRestart(t *testing.T) {
 	}
 }
 
-func TestScoutHomeOpeningProposalPreservesRouterProvenance(t *testing.T) {
+func TestScoutHomeOpeningDirectLaunchPreservesRouterProvenance(t *testing.T) {
 	setupAuthTestEnv(t)
 	resetCapabilityRuntimeForTest(t)
 	dir := ledgerTestDir(t)
 	app := newIsolatedKanbanBoardApp(t)
 	app.apiKey = "openai-test-key"
 	t.Cleanup(func() { _ = app.Close() })
+	previousStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) {}
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
 	user := accountStore().findUser("aj@shareability.com")
 	if user == nil {
 		t.Fatal("seed user missing")
@@ -619,17 +759,24 @@ func TestScoutHomeOpeningProposalPreservesRouterProvenance(t *testing.T) {
 	}
 	app.queueScoutOpeningReply(thread.ID)
 	completed := waitForScoutOpeningReplyState(t, app, thread.ID, scoutReplyStateCompleted)
-	if completed.Messages[1].Proposal == nil {
-		t.Fatalf("completed reply=%+v, want proposal", completed.Messages[1])
+	if completed.Messages[1].Proposal != nil || completed.Messages[1].Thread == nil || completed.Messages[1].IntentOutcome != string(conversationIntentStartPrivateWork) {
+		t.Fatalf("completed reply=%+v, want direct work card", completed.Messages[1])
 	}
 
-	minted := filterLedgerEvents(readRouterLedgerEvents(t, dir), telemetryTypeProposal, proposalEventMinted)
-	if len(minted) != 1 {
-		t.Fatalf("minted events=%d, want exactly one", len(minted))
+	events := readRouterLedgerEvents(t, dir)
+	minted := filterLedgerEvents(events, telemetryTypeProposal, proposalEventMinted)
+	if len(minted) != 0 {
+		t.Fatalf("minted events=%d, direct launch must not mint a proposal", len(minted))
 	}
-	fields := ledgerEventFields(minted[0])
-	if fields["source"] != proposalSourceDeterministicGuard || fields["proposal_id"] != completed.Messages[1].ID {
-		t.Fatalf("mint fields=%v, want deterministic provenance on reply id", fields)
+	directOutcomes := 0
+	for _, event := range filterLedgerEvents(events, telemetryTypeEval, evalKindRouterOutcome) {
+		fields := ledgerEventFields(event)
+		if fields["verdict"] == string(conversationIntentStartPrivateWork) && fields["source"] == proposalSourceDeterministicGuard {
+			directOutcomes++
+		}
+	}
+	if directOutcomes != 1 {
+		t.Fatalf("direct outcomes=%d, want deterministic start_private_work provenance", directOutcomes)
 	}
 	if state := capabilityState(capabilityTypedScoutRouter); !state.LastSuccess.IsZero() {
 		t.Fatalf("deterministic guard manufactured provider success: %+v", state)

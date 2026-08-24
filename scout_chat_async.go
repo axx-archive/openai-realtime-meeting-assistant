@@ -282,13 +282,15 @@ func (app *kanbanBoardApp) ensureScoutHomeOpeningWithProject(ctx context.Context
 
 	now := time.Now().UTC()
 	userMessage := scoutChatMessageRecord{
-		ID:          operation.UserMessageID,
-		Kind:        "message",
-		Role:        "user",
-		Text:        text,
-		CreatedAt:   now.Format(time.RFC3339Nano),
-		AuthorName:  scoutChatAuthorName(user),
-		AuthorEmail: owner,
+		ID:                    operation.UserMessageID,
+		Kind:                  "message",
+		Role:                  "user",
+		Text:                  text,
+		CreatedAt:             now.Format(time.RFC3339Nano),
+		AuthorName:            scoutChatAuthorName(user),
+		AuthorEmail:           owner,
+		SourceOperationID:     operation.OperationID,
+		SourceOperationDigest: operation.BodyDigest,
 	}
 	if projectToken.Kind != "" {
 		userMessage.Project = &scoutChatProjectContext{Status: "pending", ContextRevision: 1, Title: projectToken.ProjectTitle, Basis: projectToken.Basis}
@@ -638,7 +640,34 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 			}, nil
 		}
 	}
-	if verdict := app.routeScoutChatTurn(ctx, query, history); verdict != nil {
+	decision := app.routeConversationIntent(ctx, conversationIntentTurn{Text: query, Modality: conversationModalityScoutChat}, history)
+	if decision.Outcome == conversationIntentStartPrivateWork && scoutServerOwnedAuthoredOutputWork(decision.Work) {
+		if thread.OpeningOperation == nil {
+			return scoutChatMessageRecord{}, fmt.Errorf("opening work operation is unavailable")
+		}
+		workContext := withConversationTurnOperation(ctx, conversationTurnOperation{
+			ID: thread.OpeningOperation.OperationID, BodyDigest: thread.OpeningOperation.BodyDigest,
+		})
+		result, err := app.startConversationPrivateWork(
+			workContext, user, thread, userMessage, *decision.Work, "", decision.Source,
+			func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+				return app.commitScoutOpeningWorkCard(thread.ID, userMessage.ID, messages...)
+			},
+		)
+		if err != nil {
+			return scoutChatMessageRecord{}, err
+		}
+		saved, ok := result["thread"].(scoutChatThreadRecord)
+		if !ok || saved.OpeningOperation == nil {
+			return scoutChatMessageRecord{}, fmt.Errorf("opening work card is unavailable")
+		}
+		replyIndex := scoutChatMessageIndex(saved, saved.OpeningOperation.ReplyMessageID)
+		if replyIndex < 0 || saved.Messages[replyIndex].Thread == nil {
+			return scoutChatMessageRecord{}, fmt.Errorf("opening work card is unavailable")
+		}
+		return saved.Messages[replyIndex], nil
+	}
+	if verdict, err := scoutRouterVerdictFromConversationIntent(decision, query); err == nil && verdict != nil {
 		if proposal := verdict.proposal; proposal != nil {
 			return scoutChatMessageRecord{Kind: scoutChatMessageKindProposal, Role: "scout", Text: proposal.Summary, Proposal: proposal, proposalSource: verdict.source}, nil
 		}
@@ -681,6 +710,54 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 		Text:    answer,
 		Sources: groundAnswerInMessages(answer, []scoutChatMessageRecord{userMessage}, 3),
 	}, nil
+}
+
+// commitScoutOpeningWorkCard closes the last entry-point gap between a Home
+// opening and an ordinary private Scout message. The opening reply already has
+// one durable placeholder and lease, so the shared work launcher must replace
+// that exact record rather than append a second card. The running lifecycle is
+// preserved until finishScoutOpeningReply commits completion; a crash therefore
+// leaves one reclaimable opening operation and one discoverable Work root.
+func (app *kanbanBoardApp) commitScoutOpeningWorkCard(threadID string, userMessageID string, messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+	if app == nil || len(messages) != 1 || messages[0].Thread == nil || messages[0].Role != "scout" ||
+		messages[0].IntentOutcome != string(conversationIntentStartPrivateWork) {
+		return scoutChatThreadRecord{}, fmt.Errorf("opening work card is invalid")
+	}
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	thread, ok := app.scoutOpeningThreadByID(threadID)
+	if !ok || thread.OpeningOperation == nil || thread.ArchivedAt != "" ||
+		thread.OpeningOperation.UserMessageID != strings.TrimSpace(userMessageID) {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, fmt.Errorf("opening work source changed")
+	}
+	userIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.UserMessageID)
+	replyIndex := scoutChatMessageIndex(thread, thread.OpeningOperation.ReplyMessageID)
+	if userIndex < 0 || replyIndex < 0 || !scoutOpeningBodyMatches(thread, *thread.OpeningOperation, thread.Messages[userIndex]) {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, fmt.Errorf("opening work source changed")
+	}
+	placeholder := thread.Messages[replyIndex]
+	if placeholder.Reply == nil || placeholder.Reply.State != scoutReplyStateRunning {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, fmt.Errorf("opening work reply lease changed")
+	}
+	workCard := messages[0]
+	lifecycle := *placeholder.Reply
+	workCard.ID = placeholder.ID
+	workCard.CreatedAt = placeholder.CreatedAt
+	workCard.Reply = &lifecycle
+	thread.Messages[replyIndex] = workCard
+	if replyIndex == len(thread.Messages)-1 {
+		updateScoutChatThreadSummary(&thread, scoutChatMessageRecord{}, workCard)
+	}
+	if err := app.saveScoutChatThread(thread); err != nil {
+		lock.Unlock()
+		return scoutChatThreadRecord{}, err
+	}
+	lock.Unlock()
+	app.sendScoutChatThreadUpdateToViewer(thread.OwnerEmail, thread, workCard)
+	return thread, nil
 }
 
 func scoutOpeningReplyError(err error) (string, bool) {

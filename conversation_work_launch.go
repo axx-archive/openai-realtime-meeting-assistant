@@ -239,11 +239,16 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 			if process.ID == documentReportProcessID && scoutInsightsReportRequestDetected(userMessage.Text) {
 				workLabel = "Insights & Opportunities report"
 			}
-			launched, err = app.launchGoalThread(goalLaunchSpec{
+			launchSpec := goalLaunchSpec{
 				Objective: work.Objective, CreatedBy: user.Name, Authority: process.Authority,
 				PackageID: work.PackageID, ToolTemplate: process.ID, ContextRefs: work.ContextRefs,
 				WorkLabel: workLabel, Origin: origin,
-			})
+			}
+			if studioProjectKindForProcessID(process.ID) != "" {
+				launched, err = app.launchConversationStudioProcessOnce(ctx, user, thread, work, process, turnOperation, launchSpec)
+			} else {
+				launched, err = app.launchGoalThread(launchSpec)
+			}
 			label = process.Title
 			break
 		}
@@ -345,6 +350,85 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		"agentThread": launched, "artifact": launched.Artifact, "actions": launched.Actions,
 		"intentOutcome": string(conversationIntentStartPrivateWork),
 	}, nil
+}
+
+// launchConversationStudioProcessOnce gives the two authored-output processes
+// a durable exactly-once seam below every conversation entry point. Ordinary
+// private turns already journal the HTTP operation before routing, while Home
+// openings own a separate reply lease; both can still die after the canonical
+// Work root is appended and before its chat card is committed. On reclaim, the
+// exact source-bound root is adopted rather than launching a second process.
+func (app *kanbanBoardApp) launchConversationStudioProcessOnce(
+	ctx context.Context,
+	user *userAccount,
+	thread scoutChatThreadRecord,
+	work conversationWorkDecision,
+	process ProcessDefinition,
+	operation conversationTurnOperation,
+	spec goalLaunchSpec,
+) (scoutAgentThread, error) {
+	if app == nil || user == nil || app.memory == nil {
+		return scoutAgentThread{}, fmt.Errorf("private work is unavailable")
+	}
+	if operation.ID == "" && operation.BodyDigest == "" {
+		return app.launchGoalThread(spec)
+	}
+	operationID, operationErr := normalizeScoutIdempotencyKey(operation.ID)
+	if operationErr != nil || !isHexDigest(operation.BodyDigest) {
+		return scoutAgentThread{}, fmt.Errorf("conversation work operation binding is invalid")
+	}
+	operation.ID = operationID
+
+	// This lock is deliberately distinct from the outer conversation-operation
+	// lock. The ordinary message path may already hold that lock when it reaches
+	// this seam; a dedicated root lock serializes scan-then-append without
+	// deadlocking route-receipt verification, which locks the source thread.
+	lockKey := "conversation-studio-root-operation-" + sha256Hex([]byte(normalizeAccountEmail(user.Email) + "\x00" + thread.ID + "\x00" + operation.ID))[:24]
+	rootLock := app.scoutChatThreadLock(lockKey)
+	rootLock.Lock()
+	defer rootLock.Unlock()
+
+	var match scoutAgentThread
+	matches := 0
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		_, plan, canonical := studioProjectCandidate(entry)
+		if !canonical {
+			continue
+		}
+		metadata := entry.Metadata
+		if strings.TrimSpace(metadata["operationId"]) != operation.ID || strings.TrimSpace(metadata["originId"]) != strings.TrimSpace(thread.ID) ||
+			normalizeAccountEmail(metadata["requestedBy"]) != normalizeAccountEmail(user.Email) {
+			continue
+		}
+		matches++
+		if matches > 1 {
+			return scoutAgentThread{}, fmt.Errorf("%w: conversation operation owns multiple Studio roots", ErrSTRIDEConversationConflict)
+		}
+		if strings.TrimSpace(metadata["operationBodyDigest"]) != operation.BodyDigest || plan.ProcessID != process.ID ||
+			canonicalizeBoardText(plan.Objective) != canonicalizeBoardText(work.Objective) ||
+			strings.TrimSpace(plan.PackageID) != strings.TrimSpace(work.PackageID) ||
+			plan.ContextRefs != encodeAssistantContextRefs(decodeAssistantContextRefs(work.ContextRefs)) ||
+			normalizeCodexJobAuthority(plan.Authority) != normalizeCodexJobAuthority(process.Authority) || plan.RouteReceipt == nil {
+			return scoutAgentThread{}, fmt.Errorf("%w: conversation Studio operation binding changed", ErrSTRIDEConversationConflict)
+		}
+		header := artifactAuthorizationHeaderFromEntry(entry)
+		if !artifactHeaderAuthorized(ctx, user, ACLReadContent, header) || !artifactHeaderAuthorized(ctx, user, ACLExecute, header) {
+			return scoutAgentThread{}, fmt.Errorf("conversation Studio work is unavailable")
+		}
+		if err := app.verifyGoalRouteReceipt(&plan, *plan.RouteReceipt); err != nil {
+			return scoutAgentThread{}, fmt.Errorf("%w: conversation Studio route changed", ErrSTRIDEConversationConflict)
+		}
+		query := firstNonEmptyString(strings.TrimSpace(metadata["threadQuery"]), strings.TrimSpace(metadata["objective"]), plan.Objective)
+		match = scoutAgentThread{
+			ID: firstNonEmptyString(strings.TrimSpace(metadata["threadId"]), plan.GoalID), Mode: "goal", Query: query,
+			Status: firstNonEmptyString(agentThreadStatusValue(entry), "running"), Artifact: entry,
+		}
+		match.Actions = app.osAssistantActions(match.Query, match.Mode, entry)
+	}
+	if matches == 1 {
+		return match, nil
+	}
+	return app.launchGoalThread(spec)
 }
 
 func conversationWorkVisibleLabel(work conversationWorkDecision, fallback string) string {

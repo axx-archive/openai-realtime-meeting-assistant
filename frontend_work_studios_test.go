@@ -27,7 +27,7 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 		`function scoutStudioReceiptNode(message)`,
 		`scout-studio-receipt__progress`,
 		`View in Work`,
-		`selectPD1Destination('Work')`,
+		`selectPD1Destination('Work', { projectId: selectedStudioProjectId })`,
 		`if (message?.studioProject?.id) return scoutStudioReceiptIsLatest(message)`,
 		`openDeckStudio(result.artifactId`,
 		`openDocumentStudio(result.artifactId`,
