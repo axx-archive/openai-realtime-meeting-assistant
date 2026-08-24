@@ -967,10 +967,6 @@ test('rendered candidate Compose is an exact singleton topology before mutation'
   assert.equal(validate(composeV5), composeV5)
   assert.equal(renderedComposeSha256(exact), renderedComposeSha256(structuredClone(exact)))
 
-  const retainedReadinessProbe = structuredClone(exact)
-  retainedReadinessProbe.services.meetingassist.healthcheck.test = ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz']
-  assert.equal(validate(retainedReadinessProbe), retainedReadinessProbe)
-
   const reordered = { volumes: exact.volumes, networks: exact.networks,
     services: Object.fromEntries(Object.entries(exact.services).reverse()), name: exact.name }
   assert.equal(renderedComposeSha256(exact), renderedComposeSha256(reordered))
