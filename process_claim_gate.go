@@ -129,7 +129,7 @@ var (
 	processJSONPlanningContinuationLeadPattern     = regexp.MustCompile(`(?i)^\s*(?:retaining|preserving|keeping|carrying|reusing|echoing|combining|weaving|borrowing|grafting|using|making|completing|showing|connecting|ending|landing|framing|turning|translating|ensuring|reinforcing|holding|leaving)\b`)
 	processJSONPlanningConnectorPattern            = regexp.MustCompile(`(?i)^\s*(?:and|then|while|with|by|without)\s+`)
 	processJSONPlanningHiddenSyntaxPattern         = regexp.MustCompile(`(?i)(?:<!--|-->|\[\[\s*claim\s*:|stride-claim\s*:)`)
-	processJSONStoryPlanningMetadataPathPattern    = regexp.MustCompile(`(?i)(?:^|\.)(?:role_in_argument|grafted_beats|reader_use|reader_decision|evidence_boundary|causal_turns?|counterarguments?|implications?|ending_(?:decision|test)|selection_rationale|rationale|purpose|transition|speaker_intent|narrative_(?:role|move|arc)|story_(?:beat|turn)|beat|turn)(?:\.|\[|$)`)
+	processJSONStoryFactBearingPathPattern         = regexp.MustCompile(`(?i)(?:^|\.)(?:headline|thesis|opening_thesis|claim|claims|fact|facts|proof|evidence|copy|visible_copy|body|statement|finding|assertion|source|quote|exact_quote|display_claim)(?:\.|\[|$)`)
 	processJSONMissingProofStatusPathPattern       = regexp.MustCompile(`^\$(?:\.story_spine_v2)?\.claims_needing_proof\[\d+\]\.proof_status$`)
 	processMissingProofSubjectPattern              = regexp.MustCompile(`(?i)\b(?:claim|evidence|proof|source|support|verification)\b`)
 	processMissingProofAbsencePattern              = regexp.MustCompile(`(?i)\b(?:absent|missing|needs?|not|no|pending|requires?|unavailable|unproven|unsupported|unverified|without)\b`)
@@ -854,7 +854,7 @@ type processFactualClaimPolicy struct {
 	allowPackagingStoryMissingProof   bool
 	allowDocumentStoryReaderDecision  bool
 	allowStoryPlanningImperative      bool
-	allowStoryPlanningNarrative       bool
+	allowStoryInternalMetadata        bool
 	allowDocumentAuthorizedConstraint bool
 	authorizedObjective               string
 }
@@ -877,7 +877,7 @@ func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) proce
 		allowPackagingStoryMissingProof:   packagingStory,
 		allowDocumentStoryReaderDecision:  documentStory,
 		allowStoryPlanningImperative:      packagingStory || documentStory,
-		allowStoryPlanningNarrative:       packagingStory || documentStory,
+		allowStoryInternalMetadata:        packagingStory || documentStory,
 		allowDocumentAuthorizedConstraint: documentStory,
 		authorizedObjective:               objective,
 	}
@@ -947,47 +947,33 @@ func processStoryPlanningImperativeText(text string) bool {
 	return match != nil && match[0] == 0
 }
 
-func processStoryPlanningMetadataField(path, key string) bool {
-	return processJSONStoryPlanningMetadataPathPattern.MatchString(path + "." + strings.TrimSpace(key))
+func processStoryFactBearingField(path, key string) bool {
+	return processJSONStoryFactBearingPathPattern.MatchString(path + "." + strings.TrimSpace(key))
 }
 
-// validateProcessStoryPlanningNarrativeText is the typed boundary for internal
-// story-spine metadata such as selection rationale, grafted beats, reader use,
-// causal turns, and transitions. Those fields describe how a later writer
-// should shape the argument; they are not delivered copy. The final deck or
-// document writer remains on the full exact-claim gate. This boundary still
-// rejects every concrete metric/date/URL, factual-status claim, hidden marker,
-// and present/past copula so internal planning cannot carry material proof or a
-// disguised client-facing assertion downstream.
-func validateProcessStoryPlanningNarrativeText(text, path string) error {
+// validateProcessStoryInternalMetadataText is the typed boundary for a
+// free-form internal story spine. Headline/thesis/claim/proof/evidence/copy and
+// other fact-bearing fields stay on the exact-claim gate; every other scalar is
+// planning metadata consumed by a later writer whose complete output is gated
+// again. Internal metadata may therefore describe selection, reader use, or
+// research posture in natural prose, but it still cannot carry a concrete
+// metric/date/URL, factual-status superlative, claim mutation, or hidden marker.
+func validateProcessStoryInternalMetadataText(text, path string) error {
 	if processJSONPlanningHiddenSyntaxPattern.MatchString(text) {
-		return fmt.Errorf("%s: story-planning metadata cannot contain hidden comments or claim markers", path)
+		return fmt.Errorf("%s: internal story metadata cannot contain hidden comments or claim markers", path)
 	}
 	trimmed := strings.TrimSpace(text)
 	if strings.ContainsAny(trimmed, "\r\n") {
-		return fmt.Errorf("%s: story-planning metadata must be one line", path)
+		return fmt.Errorf("%s: internal story metadata must be one line", path)
 	}
 	if trimmed == "" {
 		return nil
 	}
-	inspect := trimmed
-	if strings.HasSuffix(inspect, ".") || strings.HasSuffix(inspect, "?") || strings.HasSuffix(inspect, "!") {
-		inspect = strings.TrimSpace(inspect[:len(inspect)-1])
-	}
-	if inspect == "" || strings.ContainsAny(inspect, ".!?") {
-		return fmt.Errorf("%s: story-planning metadata must contain at most one sentence", path)
-	}
-	if processJSONPlanningFactualClausePattern.MatchString(inspect) {
-		return fmt.Errorf("%s: story-planning metadata cannot contain a factual causal clause", path)
-	}
-	for _, token := range processMaterialTokens(inspect) {
+	for _, token := range processMaterialTokens(trimmed) {
 		if token.Kind == "assertion" {
 			continue
 		}
-		return fmt.Errorf("%s: story-planning metadata contains material %s %q", path, token.Kind, compactAssistantLine(token.Value))
-	}
-	if processDeclarativeAuxiliaryPattern.MatchString(inspect) || processLikelyFactualHeadlineFragment(inspect) {
-		return fmt.Errorf("%s: story-planning metadata contains an unsupported factual proposition", path)
+		return fmt.Errorf("%s: internal story metadata contains material %s %q", path, token.Kind, compactAssistantLine(token.Value))
 	}
 	return nil
 }
@@ -1306,8 +1292,8 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 				}
 				continue
 			}
-			if policy.allowStoryPlanningNarrative && !leaf.ForceNumber && processStoryPlanningMetadataField(path, key) {
-				if err := validateProcessStoryPlanningNarrativeText(leaf.Text, leaf.Path); err != nil {
+			if policy.allowStoryInternalMetadata && !leaf.ForceNumber && !processStoryFactBearingField(path, key) {
+				if err := validateProcessStoryInternalMetadataText(leaf.Text, leaf.Path); err != nil {
 					return err
 				}
 				continue

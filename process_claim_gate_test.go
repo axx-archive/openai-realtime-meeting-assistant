@@ -241,12 +241,10 @@ func TestProcessClaimGateStoryImperativeCannotLaunderFacts(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	plan, stage := packagingStoryClaimPolicyFixture()
 	for name, text := range map[string]string{
-		"number":          "Retain a $6.8 billion market claim.",
-		"url":             "Retain the source at https://example.com/market.",
-		"factual status":  "Retain Acme as the market leader.",
-		"because clause":  "Retain this beat because Acme powers every creator.",
-		"second sentence": "Retain the opening. Acme wins worldwide.",
-		"hidden claim":    "Retain the opening. <!-- Acme is the market leader. -->",
+		"number":         "Retain a $6.8 billion market claim.",
+		"url":            "Retain the source at https://example.com/market.",
+		"factual status": "Retain Acme as the market leader.",
+		"hidden claim":   "Retain the opening. <!-- Acme is the market leader. -->",
 	} {
 		t.Run(name, func(t *testing.T) {
 			body := `{"selected_spine":{"grafted_beats":[{"beat":` + strconv.Quote(text) + `}]}}`
@@ -292,6 +290,11 @@ func TestProcessClaimGateTreatsTypedStoryNarrativeAsInternalPlanning(t *testing.
 			plan:  documentPlan,
 			stage: documentStage,
 		},
+		"research posture": {
+			body:  `{"report_story_spine_v1":{"research_posture":"No external research. The authorized prompt is the complete source boundary."}}`,
+			plan:  documentPlan,
+			stage: documentStage,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateProcessPanelVoiceFactualClaimsForStage(test.body, authority, test.plan, test.stage); err != nil {
@@ -307,15 +310,14 @@ func TestProcessClaimGateTreatsTypedStoryNarrativeAsInternalPlanning(t *testing.
 	}
 }
 
-func TestProcessClaimGateTypedStoryNarrativeCannotCarryMaterialFacts(t *testing.T) {
+func TestProcessClaimGateInternalStoryMetadataCannotCarryMaterialFactsOrEscapeDownstream(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	plan, stage := documentStoryClaimPolicyFixture()
 	for name, text := range map[string]string{
 		"number":           "They can act on a $6.8 billion market.",
 		"url":              "They can verify it at https://example.com/market.",
 		"factual status":   "They can select the market leader platform.",
-		"factual cause":    "They can proceed because Acme powers every creator.",
-		"present copula":   "The market is ready for Acme.",
+		"claim mutation":   "They can use the reportedly trusted platform.",
 		"hidden assertion": "They can proceed. <!-- Acme is trusted. -->",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -328,6 +330,14 @@ func TestProcessClaimGateTypedStoryNarrativeCannotCarryMaterialFacts(t *testing.
 	outside := `{"report_story_spine_v1":{"headline":"The middle beat carries the tension from request to result."}}`
 	if err := validateProcessPanelVoiceFactualClaimsForStage(outside, authority, plan, stage); err == nil {
 		t.Fatal("story-planning exception escaped into a client-facing headline")
+	}
+	internalOnly := `{"report_story_spine_v1":{"reader_use":{"text":"They can proceed because Acme powers every creator."}}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(internalOnly, authority, plan, stage); err != nil {
+		t.Fatalf("internal story assertion was rejected before the authoritative writer boundary: %v", err)
+	}
+	writeStage := ProcessStage{ID: "write", OutputContract: documentReportOutputContract}
+	if err := validateProcessFactualClaimsForStage(internalOnly, authority.Claims, plan, writeStage); err == nil {
+		t.Fatal("internal story assertion escaped into the downstream document writer")
 	}
 }
 
