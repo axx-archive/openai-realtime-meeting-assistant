@@ -440,6 +440,7 @@ func TestAdmissionAnchorFailurePreservesExistingEndpointSession(t *testing.T) {
 }
 
 func TestTransferAnchorFailurePreservesExistingEndpointsAndMedia(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-a")
 	dir := t.TempDir()
 	memory, err := newMeetingMemoryStore(filepath.Join(dir, "meeting-memory.jsonl"))
 	if err != nil {
@@ -516,6 +517,7 @@ func TestTransferAnchorFailurePreservesExistingEndpointsAndMedia(t *testing.T) {
 }
 
 func TestMeetingRecordFailureAfterAnchorRecoversExactSittingOnRestart(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-a")
 	root := t.TempDir()
 	memoryPath := filepath.Join(root, "memory", "meeting-memory.jsonl")
 	meetingDir := filepath.Join(root, "meeting-store")
@@ -604,6 +606,7 @@ func TestMeetingRecordFailureAfterAnchorRecoversExactSittingOnRestart(t *testing
 }
 
 func TestMeetingRecordFailureAfterIdleCancelRearmsEmptySitting(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-a")
 	root := t.TempDir()
 	memory, err := newMeetingMemoryStore(filepath.Join(root, "memory", "meeting-memory.jsonl"))
 	if err != nil {
@@ -660,6 +663,7 @@ func TestMeetingRecordFailureAfterIdleCancelRearmsEmptySitting(t *testing.T) {
 }
 
 func TestAnchoredAdmissionQueuesDefensivelyClosedPriorSittingInProcess(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-a")
 	root := t.TempDir()
 	memory, err := newMeetingMemoryStore(filepath.Join(root, "meeting-memory.jsonl"))
 	if err != nil {

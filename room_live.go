@@ -149,6 +149,7 @@ type roomLiveState struct {
 	// speaker attribution + active speaker, fed by THIS room's mixer activity
 	// listener (roomAudioActivityListener).
 	audioActivity             []participantAudioFrame
+	audioActivityStart        int
 	currentSpeechStartedAt    time.Time
 	currentSpeechStoppedAt    time.Time
 	pendingAttributionWindows []attributionWindow
@@ -1016,6 +1017,7 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	state.scoutVoiceState = ""
 	state.scoutLastStatusReason = ""
 	state.audioActivity = nil
+	state.audioActivityStart = 0
 	state.currentSpeechStartedAt = time.Time{}
 	state.currentSpeechStoppedAt = time.Time{}
 	state.pendingAttributionWindows = nil
@@ -1442,6 +1444,13 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 	// the exact postimage and returns changed=true so this chain continues.
 	var closed meetingRecord
 	if record, ok := app.meetings.activeRecord(roomID); ok {
+		app.beginMeetingArchivePublication(record.ID)
+		publicationOpen := true
+		defer func() {
+			if publicationOpen {
+				app.endMeetingArchivePublication(record.ID, false)
+			}
+		}()
 		source := app.meetingFinalizationSource(record.ID)
 		var changed bool
 		var closeErr error
@@ -1455,6 +1464,15 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 			app.scheduleRoomArchiveCloseRetry(roomID)
 			return
 		}
+		if app.canonicalReconcileAfterMeetingClosed != nil {
+			app.canonicalReconcileAfterMeetingClosed()
+		}
+		defer func() {
+			if publicationOpen {
+				app.endMeetingArchivePublication(record.ID, true)
+				publicationOpen = false
+			}
+		}()
 	}
 	if stillOpen, ok := app.meetings.activeRecord(roomID); ok {
 		log.Errorf("Refusing room-archive teardown while meeting %s remains open", stillOpen.ID)
@@ -1535,7 +1553,6 @@ func (app *kanbanBoardApp) closeRoomForArchive(roomID string) {
 		app.broadcastMeetingRecord(closed)
 		app.flushRoomFollowThroughForMeeting(roomID, closed.ID, "room_archive")
 		app.autoArchiveIdleMeeting(closed)
-		app.scheduleMeetingCoreFinalization(closed.ID)
 	}
 	app.teardownRoomMediaAfterIdle(roomID)
 	broadcastRoomsSnapshot()

@@ -16,6 +16,33 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestAuthoritativeRecentMemoryEntryReadsDurableTailNotMemoryCache(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "meeting-memory.jsonl")
+	entry := meetingMemoryEntry{ID: "recent-transcript", Kind: meetingMemoryKindTranscript, Text: "durable body", CreatedAt: time.Now().UTC()}
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &MeetingMemoryBrainAdapter{Memory: &meetingMemoryStore{path: path, entries: []meetingMemoryEntry{{ID: entry.ID, Kind: entry.Kind, Text: "stale cache"}}}}
+	got, found, err := adapter.authoritativeRecentMemoryEntry(entry.ID)
+	if err != nil || !found || got.Text != "durable body" {
+		t.Fatalf("durable tail entry=%+v found=%v err=%v", got, found, err)
+	}
+
+	entry.Text = "externally replaced durable body"
+	raw, _ = json.Marshal(entry)
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err = adapter.authoritativeRecentMemoryEntry(entry.ID)
+	if err != nil || !found || got.Text != entry.Text {
+		t.Fatalf("durable replacement was not observed: entry=%+v found=%v err=%v", got, found, err)
+	}
+}
+
 type adapterBrainPurgeGeneration int64
 
 func (generation adapterBrainPurgeGeneration) CurrentPurgeGeneration(context.Context, string) (int64, error) {
@@ -459,5 +486,57 @@ func TestProductionCatchUpConditionalPublicationRejectsPostPreflightMutation(t *
 				t.Fatal("conditional publication did not finish")
 			}
 		})
+	}
+}
+
+type fixedProjectionConsentFences struct{ fences []ConsentFence }
+
+func (consent fixedProjectionConsentFences) VerifyBrainSourceConsent(context.Context, meetingMemoryEntry) error {
+	return nil
+}
+
+func (consent fixedProjectionConsentFences) AuthorizeBrainSourceConsent(context.Context, meetingMemoryEntry) ([]ConsentFence, error) {
+	return append([]ConsentFence(nil), consent.fences...), nil
+}
+
+func TestSTRIDEProjectionCommitRejectsConsentWithdrawalAfterPreflight(t *testing.T) {
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "projection-policy-v1")
+	authority.CaptureCutoff = func() (uint64, error) { return 0, nil }
+	installConsentAuthorityForTest(t, authority)
+	binding := consentLaneTestBinding("projection-speaker", "office", "sitting-a")
+	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory} {
+		grantConsentScope(t, authority, binding, scope)
+	}
+	decision, err := authority.Authorize(context.Background(), binding, ConsentLaneOrgMemory)
+	if err != nil || !decision.Allowed {
+		t.Fatalf("org-memory decision=%+v err=%v", decision, err)
+	}
+	store, err := newMeetingMemoryStore(filepath.Join(t.TempDir(), "meeting-memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := meetingMemoryEntry{ID: "projection-consent-source", Kind: meetingMemoryKindTranscript, Text: "authorized before withdrawal", CreatedAt: time.Now().UTC(), Metadata: map[string]string{"roomId": "office", "meetingId": "sitting-a"}}
+	persistAdapterEntries(t, store, []meetingMemoryEntry{entry})
+	adapter := &MeetingMemoryBrainAdapter{Memory: store, Consent: fixedProjectionConsentFences{fences: []ConsentFence{decision.Fence}}}
+	resolver := &productionCatchUpResolver{Sources: adapter, beforeCommit: func() {
+		if _, withdrawErr := authority.RecordDecision(context.Background(), binding, ConsentOrgMemory, ConsentWithdrawn); withdrawErr != nil {
+			t.Errorf("withdraw org memory: %v", withdrawErr)
+		}
+	}}
+	evidence := BrainEvidenceRef{TenantID: canonicalTenantID(), SourceFamily: "memory", ObjectID: entry.ID, ContentRevision: 1, ACLVersion: 1, ContentDigest: digestBrainString(entry.Text), RoomID: "office", SittingID: "sitting-a", OccurredStart: entry.CreatedAt, OccurredEnd: entry.CreatedAt.Add(time.Nanosecond), PurgeGeneration: 0, Trust: BrainEvidenceTrusted}
+	evidenceID, err := brainRetrievalEvidenceID(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := false
+	err = resolver.CommitSTRIDETranscriptProjection(context.Background(), entry, RetrievalSnapshotSource{EvidenceID: evidenceID, Evidence: evidence}, []ACLPrincipal{{TenantID: canonicalTenantID(), Kind: ACLPrincipalUser, ID: "aj@shareability.com"}}, func(commitAuthority func() error) error {
+		if err := commitAuthority(); err != nil {
+			return err
+		}
+		published = true
+		return nil
+	})
+	if !errors.Is(err, ErrConsentFenceStale) || published {
+		t.Fatalf("projection err=%v published=%t, want stale consent and no publication", err, published)
 	}
 }

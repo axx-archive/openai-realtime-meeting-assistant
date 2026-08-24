@@ -486,6 +486,7 @@ func TestRoomScoutRecallSeesOnlyCurrentMediaGenerationTranscript(t *testing.T) {
 }
 
 func TestRoomScoutTranscriptCommitRejectsSittingRollover(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-rollover11")
 	app := newW2ATestApp(t)
 	defer app.Close()
 	roomID := "room-rollover11"

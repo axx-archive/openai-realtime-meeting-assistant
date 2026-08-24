@@ -286,6 +286,7 @@ func TestLivenessReapCarriesRetiredLeaseToPostLockDrain(t *testing.T) {
 }
 
 func TestConcurrentTwoRoomJoinPipelineHasOneDeterministicWinner(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-a", "room-b")
 	dir := t.TempDir()
 	memory, err := newMeetingMemoryStore(filepath.Join(dir, "meeting-memory.jsonl"))
 	if err != nil {

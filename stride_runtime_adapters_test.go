@@ -3,9 +3,35 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestSTRIDELiveTranscriptProjectionNeverInventoriesLifetimeCorpus(t *testing.T) {
+	raw, err := os.ReadFile("stride_runtime_adapters.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	start := strings.Index(source, "func (app *kanbanBoardApp) projectSTRIDEAuthoritativeTranscript")
+	end := strings.Index(source[start:], "// AdmitSuggestedWorkCandidate")
+	if start < 0 || end < 0 {
+		t.Fatal("could not isolate live transcript projection")
+	}
+	body := source[start : start+end]
+	for _, forbidden := range []string{"InventoryBrainSources(", "ReadBrainSource(", "ApplyTemporalEvidenceAndSave(", ".Save()"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("live transcript projection performs lifetime source scan via %q", forbidden)
+		}
+	}
+	for _, required := range []string{"authoritativeRecentMemoryEntry", "CurrentBrainObject", "CurrentPurgeGeneration", "VerifyBrainSourceConsent", "ApplyLiveTemporalEvidence"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("targeted projection is missing %q revalidation", required)
+		}
+	}
+}
 
 func TestSTRIDETeamChatAdapterProjectsOnlyPublicDurableMessages(t *testing.T) {
 	setupAuthTestEnv(t)

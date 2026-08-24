@@ -694,6 +694,7 @@ func TestTwoGuestsNamedSamCoexist(t *testing.T) {
 }
 
 func TestGuestTranscriptAttributionStoredAsGuestName(t *testing.T) {
+	installNamedRoomIDsForTest(t, "room-attrib")
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 	app := newKanbanBoardApp()
 	roomID := "room-attrib"

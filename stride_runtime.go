@@ -162,10 +162,14 @@ type strideRuntimeTenantState struct {
 }
 
 type STRIDERuntime struct {
-	mu                               sync.Mutex
-	config                           STRIDERuntimeConfig
-	state                            STRIDERuntimeState
-	domains                          *strideRuntimeTenantState
+	mu      sync.Mutex
+	config  STRIDERuntimeConfig
+	state   STRIDERuntimeState
+	domains *strideRuntimeTenantState
+	// liveTemporal is an explicitly ephemeral current-sitting projection. Raw
+	// transcript brains never enter domains.temporal and are therefore excluded
+	// from every compound runtime snapshot and unrelated Save.
+	liveTemporal                     map[string]*TemporalMeetingBrain
 	generation                       uint64
 	restored                         bool
 	legacyProjectionNeverInitialized bool
@@ -187,7 +191,7 @@ func NewSTRIDERuntime(config STRIDERuntimeConfig) (*STRIDERuntime, error) {
 	config.SnapshotPath = filepath.Clean(strings.TrimSpace(config.SnapshotPath))
 	config.GenerationPath = filepath.Clean(strings.TrimSpace(config.GenerationPath))
 	config.RecallThreadIDs = append([]string(nil), config.RecallThreadIDs...)
-	runtime := &STRIDERuntime{config: config, state: STRIDERuntimeDisabled}
+	runtime := &STRIDERuntime{config: config, state: STRIDERuntimeDisabled, liveTemporal: map[string]*TemporalMeetingBrain{}}
 	if !config.Enabled {
 		snapshotExists, snapshotErr := strideRuntimeFileExists(config.SnapshotPath)
 		generationExists, generationErr := strideRuntimeFileExists(config.GenerationPath)
@@ -398,6 +402,94 @@ func (runtime *STRIDERuntime) WithTemporalMeetingBrain(tenantID string, config T
 	return nil
 }
 
+// ApplyLiveTemporalEvidence stages one current-meeting mutation while holding
+// the runtime lock, commits the external consent/ACL/purge authority boundary,
+// and only then publishes the staged brain in memory. The transcript row is
+// already durable; this live projection deliberately does not rewrite the
+// compound lifetime STRIDE snapshot. Durable post-meeting brain/digest output
+// is owned by meeting finalization.
+func (runtime *STRIDERuntime) ApplyLiveTemporalEvidence(tenantID string, config TemporalMeetingBrainConfig, event TemporalMeetingEvent, commitAuthority func() error) error {
+	if runtime == nil || commitAuthority == nil {
+		return ErrSTRIDERuntimeUnavailable
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if err := runtime.requireTenantLocked(tenantID); err != nil {
+		return err
+	}
+	if config.TenantID != runtime.config.TenantID || config.validate() != nil {
+		return ErrSTRIDERuntimeTenantDenied
+	}
+	key := strideRuntimeTemporalKey(config.RoomID, config.SittingID)
+	priorBrain, existed := runtime.liveTemporal[key]
+	var staged *TemporalMeetingBrain
+	if existed {
+		if priorBrain.CurrentState().Config != config {
+			return ErrTemporalBrainInvalid
+		}
+		staged = cloneTemporalMeetingBrain(priorBrain)
+	} else {
+		var err error
+		staged, err = NewTemporalMeetingBrain(config)
+		if err != nil {
+			return err
+		}
+	}
+	if err := staged.Apply(event); err != nil {
+		return err
+	}
+	if staged.CurrentState().Config.TenantID != runtime.config.TenantID {
+		return ErrSTRIDERuntimeCrossTenant
+	}
+	// Install behind runtime.mu while the canonical transaction still holds its
+	// source/grant/purge locks. Readers take the same mutex, so the staged brain
+	// is invisible until authority commits; a commit failure restores the exact
+	// prior pointer before any reader can observe it.
+	runtime.liveTemporal[key] = staged
+	if err := commitAuthority(); err != nil {
+		if existed {
+			runtime.liveTemporal[key] = priorBrain
+		} else {
+			delete(runtime.liveTemporal, key)
+		}
+		return err
+	}
+	return nil
+}
+
+func (runtime *STRIDERuntime) ClearLiveTemporalMeetingBrain(tenantID, roomID, sittingID string) error {
+	if runtime == nil {
+		return ErrSTRIDERuntimeUnavailable
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if err := runtime.requireTenantLocked(tenantID); err != nil {
+		return err
+	}
+	delete(runtime.liveTemporal, strideRuntimeTemporalKey(normalizeRoomID(roomID), strings.TrimSpace(sittingID)))
+	return nil
+}
+
+func cloneTemporalMeetingBrain(brain *TemporalMeetingBrain) *TemporalMeetingBrain {
+	if brain == nil {
+		return nil
+	}
+	cloned := *brain
+	cloned.sources = make(map[string]TemporalTranscriptSource, len(brain.sources))
+	for id, source := range brain.sources {
+		cloned.sources[id] = cloneContract(source)
+	}
+	cloned.facts = make(map[string]TemporalMeetingFact, len(brain.facts))
+	for id, fact := range brain.facts {
+		cloned.facts[id] = cloneContract(fact)
+	}
+	cloned.purgedRevisions = make(map[string]bool, len(brain.purgedRevisions))
+	for id, purged := range brain.purgedRevisions {
+		cloned.purgedRevisions[id] = purged
+	}
+	return &cloned
+}
+
 // ReadTemporalMeetingBrain is the non-creating product read seam for one exact
 // room sitting. A recall request must never manufacture an empty brain and then
 // present that absence as complete coverage; projection owns creation.
@@ -410,7 +502,11 @@ func (runtime *STRIDERuntime) ReadTemporalMeetingBrain(tenantID, roomID, sitting
 	if err := runtime.requireTenantLocked(tenantID); err != nil {
 		return err
 	}
-	brain := runtime.domains.temporal[strideRuntimeTemporalKey(normalizeRoomID(roomID), strings.TrimSpace(sittingID))]
+	key := strideRuntimeTemporalKey(normalizeRoomID(roomID), strings.TrimSpace(sittingID))
+	brain := runtime.liveTemporal[key]
+	if brain == nil {
+		brain = runtime.domains.temporal[key]
+	}
 	if brain == nil {
 		return ErrBrainRetrievalUnavailable
 	}

@@ -1253,6 +1253,13 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	if !ok {
 		return
 	}
+	app.beginMeetingArchivePublication(record.ID)
+	publicationOpen := true
+	defer func() {
+		if publicationOpen {
+			app.endMeetingArchivePublication(record.ID, false)
+		}
+	}()
 	source := app.meetingFinalizationSource(record.ID)
 	closed, changed, closeErr := app.meetings.endMeetingWithFinalizationIfIdleGeneration(roomID, record.ID, time.Now().UTC(), generation, source)
 	if closeErr != nil {
@@ -1264,6 +1271,9 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	}
 	if !changed {
 		return
+	}
+	if app.canonicalReconcileAfterMeetingClosed != nil {
+		app.canonicalReconcileAfterMeetingClosed()
 	}
 	app.meetings.clearIdleCloseRetry(roomID)
 	if app.meetingSpecialists != nil {
@@ -1290,7 +1300,8 @@ func (app *kanbanBoardApp) endMeetingForIdle(roomID string, generation uint64) {
 	// the prior one preserved. The archive embeds `closing`; the asynchronous
 	// core runner refreshes it to finalized/degraded from its durable receipt.
 	app.autoArchiveIdleMeeting(closed)
-	app.scheduleMeetingCoreFinalization(closed.ID)
+	app.endMeetingArchivePublication(closed.ID, true)
+	publicationOpen = false
 	broadcastRoomsSnapshot()
 }
 

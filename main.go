@@ -986,7 +986,9 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Canonical runtime startup failed: %v\n", runtimeErr)
 		os.Exit(2)
 	}
-	_ = canonicalRuntime
+	// The meeting store is loaded later in startup. Hold whole-history parity
+	// until it exists so a resumed live sitting cannot compete with boot.
+	canonicalRuntime.setReconcileDeferred(func() bool { return true })
 	defer closeCanonicalRuntime()
 	if err := installStrideE10W4ProductionRuntimeFromEnvironment(); err != nil {
 		fmt.Fprintf(os.Stderr, "STRIDE W4 runtime startup failed: %v\n", err)
@@ -1032,6 +1034,7 @@ func main() {
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
+	canonicalRuntime.setReconcileDeferred(kanbanApp.canonicalReconcileDeferred)
 	kanbanApp.startScoutOpeningReplyWorkers()
 	kanbanApp.startScoutChatImageWorkers()
 	installLiveMediaSoakObserver(kanbanApp)
@@ -6272,13 +6275,15 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			audioTrackKey := roomAudioTrackKey(t)
 			var consentGate *consentAudioIngressGate
+			var roomAudioMixer *audioMixer
 			if audioDecoder != nil {
 				consentGate = newConsentAudioIngressGate(kanbanApp, mediaConsentPrincipal, connRoomID)
+				roomAudioMixer = kanbanApp.roomMixerFor(connRoomID)
 				// remove from whatever mixer the room holds at teardown time —
 				// the lazy lifecycle may have replaced it mid-session.
 				defer func() {
 					consentGate.close()
-					kanbanApp.roomMixerFor(connRoomID).removeTrack(audioTrackKey)
+					roomAudioMixer.removeTrack(audioTrackKey)
 				}()
 			}
 			audioDecodeBuffer := make([]int16, roomAudioDecodeBufferSize(audioChannels))
@@ -6326,10 +6331,25 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.Marker, packet.PayloadType, len(packet.Payload), packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()))
 				}
 
+				// Direct room media is the primary lane. Forward before any optional
+				// decode, consent lookup, attribution, or model-analysis work so an
+				// overloaded intelligence lane cannot hold the call behind it.
+				if err = forwardPublisherRTP(trackLocal, packet, stripExtensionIDs); err != nil {
+					log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
+						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
+					return
+				}
+				packetsForwarded++
+				payloadBytesForwarded += len(packet.Payload)
+
 				if audioDecoder != nil {
 					if !announcedAudioPacket {
 						announcedAudioPacket = true
 						broadcastRoomAssistantTelemetry(connRoomID, "audio", "browser microphone packets are reaching the server", nil)
+					}
+					fences, allowed := consentGate.admittedFences()
+					if !allowed || !roomAudioMixer.admitsAnalysis(audioTrackKey) {
+						continue
 					}
 					pcm, decodeErr := decodeOpusToRoomPCM(audioDecoder, audioDecodeBuffer, audioChannels, packet.Payload)
 					if decodeErr != nil {
@@ -6347,25 +6367,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 						// missing, denied, withdrawn, or unavailable authority drops
 						// only server-side decoded PCM; the packet is still forwarded
 						// below to the other participants.
-						if fences, allowed := consentGate.admittedFences(); allowed {
-							kanbanApp.roomMixerFor(connRoomID).submitWithConsent(audioTrackKey, trackParticipantName, pcm, fences)
-						}
+						roomAudioMixer.submitWithConsent(audioTrackKey, trackParticipantName, pcm, fences)
 					}
 				}
-
-				// Preserve RTP header extensions from the publisher when they are
-				// media-scoped (mobile browsers carry video orientation/rotation and
-				// congestion metadata there; stripping them makes phone video look
-				// unstable to subscribers — 0a46b50) while dropping the
-				// Transport-scoped SDES/TWCC ids, which are only meaningful on the
-				// publisher's own transport (see stripTransportScopedRTPExtensions).
-				if err = forwardPublisherRTP(trackLocal, packet, stripExtensionIDs); err != nil {
-					log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
-						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
-					return
-				}
-				packetsForwarded++
-				payloadBytesForwarded += len(packet.Payload)
 			}
 		})
 

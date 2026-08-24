@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -70,6 +71,103 @@ func TestSTRIDERuntimeRequiresTrustAndExplicitEmptyGenerationBootstrap(t *testin
 	}
 	if accessErr := runtime.WithTenantDomains("bonfire", func(STRIDERuntimeDomains) error { return nil }); !errors.Is(accessErr, ErrSTRIDERuntimeUnavailable) {
 		t.Fatalf("untrusted runtime exposed domains: %v", accessErr)
+	}
+}
+
+func TestSTRIDERuntimeLiveTemporalApplyNeverSnapshotsHistoricalBrains(t *testing.T) {
+	config := strideIntegratedRuntimeConfig(t.TempDir())
+	config.TenantID = "tenant-1"
+	runtime, err := NewSTRIDERuntime(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	const historicalBrains = 256
+	for index := 0; index < historicalBrains; index++ {
+		historical, newErr := NewTemporalMeetingBrain(TemporalMeetingBrainConfig{TenantID: "tenant-1", RoomID: "room-history", SittingID: fmt.Sprintf("history-%03d", index), SittingStart: start.Add(-time.Duration(index+1) * time.Hour)})
+		if newErr != nil {
+			t.Fatal(newErr)
+		}
+		runtime.liveTemporal[strideRuntimeTemporalKey("room-history", fmt.Sprintf("history-%03d", index))] = historical
+	}
+	brainConfig := TemporalMeetingBrainConfig{TenantID: "tenant-1", RoomID: "room-1", SittingID: "sitting-1", SittingStart: start, SittingEnd: start.Add(time.Hour)}
+	first := temporalTestTranscript("segment-first", "revision-first", "first durable turn", "authoritative_final", "", 1, 1, start, start.Add(time.Minute), start.Add(time.Minute), []string{"member_aj"}, nil)
+	commits := 0
+	if err := runtime.ApplyLiveTemporalEvidence("tenant-1", brainConfig, first, func() error {
+		commits++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if commits != 1 || runtime.generation != config.MinimumGeneration-1 {
+		t.Fatalf("live projection persisted compound runtime: commits=%d generation=%d", commits, runtime.generation)
+	}
+	denied := errors.New("authority commit rejected")
+	second := temporalTestTranscript("segment-second", "revision-second", "must remain staged only", "authoritative_final", "", 1, 2, start.Add(2*time.Minute), start.Add(3*time.Minute), start.Add(3*time.Minute), []string{"member_aj"}, nil)
+	if err := runtime.ApplyLiveTemporalEvidence("tenant-1", brainConfig, second, func() error { return denied }); !errors.Is(err, denied) {
+		t.Fatalf("rejected authority commit error=%v", err)
+	}
+	if brain := runtime.liveTemporal[strideRuntimeTemporalKey("room-1", "sitting-1")]; len(brain.sources) != 1 || brain.transcriptHighWater != 1 {
+		t.Fatalf("rejected authority commit leaked staged source: highWater=%d sources=%+v", brain.transcriptHighWater, brain.sources)
+	}
+	third := temporalTestTranscript("segment-third", "revision-third", "visible only after authority commit", "authoritative_final", "", 1, 2, start.Add(4*time.Minute), start.Add(5*time.Minute), start.Add(5*time.Minute), []string{"member_aj"}, nil)
+	commitEntered, releaseCommit := make(chan struct{}), make(chan struct{})
+	applyDone := make(chan error, 1)
+	go func() {
+		applyDone <- runtime.ApplyLiveTemporalEvidence("tenant-1", brainConfig, third, func() error {
+			close(commitEntered)
+			<-releaseCommit
+			return nil
+		})
+	}()
+	<-commitEntered
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- runtime.ReadTemporalMeetingBrain("tenant-1", "room-1", "sitting-1", func(brain *TemporalMeetingBrain) error {
+			if _, found := brain.sources["segment-third"]; !found {
+				return errors.New("committed source is absent")
+			}
+			return nil
+		})
+	}()
+	select {
+	case err := <-readDone:
+		t.Fatalf("reader crossed uncommitted authority boundary: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseCommit)
+	if err := <-applyDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-readDone; err != nil {
+		t.Fatal(err)
+	}
+	for key, brain := range runtime.liveTemporal {
+		if key == strideRuntimeTemporalKey("room-1", "sitting-1") {
+			continue
+		}
+		if brain.snapshotGeneration != 0 {
+			t.Fatalf("live projection snapshotted historical brain %s at generation %d", key, brain.snapshotGeneration)
+		}
+	}
+	if err := runtime.Save(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(config.SnapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("history-")) || bytes.Contains(raw, []byte("first durable turn")) || len(runtime.domains.temporal) != 0 {
+		t.Fatalf("ordinary compound Save serialized ephemeral live brains")
+	}
+	if len(runtime.liveTemporal) != historicalBrains+1 {
+		t.Fatalf("ordinary Save mutated live meeting cache: count=%d", len(runtime.liveTemporal))
+	}
+	if err := runtime.ClearLiveTemporalMeetingBrain("tenant-1", "room-1", "sitting-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := runtime.liveTemporal[strideRuntimeTemporalKey("room-1", "sitting-1")]; found {
+		t.Fatal("finalized current meeting raw brain was not cleared")
 	}
 }
 

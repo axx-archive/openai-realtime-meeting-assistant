@@ -7,6 +7,23 @@ import (
 	"time"
 )
 
+func TestAudioActivityRetentionUsesAmortizedCompaction(t *testing.T) {
+	now := time.Now().UTC()
+	old := now.Add(-speakerActivityRetention - time.Second)
+	state := &roomLiveState{audioActivity: make([]participantAudioFrame, 5000)}
+	for index := range state.audioActivity {
+		state.audioActivity[index] = participantAudioFrame{At: old, EnergyByParticipant: map[string]float64{"Old": 1}}
+	}
+	state.audioActivity = append(state.audioActivity, participantAudioFrame{At: now, EnergyByParticipant: map[string]float64{"Current": 1}})
+	compactAudioActivityRetention(state, now.Add(-speakerActivityRetention))
+	if state.audioActivityStart != 0 || len(state.audioActivity) != 1 {
+		t.Fatalf("retention compaction head=%d len=%d, want 0/1", state.audioActivityStart, len(state.audioActivity))
+	}
+	if _, stale := attributionScoresLocked(state, now.Add(-time.Second), now)["Old"]; stale {
+		t.Fatal("retired attribution frame remained visible after compaction")
+	}
+}
+
 func TestBlockedActiveSpeakerBroadcastDoesNotLoseAttributionFrames(t *testing.T) {
 	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(t.TempDir(), "memory.jsonl"))
 	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(t.TempDir(), "board.json"))

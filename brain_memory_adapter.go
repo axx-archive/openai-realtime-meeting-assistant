@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -18,6 +19,8 @@ import (
 )
 
 var ErrBrainSourceConsentAbsent = errors.New("brain source has no current organization-memory consent")
+
+const authoritativeRecentMemoryWindow = 2 << 20
 
 // BrainCurrentObjectResolver resolves the canonical identity of the current
 // source revision without requiring a caller to guess its ACL version.
@@ -408,6 +411,69 @@ func (adapter *MeetingMemoryBrainAdapter) authoritativeMemoryEntry(id string) (m
 	return meetingMemoryEntry{}, false, nil
 }
 
+// authoritativeRecentMemoryEntry verifies a just-committed live source from a
+// bounded tail window of the durable JSONL. Live projection calls this
+// synchronously after append, so the target is at the tail even when another
+// worker appended a few rows. It preserves the durable-byte boundary without
+// reparsing the lifetime corpus for every speaker turn.
+func (adapter *MeetingMemoryBrainAdapter) authoritativeRecentMemoryEntry(id string) (meetingMemoryEntry, bool, error) {
+	if adapter == nil || adapter.Memory == nil || strings.TrimSpace(adapter.Memory.path) == "" || strings.TrimSpace(id) == "" {
+		return meetingMemoryEntry{}, false, ErrBrainRetrievalUnavailable
+	}
+	adapter.Memory.mu.Lock()
+	defer adapter.Memory.mu.Unlock()
+	return adapter.authoritativeRecentMemoryEntryLocked(id)
+}
+
+func (adapter *MeetingMemoryBrainAdapter) authoritativeRecentMemoryEntryLocked(id string) (meetingMemoryEntry, bool, error) {
+	if adapter == nil || adapter.Memory == nil || strings.TrimSpace(adapter.Memory.path) == "" || strings.TrimSpace(id) == "" {
+		return meetingMemoryEntry{}, false, ErrBrainRetrievalUnavailable
+	}
+	file, err := os.Open(adapter.Memory.path)
+	if err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return meetingMemoryEntry{}, false, err
+	}
+	start := info.Size() - authoritativeRecentMemoryWindow
+	if start < 0 {
+		start = 0
+	}
+	raw := make([]byte, info.Size()-start)
+	if _, err := file.ReadAt(raw, start); err != nil && !errors.Is(err, io.EOF) {
+		return meetingMemoryEntry{}, false, err
+	}
+	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
+		return meetingMemoryEntry{}, false, errors.New("authoritative meeting memory has a torn final record")
+	}
+	if start > 0 {
+		newline := bytes.IndexByte(raw, '\n')
+		if newline < 0 {
+			return meetingMemoryEntry{}, false, nil
+		}
+		raw = raw[newline+1:]
+	}
+	lines := bytes.Split(raw, []byte{'\n'})
+	for index := len(lines) - 1; index >= 0; index-- {
+		line := bytes.TrimSpace(lines[index])
+		if len(line) == 0 {
+			continue
+		}
+		var entry meetingMemoryEntry
+		if err := json.Unmarshal(line, &entry); err != nil || strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.Text) == "" {
+			return meetingMemoryEntry{}, false, errors.New("authoritative meeting memory contains an invalid recent record")
+		}
+		if entry.ID == id {
+			entry.Metadata = cloneBrainMemoryMetadata(entry.Metadata)
+			return entry, true, nil
+		}
+	}
+	return meetingMemoryEntry{}, false, nil
+}
+
 func brainMemoryEntryTimes(entry meetingMemoryEntry) (time.Time, time.Time, time.Time) {
 	capturedAt := entry.CreatedAt.UTC()
 	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata["capturedAt"])); err == nil {
@@ -522,10 +588,24 @@ func (resolver *productionCatchUpResolver) CommitCatchUpPublication(ctx context.
 // local body+notification/result publication callback completes. The final
 // authorization read occurs after those locks are held.
 func (resolver *productionCatchUpResolver) withCanonicalCatchUpSourceFence(ctx context.Context, principal ACLPrincipal, snapshot RetrievalSnapshot, publish func() error) error {
-	return resolver.withCanonicalCatchUpSourceFenceCommit(ctx, principal, snapshot, func(pgx.Tx) error { return publish() }, nil)
+	if principal.TenantID != snapshot.TenantID || principal.Kind != snapshot.PrincipalKind || principal.ID != snapshot.PrincipalID {
+		return ErrRetrievalSnapshotStale
+	}
+	return resolver.withCanonicalSourceAuthorityFenceCommit(ctx, []ACLPrincipal{principal}, snapshot, func(pgx.Tx) error { return publish() }, nil)
 }
 
 func (resolver *productionCatchUpResolver) withCanonicalCatchUpSourceFenceCommit(ctx context.Context, principal ACLPrincipal, snapshot RetrievalSnapshot, publish func(pgx.Tx) error, commitFn func(context.Context, pgx.Tx) error) error {
+	if principal.TenantID != snapshot.TenantID || principal.Kind != snapshot.PrincipalKind || principal.ID != snapshot.PrincipalID {
+		return ErrRetrievalSnapshotStale
+	}
+	return resolver.withCanonicalSourceAuthorityFenceCommit(ctx, []ACLPrincipal{principal}, snapshot, publish, commitFn)
+}
+
+// withCanonicalSourceAuthorityFenceCommit is the shared atomic publication
+// boundary for catch-up and live STRIDE projection. Exact object, grant and
+// purge rows remain locked until the local result is durably published, and
+// every audience principal is reauthorized only after those locks are held.
+func (resolver *productionCatchUpResolver) withCanonicalSourceAuthorityFenceCommit(ctx context.Context, principals []ACLPrincipal, snapshot RetrievalSnapshot, publish func(pgx.Tx) error, commitFn func(context.Context, pgx.Tx) error) error {
 	if resolver == nil || resolver.Postgres == nil || resolver.Postgres.pool == nil || publish == nil {
 		return ErrCatchUpUnavailable
 	}
@@ -571,8 +651,25 @@ func (resolver *productionCatchUpResolver) withCanonicalCatchUpSourceFenceCommit
 	}
 	// Re-run the complete principal, purge-generation, and exact revision
 	// authorization only after conflicting source/grant/purge writers are held.
-	if err := ReauthorizeRetrievalSnapshot(ctx, resolver.Planner.Kernel, resolver.Planner.Purge, principal, snapshot); err != nil {
-		return err
+	if len(principals) == 0 {
+		return ErrRetrievalSnapshotStale
+	}
+	currentPurge, err := resolver.Planner.Purge.CurrentPurgeGeneration(ctx, snapshot.TenantID)
+	if err != nil || currentPurge != snapshot.PurgeGeneration {
+		return ErrRetrievalSnapshotStale
+	}
+	for _, principal := range principals {
+		if principal.TenantID != snapshot.TenantID {
+			return ErrRetrievalSnapshotStale
+		}
+		for _, source := range snapshot.Sources {
+			objectRef, revisionRef := source.Evidence.ACLRefs()
+			metadata := resolver.Planner.Kernel.Authorize(ctx, principal, ACLReadMetadata, objectRef, ACLRevisionRef{})
+			content := resolver.Planner.Kernel.Authorize(ctx, principal, ACLReadContent, objectRef, revisionRef)
+			if !metadata.Allowed || !content.Allowed || metadata.ACLVersion != source.Evidence.ACLVersion || content.ACLVersion != source.Evidence.ACLVersion {
+				return ErrRetrievalSnapshotStale
+			}
+		}
 	}
 	if err := publish(tx); err != nil {
 		return err
@@ -584,6 +681,56 @@ func (resolver *productionCatchUpResolver) withCanonicalCatchUpSourceFenceCommit
 		return fmt.Errorf("commit catch-up source authority fence: %w", err)
 	}
 	return nil
+}
+
+// CommitSTRIDETranscriptProjection linearizes a live meeting-brain update
+// against the exact durable body, contributor consent, purge generation,
+// canonical source revision and every audience grant. It deliberately uses
+// the bounded recent-row reader rather than lifetime inventory APIs.
+func (resolver *productionCatchUpResolver) CommitSTRIDETranscriptProjection(ctx context.Context, entry meetingMemoryEntry, source RetrievalSnapshotSource, principals []ACLPrincipal, publish func(commitAuthority func() error) error) error {
+	if resolver == nil || resolver.Sources == nil || publish == nil || len(principals) == 0 {
+		return ErrBrainRetrievalUnavailable
+	}
+	authorizer, ok := resolver.Sources.Consent.(BrainSourceConsentFenceAuthorizer)
+	if !ok {
+		return ErrBrainRetrievalUnavailable
+	}
+	fences, err := authorizer.AuthorizeBrainSourceConsent(ctx, entry)
+	if err != nil {
+		return err
+	}
+	if resolver.beforeCommit != nil {
+		resolver.beforeCommit()
+	}
+	snapshot := RetrievalSnapshot{
+		TenantID: source.Evidence.TenantID, PurgeGeneration: source.Evidence.PurgeGeneration,
+		Sources: []RetrievalSnapshotSource{source},
+	}
+	commit := func() error {
+		return resolver.Sources.commitRecentMemoryProjectionLocked(source.Evidence, func() error {
+			authorityCommitted := false
+			return resolver.withCanonicalSourceAuthorityFenceCommit(ctx, principals, snapshot, func(tx pgx.Tx) error {
+				return publish(func() error {
+					if err := tx.Commit(ctx); err != nil {
+						return err
+					}
+					authorityCommitted = true
+					return nil
+				})
+			}, func(context.Context, pgx.Tx) error {
+				if !authorityCommitted {
+					return errors.New("STRIDE projection did not commit its canonical authority fence")
+				}
+				return nil
+			})
+		})
+	}
+	// Explicitly submitted text has no microphone fence. Audio transcripts must
+	// carry contributor fences, which CommitWithFences holds through Save.
+	if len(fences) == 0 {
+		return commit()
+	}
+	return currentConsentLaneAuthority().CommitWithFences(ctx, fences, commit)
 }
 
 // commitCatchUpPublicationLocked keeps the authoritative JSONL body identity
@@ -610,6 +757,21 @@ func (adapter *MeetingMemoryBrainAdapter) commitCatchUpPublicationLocked(snapsho
 			strings.TrimSpace(entry.Metadata["meetingId"]) != source.Evidence.SittingID {
 			return ErrRetrievalSnapshotStale
 		}
+	}
+	return publish()
+}
+
+func (adapter *MeetingMemoryBrainAdapter) commitRecentMemoryProjectionLocked(expected BrainEvidenceRef, publish func() error) error {
+	if adapter == nil || adapter.Memory == nil || publish == nil {
+		return ErrBrainRetrievalUnavailable
+	}
+	adapter.Memory.mu.Lock()
+	defer adapter.Memory.mu.Unlock()
+	entry, found, err := adapter.authoritativeRecentMemoryEntryLocked(expected.ObjectID)
+	if err != nil || !found || entry.Kind != meetingMemoryKindTranscript || memoryEntryHiddenFromRecall(entry) ||
+		digestBrainString(entry.Text) != expected.ContentDigest || normalizeRoomID(entry.Metadata["roomId"]) != normalizeRoomID(expected.RoomID) ||
+		strings.TrimSpace(entry.Metadata["meetingId"]) != expected.SittingID {
+		return ErrRetrievalSnapshotStale
 	}
 	return publish()
 }

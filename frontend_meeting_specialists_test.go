@@ -127,6 +127,23 @@ func TestFrontendProjectsAgentsAndCameraOffHumansIntoAudioPresenceBar(t *testing
 	}
 }
 
+func TestFrontendExpectsAgentAudioOnlyForLiveProviderSession(t *testing.T) {
+	source, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := functionBody(string(source), "function expectedRemoteAudioParticipantNames()")
+	for _, want := range []string{
+		"agent.providerSessionStarted === true",
+		"agent.voiceState || agent.status",
+		"'starting', 'degraded', 'error', 'closed'",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("agent audio expectation is missing %q", want)
+		}
+	}
+}
+
 func TestFrontendAudioPresenceAlwaysWinsParticipantTileLayoutCascade(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {

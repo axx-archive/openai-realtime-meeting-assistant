@@ -390,7 +390,7 @@ function renderedComposeConfig(receipt = makeReceipt()) {
           volume('codex_queue', '/app/codex-queue'), volume('render_queue', '/app/render-queue')
         ],
         ports: [port('40000-40100', '40000-40100', 'udp')],
-        healthcheck: { test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz'], interval: '30s', timeout: '5s', retries: 3, start_period: '5m0s' },
+        healthcheck: { test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/livez'], interval: '30s', timeout: '5s', retries: 3, start_period: '5m0s' },
         mem_limit: '3g', networks: { default: null, render_internal: null },
         depends_on: { 'canonical-postgres': { condition: 'service_healthy', required: true } }, restart: 'unless-stopped'
       },

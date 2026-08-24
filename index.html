@@ -64756,7 +64756,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function expectedRemoteAudioParticipantNames() {
         return normalizeParticipantList([
           ...participantsInRoom,
-          ...roomAgentParticipants.map(agent => agent.name)
+          ...roomAgentParticipants
+            .filter(agent => agent.providerSessionStarted === true && !['starting', 'degraded', 'error', 'closed'].includes(String(agent.voiceState || agent.status || '').toLowerCase()))
+            .map(agent => agent.name)
         ]).filter(name => name && !isCurrentParticipantName(name))
       }
 

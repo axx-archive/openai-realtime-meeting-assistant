@@ -57,6 +57,96 @@ func waitForMeetingFinalizationQueueIdle(t *testing.T, app *kanbanBoardApp) {
 	t.Fatal("meeting finalization queue did not quiesce")
 }
 
+func TestCanonicalReconcileDeferredCoversConcreteMeetingCloseTransitions(t *testing.T) {
+	for _, closeKind := range []string{"idle", "named-room-archive"} {
+		t.Run(closeKind, func(t *testing.T) {
+			t.Setenv("OPENAI_API_KEY", "")
+			t.Setenv("BONFIRE_ROOMS_PATH", filepath.Join(t.TempDir(), "rooms.json"))
+			app := newIsolatedKanbanBoardApp(t)
+			roomID := officeRoomID
+			if closeKind == "named-room-archive" {
+				room, err := appRoomStore().create("canonical close fence", "", "aj@shareability.com", false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				roomID = room.ID
+			}
+			record, changed := app.meetings.startMeeting(roomID, "meeting-"+closeKind, time.Now().UTC(), []string{"AJ"})
+			if !changed || !app.canonicalReconcileDeferred() {
+				t.Fatalf("open %s meeting did not defer parity", closeKind)
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			app.canonicalReconcileAfterMeetingClosed = func() {
+				close(entered)
+				<-release
+			}
+			done := make(chan struct{})
+			if closeKind == "idle" {
+				app.meetings.mu.Lock()
+				generation := app.meetings.idleGenerations[roomID]
+				app.meetings.mu.Unlock()
+				go func() {
+					app.endMeetingForIdle(roomID, generation)
+					close(done)
+				}()
+			} else {
+				if err := appRoomStore().archive(roomID); err != nil {
+					t.Fatal(err)
+				}
+				go func() {
+					app.closeRoomForArchive(roomID)
+					close(done)
+				}()
+			}
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatalf("%s close did not reach post-durable transition", closeKind)
+			}
+			if _, open := app.meetings.activeRecord(roomID); open {
+				t.Fatalf("%s record was still open at transition barrier", closeKind)
+			}
+			if !app.canonicalReconcileDeferred() {
+				t.Fatalf("%s close exposed a parity gap after ending %s", closeKind, record.ID)
+			}
+			close(release)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s close did not finish", closeKind)
+			}
+		})
+	}
+}
+
+func TestCanonicalReconcileDeferredDistinguishesRetryFromBootBacklog(t *testing.T) {
+	app := &kanbanBoardApp{
+		meetingFinalizationRunning:        map[string]struct{}{"historical": {}},
+		meetingFinalizationQueuedPriority: map[string]bool{"historical": false},
+		meetingFinalizationActive:         map[string]bool{},
+		meetingFinalizationRetryQueued:    map[string]bool{},
+		meetingFinalizationRetryActive:    map[string]bool{},
+		meetingArchivePublishing:          map[string]bool{},
+	}
+	if app.canonicalReconcileDeferred() {
+		t.Fatal("historical boot backlog alone deferred full parity")
+	}
+	app.meetingFinalizationRetryQueued["retry"] = true
+	if !app.canonicalReconcileDeferred() {
+		t.Fatal("queued finalization retry did not defer full parity")
+	}
+	delete(app.meetingFinalizationRetryQueued, "retry")
+	app.meetingFinalizationRetryActive["retry"] = true
+	if !app.canonicalReconcileDeferred() {
+		t.Fatal("active finalization retry did not defer full parity")
+	}
+	delete(app.meetingFinalizationRetryActive, "retry")
+	app.meetingFinalizationQueuedPriority["fresh"] = true
+	if !app.canonicalReconcileDeferred() {
+		t.Fatal("fresh finalization did not defer full parity")
+	}
+}
+
 func waitForMeetingArchiveFinalizationSync(t *testing.T, app *kanbanBoardApp, meetingID string) meetingRecord {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
@@ -124,6 +214,17 @@ func TestMeetingFinalizationCorePersistsIdempotentReceiptsAndReadTruth(t *testin
 	if !ok {
 		t.Fatal("missing active meeting")
 	}
+	strideConfig := strideIntegratedRuntimeConfig(t.TempDir())
+	liveRuntime, err := NewSTRIDERuntime(strideConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.strideRuntime = liveRuntime
+	liveBrain, err := NewTemporalMeetingBrain(TemporalMeetingBrainConfig{TenantID: canonicalTenantID(), RoomID: officeRoomID, SittingID: record.ID, SittingStart: time.Now().UTC().Add(-time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveRuntime.liveTemporal[strideRuntimeTemporalKey(officeRoomID, record.ID)] = liveBrain
 	source := app.meetingFinalizationSource(record.ID)
 	closed, changed, err := app.meetings.endMeetingWithFinalization(record.ID, time.Now().UTC(), meetingEndedReasonIdle, "", source)
 	if err != nil || !changed || closed.Finalization == nil || closed.Finalization.State != meetingFinalizationClosing {
@@ -136,6 +237,9 @@ func TestMeetingFinalizationCorePersistsIdempotentReceiptsAndReadTruth(t *testin
 	}
 	if finalized.Finalization == nil || finalized.Finalization.State != meetingFinalizationFinalized {
 		t.Fatalf("finalization=%+v, want finalized", finalized.Finalization)
+	}
+	if _, found := liveRuntime.liveTemporal[strideRuntimeTemporalKey(officeRoomID, record.ID)]; found {
+		t.Fatal("durable meeting finalization retained raw live temporal brain")
 	}
 	if !finalized.Finalization.Source.equal(source) || finalized.Finalization.ObservedCaptureSequence != source.CaptureSequence {
 		t.Fatalf("receipt source=%+v observed=%d, want %+v", finalized.Finalization.Source, finalized.Finalization.ObservedCaptureSequence, source)

@@ -437,35 +437,106 @@ func (app *kanbanBoardApp) projectSTRIDEAuthoritativeTranscript(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	var source *BrainSourceMetadata
+	// This entry was just durably appended by the caller. Re-resolve that exact
+	// current row and its canonical identity once; the general inventory API is
+	// intentionally lifetime-wide and previously reparsed the full memory JSONL
+	// once per principal for every live transcript.
+	committed, found, committedErr := resolver.Sources.authoritativeRecentMemoryEntry(entry.ID)
+	if committedErr != nil || !found || committed.Kind != meetingMemoryKindTranscript || memoryEntryHiddenFromRecall(committed) || digestBrainString(committed.Text) != digestBrainString(entry.Text) {
+		return ErrBrainRetrievalRetry
+	}
+	purgeGeneration, err := resolver.Sources.Purge.CurrentPurgeGeneration(ctx, canonicalTenantID())
+	if err != nil || purgeGeneration < 0 {
+		return ErrBrainRetrievalUnavailable
+	}
+	object, err := resolver.Sources.Objects.CurrentBrainObject(ctx, canonicalTenantID(), "memory", committed.ID)
+	if err != nil {
+		return ErrBrainRetrievalUnavailable
+	}
+	if err := resolver.Sources.Consent.VerifyBrainSourceConsent(ctx, committed); err != nil {
+		if errors.Is(err, ErrBrainSourceConsentAbsent) {
+			return ErrTemporalContextUnauthorized
+		}
+		return ErrBrainRetrievalUnavailable
+	}
+	digest := digestBrainString(committed.Text)
+	roomID := normalizeRoomID(committed.Metadata["roomId"])
+	sittingID := strings.TrimSpace(committed.Metadata["meetingId"])
+	occurredStart, occurredEnd, capturedAt := brainMemoryEntryTimes(committed)
+	if object.Deleted || object.Ref.TenantID != canonicalTenantID() || object.Ref.Type != "memory" || object.Ref.ID != committed.ID ||
+		object.Ref.ACLVersion < 1 || object.CurrentContentRevision < 1 || object.CurrentContentDigest != digest ||
+		roomID != query.RoomID || sittingID != query.SittingID || !occurredStart.Before(query.EndUTC) || !query.StartUTC.Before(occurredEnd) {
+		return ErrBrainRetrievalRetry
+	}
+	sequence, _ := entryCaptureSequence(committed)
+	source := BrainSourceMetadata{
+		Evidence: BrainEvidenceRef{
+			TenantID: canonicalTenantID(), SourceFamily: "memory", ObjectID: committed.ID,
+			ContentRevision: object.CurrentContentRevision, ACLVersion: object.Ref.ACLVersion, ContentDigest: digest,
+			RoomID: roomID, SittingID: sittingID, OccurredStart: occurredStart, OccurredEnd: occurredEnd,
+			PurgeGeneration: purgeGeneration, Trust: BrainEvidenceTrusted,
+		},
+		CaptureSequence: sequence, CapturedAt: capturedAt,
+		Segments: []BrainSourceSegmentMetadata{{OccurredStart: occurredStart, OccurredEnd: occurredEnd, ByteStart: 0, ByteEnd: len(committed.Text)}},
+	}
 	principals := []string{}
 	for _, member := range runtimeMemberPrincipals() {
 		email := strings.TrimPrefix(strings.TrimSpace(member), "user:")
 		principal := ACLPrincipal{TenantID: canonicalTenantID(), ID: email, Kind: ACLPrincipalUser, TeamIDs: []string{"organization"}, RoomID: query.RoomID, SittingID: query.SittingID}
-		page, inventoryErr := resolver.Sources.InventoryBrainSources(ctx, BrainSourceInventoryRequest{TenantID: canonicalTenantID(), Principal: principal, Temporal: query}, "")
-		if inventoryErr != nil {
-			if errors.Is(inventoryErr, ErrBrainRetrievalUnavailable) {
-				return inventoryErr
-			}
-			continue
+		metadataDecision := resolver.Sources.Kernel.Authorize(ctx, principal, ACLReadMetadata, object.Ref, ACLRevisionRef{})
+		contentDecision := resolver.Sources.Kernel.Authorize(ctx, principal, ACLReadContent, object.Ref, ACLRevisionRef{
+			ContentRevision: object.CurrentContentRevision, ContentDigest: object.CurrentContentDigest,
+		})
+		if metadataDecision.DenialCode == ACLDenialUnavailable || contentDecision.DenialCode == ACLDenialUnavailable {
+			return ErrBrainRetrievalUnavailable
 		}
-		for index := range page.Sources {
-			if page.Sources[index].Evidence.ObjectID == entry.ID {
-				copySource := page.Sources[index]
-				source = &copySource
-				principals = append(principals, strideRuntimePrincipalForEmail(email))
-				break
-			}
+		if metadataDecision.Allowed && contentDecision.Allowed {
+			principals = append(principals, strideRuntimePrincipalForEmail(email))
 		}
 	}
 	principals = sortedUniqueSTRIDEIDs(principals)
-	if source == nil || len(principals) == 0 {
+	if len(principals) == 0 {
 		return ErrTemporalContextUnauthorized
 	}
-	read, err := resolver.Sources.ReadBrainSource(ctx, source.Evidence)
-	if err != nil || !read.BodyAvailable || read.Status != RecallSourceFresh || read.BodyDigest != source.Evidence.ContentDigest {
+	// Revalidate the exact current row, consent, canonical revision and purge
+	// generation immediately before projection. This preserves the old
+	// fail-closed read boundary without reopening 74 MiB of unrelated history.
+	current, currentFound, currentErr := resolver.Sources.authoritativeRecentMemoryEntry(committed.ID)
+	currentObject, objectErr := resolver.Sources.Objects.CurrentBrainObject(ctx, canonicalTenantID(), "memory", committed.ID)
+	currentPurge, purgeErr := resolver.Sources.Purge.CurrentPurgeGeneration(ctx, canonicalTenantID())
+	consentErr := resolver.Sources.Consent.VerifyBrainSourceConsent(ctx, current)
+	if currentErr != nil || !currentFound || objectErr != nil || purgeErr != nil || consentErr != nil || currentPurge != source.Evidence.PurgeGeneration ||
+		currentObject.Deleted || currentObject.Ref.ACLVersion != source.Evidence.ACLVersion ||
+		currentObject.CurrentContentRevision != source.Evidence.ContentRevision || currentObject.CurrentContentDigest != source.Evidence.ContentDigest ||
+		digestBrainString(current.Text) != source.Evidence.ContentDigest {
 		return ErrBrainRetrievalRetry
 	}
+	reauthorizedPrincipals := make([]string, 0, len(principals))
+	publicationPrincipals := make([]ACLPrincipal, 0, len(principals))
+	for _, member := range runtimeMemberPrincipals() {
+		email := strings.TrimPrefix(strings.TrimSpace(member), "user:")
+		stridePrincipal := strideRuntimePrincipalForEmail(email)
+		if !containsSTRIDEPrincipal(principals, stridePrincipal) {
+			continue
+		}
+		principal := ACLPrincipal{TenantID: canonicalTenantID(), ID: email, Kind: ACLPrincipalUser, TeamIDs: []string{"organization"}, RoomID: query.RoomID, SittingID: query.SittingID}
+		metadataDecision := resolver.Sources.Kernel.Authorize(ctx, principal, ACLReadMetadata, currentObject.Ref, ACLRevisionRef{})
+		contentDecision := resolver.Sources.Kernel.Authorize(ctx, principal, ACLReadContent, currentObject.Ref, ACLRevisionRef{
+			ContentRevision: currentObject.CurrentContentRevision, ContentDigest: currentObject.CurrentContentDigest,
+		})
+		if metadataDecision.DenialCode == ACLDenialUnavailable || contentDecision.DenialCode == ACLDenialUnavailable {
+			return ErrBrainRetrievalRetry
+		}
+		if metadataDecision.Allowed && contentDecision.Allowed && metadataDecision.ACLVersion == source.Evidence.ACLVersion && contentDecision.ACLVersion == source.Evidence.ACLVersion {
+			reauthorizedPrincipals = append(reauthorizedPrincipals, stridePrincipal)
+			publicationPrincipals = append(publicationPrincipals, principal)
+		}
+	}
+	principals = sortedUniqueSTRIDEIDs(reauthorizedPrincipals)
+	if len(principals) == 0 {
+		return ErrTemporalContextUnauthorized
+	}
+	readBody := current.Text
 	mediaGeneration, err := strconv.ParseUint(strings.TrimSpace(entry.Metadata["mediaGeneration"]), 10, 64)
 	if err != nil || mediaGeneration == 0 || source.CaptureSequence == 0 {
 		return ErrTemporalBrainInvalid
@@ -511,11 +582,15 @@ func (app *kanbanBoardApp) projectSTRIDEAuthoritativeTranscript(ctx context.Cont
 		Header:    STRIDEContractHeader{TenantID: canonicalTenantID(), ID: revisionID, Revision: source.Evidence.ContentRevision, SchemaVersion: STRIDEContractSchemaVersion, ContractType: STRIDEContractTranscriptRevision, ContentDigest: source.Evidence.ContentDigest, CreatedAt: createdAt},
 		SegmentID: segmentID, Revision: source.Evidence.ContentRevision, TextDigest: source.Evidence.ContentDigest, Status: "authoritative_final", Evidence: []STRIDEReference{conversationRef, segmentRef},
 	}
-	event := TemporalMeetingEvent{Sequence: source.CaptureSequence, Kind: TemporalMeetingEventTranscript, Transcript: &TemporalTranscriptRevisionEvent{Conversation: conversation, Segment: segment, Revision: revision, Text: read.Body}}
-	if err := app.strideRuntime.ApplyTemporalEvidence(canonicalTenantID(), config, event); err != nil {
+	event := TemporalMeetingEvent{Sequence: source.CaptureSequence, Kind: TemporalMeetingEventTranscript, Transcript: &TemporalTranscriptRevisionEvent{Conversation: conversation, Segment: segment, Revision: revision, Text: readBody}}
+	evidenceID, err := brainRetrievalEvidenceID(source.Evidence)
+	if err != nil {
 		return err
 	}
-	return app.strideRuntime.Save()
+	publicationSource := RetrievalSnapshotSource{EvidenceID: evidenceID, Evidence: source.Evidence}
+	return resolver.CommitSTRIDETranscriptProjection(ctx, current, publicationSource, publicationPrincipals, func(commitAuthority func() error) error {
+		return app.strideRuntime.ApplyLiveTemporalEvidence(canonicalTenantID(), config, event, commitAuthority)
+	})
 }
 
 // AdmitSuggestedWorkCandidate is the product seam for a future authorized

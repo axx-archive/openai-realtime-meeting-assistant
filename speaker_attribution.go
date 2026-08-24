@@ -92,13 +92,7 @@ func (app *kanbanBoardApp) noteAudioActivityForScope(scope RoomScoutScope, at ti
 		EnergyByParticipant: energyByParticipant,
 	})
 	cutoff := at.Add(-speakerActivityRetention)
-	keepFrom := 0
-	for keepFrom < len(state.audioActivity) && state.audioActivity[keepFrom].At.Before(cutoff) {
-		keepFrom++
-	}
-	if keepFrom > 0 {
-		state.audioActivity = append([]participantAudioFrame(nil), state.audioActivity[keepFrom:]...)
-	}
+	compactAudioActivityRetention(state, cutoff)
 	activeSpeaker = app.noteActiveSpeakerActivityLocked(state, at.UTC(), energyByParticipant)
 	app.mu.Unlock()
 
@@ -108,6 +102,27 @@ func (app *kanbanBoardApp) noteAudioActivityForScope(scope RoomScoutScope, at ti
 		}
 		log.Infof("room_active_speaker room=%s name=%q level=%.5f confidence=%.3f", roomID, activeSpeaker.Name, activeSpeaker.Level, activeSpeaker.Confidence)
 		app.enqueueActiveSpeakerPublication(activeSpeakerPublication{scope: scope, roomID: roomID, payload: *activeSpeaker})
+	}
+}
+
+func compactAudioActivityRetention(state *roomLiveState, cutoff time.Time) {
+	if state == nil {
+		return
+	}
+	keepFrom := state.audioActivityStart
+	for keepFrom < len(state.audioActivity) && state.audioActivity[keepFrom].At.Before(cutoff) {
+		keepFrom++
+	}
+	state.audioActivityStart = keepFrom
+	// Advancing a logical head makes steady-state eviction O(1). Compact only
+	// after a large retired prefix accumulates, amortizing the copy instead of
+	// copying roughly two minutes of maps on every 20ms mixer tick.
+	if state.audioActivityStart >= 4096 {
+		retained := len(state.audioActivity) - state.audioActivityStart
+		copy(state.audioActivity[:retained], state.audioActivity[state.audioActivityStart:])
+		clear(state.audioActivity[retained:])
+		state.audioActivity = state.audioActivity[:retained]
+		state.audioActivityStart = 0
 	}
 }
 
@@ -673,7 +688,7 @@ func attributionScoresLocked(state *roomLiveState, startedAt, stoppedAt time.Tim
 	windowStop := stoppedAt.Add(speakerAttributionStopPadding)
 
 	scores := map[string]float64{}
-	for _, frame := range state.audioActivity {
+	for _, frame := range state.audioActivity[state.audioActivityStart:] {
 		if frame.At.Before(windowStart) || frame.At.After(windowStop) {
 			continue
 		}

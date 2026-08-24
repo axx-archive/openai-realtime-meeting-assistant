@@ -300,12 +300,16 @@ type kanbanBoardApp struct {
 	meetingFinalizationBacklog        []string
 	meetingFinalizationQueuedPriority map[string]bool
 	meetingFinalizationActive         map[string]bool
+	meetingFinalizationRetryQueued    map[string]bool
+	meetingFinalizationRetryActive    map[string]bool
 	meetingFinalizationWorkers        int
 	meetingFinalizationBacklogActive  bool
 	meetingFinalizationWorker         bool
 	meetingFinalizationRetryTimers    map[string]*time.Timer
 	meetingFinalizationRetriesStopped bool
 	meetingArchivePublishing          map[string]bool
+	// Deterministic close-transition test seam; nil in production.
+	canonicalReconcileAfterMeetingClosed func()
 	// roomArchiveCloseRetryTimers keeps a durably archived named room from
 	// becoming a half-closed sitting when meetings.json is temporarily
 	// unavailable. The archived room flag is the restart authority; these

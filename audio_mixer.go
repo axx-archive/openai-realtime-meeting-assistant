@@ -202,6 +202,26 @@ func (mixer *audioMixer) submitWithConsent(trackKey string, participantName stri
 	}
 }
 
+// admitsAnalysis lets the RTP path shed optional decode work before paying the
+// Opus/PCM cost. The queue remains the final authority in submitWithConsent;
+// this early, intentionally approximate check protects direct media when the
+// analysis lane is already behind.
+func (mixer *audioMixer) admitsAnalysis(trackKey string) bool {
+	if mixer == nil {
+		return false
+	}
+	select {
+	case <-mixer.stop:
+		return false
+	default:
+	}
+	if len(mixer.input) >= cap(mixer.input) {
+		mixer.noteDroppedFrame(trackKey)
+		return false
+	}
+	return true
+}
+
 // noteDroppedFrame aggregates saturation telemetry. A warning per 10-20ms
 // audio packet can consume the CPU needed by direct RTP forwarding and turn a
 // degraded analysis lane into a failed call, so the media hot path emits at

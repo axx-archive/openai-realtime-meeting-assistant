@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -53,15 +55,20 @@ type CanonicalRuntime struct {
 	checkpointHighWater uint64
 	checkpointSourceSHA string
 	captureErr          error
+	appendDigests       map[string]canonicalAppendDigestState
+	appendDigestReads   uint64
 
-	reconcileQuietWindow   time.Duration
-	reconcileMaxLatency    time.Duration
-	reconcileAttemptTarget uint64
-	reconcileAttemptAt     time.Time
-	reconcileLastAt        time.Time
-	reconcileLastDuration  time.Duration
-	reconcileLastOutcome   string
-	reconcileSuperseded    uint64
+	reconcileQuietWindow     time.Duration
+	reconcileDeferredPoll    time.Duration
+	reconcileDeferred        func() bool
+	reconcileAttemptTarget   uint64
+	reconcileAttemptCancel   context.CancelFunc
+	reconcileAttemptDeferred bool
+	reconcileAttemptAt       time.Time
+	reconcileLastAt          time.Time
+	reconcileLastDuration    time.Duration
+	reconcileLastOutcome     string
+	reconcileSuperseded      uint64
 
 	// Deterministic test seams. Production leaves both nil.
 	reconcileAfterTarget       func()
@@ -71,12 +78,24 @@ type CanonicalRuntime struct {
 	lastOK    time.Time
 }
 
+type canonicalAppendDigestState struct {
+	exists     bool
+	size       int64
+	modifiedAt time.Time
+	identity   string
+	digest     string
+	hashState  []byte
+}
+
 const (
-	canonicalReconcileQuietWindow = 500 * time.Millisecond
-	canonicalReconcileMaxLatency  = 5 * time.Second
+	canonicalReconcileQuietWindow  = 500 * time.Millisecond
+	canonicalReconcileDeferredPoll = time.Second
 )
 
-var errCanonicalReconcileSuperseded = errors.New("canonical reconcile superseded by a newer mutation")
+var (
+	errCanonicalReconcileSuperseded = errors.New("canonical reconcile superseded by a newer mutation")
+	errCanonicalReconcileDeferred   = errors.New("canonical reconcile deferred by meeting lifecycle")
+)
 
 type CanonicalRuntimeSnapshot struct {
 	Mode                string                          `json:"mode"`
@@ -429,7 +448,7 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	dataDir := filepath.Dir(meetingMemoryPath())
 	runtime := &CanonicalRuntime{
 		mode: mode, dataDir: dataDir, tenantID: canonicalTenantID(), lastOK: time.Now().UTC(),
-		reconcileQuietWindow: canonicalReconcileQuietWindow, reconcileMaxLatency: canonicalReconcileMaxLatency,
+		reconcileQuietWindow: canonicalReconcileQuietWindow,
 	}
 	if mode == CanonicalModeOff {
 		configureProductionBrainProjectionRuntime(runtime)
@@ -797,12 +816,85 @@ func canonicalFenceAppendMutation(path string, appended []byte, mutate func() er
 	}
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
-	before, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	before, err := runtime.appendDigestStateLocked(path)
+	if err != nil {
 		return runtime.prepareFailureOrShadow(fmt.Errorf("read legacy state before canonical prepare: %w", err), mutate)
 	}
-	after := append(append([]byte(nil), before...), appended...)
-	return runtime.mutateFileLocked(context.Background(), family, path, before, err == nil, after, false, mutate)
+	hasher := sha256.New()
+	unmarshaler, ok := hasher.(encoding.BinaryUnmarshaler)
+	if !ok {
+		return runtime.prepareFailureOrShadow(errors.New("restore append digest state: sha256 state is not restorable"), mutate)
+	}
+	if err := unmarshaler.UnmarshalBinary(before.hashState); err != nil {
+		delete(runtime.appendDigests, filepath.Clean(path))
+		return runtime.prepareFailureOrShadow(fmt.Errorf("restore append digest state: %w", err), mutate)
+	}
+	_, _ = hasher.Write(appended)
+	afterDigest := hex.EncodeToString(hasher.Sum(nil))
+	if err := runtime.mutateFileDigestsLocked(context.Background(), family, path, before.digest, before.exists, afterDigest, false, mutate); err != nil {
+		delete(runtime.appendDigests, filepath.Clean(path))
+		return err
+	}
+	info, statErr := os.Stat(path)
+	marshaler, marshalOK := hasher.(encoding.BinaryMarshaler)
+	if statErr == nil && marshalOK {
+		state, marshalErr := marshaler.MarshalBinary()
+		if marshalErr == nil {
+			runtime.cacheAppendDigestLocked(path, canonicalAppendDigestState{
+				exists: true, size: info.Size(), modifiedAt: info.ModTime(), identity: canonicalFileIdentity(info), digest: afterDigest, hashState: state,
+			})
+		}
+	}
+	return nil
+}
+
+func (runtime *CanonicalRuntime) appendDigestStateLocked(path string) (canonicalAppendDigestState, error) {
+	cleanPath := filepath.Clean(path)
+	info, statErr := os.Stat(cleanPath)
+	if errors.Is(statErr, os.ErrNotExist) {
+		hasher := sha256.New()
+		state, err := hasher.(encoding.BinaryMarshaler).MarshalBinary()
+		if err != nil {
+			return canonicalAppendDigestState{}, err
+		}
+		return canonicalAppendDigestState{digest: sha256Hex(nil), hashState: state}, nil
+	}
+	if statErr != nil {
+		return canonicalAppendDigestState{}, statErr
+	}
+	if cached, ok := runtime.appendDigests[cleanPath]; ok && cached.exists && cached.size == info.Size() && cached.modifiedAt.Equal(info.ModTime()) && cached.identity == canonicalFileIdentity(info) {
+		return cached, nil
+	}
+	file, err := os.Open(cleanPath)
+	if err != nil {
+		return canonicalAppendDigestState{}, err
+	}
+	hasher := sha256.New()
+	_, copyErr := io.Copy(hasher, file)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return canonicalAppendDigestState{}, copyErr
+	}
+	if closeErr != nil {
+		return canonicalAppendDigestState{}, closeErr
+	}
+	hashState, err := hasher.(encoding.BinaryMarshaler).MarshalBinary()
+	if err != nil {
+		return canonicalAppendDigestState{}, err
+	}
+	runtime.appendDigestReads++
+	result := canonicalAppendDigestState{
+		exists: true, size: info.Size(), modifiedAt: info.ModTime(), identity: canonicalFileIdentity(info), digest: hex.EncodeToString(hasher.Sum(nil)), hashState: hashState,
+	}
+	runtime.cacheAppendDigestLocked(cleanPath, result)
+	return result, nil
+}
+
+func (runtime *CanonicalRuntime) cacheAppendDigestLocked(path string, state canonicalAppendDigestState) {
+	if runtime.appendDigests == nil {
+		runtime.appendDigests = map[string]canonicalAppendDigestState{}
+	}
+	runtime.appendDigests[filepath.Clean(path)] = state
 }
 
 func canonicalFenceRemoveMutation(path string, mutate func() error) error {
@@ -828,6 +920,16 @@ func (runtime *CanonicalRuntime) mutateFile(ctx context.Context, family, path st
 }
 
 func (runtime *CanonicalRuntime) mutateFileLocked(ctx context.Context, family, path string, before []byte, beforeExists bool, after []byte, deleted bool, mutate func() error) error {
+	delete(runtime.appendDigests, filepath.Clean(path))
+	beforeDigest := ""
+	if beforeExists {
+		beforeDigest = sha256Hex(before)
+	}
+	afterDigest := sha256Hex(after)
+	return runtime.mutateFileDigestsLocked(ctx, family, path, beforeDigest, beforeExists, afterDigest, deleted, mutate)
+}
+
+func (runtime *CanonicalRuntime) mutateFileDigestsLocked(ctx context.Context, family, path, beforeDigest string, beforeExists bool, afterDigest string, deleted bool, mutate func() error) error {
 	if runtime.captureErr != nil {
 		// Once a visible legacy generation cannot be bound to a durable capture
 		// terminal, no later covered generation may enter the chain. A restart
@@ -836,11 +938,9 @@ func (runtime *CanonicalRuntime) mutateFileLocked(ctx context.Context, family, p
 		runtime.healthErr = runtime.captureErr
 		return fmt.Errorf("canonical capture integrity is unresolved; covered mutation rejected before prepare: %w", runtime.captureErr)
 	}
-	beforeDigest := ""
-	if beforeExists {
-		beforeDigest = sha256Hex(before)
+	if !beforeExists {
+		beforeDigest = ""
 	}
-	afterDigest := sha256Hex(after)
 	objectKey := filepath.Clean(path)
 	mutationID := uuid.NewString()
 	fact, _ := json.Marshal(map[string]any{"source_kind": family, "object_id": sha256Hex([]byte(objectKey)), "payload_sha256": afterDigest, "deleted": deleted})
@@ -948,6 +1048,13 @@ func (runtime *CanonicalRuntime) spoolHighWater() uint64 {
 
 func (runtime *CanonicalRuntime) markDirtyLocked() {
 	runtime.dirtyHighWater = runtime.spoolHighWater()
+	// A full legacy scan is useful only for the exact mutation boundary it
+	// sampled. Stop obsolete work immediately instead of letting a large memory
+	// or blob walk burn CPU for tens of seconds before discovering at checkpoint
+	// time that it was superseded.
+	if runtime.reconcileAttemptCancel != nil && runtime.dirtyHighWater != runtime.reconcileAttemptTarget {
+		runtime.reconcileAttemptCancel()
+	}
 	runtime.signalReconcileLocked()
 }
 
@@ -1001,6 +1108,53 @@ func (runtime *CanonicalRuntime) startInitialShadowReconcile() {
 	}
 }
 
+// setReconcileDeferred installs the lifecycle gate for full legacy parity.
+// Covered writes continue to advance the durable capture spool while the gate
+// is closed; only the expensive whole-history scan is postponed. Swapping the
+// callback is mutex-protected so startup can hold reconciliation until the
+// meeting store exists and then hand authority to the live-session lifecycle.
+func (runtime *CanonicalRuntime) setReconcileDeferred(deferred func() bool) {
+	if runtime == nil {
+		return
+	}
+	runtime.mu.Lock()
+	runtime.reconcileDeferred = deferred
+	runtime.signalReconcileLocked()
+	runtime.mu.Unlock()
+}
+
+// notifyReconcileDeferred is called after the meeting lifecycle enters a
+// protected phase. A scan that began while the app was idle is canceled just
+// as promptly as one superseded by a new captured write.
+func (runtime *CanonicalRuntime) notifyReconcileDeferred() {
+	if runtime == nil || !runtime.reconciliationDeferred() {
+		return
+	}
+	runtime.mu.Lock()
+	if runtime.reconcileAttemptCancel != nil {
+		runtime.reconcileAttemptDeferred = true
+		runtime.reconcileAttemptCancel()
+	}
+	runtime.signalReconcileLocked()
+	runtime.mu.Unlock()
+}
+
+func notifyCanonicalReconcileDeferred() {
+	if runtime := currentCanonicalRuntime(); runtime != nil {
+		runtime.notifyReconcileDeferred()
+	}
+}
+
+func (runtime *CanonicalRuntime) reconciliationDeferred() bool {
+	if runtime == nil {
+		return false
+	}
+	runtime.mu.Lock()
+	deferred := runtime.reconcileDeferred
+	runtime.mu.Unlock()
+	return deferred != nil && deferred()
+}
+
 func (runtime *CanonicalRuntime) reconcileLoop() {
 	defer runtime.reconcileWG.Done()
 	retry := 0
@@ -1022,12 +1176,20 @@ func (runtime *CanonicalRuntime) reconcileLoop() {
 				return
 			case <-timer.C:
 			}
+			if !runtime.waitForReconcilePermission() {
+				return
+			}
 		}
 		if err := runtime.Reconcile(runtime.reconcileCtx); err != nil {
 			if errors.Is(err, context.Canceled) || runtime.reconcileCtx.Err() != nil {
 				return
 			}
 			if errors.Is(err, errCanonicalReconcileSuperseded) {
+				retry = 0
+				lastErr = nil
+				continue
+			}
+			if errors.Is(err, errCanonicalReconcileDeferred) {
 				retry = 0
 				lastErr = nil
 				continue
@@ -1039,6 +1201,26 @@ func (runtime *CanonicalRuntime) reconcileLoop() {
 		retry = 0
 		lastErr = nil
 	}
+}
+
+func (runtime *CanonicalRuntime) waitForReconcilePermission() bool {
+	deferredPoll := runtime.reconcileDeferredPoll
+	if deferredPoll <= 0 {
+		deferredPoll = canonicalReconcileDeferredPoll
+	}
+	for runtime.reconciliationDeferred() {
+		timer := time.NewTimer(deferredPoll)
+		select {
+		case <-runtime.reconcileStop:
+			timer.Stop()
+			return false
+		case <-runtime.reconcileCtx.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
+	}
+	return true
 }
 
 func (runtime *CanonicalRuntime) waitForReconcileWindow() bool {
@@ -1053,24 +1235,23 @@ func (runtime *CanonicalRuntime) waitForReconcileWindow() bool {
 	if quiet <= 0 {
 		quiet = canonicalReconcileQuietWindow
 	}
-	maximum := runtime.reconcileMaxLatency
-	if maximum < quiet {
-		maximum = quiet
+	deferredPoll := runtime.reconcileDeferredPoll
+	if deferredPoll <= 0 {
+		deferredPoll = canonicalReconcileDeferredPoll
 	}
 	quietTimer := time.NewTimer(quiet)
-	maximumTimer := time.NewTimer(maximum)
 	defer quietTimer.Stop()
-	defer maximumTimer.Stop()
 	for {
 		select {
 		case <-runtime.reconcileStop:
 			return false
 		case <-runtime.reconcileCtx.Done():
 			return false
-		case <-maximumTimer.C:
-			return true
 		case <-quietTimer.C:
-			return true
+			if !runtime.reconciliationDeferred() {
+				return true
+			}
+			quietTimer.Reset(deferredPoll)
 		case <-runtime.reconcileSignal:
 			if !quietTimer.Stop() {
 				select {
@@ -1238,7 +1419,10 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	target := runtime.takeReconcileTarget()
 	attemptStarted := time.Now().UTC()
 	outcome := "failed"
-	runtime.recordReconcileAttempt(target, attemptStarted)
+	parentCtx := ctx
+	ctx, cancelAttempt := context.WithCancel(parentCtx)
+	runtime.recordReconcileAttempt(target, attemptStarted, cancelAttempt)
+	defer runtime.clearReconcileAttemptCancel()
 	defer func() { runtime.recordReconcileOutcome(target, attemptStarted, outcome) }()
 	runtime.mu.Lock()
 	captureErr := runtime.captureErr
@@ -1271,6 +1455,26 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 		}
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) && parentCtx.Err() == nil {
+			runtime.mu.Lock()
+			superseded := runtime.dirtyHighWater != target
+			deferred := runtime.reconcileAttemptDeferred
+			if superseded {
+				runtime.signalReconcileLocked()
+			} else if deferred {
+				runtime.signalReconcileLocked()
+			}
+			dirty := runtime.dirtyHighWater
+			runtime.mu.Unlock()
+			if superseded {
+				outcome = "superseded"
+				return fmt.Errorf("%w: target=%d dirty=%d", errCanonicalReconcileSuperseded, target, dirty)
+			}
+			if deferred {
+				outcome = "deferred"
+				return fmt.Errorf("%w: target=%d", errCanonicalReconcileDeferred, target)
+			}
+		}
 		failure := fmt.Errorf("canonical reconcile failed at high-water %d: %w", target, err)
 		runtime.markFailure(failure)
 		return failure
@@ -1323,11 +1527,26 @@ func (runtime *CanonicalRuntime) Reconcile(ctx context.Context) error {
 	return nil
 }
 
-func (runtime *CanonicalRuntime) recordReconcileAttempt(target uint64, started time.Time) {
+func (runtime *CanonicalRuntime) recordReconcileAttempt(target uint64, started time.Time, cancel context.CancelFunc) {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	runtime.reconcileAttemptTarget = target
+	runtime.reconcileAttemptCancel = cancel
+	runtime.reconcileAttemptDeferred = false
 	runtime.reconcileAttemptAt = started
+	// A mutation can land after takeReconcileTarget releases mu but before this
+	// attempt installs its cancel handle. Close that gap under the same lock so
+	// an already-obsolete full scan never starts.
+	if runtime.dirtyHighWater != target {
+		cancel()
+	}
+}
+
+func (runtime *CanonicalRuntime) clearReconcileAttemptCancel() {
+	runtime.mu.Lock()
+	runtime.reconcileAttemptCancel = nil
+	runtime.reconcileAttemptDeferred = false
+	runtime.mu.Unlock()
 }
 
 func (runtime *CanonicalRuntime) recordReconcileOutcome(target uint64, started time.Time, outcome string) {

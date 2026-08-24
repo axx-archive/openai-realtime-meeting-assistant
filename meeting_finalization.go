@@ -892,6 +892,7 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 		}
 		if record.Finalization != nil && record.Finalization.State == meetingFinalizationFinalized && record.Finalization.Source.equal(source) {
 			if app.meetingFinalizationOutputsReady(record) {
+				app.clearFinalizedLiveTemporalBrain(record)
 				return record, nil
 			}
 			record, err = app.meetings.beginFinalizationAtRevision(meetingID, source, observedRevision, true, time.Now().UTC())
@@ -911,6 +912,9 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 			finalized, err := app.meetings.markFinalizationComplete(meetingID, source, time.Now().UTC())
 			if errors.Is(err, ErrMeetingFinalizationSourceAdvanced) {
 				continue
+			}
+			if err == nil {
+				app.clearFinalizedLiveTemporalBrain(finalized)
 			}
 			return finalized, err
 		}
@@ -988,10 +992,22 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 		if errors.Is(err, ErrMeetingFinalizationSourceAdvanced) {
 			continue
 		}
+		if err == nil {
+			app.clearFinalizedLiveTemporalBrain(finalized)
+		}
 		return finalized, err
 	}
 	err := fmt.Errorf("meeting finalization did not reach a stable source high-water")
 	return meetingRecord{}, app.degradeMeetingFinalization(meetingID, meetingFinalizationStageBrain, err)
+}
+
+func (app *kanbanBoardApp) clearFinalizedLiveTemporalBrain(record meetingRecord) {
+	if app == nil || app.strideRuntime == nil || record.ID == "" {
+		return
+	}
+	if err := app.strideRuntime.ClearLiveTemporalMeetingBrain(canonicalTenantID(), meetingRoomID(record), record.ID); err != nil && !errors.Is(err, ErrSTRIDERuntimeDisabled) {
+		log.Errorf("Could not clear finalized live temporal brain for meeting %s: %v", record.ID, err)
+	}
 }
 
 func firstNonNilResponder(responder openAITextResponder) openAITextResponder {
@@ -1229,6 +1245,7 @@ func (app *kanbanBoardApp) beginMeetingArchivePublication(meetingID string) {
 	}
 	app.meetingArchivePublishing[strings.TrimSpace(meetingID)] = true
 	app.meetingFinalizationRunMu.Unlock()
+	notifyCanonicalReconcileDeferred()
 }
 
 func (app *kanbanBoardApp) endMeetingArchivePublication(meetingID string, schedule bool) {
@@ -1236,23 +1253,27 @@ func (app *kanbanBoardApp) endMeetingArchivePublication(meetingID string, schedu
 		return
 	}
 	meetingID = strings.TrimSpace(meetingID)
-	app.meetingFinalizationRunMu.Lock()
-	delete(app.meetingArchivePublishing, meetingID)
-	app.meetingFinalizationRunMu.Unlock()
 	if schedule {
 		app.scheduleMeetingCoreFinalization(meetingID)
 	}
+	app.meetingFinalizationRunMu.Lock()
+	delete(app.meetingArchivePublishing, meetingID)
+	app.meetingFinalizationRunMu.Unlock()
 }
 
 func (app *kanbanBoardApp) scheduleMeetingCoreFinalization(meetingID string) {
-	app.scheduleMeetingCoreFinalizationPriority(meetingID, true)
+	app.scheduleMeetingCoreFinalizationPriority(meetingID, true, false)
 }
 
 func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationBacklog(meetingID string) {
-	app.scheduleMeetingCoreFinalizationPriority(meetingID, false)
+	app.scheduleMeetingCoreFinalizationPriority(meetingID, false, false)
 }
 
-func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationPriority(meetingID string, fresh bool) {
+func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationRetry(meetingID string) {
+	app.scheduleMeetingCoreFinalizationPriority(meetingID, false, true)
+}
+
+func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationPriority(meetingID string, fresh, retry bool) {
 	meetingID = strings.TrimSpace(meetingID)
 	if app == nil || meetingID == "" {
 		return
@@ -1276,7 +1297,20 @@ func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationPriority(meetingID str
 	if app.meetingFinalizationActive == nil {
 		app.meetingFinalizationActive = map[string]bool{}
 	}
+	if app.meetingFinalizationRetryQueued == nil {
+		app.meetingFinalizationRetryQueued = map[string]bool{}
+	}
+	if app.meetingFinalizationRetryActive == nil {
+		app.meetingFinalizationRetryActive = map[string]bool{}
+	}
 	if _, tracked := app.meetingFinalizationRunning[meetingID]; tracked {
+		if retry {
+			if _, active := app.meetingFinalizationActive[meetingID]; active {
+				app.meetingFinalizationRetryActive[meetingID] = true
+			} else {
+				app.meetingFinalizationRetryQueued[meetingID] = true
+			}
+		}
 		if _, active := app.meetingFinalizationActive[meetingID]; active {
 			// Only a fresh, append-side observation needs a second pass. Repeated
 			// boot snapshots do not create work and must not spin the queue.
@@ -1295,10 +1329,14 @@ func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationPriority(meetingID str
 		}
 		app.ensureMeetingFinalizationWorkersLocked()
 		app.meetingFinalizationRunMu.Unlock()
+		notifyCanonicalReconcileDeferred()
 		return
 	}
 	app.meetingFinalizationRunning[meetingID] = struct{}{}
 	app.meetingFinalizationQueuedPriority[meetingID] = fresh
+	if retry {
+		app.meetingFinalizationRetryQueued[meetingID] = true
+	}
 	if fresh {
 		app.meetingFinalizationQueue = append(app.meetingFinalizationQueue, meetingID)
 	} else {
@@ -1306,6 +1344,7 @@ func (app *kanbanBoardApp) scheduleMeetingCoreFinalizationPriority(meetingID str
 	}
 	app.ensureMeetingFinalizationWorkersLocked()
 	app.meetingFinalizationRunMu.Unlock()
+	notifyCanonicalReconcileDeferred()
 }
 
 // scheduleMeetingFinalizationRetry installs one timer per meeting. Durable
@@ -1367,7 +1406,7 @@ func (app *kanbanBoardApp) scheduleMeetingFinalizationRetry(record meetingRecord
 			strings.TrimSpace(current.Finalization.RetryAfter) != expectedRetryAfter || current.Finalization.RetryAttempt != expectedRetryAttempt {
 			return
 		}
-		app.scheduleMeetingCoreFinalizationBacklog(meetingID)
+		app.scheduleMeetingCoreFinalizationRetry(meetingID)
 	})
 	app.meetingFinalizationRetryTimers[meetingID] = timer
 	app.meetingFinalizationRunMu.Unlock()
@@ -1399,6 +1438,36 @@ func (app *kanbanBoardApp) stopMeetingFinalizationRetries() {
 		delete(app.meetingFinalizationRetryTimers, meetingID)
 	}
 	app.meetingFinalizationRunMu.Unlock()
+}
+
+// canonicalReconcileDeferred keeps whole-history parity work out of the live
+// meeting and current-close critical path. Durable capture remains active for
+// every write. Historical boot repair does not hold this gate: only an open
+// sitting, archive publication, or fresh finalization work for the meeting
+// that just closed postpones the scan.
+func (app *kanbanBoardApp) canonicalReconcileDeferred() bool {
+	if app == nil {
+		return false
+	}
+	if app.meetings != nil && len(app.meetings.openRoomIDs()) > 0 {
+		return true
+	}
+	app.meetingFinalizationRunMu.Lock()
+	defer app.meetingFinalizationRunMu.Unlock()
+	if len(app.meetingArchivePublishing) > 0 || len(app.meetingFinalizationAgain) > 0 || len(app.meetingFinalizationRetryQueued) > 0 || len(app.meetingFinalizationRetryActive) > 0 {
+		return true
+	}
+	for _, fresh := range app.meetingFinalizationQueuedPriority {
+		if fresh {
+			return true
+		}
+	}
+	for _, fresh := range app.meetingFinalizationActive {
+		if fresh {
+			return true
+		}
+	}
+	return false
 }
 
 func removeMeetingFinalizationQueueID(queue []string, meetingID string) []string {
@@ -1433,6 +1502,7 @@ func (app *kanbanBoardApp) nextMeetingFinalizationLocked() (string, bool, bool) 
 		meetingID := app.meetingFinalizationQueue[0]
 		app.meetingFinalizationQueue = app.meetingFinalizationQueue[1:]
 		delete(app.meetingFinalizationQueuedPriority, meetingID)
+		delete(app.meetingFinalizationRetryQueued, meetingID)
 		app.meetingFinalizationActive[meetingID] = true
 		return meetingID, true, true
 	}
@@ -1440,6 +1510,10 @@ func (app *kanbanBoardApp) nextMeetingFinalizationLocked() (string, bool, bool) 
 		meetingID := app.meetingFinalizationBacklog[0]
 		app.meetingFinalizationBacklog = app.meetingFinalizationBacklog[1:]
 		delete(app.meetingFinalizationQueuedPriority, meetingID)
+		if app.meetingFinalizationRetryQueued[meetingID] {
+			app.meetingFinalizationRetryActive[meetingID] = true
+		}
+		delete(app.meetingFinalizationRetryQueued, meetingID)
 		app.meetingFinalizationActive[meetingID] = false
 		app.meetingFinalizationBacklogActive = true
 		return meetingID, false, true
@@ -1479,6 +1553,7 @@ func (app *kanbanBoardApp) runMeetingFinalizationQueue() {
 		}
 		app.meetingFinalizationRunMu.Lock()
 		delete(app.meetingFinalizationActive, meetingID)
+		delete(app.meetingFinalizationRetryActive, meetingID)
 		if !fresh {
 			app.meetingFinalizationBacklogActive = false
 		}

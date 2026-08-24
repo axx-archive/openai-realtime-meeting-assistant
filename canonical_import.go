@@ -157,7 +157,7 @@ func (importer *CanonicalImporter) Build(ctx context.Context) (CanonicalImportPl
 		canonicalLifecycleJournalMu.Unlock()
 		return CanonicalImportPlan{}, fmt.Errorf("recover legacy lifecycle before canonical plan: %w", err)
 	}
-	objects, err := importer.readLegacyObjectsLocked()
+	objects, err := importer.readLegacyObjectsLockedContext(ctx)
 	canonicalLifecycleJournalMu.Unlock()
 	if err != nil {
 		return CanonicalImportPlan{}, err
@@ -322,33 +322,58 @@ func (plan CanonicalImportPlan) Apply(ctx context.Context, store CanonicalEventS
 func (importer *CanonicalImporter) readLegacyObjects() ([]CanonicalImportedObject, error) {
 	canonicalLifecycleJournalMu.Lock()
 	defer canonicalLifecycleJournalMu.Unlock()
-	return importer.readLegacyObjectsLocked()
+	return importer.readLegacyObjectsLockedContext(context.Background())
 }
 
 func (importer *CanonicalImporter) readLegacyObjectsLocked() ([]CanonicalImportedObject, error) {
+	return importer.readLegacyObjectsLockedContext(context.Background())
+}
+
+func (importer *CanonicalImporter) readLegacyObjectsLockedContext(ctx context.Context) ([]CanonicalImportedObject, error) {
 	var objects []CanonicalImportedObject
-	readers := []func() ([]CanonicalImportedObject, error){
-		func() ([]CanonicalImportedObject, error) { return importMemoryObjects(importer.Paths.MeetingMemory) },
-		func() ([]CanonicalImportedObject, error) { return importBoardObjects(importer.Paths.Board) },
-		func() ([]CanonicalImportedObject, error) { return importRoomObjects(importer.Paths.Rooms) },
-		func() ([]CanonicalImportedObject, error) { return importMeetingObjects(importer.Paths.Meetings) },
-		func() ([]CanonicalImportedObject, error) {
+	readers := []func(context.Context) ([]CanonicalImportedObject, error){
+		func(ctx context.Context) ([]CanonicalImportedObject, error) {
+			return importMemoryObjectsContext(ctx, importer.Paths.MeetingMemory)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importBoardObjects(importer.Paths.Board)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importRoomObjects(importer.Paths.Rooms)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importMeetingObjects(importer.Paths.Meetings)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
 			return importNotificationObjects(importer.Paths.Notifications)
 		},
-		func() ([]CanonicalImportedObject, error) { return importShareLinkObjects(importer.Paths.ShareLinks) },
-		func() ([]CanonicalImportedObject, error) { return importFileFolderObjects(importer.Paths.FileFolders) },
-		func() ([]CanonicalImportedObject, error) { return importQueueObjects(importer.Paths.QueueDirs) },
-		func() ([]CanonicalImportedObject, error) { return importArchiveObjects(importer.Paths.ArchivesDir) },
-		func() ([]CanonicalImportedObject, error) { return importBlobObjects(importer.Paths.BlobsDir) },
-		func() ([]CanonicalImportedObject, error) {
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importShareLinkObjects(importer.Paths.ShareLinks)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importFileFolderObjects(importer.Paths.FileFolders)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importQueueObjects(importer.Paths.QueueDirs)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
+			return importArchiveObjects(importer.Paths.ArchivesDir)
+		},
+		func(ctx context.Context) ([]CanonicalImportedObject, error) {
+			return importBlobObjectsContext(ctx, importer.Paths.BlobsDir)
+		},
+		func(context.Context) ([]CanonicalImportedObject, error) {
 			return importLifecycleJournalLocked(importer.Paths.DeletedJournal, "tombstone")
 		},
-		func() ([]CanonicalImportedObject, error) {
+		func(context.Context) ([]CanonicalImportedObject, error) {
 			return importLifecycleJournalLocked(importer.Paths.EvictedJournal, "eviction")
 		},
 	}
 	for _, read := range readers {
-		familyObjects, err := read()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		familyObjects, err := read(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -456,6 +481,10 @@ func addCanonicalLifecycleDeletionTargets(objects []CanonicalImportedObject, ver
 }
 
 func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
+	return importMemoryObjectsContext(context.Background(), path)
+}
+
+func importMemoryObjectsContext(ctx context.Context, path string) ([]CanonicalImportedObject, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, nil
 	}
@@ -474,6 +503,9 @@ func importMemoryObjects(path string) ([]CanonicalImportedObject, error) {
 	// IDs are non-events even when their kind/body conflicts.
 	seenIDs := map[string]struct{}{}
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		line, readErr := reader.ReadBytes('\n')
 		if len(strings.TrimSpace(string(line))) > 0 {
 			var entry meetingMemoryEntry
@@ -839,11 +871,18 @@ func importArchiveObjects(dir string) ([]CanonicalImportedObject, error) {
 }
 
 func importBlobObjects(dir string) ([]CanonicalImportedObject, error) {
+	return importBlobObjectsContext(context.Background(), dir)
+}
+
+func importBlobObjectsContext(ctx context.Context, dir string) ([]CanonicalImportedObject, error) {
 	if strings.TrimSpace(dir) == "" {
 		return nil, nil
 	}
 	var objects []CanonicalImportedObject
 	err := filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil

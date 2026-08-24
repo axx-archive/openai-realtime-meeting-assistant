@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,6 +52,105 @@ func TestCanonicalRuntimeOffPreservesLegacyWrite(t *testing.T) {
 	}
 }
 
+func TestCanonicalRuntimeDefersFullParityAcrossSpacedActiveMeetingWrites(t *testing.T) {
+	canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.reconcileQuietWindow = 40 * time.Millisecond
+	runtime.reconcileDeferredPoll = 20 * time.Millisecond
+	var active atomic.Bool
+	active.Store(true)
+	runtime.setReconcileDeferred(active.Load)
+	runtime.events = NewMemoryCanonicalEventStore(runtime.registry)
+	runtime.startReconcileLoop()
+	var attempts atomic.Int64
+	runtime.reconcileAfterTarget = func() { attempts.Add(1) }
+
+	path := meetingMemoryPath()
+	for index := 0; index < 3; index++ {
+		if err := appendFileDurably(path, []byte(fmt.Sprintf("{\"segment\":%d}\n", index)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(90 * time.Millisecond) // longer than the quiet window
+	}
+	if got := attempts.Load(); got != 0 {
+		t.Fatalf("full parity ran %d times during an active meeting", got)
+	}
+
+	active.Store(false)
+	deadline := time.Now().Add(3 * time.Second)
+	for attempts.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("full parity attempts after meeting finalization=%d, want exactly 1; snapshot=%+v", got, canonicalRuntimeSnapshot())
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := canonicalRuntimeSnapshot()
+		if snapshot.ReconciledHighWater == snapshot.DirtyHighWater && snapshot.ReconcileOutcome == "checkpointed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	snapshot := canonicalRuntimeSnapshot()
+	if snapshot.ReconciledHighWater != snapshot.DirtyHighWater || snapshot.ReconcileOutcome != "checkpointed" {
+		t.Fatalf("post-meeting parity did not converge: %+v", snapshot)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("post-meeting parity repeated without new writes: attempts=%d", got)
+	}
+}
+
+func TestCanonicalRuntimeShortLifecycleCancellationRemainsDeferredThenConverges(t *testing.T) {
+	dir := canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.events = NewMemoryCanonicalEventStore(runtime.registry)
+	runtime.reconcileSignal = make(chan struct{}, 1)
+	path := filepath.Join(dir, "meeting-memory.jsonl")
+	entry := []byte(`{"id":"lifecycle-cancel","kind":"note","text":"captured","createdAt":"2026-08-24T12:00:00Z"}` + "\n")
+	if err := writeFileAtomicallyForCanonicalMode(path, entry, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baselineError := canonicalRuntimeSnapshot().Error
+	var deferred atomic.Bool
+	runtime.setReconcileDeferred(deferred.Load)
+	entered, release := make(chan struct{}), make(chan struct{})
+	runtime.reconcileAfterTarget = func() {
+		close(entered)
+		<-release
+	}
+	done := make(chan error, 1)
+	go func() { done <- runtime.Reconcile(context.Background()) }()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reconcile did not reach lifecycle cancellation barrier")
+	}
+	deferred.Store(true)
+	runtime.notifyReconcileDeferred()
+	deferred.Store(false) // lifecycle ended before the canceled scan unwound
+	close(release)
+	if err := <-done; !errors.Is(err, errCanonicalReconcileDeferred) {
+		t.Fatalf("short lifecycle cancellation error=%v, want deferred", err)
+	}
+	if snapshot := canonicalRuntimeSnapshot(); snapshot.ReconcileOutcome != "deferred" || snapshot.Error != baselineError || snapshot.CheckpointValid {
+		t.Fatalf("short lifecycle cancellation was misclassified: %+v", snapshot)
+	}
+	runtime.reconcileAfterTarget = nil
+	if err := runtime.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := canonicalRuntimeSnapshot(); snapshot.ReconcileOutcome != "checkpointed" || !snapshot.CheckpointValid || snapshot.ReconciledHighWater != snapshot.DirtyHighWater {
+		t.Fatalf("post-lifecycle reconcile did not converge: %+v", snapshot)
+	}
+}
+
 func TestCanonicalRuntimeShadowFencesConcurrentAppendsAndReportsMissingPG(t *testing.T) {
 	dir := canonicalRuntimeTestEnv(t, "shadow")
 	if _, err := initializeCanonicalRuntime(context.Background()); err != nil {
@@ -82,6 +182,94 @@ func TestCanonicalRuntimeShadowFencesConcurrentAppendsAndReportsMissingPG(t *tes
 	}
 	if !strings.Contains(snapshot.Error, "PostgreSQL") {
 		t.Fatalf("missing database degradation not visible: %+v", snapshot)
+	}
+}
+
+func TestCanonicalRuntimeAppendDigestReadsLargeSourceOnlyOnce(t *testing.T) {
+	dir := canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "meeting-memory.jsonl")
+	seed := bytes.Repeat([]byte("seed payload for rolling digest\n"), 32*1024)
+	if err := writeFileAtomicallyForCanonicalMode(path, seed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendFileDurably(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reads := runtime.appendDigestReads; reads != 1 {
+		t.Fatalf("full digest reads after first append=%d, want 1", reads)
+	}
+	if _, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendFileDurably(path, []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reads := runtime.appendDigestReads; reads != 1 {
+		t.Fatalf("second append rescanned the full source: reads=%d", reads)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, append(append(seed, []byte("first\n")...), []byte("second\n")...)) {
+		t.Fatal("rolling digest path changed append content")
+	}
+}
+
+func TestCanonicalRuntimeAppendDigestInvalidatesOnExternalRewriteAndFailedMutation(t *testing.T) {
+	dir := canonicalRuntimeTestEnv(t, "shadow")
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "meeting-memory.jsonl")
+	seed := []byte("original-state\n")
+	if err := writeFileAtomicallyForCanonicalMode(path, seed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendFileDurably(path, []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := []byte("replaced-state\nfirst\n")
+	current, err := os.ReadFile(path)
+	if err != nil || len(replacement) != len(current) {
+		t.Fatalf("same-size replacement fixture current=%d replacement=%d err=%v", len(current), len(replacement), err)
+	}
+	if err := os.WriteFile(path, replacement, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendFileDurably(path, []byte("second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reads := runtime.appendDigestReads; reads != 2 {
+		t.Fatalf("external same-size rewrite reused stale digest cache: reads=%d", reads)
+	}
+	facts := runtime.spool.CommittedFacts()
+	latest := facts[len(facts)-1].Prepare
+	if latest.BeforeStateDigest != sha256Hex(replacement) || latest.AfterStateDigest != sha256Hex(append(append([]byte(nil), replacement...), []byte("second\n")...)) {
+		t.Fatalf("external rewrite capture digests before=%s after=%s", latest.BeforeStateDigest, latest.AfterStateDigest)
+	}
+
+	wantFailure := errors.New("append failed")
+	if err := canonicalFenceAppendMutation(path, []byte("failed\n"), func() error { return wantFailure }); !errors.Is(err, wantFailure) {
+		t.Fatalf("failed append error=%v", err)
+	}
+	if err := appendFileDurably(path, []byte("third\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reads := runtime.appendDigestReads; reads != 3 {
+		t.Fatalf("failed mutation retained uncommitted digest state: reads=%d", reads)
 	}
 }
 
@@ -531,6 +719,7 @@ func TestCanonicalRuntimeStalledReconcileDoesNotBlockSnapshotsOrWrites(t *testin
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- runtime.Reconcile(ctx) }()
 	select {
@@ -567,9 +756,8 @@ func TestCanonicalRuntimeStalledReconcileDoesNotBlockSnapshotsOrWrites(t *testin
 		t.Fatalf("covered write did not advance canonical capture: snapshot=%+v spool=%d", snapshot, runtime.spoolHighWater())
 	}
 
-	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("reconcile error=%v, want context canceled", err)
+	if err := <-done; !errors.Is(err, errCanonicalReconcileSuperseded) {
+		t.Fatalf("reconcile error=%v, want superseded after covered write", err)
 	}
 }
 
@@ -663,7 +851,6 @@ func TestCanonicalRuntimeContinuousWriteChurnStaysFailClosedThenConverges(t *tes
 		if err := appendFileDurably(path, entry, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		gate.release <- struct{}{}
 		if err := <-done; !errors.Is(err, errCanonicalReconcileSuperseded) {
 			t.Fatalf("pass %d error=%v, want superseded", pass, err)
 		}
@@ -702,7 +889,6 @@ func TestCanonicalRuntimeSupersededLoopCoalescesBurstBehindQuietWindow(t *testin
 		t.Fatal(err)
 	}
 	runtime.reconcileQuietWindow = 80 * time.Millisecond
-	runtime.reconcileMaxLatency = 400 * time.Millisecond
 	gate := &pacedEventsCanonicalEventStore{
 		inner: NewMemoryCanonicalEventStore(runtime.registry), entered: make(chan int, 1), release: make(chan struct{}),
 	}
@@ -733,14 +919,13 @@ func TestCanonicalRuntimeSupersededLoopCoalescesBurstBehindQuietWindow(t *testin
 			t.Fatalf("write %d blocked behind full reconcile for %s", index, elapsed)
 		}
 	}
-	releasedAt := time.Now()
-	gate.release <- struct{}{}
+	supersededAt := time.Now()
 	select {
 	case call := <-gate.entered:
 		if call != 2 {
 			t.Fatalf("follow-up event scan call=%d", call)
 		}
-		if elapsed := time.Since(releasedAt); elapsed < 60*time.Millisecond {
+		if elapsed := time.Since(supersededAt); elapsed < 60*time.Millisecond {
 			t.Fatalf("superseded pass busy-rescanned after %s", elapsed)
 		}
 	case <-time.After(2 * time.Second):
@@ -767,14 +952,13 @@ func TestCanonicalRuntimeSupersededLoopCoalescesBurstBehindQuietWindow(t *testin
 	}
 }
 
-func TestCanonicalRuntimeReconcileWindowBoundsContinuousWriteCadence(t *testing.T) {
+func TestCanonicalRuntimeReconcileWaitsForQuietAfterContinuousWrites(t *testing.T) {
 	dir := canonicalRuntimeTestEnv(t, "shadow")
 	runtime, err := initializeCanonicalRuntime(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime.reconcileQuietWindow = 200 * time.Millisecond
-	runtime.reconcileMaxLatency = 350 * time.Millisecond
+	runtime.reconcileQuietWindow = 100 * time.Millisecond
 	gate := &pacedEventsCanonicalEventStore{
 		inner: NewMemoryCanonicalEventStore(runtime.registry), entered: make(chan int, 1), release: make(chan struct{}),
 	}
@@ -782,7 +966,6 @@ func TestCanonicalRuntimeReconcileWindowBoundsContinuousWriteCadence(t *testing.
 	runtime.startReconcileLoop()
 	path := filepath.Join(dir, "meeting-memory.jsonl")
 	first := []byte(`{"id":"bounded-00","kind":"note","text":"generation 0","createdAt":"2026-01-01T00:00:00Z"}` + "\n")
-	started := time.Now()
 	if err := writeFileAtomicallyForCanonicalMode(path, first, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -808,40 +991,21 @@ func TestCanonicalRuntimeReconcileWindowBoundsContinuousWriteCadence(t *testing.
 	}()
 	select {
 	case call := <-gate.entered:
-		if call != 1 {
-			t.Fatalf("first event scan call=%d", call)
-		}
-		elapsed := time.Since(started)
-		if elapsed < 250*time.Millisecond {
-			t.Fatalf("continuous writes did not hold the quiet window; scan began after %s", elapsed)
-		}
-		if elapsed > time.Second {
-			t.Fatalf("continuous writes starved the bounded reconcile attempt for %s", elapsed)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("maximum reconcile latency did not bound continuous write churn")
+		t.Fatalf("continuous writes started wasteful full reconcile call=%d", call)
+	case <-time.After(350 * time.Millisecond):
 	}
 	close(stopWrites)
 	if err := <-writesDone; err != nil {
 		t.Fatal(err)
 	}
-	// This mutation is definitively after the first pass sampled its target.
-	final := []byte(`{"id":"bounded-final","kind":"note","text":"final generation","createdAt":"2026-01-01T00:01:00Z"}` + "\n")
-	if err := appendFileDurably(path, final, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gate.release <- struct{}{}
 
 	select {
 	case call := <-gate.entered:
-		if call != 2 {
-			t.Fatalf("follow-up event scan call=%d", call)
-		}
-		if snapshot := canonicalRuntimeSnapshot(); snapshot.CheckpointValid || snapshot.ReconcileOutcome != "superseded" || snapshot.ReconcileSuperseded != 1 {
-			t.Fatalf("bounded churn attempt was misreported as progress: %+v", snapshot)
+		if call != 1 {
+			t.Fatalf("quiet reconcile call=%d, want 1", call)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("queued quiet follow-up did not run")
+		t.Fatal("quiet reconcile did not start after writes stopped")
 	}
 	gate.release <- struct{}{}
 	deadline := time.Now().Add(2 * time.Second)
@@ -852,12 +1016,12 @@ func TestCanonicalRuntimeReconcileWindowBoundsContinuousWriteCadence(t *testing.
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if snapshot := canonicalRuntimeSnapshot(); !snapshot.CheckpointValid || snapshot.ReconciledHighWater != snapshot.DirtyHighWater || snapshot.ReconcileSuperseded != 1 {
-		t.Fatalf("bounded cadence follow-up did not converge: %+v", snapshot)
+	if snapshot := canonicalRuntimeSnapshot(); !snapshot.CheckpointValid || snapshot.ReconciledHighWater != snapshot.DirtyHighWater || snapshot.ReconcileSuperseded != 0 {
+		t.Fatalf("single quiet pass did not converge: %+v", snapshot)
 	}
 	time.Sleep(250 * time.Millisecond)
-	if calls := gate.eventCalls(); calls != 2 {
-		t.Fatalf("event scans=%d, want one max-latency attempt and one quiet follow-up", calls)
+	if calls := gate.eventCalls(); calls != 1 {
+		t.Fatalf("event scans=%d, want exactly one quiet reconcile", calls)
 	}
 }
 

@@ -1274,7 +1274,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
   validateExactEnvironment('caddy', config.services.caddy.environment, [])
 
   validateHealthcheck('meetingassist', config.services.meetingassist.healthcheck, {
-    test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz'], interval: ['30s', 30_000_000_000],
+    test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/livez'], interval: ['30s', 30_000_000_000],
     timeout: ['5s', 5_000_000_000], startPeriod: ['5m0s', 300_000_000_000], retries: 3
   })
   validateHealthcheck('canonical-postgres', config.services['canonical-postgres'].healthcheck, {

@@ -528,22 +528,23 @@ func newIsolatedWebsocketServer(t *testing.T) *httptest.Server {
 	// next test's isolated peer registry.
 	resetRoomMediaActorsForTest(t)
 	var app *kanbanBoardApp
-	// Registered before connection/server cleanups so it runs after their close
-	// callbacks (but before the actor reset registered above): first join every
-	// hijacked handler, then close the app and join any idle-end callback armed
-	// by the handlers' deferred occupancy cleanup. Only then may the next test
-	// replace package globals such as kanbanApp.
+
+	dir := t.TempDir()
+	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
+	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	// Registered after TempDir but before connection/server cleanups so it runs
+	// after their close callbacks and before TempDir removal (but before the
+	// actor reset registered above): first join every hijacked handler, then
+	// close the app and join any idle-end callback armed by the handlers'
+	// deferred occupancy cleanup. Only then may the next test replace package
+	// globals such as kanbanApp.
 	t.Cleanup(func() {
 		waitForWebsocketHandlersToDrain(t, 5*time.Second)
 		if app != nil {
 			_ = app.Close()
 		}
 	})
-
-	dir := t.TempDir()
-	t.Setenv("BONFIRE_USERS_PATH", filepath.Join(dir, "users.json"))
-	t.Setenv("BONFIRE_SESSIONS_PATH", filepath.Join(dir, "sessions.json"))
-	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
 
 	// The websocket handler can outlive httptest.Server.Close after the
 	// connection is hijacked. Leave a non-nil app installed for deferred peer
