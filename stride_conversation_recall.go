@@ -471,29 +471,24 @@ func (app *kanbanBoardApp) lockCurrentCompanyConversationSources(principal Recal
 		if entry.Kind == meetingMemoryKindTranscript {
 			source := strings.TrimSpace(entry.Metadata["source"])
 			var expectedMetadata map[string]string
-			var expectedText string
 			switch source {
 			case transcriptSourceChannel:
 				if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
 					return fail()
 				}
 				expectedMetadata = channelBrainMetadata(thread, message)
-				expectedText = strings.TrimSpace(message.Text)
-				if title := strings.TrimSpace(thread.Title); title != "" {
-					expectedText = "[#" + title + "] " + expectedText
-				}
 			case transcriptSourceRiff:
 				if thread.Riff == nil {
 					return fail()
 				}
 				expectedMetadata = riffBrainMetadata(thread, message)
-				expectedText = strings.TrimSpace(message.Text)
-				if title := strings.TrimSpace(thread.Riff.SourceTitle); title != "" {
-					expectedText = "[Riff on #" + title + "] " + expectedText
-				}
 			default:
 				return fail()
 			}
+			expectedText := formatSpeakerTranscript(
+				scoutChatAuthorName(&userAccount{Email: message.AuthorEmail, Name: message.AuthorName}),
+				channelBrainTranscriptBody(thread, source, message.Text),
+			)
 			if !recallEntryScopeAllowed(expectedMetadata, principal) || entry.Text != expectedText || !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 				return fail()
 			}

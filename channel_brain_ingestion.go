@@ -108,6 +108,27 @@ func riffBrainMetadata(thread scoutChatThreadRecord, message scoutChatMessageRec
 	return meta
 }
 
+// channelBrainTranscriptBody is the one canonical source-body constructor for
+// both durable ingestion and the post-provider current-source reauthorization
+// boundary. Speaker attribution is applied by appendAttributedTranscriptEntry;
+// callers reconstructing the stored bytes must pass this body through
+// formatSpeakerTranscript with the same message author.
+func channelBrainTranscriptBody(thread scoutChatThreadRecord, source, text string) string {
+	text = strings.TrimSpace(text)
+	var bodyBuilder strings.Builder
+	if source == transcriptSourceChannel {
+		if title := strings.TrimSpace(thread.Title); title != "" {
+			fmt.Fprintf(&bodyBuilder, "[#%s] ", title)
+		}
+	} else if source == transcriptSourceRiff && thread.Riff != nil {
+		if title := strings.TrimSpace(thread.Riff.SourceTitle); title != "" {
+			fmt.Fprintf(&bodyBuilder, "[Riff on #%s] ", title)
+		}
+	}
+	bodyBuilder.WriteString(text)
+	return bodyBuilder.String()
+}
+
 // fileChannelMessageAsBrainTranscript creates a transcript entry from a
 // channel or Riff message. This enables the brain worker to synthesize
 // channel knowledge into brain entries.
@@ -143,19 +164,6 @@ func (app *kanbanBoardApp) fileChannelMessageAsBrainTranscript(thread scoutChatT
 	// Build the speaker from author info
 	speaker := scoutChatAuthorName(&userAccount{Email: message.AuthorEmail, Name: message.AuthorName})
 
-	// Add channel context to the text for better brain synthesis
-	var bodyBuilder strings.Builder
-	if source == transcriptSourceChannel {
-		if title := strings.TrimSpace(thread.Title); title != "" {
-			fmt.Fprintf(&bodyBuilder, "[#%s] ", title)
-		}
-	} else if source == transcriptSourceRiff && thread.Riff != nil {
-		if title := strings.TrimSpace(thread.Riff.SourceTitle); title != "" {
-			fmt.Fprintf(&bodyBuilder, "[Riff on #%s] ", title)
-		}
-	}
-	bodyBuilder.WriteString(text)
-
 	// Create a unique event ID based on the message
 	eventID := fmt.Sprintf("%s-%s-%s", source, thread.ID, message.ID)
 
@@ -163,10 +171,10 @@ func (app *kanbanBoardApp) fileChannelMessageAsBrainTranscript(thread scoutChatT
 	_, _, err := app.memory.appendAttributedTranscriptEntry(
 		officeRoomID,
 		eventID,
-		"",       // itemID
+		"", // itemID
 		speaker,
-		"",       // speakerType
-		bodyBuilder.String(),
+		"", // speakerType
+		channelBrainTranscriptBody(thread, source, text),
 		meta,
 		true, // bypass usefulness filter
 		"",   // expectedMeetingID
