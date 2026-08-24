@@ -447,6 +447,15 @@ func TestPackagingGeneratedSceneQualityRequiresExactPremiumLockedLayout(t *testi
 	if err := validatePackagingGeneratedScene(app, plan, source, nil); err != nil {
 		t.Fatalf("scene matching exact premium locked layout: %v", err)
 	}
+	decoratedSlides := strings.Replace(source, `<section class="pg on" data-deck-slide="cover"`, `<section class="pg on" data-deck-slide="cover" data-deck-type="slide" data-deck-slide-kind="cover"`, 1)
+	decoratedSlides = strings.Replace(decoratedSlides, `<section class="pg" data-deck-slide="proof"`, `<section class="pg" data-deck-slide="proof" data-deck-type="slide" data-deck-slide-kind="normal"`, 1)
+	if err := validatePackagingGeneratedScene(app, plan, decoratedSlides, nil); err != nil {
+		t.Fatalf("closed optional slide metadata: %v", err)
+	}
+	driftedSlideKind := strings.Replace(decoratedSlides, `data-deck-slide-kind="normal"`, `data-deck-slide-kind="close"`, 1)
+	if err := validatePackagingGeneratedScene(app, plan, driftedSlideKind, nil); err == nil || !strings.Contains(err.Error(), "data-deck-slide-kind drifted") {
+		t.Fatalf("slide-kind drift error=%v, want locked-layout rejection", err)
+	}
 	styledChild := strings.Replace(source, ">Locked Proof</div>", `><span style="font-size:8px;color:#ffffff;font-family:Georgia">Locked Proof</span></div>`, 1)
 	if err := validatePackagingGeneratedScene(app, plan, styledChild, nil); err == nil || (!strings.Contains(err.Error(), "inline style on an unowned span") && !strings.Contains(err.Error(), "nested or styled text markup")) {
 		t.Fatalf("rich-text child bypass error=%v, want premium typography rejection", err)

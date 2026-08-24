@@ -557,6 +557,9 @@ func validatePackagingGeneratedSceneLockedLayoutPremium(app *kanbanBoardApp, pla
 		if err != nil || !oneOf(slideKind, "cover", "normal", "evidence", "close") || (slideIndex == 0 && slideKind != "cover") {
 			return fmt.Errorf("%s has invalid slide_kind", label)
 		}
+		if renderedKind := source.SlideKind[slideID]; renderedKind != "" && renderedKind != slideKind {
+			return fmt.Errorf("%s data-deck-slide-kind drifted from the locked layout", label)
+		}
 		if _, err := packagingStudioLayoutString(layoutSlide, "composition", label, false); err != nil {
 			return err
 		}

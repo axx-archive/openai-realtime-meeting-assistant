@@ -28,6 +28,7 @@ func packagingGeneratedScenePreflightRequired(plan *goalPlan) bool {
 
 type packagingGeneratedSceneSource struct {
 	SlideOrder     []string
+	SlideKind      map[string]string
 	SlideElements  map[string][]string
 	ElementSlide   map[string]string
 	OverlapAllowed map[string]bool
@@ -118,7 +119,7 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 	}
 
 	source := packagingGeneratedSceneSource{
-		SlideElements: make(map[string][]string), ElementSlide: make(map[string]string), OverlapAllowed: make(map[string]bool), SafeZoneExempt: make(map[string]bool), VisuallyHidden: make(map[string]bool),
+		SlideKind: make(map[string]string), SlideElements: make(map[string][]string), ElementSlide: make(map[string]string), OverlapAllowed: make(map[string]bool), SafeZoneExempt: make(map[string]bool), VisuallyHidden: make(map[string]bool),
 		Identity: make(map[string]string), ImageFig: make(map[string]string), ImageCrop: make(map[string]string), ImageFocalX: make(map[string]string), ImageFocalY: make(map[string]string), ImageFit: make(map[string]string), ImagePosition: make(map[string]string), UnsafeTextTree: make(map[string]bool),
 		TextLines: make(map[string][]string),
 	}
@@ -145,6 +146,7 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 		}
 		seenSlides[slideID] = struct{}{}
 		source.SlideOrder = append(source.SlideOrder, slideID)
+		source.SlideKind[slideID] = strings.ToLower(strings.TrimSpace(legacyNodeAttr(node, "data-deck-slide-kind")))
 
 		var elementWalk func(*xhtml.Node)
 		elementWalk = func(elementNode *xhtml.Node) {
@@ -409,8 +411,14 @@ func validatePackagingGeneratedPremiumSlideDOM(slide *xhtml.Node, slideIndex int
 	if !packagingGeneratedExactClassSet(slide, wantClasses) {
 		return fmt.Errorf("premium generated slide %d has invalid chassis classes", slideIndex+1)
 	}
-	if err := packagingGeneratedExactAttributeKeys(slide, map[string]bool{"class": true, "data-deck-slide": true, "style": true}, "slide"); err != nil || len(slide.Attr) != 3 {
+	allowed := map[string]bool{"class": true, "data-deck-slide": true, "style": true, "data-deck-type": true, "data-deck-slide-kind": true}
+	if err := packagingGeneratedExactAttributeKeys(slide, allowed, "slide"); err != nil {
 		return fmt.Errorf("premium generated slide %d has attributes outside its exact contract", slideIndex+1)
+	}
+	typeValue := strings.ToLower(strings.TrimSpace(legacyNodeAttr(slide, "data-deck-type")))
+	kindValue := strings.ToLower(strings.TrimSpace(legacyNodeAttr(slide, "data-deck-slide-kind")))
+	if (typeValue == "") != (kindValue == "") || (typeValue != "" && (typeValue != "slide" || !oneOf(kindValue, "cover", "normal", "evidence", "close") || len(slide.Attr) != 5)) || (typeValue == "" && len(slide.Attr) != 3) {
+		return fmt.Errorf("premium generated slide %d has invalid optional slide metadata", slideIndex+1)
 	}
 	notes := 0
 	for child := slide.FirstChild; child != nil; child = child.NextSibling {
