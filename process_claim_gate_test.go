@@ -273,6 +273,64 @@ func TestProcessClaimGateStoryImperativeCannotLaunderFacts(t *testing.T) {
 	}
 }
 
+func TestProcessClaimGateTreatsTypedStoryNarrativeAsInternalPlanning(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	packagingPlan, packagingStage := packagingStoryClaimPolicyFixture()
+	documentPlan, documentStage := documentStoryClaimPolicyFixture()
+	for name, test := range map[string]struct {
+		body  string
+		plan  *goalPlan
+		stage ProcessStage
+	}{
+		"selection rationale": {
+			body:  `{"selection":{"selection_rationale":"The middle beat carries the tension from request to visible progress to editable result."}}`,
+			plan:  packagingPlan,
+			stage: packagingStage,
+		},
+		"reader use": {
+			body:  `{"report_story_spine_v1":{"reader_use":{"text":"A compact receipt they can scan before opening Work."}}}`,
+			plan:  documentPlan,
+			stage: documentStage,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(test.body, authority, test.plan, test.stage); err != nil {
+				t.Fatalf("typed story-planning metadata was rejected: %v", err)
+			}
+			if err := validateProcessFactualClaimsForStage(test.body, authority.Claims, test.plan, test.stage); err != nil {
+				t.Fatalf("typed synthesized story-planning metadata was rejected: %v", err)
+			}
+			if err := validateProcessFactualClaims(test.body, authority.Claims); err == nil {
+				t.Fatal("generic factual validator accepted typed story-planning metadata")
+			}
+		})
+	}
+}
+
+func TestProcessClaimGateTypedStoryNarrativeCannotCarryMaterialFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := documentStoryClaimPolicyFixture()
+	for name, text := range map[string]string{
+		"number":           "They can act on a $6.8 billion market.",
+		"url":              "They can verify it at https://example.com/market.",
+		"factual status":   "They can select the market leader platform.",
+		"factual cause":    "They can proceed because Acme powers every creator.",
+		"present copula":   "The market is ready for Acme.",
+		"hidden assertion": "They can proceed. <!-- Acme is trusted. -->",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"report_story_spine_v1":{"reader_use":{"text":` + strconv.Quote(text) + `}}}`
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("material fact passed through typed story-planning metadata")
+			}
+		})
+	}
+	outside := `{"report_story_spine_v1":{"headline":"The middle beat carries the tension from request to result."}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(outside, authority, plan, stage); err == nil {
+		t.Fatal("story-planning exception escaped into a client-facing headline")
+	}
+}
+
 func TestProcessClaimGateTreatsExactDocumentConstraintAsPlanningMetadata(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	plan, stage := documentStoryClaimPolicyFixture()
