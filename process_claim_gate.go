@@ -858,6 +858,7 @@ type processFactualClaimPolicy struct {
 	allowDocumentStoryReaderDecision  bool
 	allowStoryPlanningImperative      bool
 	allowStoryInternalMetadata        bool
+	allowStoryVisibleForwardStatement bool
 	allowDocumentAuthorizedConstraint bool
 	authorizedObjective               string
 }
@@ -886,6 +887,7 @@ func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) proce
 		allowDocumentStoryReaderDecision:  documentStory,
 		allowStoryPlanningImperative:      packagingStory || documentStory,
 		allowStoryInternalMetadata:        packagingStory || documentStory,
+		allowStoryVisibleForwardStatement: packagingStory || documentStory,
 		allowDocumentAuthorizedConstraint: documentStory,
 		authorizedObjective:               objective,
 	}
@@ -1363,6 +1365,19 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 			}
 			if declared != processStatementNone && processForwardStatementAllowed(leaf.Text, declared, anchors) {
 				continue
+			}
+			// Story spines are internal planning artifacts. Some otherwise valid
+			// panel schemas represent a fact-bearing decision as a string inside an
+			// array, where there is no object on which to place statement_type. In
+			// this exact story-stage boundary, the visible label is the declaration
+			// only when the same closed forward-statement validator accepts the
+			// bounded imperative. Downstream document/deck prose remains strict.
+			if declared == processStatementNone && policy.allowStoryVisibleForwardStatement && processStoryFactBearingField(path, key) {
+				visibleType := processVisibleStatementType(leaf.Text)
+				_, visibleBody := processVisibleStatementBody(leaf.Text)
+				if visibleType != processStatementNone && processForwardStatementAllowed(leaf.Text, visibleType, anchors) && processScopedUnconditionalAction(visibleBody) == "" && processScopedUnsupportedDefinitive(visibleBody) == "" {
+					continue
+				}
 			}
 			if err := validateProcessFactText(leaf.Text, leaf.Path, anchors, leaf.ForceNumber); err != nil {
 				return err

@@ -335,6 +335,35 @@ func TestProcessClaimGateTreatsTypedStoryNarrativeAsInternalPlanning(t *testing.
 	}
 }
 
+func TestProcessClaimGateAllowsVisibleTypedForwardDecisionOnlyInsideStoryStage(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := documentStoryClaimPolicyFixture()
+	valid := `{"report_story_spine_v1":{"ending_decision_or_test":[{"claim":"Recommendation: use the compact receipt as the handoff."}]}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(valid, authority, plan, stage); err != nil {
+		t.Fatalf("visibly typed internal story decision was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaims(valid, authority.Claims); err == nil {
+		t.Fatal("generic factual validator accepted the story-only visible declaration")
+	}
+	if err := validateProcessFactualClaimsForStage(valid, authority.Claims, plan, ProcessStage{ID: "write", OutputContract: "native_markdown_report_v1"}); err == nil {
+		t.Fatal("visible-declaration exception escaped the exact story stage")
+	}
+
+	for name, claim := range map[string]string{
+		"present fact":       "Recommendation: Acme is the market leader.",
+		"unbounded action":   "Recommendation: deploy the system to every customer.",
+		"declarative future": "Recommendation: the system will solve the problem.",
+		"external URL":       "Recommendation: use https://example.com now.",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"report_story_spine_v1":{"ending_decision_or_test":[{"claim":` + strconv.Quote(claim) + `}]}}`
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("unsafe visibly labeled story decision passed")
+			}
+		})
+	}
+}
+
 func TestProcessClaimGateInternalStoryMetadataCannotCarryMaterialFactsOrEscapeDownstream(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	plan, stage := documentStoryClaimPolicyFixture()

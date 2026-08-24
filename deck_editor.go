@@ -2079,7 +2079,7 @@ func legacyDataDeckElements(root *xhtml.Node, allowedRefs map[string]struct{}, a
 			element.Color = firstNonEmptyString(styles["color"], "#ffffff")
 			element.TextAlign = strings.ToLower(firstNonEmptyString(styles["text-align"], "left"))
 			element.LetterSpacing = letterSpacing
-			if value, ok := legacyDeckNumber(styles["line-height"]); ok {
+			if value, ok := packagingGeneratedNormalizedLineHeight(styles["line-height"], element.FontSize); ok {
 				element.LineHeight = value
 			} else {
 				element.LineHeight = 1.08

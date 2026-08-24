@@ -244,6 +244,33 @@ func TestPackagingGeneratedSceneQualityGoodVariedScene(t *testing.T) {
 	}
 }
 
+func TestPackagingGeneratedSceneQualityAcceptsEquivalentPixelLineHeight(t *testing.T) {
+	source := strings.ReplaceAll(packagingGeneratedSceneGoodHTML(), "line-height:1.05", "line-height:50.4px")
+	if err := validatePackagingGeneratedPremiumStyles(source); err != nil {
+		t.Fatalf("equivalent pixel line-height: %v", err)
+	}
+
+	deck, fidelity := importLegacyDeckDocument(meetingMemoryEntry{Text: source})
+	if fidelity != "faithful" || len(deck.Slides) == 0 || len(deck.Slides[0].Elements) == 0 {
+		t.Fatal("pixel line-height scene did not import")
+	}
+	lineHeight := 0.0
+	for _, element := range deck.Slides[0].Elements {
+		if element.Type == "text" {
+			lineHeight = element.LineHeight
+			break
+		}
+	}
+	if got := lineHeight; got != 1.05 {
+		t.Fatalf("normalized line-height=%v, want 1.05", got)
+	}
+
+	bad := strings.ReplaceAll(source, "line-height:50.4px", "line-height:120px")
+	if err := validatePackagingGeneratedPremiumStyles(bad); err == nil || !strings.Contains(err.Error(), "equivalent pixel leading") {
+		t.Fatalf("unsafe pixel line-height error=%v, want closed-range rejection", err)
+	}
+}
+
 func TestPackagingGeneratedSceneQualityGeometryAndMappingAdversaries(t *testing.T) {
 	good := packagingGeneratedSceneGoodHTML()
 	tests := []struct {

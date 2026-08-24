@@ -657,7 +657,8 @@ func validatePackagingGeneratedPremiumInlineStyle(node *xhtml.Node, raw string) 
 
 	switch elementType {
 	case "text":
-		if size, ok := packagingGeneratedCSSNumber(styles["font-size"], "px"); !ok || size <= 0 {
+		size, sizeOK := packagingGeneratedCSSNumber(styles["font-size"], "px")
+		if !sizeOK || size <= 0 {
 			return fmt.Errorf("premium generated text font-size must be a positive pixel value")
 		}
 		weight, weightErr := strconv.Atoi(styles["font-weight"])
@@ -667,9 +668,8 @@ func validatePackagingGeneratedPremiumInlineStyle(node *xhtml.Node, raw string) 
 		if !deckHexColorPattern.MatchString(styles["color"]) || !oneOf(styles["text-align"], "left", "center", "right") {
 			return fmt.Errorf("premium generated text color or alignment is invalid")
 		}
-		lineHeight, lineHeightOK := packagingGeneratedCSSNumber(styles["line-height"], "")
-		if !lineHeightOK || lineHeight < .8 || lineHeight > 2 {
-			return fmt.Errorf("premium generated text line-height must be from .8 to 2")
+		if _, ok := packagingGeneratedNormalizedLineHeight(styles["line-height"], size); !ok {
+			return fmt.Errorf("premium generated text line-height must be a unitless .8 to 2 ratio or equivalent pixel leading")
 		}
 		if _, ok := packagingStudioTrackingPixels(styles["letter-spacing"], 1); !ok {
 			return fmt.Errorf("premium generated text letter-spacing is outside the closed tracking range")
@@ -705,6 +705,32 @@ func validatePackagingGeneratedPremiumInlineStyle(node *xhtml.Node, raw string) 
 		}
 	}
 	return nil
+}
+
+func packagingGeneratedNormalizedLineHeight(value string, fontSize float64) (float64, bool) {
+	value = strings.TrimSpace(value)
+	if fontSize <= 0 || value == "" {
+		return 0, false
+	}
+	lineHeight, ok := packagingGeneratedCSSNumber(value, "")
+	if !ok {
+		lineHeightPixels, pixelsOK := packagingGeneratedCSSNumber(value, "px")
+		if !pixelsOK {
+			return 0, false
+		}
+		lineHeight = lineHeightPixels / fontSize
+	}
+	return lineHeight, lineHeight >= .8 && lineHeight <= 2
+}
+
+func packagingGeneratedNormalizedLayoutLineHeight(value, fontSize float64) (float64, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || math.IsNaN(fontSize) || math.IsInf(fontSize, 0) || fontSize <= 0 {
+		return 0, false
+	}
+	if value > 2 {
+		value /= fontSize
+	}
+	return value, value >= .8 && value <= 2
 }
 
 func packagingGeneratedCSSNumber(value, suffix string) (float64, bool) {

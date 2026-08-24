@@ -771,7 +771,8 @@ func validatePackagingStudioLayoutText(label, slideKind string, layout map[strin
 		return "", fmt.Errorf("%s font_weight drifted or is invalid", label)
 	}
 	lineHeight, err := packagingStudioLayoutNumber(typography, "line_height", label+" typography")
-	if err != nil || math.Abs(lineHeight-scene.LineHeight) > packagingGeneratedSceneEpsilon || lineHeight < .8 || lineHeight > 2 {
+	lineHeight, lineHeightOK := packagingGeneratedNormalizedLayoutLineHeight(lineHeight, fontSize)
+	if err != nil || !lineHeightOK || math.Abs(lineHeight-scene.LineHeight) > packagingGeneratedSceneEpsilon {
 		return "", fmt.Errorf("%s line_height drifted or is invalid", label)
 	}
 	letterSpacing, err := packagingStudioLayoutString(typography, "letter_spacing", label+" typography", false)
