@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,10 @@ func packagingStoryClaimPolicyFixture() (*goalPlan, ProcessStage) {
 	return &goalPlan{ProcessID: packagingStudioProcessID}, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v2"}
 }
 
+func documentStoryClaimPolicyFixture() (*goalPlan, ProcessStage) {
+	return &goalPlan{ProcessID: documentReportProcessID}, ProcessStage{ID: "story", OutputContract: "report_story_spine_v1"}
+}
+
 func TestProcessPanelVoiceGateAllowsDeliberationButRejectsInventedFacts(t *testing.T) {
 	authority := scopedEvidenceAuthorityFixture()
 	// A panelist may argue for a direction. That voice is retained for audit but
@@ -143,6 +148,108 @@ func TestProcessClaimGateTreatsSlideArgumentRoleAsPlanningMetadata(t *testing.T)
 		if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
 			t.Fatal("generic factual validator accepted a stage-specific planning-role exception")
 		}
+	}
+}
+
+func TestProcessClaimGateTreatsPackagingMissingProofStatusAsNegativeMetadata(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := packagingStoryClaimPolicyFixture()
+	body := `{"claims_needing_proof":[{"proof_status":{"text":"No proof was generated for the proposed transition."}}]}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err != nil {
+		t.Fatalf("negative missing-proof status was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage); err != nil {
+		t.Fatalf("negative synthesized missing-proof status was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
+		t.Fatal("generic factual validator accepted a stage-specific missing-proof exception")
+	}
+}
+
+func TestProcessClaimGateMissingProofStatusExceptionCannotLaunderFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := packagingStoryClaimPolicyFixture()
+	for name, text := range map[string]string{
+		"positive proof":   "Proof was generated for the transition.",
+		"number":           "No proof supports a $6.8 billion market.",
+		"url":              "No proof appears at https://example.com/market.",
+		"embedded claim":   "No proof was generated for Acme powers every creator.",
+		"second clause":    "No proof was generated, Acme powers every creator.",
+		"hidden assertion": "No proof was generated. <!-- Acme powers every creator. -->",
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := `{"claims_needing_proof":[{"proof_status":{"text":` + strconv.Quote(text) + `}}]}`
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("unsafe missing-proof status passed")
+			}
+		})
+	}
+	valid := `{"claims_needing_proof":[{"proof_status":{"text":"Evidence is unavailable for this proposed transition."}}]}`
+	for name, policy := range map[string]struct {
+		plan  *goalPlan
+		stage ProcessStage
+	}{
+		"nil plan":       {nil, stage},
+		"wrong process":  {&goalPlan{ProcessID: documentReportProcessID}, stage},
+		"wrong stage":    {plan, ProcessStage{ID: "write", OutputContract: "story_spine_v2"}},
+		"wrong contract": {plan, ProcessStage{ID: "story_architects", OutputContract: "story_spine_v3"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(valid, authority, policy.plan, policy.stage); err == nil {
+				t.Fatal("missing-proof exception escaped its exact process-stage-output policy")
+			}
+		})
+	}
+}
+
+func TestProcessClaimGateTreatsDocumentReaderDecisionAsDeliberativePlanning(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := documentStoryClaimPolicyFixture()
+	body := `{"report_story_spine_v1":{"reader_decision":"Decide whether the proposed Scout receipt is compact, legible, and direct enough to implement."}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err != nil {
+		t.Fatalf("claim-free reader decision was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage); err != nil {
+		t.Fatalf("claim-free synthesized reader decision was rejected: %v", err)
+	}
+	if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
+		t.Fatal("generic factual validator accepted a stage-specific reader-decision exception")
+	}
+}
+
+func TestProcessClaimGateReaderDecisionExceptionIsNarrowAndCannotLaunderFacts(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan, stage := documentStoryClaimPolicyFixture()
+	for name, body := range map[string]string{
+		"number":          `{"report_story_spine_v1":{"reader_decision":"Decide whether a $6.8 billion market warrants launch."}}`,
+		"url":             `{"report_story_spine_v1":{"reader_decision":"Decide whether https://example.com proves the design."}}`,
+		"factual status":  `{"report_story_spine_v1":{"reader_decision":"Decide whether Acme is trusted worldwide."}}`,
+		"second sentence": `{"report_story_spine_v1":{"reader_decision":"Decide whether the receipt is clear. Acme is trusted."}}`,
+		"because clause":  `{"report_story_spine_v1":{"reader_decision":"Decide whether to proceed because Acme is trusted."}}`,
+		"hidden comment":  `{"report_story_spine_v1":{"reader_decision":"Decide whether the receipt is clear. <!-- Acme is trusted. -->"}}`,
+		"wrong field":     `{"report_story_spine_v1":{"opening_thesis":"Decide whether the proposed Scout receipt is compact enough to implement."}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(body, authority, plan, stage); err == nil {
+				t.Fatal("unsupported reader-decision material passed")
+			}
+		})
+	}
+	valid := `{"report_story_spine_v1":{"reader_decision":"Decide whether the receipt includes kind, title, phase, progress, status, and a direct Work link?"}}`
+	for name, policy := range map[string]struct {
+		plan  *goalPlan
+		stage ProcessStage
+	}{
+		"nil plan":       {nil, stage},
+		"wrong process":  {&goalPlan{ProcessID: packagingStudioProcessID}, stage},
+		"wrong stage":    {plan, ProcessStage{ID: "write", OutputContract: "report_story_spine_v1"}},
+		"wrong contract": {plan, ProcessStage{ID: "story", OutputContract: "report_story_spine_v2"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessPanelVoiceFactualClaimsForStage(valid, authority, policy.plan, policy.stage); err == nil {
+				t.Fatal("reader-decision exception escaped its exact process-stage-output policy")
+			}
+		})
 	}
 }
 

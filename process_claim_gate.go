@@ -125,6 +125,9 @@ var (
 	processJSONElementPathPattern                  = regexp.MustCompile(`^\$\.slides\[\d+\]\.elements\[\d+\]$`)
 	processJSONPlanningRoleLeadPattern             = regexp.MustCompile(`(?i)^\s*(?:establish|frame|introduce|surface|set\s+up|contrast|reveal|pivot|reframe|turn|connect|translate|move|build|earn|land|close|resolve|challenge|foreground|dramatize|explain|orient|show|confront|end|lead)\b`)
 	processJSONPlanningHiddenSyntaxPattern         = regexp.MustCompile(`(?i)(?:<!--|-->|\[\[\s*claim\s*:|stride-claim\s*:)`)
+	processJSONMissingProofStatusPathPattern       = regexp.MustCompile(`^\$(?:\.story_spine_v2)?\.claims_needing_proof\[\d+\]\.proof_status$`)
+	processMissingProofSubjectPattern              = regexp.MustCompile(`(?i)\b(?:claim|evidence|proof|source|support|verification)\b`)
+	processMissingProofAbsencePattern              = regexp.MustCompile(`(?i)\b(?:absent|missing|needs?|not|no|pending|requires?|unavailable|unproven|unsupported|unverified|without)\b`)
 	processJSONRootWrapperPathPattern              = regexp.MustCompile(`^\$\.(canvas|grid|palette|typography)$`)
 	processJSONSceneWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.(canvas|grid|palette|typography|style|position|dimensions|resolution)$`)
 	processJSONStyleWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.style\.(palette|typography|position|dimensions)$`)
@@ -842,7 +845,9 @@ func processJSONPlanningRoleField(path, key string) bool {
 }
 
 type processFactualClaimPolicy struct {
-	allowPackagingStoryPlanningRole bool
+	allowPackagingStoryPlanningRole  bool
+	allowPackagingStoryMissingProof  bool
+	allowDocumentStoryReaderDecision bool
 }
 
 func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) processFactualClaimPolicy {
@@ -851,6 +856,14 @@ func processFactualClaimPolicyForStage(plan *goalPlan, stage ProcessStage) proce
 			plan.ProcessID == packagingStudioProcessID &&
 			stage.ID == "story_architects" &&
 			stage.OutputContract == "story_spine_v2",
+		allowPackagingStoryMissingProof: plan != nil &&
+			plan.ProcessID == packagingStudioProcessID &&
+			stage.ID == "story_architects" &&
+			stage.OutputContract == "story_spine_v2",
+		allowDocumentStoryReaderDecision: plan != nil &&
+			plan.ProcessID == documentReportProcessID &&
+			stage.ID == "story" &&
+			stage.OutputContract == "report_story_spine_v1",
 	}
 }
 
@@ -883,6 +896,74 @@ func validateProcessPlanningRoleText(text, path string) error {
 		return fmt.Errorf("%s: planning field must contain one sentence without a second clause", path)
 	}
 	return validateProcessFactText(inspect, path, nil, false)
+}
+
+// validateProcessReaderDecisionText recognizes the document story spine's one
+// deliberative planning field. "Decide whether ..." scopes the embedded
+// proposition as a question for the reader; it does not assert that proposition
+// as a fact. Keep the exception bound to one sentence and this exact stage
+// field. Material facts, factual-status headlines, hidden claim syntax, and a
+// second explanatory clause remain outside the exception.
+func validateProcessReaderDecisionText(text, path string) error {
+	if processJSONPlanningHiddenSyntaxPattern.MatchString(text) {
+		return fmt.Errorf("%s: reader decision cannot contain hidden comments or claim markers", path)
+	}
+	trimmed := strings.TrimSpace(text)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return fmt.Errorf("%s: reader decision must be one line", path)
+	}
+	const decideWhether = "decide whether "
+	if len(trimmed) <= len(decideWhether) || !strings.EqualFold(trimmed[:len(decideWhether)], decideWhether) {
+		return fmt.Errorf("%s: reader decision must begin with Decide whether", path)
+	}
+	inspect := trimmed
+	if strings.HasSuffix(inspect, ".") || strings.HasSuffix(inspect, "?") || strings.HasSuffix(inspect, "!") {
+		inspect = strings.TrimSpace(inspect[:len(inspect)-1])
+	}
+	question := strings.TrimSpace(inspect[len(decideWhether):])
+	if question == "" || strings.ContainsAny(question, ".!?;:—–") || processForwardClausePattern.MatchString(question) {
+		return fmt.Errorf("%s: reader decision must contain one deliberative clause", path)
+	}
+	if tokens := processMaterialTokens(question); len(tokens) > 0 {
+		return fmt.Errorf("%s: reader decision contains material %s %q without an admitted claim", path, tokens[0].Kind, compactAssistantLine(tokens[0].Value))
+	}
+	if processLikelyFactualHeadlineFragment(question) {
+		return fmt.Errorf("%s: reader decision contains an unsupported factual-status proposition", path)
+	}
+	return nil
+}
+
+// validateProcessMissingProofStatusText permits one typed, negative evidence-
+// status sentence inside Packaging Studio's claims_needing_proof inventory.
+// The model may truthfully say "No proof was generated" without that verb being
+// mistaken for a positive factual claim. The exception does not admit the
+// underlying claim: material facts, a second clause, or positive proof language
+// still fail before the panel can influence synthesis.
+func validateProcessMissingProofStatusText(text, path string) error {
+	if processJSONPlanningHiddenSyntaxPattern.MatchString(text) {
+		return fmt.Errorf("%s: missing-proof status cannot contain hidden comments or claim markers", path)
+	}
+	trimmed := strings.TrimSpace(text)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		return fmt.Errorf("%s: missing-proof status must be one line", path)
+	}
+	inspect := trimmed
+	if strings.HasSuffix(inspect, ".") || strings.HasSuffix(inspect, "?") || strings.HasSuffix(inspect, "!") {
+		inspect = strings.TrimSpace(inspect[:len(inspect)-1])
+	}
+	if inspect == "" || strings.ContainsAny(inspect, ".!?;,:—–") || !processMissingProofSubjectPattern.MatchString(inspect) ||
+		!processMissingProofAbsencePattern.MatchString(inspect) {
+		return fmt.Errorf("%s: missing-proof status must be one negative evidence-status clause", path)
+	}
+	for _, token := range processMaterialTokens(inspect) {
+		if token.Kind != "assertion" || !oneOf(strings.ToLower(strings.TrimSpace(token.Value)), "generated", "included", "provided", "supported", "created") {
+			return fmt.Errorf("%s: missing-proof status contains material %s %q", path, token.Kind, compactAssistantLine(token.Value))
+		}
+	}
+	if processLikelyFactualHeadlineFragment(inspect) {
+		return fmt.Errorf("%s: missing-proof status contains an unsupported factual-status proposition", path)
+	}
+	return nil
 }
 
 func processJSONScalarStrings(value any) []string {
@@ -1046,6 +1127,26 @@ func validateProcessJSONClaimObjectWithPolicy(object map[string]any, path string
 				return fmt.Errorf("%s.%s: planning field %s must be a string", path, key, key)
 			}
 			if err := validateProcessPlanningRoleText(text, path+"."+key); err != nil {
+				return err
+			}
+			continue
+		}
+		if policy.allowDocumentStoryReaderDecision && path == "$.report_story_spine_v1" && strings.EqualFold(strings.TrimSpace(key), "reader_decision") {
+			text, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("%s.%s: reader decision must be a string", path, key)
+			}
+			if err := validateProcessReaderDecisionText(text, path+"."+key); err != nil {
+				return err
+			}
+			continue
+		}
+		if policy.allowPackagingStoryMissingProof && processJSONMissingProofStatusPathPattern.MatchString(path) && strings.EqualFold(strings.TrimSpace(key), "text") {
+			text, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("%s.%s: missing-proof status must be a string", path, key)
+			}
+			if err := validateProcessMissingProofStatusText(text, path+"."+key); err != nil {
 				return err
 			}
 			continue
