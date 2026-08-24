@@ -310,6 +310,11 @@ func TestProcessClaimGateTreatsTypedStoryNarrativeAsInternalPlanning(t *testing.
 			plan:  documentPlan,
 			stage: documentStage,
 		},
+		"deliberative decision boundary": {
+			body:  `{"report_story_spine_v1":{"decision_boundary":"What the reader may change after review."}}`,
+			plan:  documentPlan,
+			stage: documentStage,
+		},
 		"nested selection reason visible string": {
 			body:  `{"selected_story":{"selection_reason":{"visible_string":"Recommendation: Choose the direct request-to-result arc because it gives the reader a clean decision path."}}}`,
 			plan:  packagingPlan,
@@ -373,6 +378,17 @@ func TestProcessClaimGateInternalStoryMetadataCannotCarryMaterialFactsOrEscapeDo
 	}
 	if err := validateProcessFactualClaimsForStage(alternateDecision, authority.Claims, plan, writeStage); err == nil {
 		t.Fatal("alternate internal reader decision escaped into the downstream document writer")
+	}
+	deliberativeBoundary := `{"report_story_spine_v1":{"decision_boundary":"What the reader may change after review."}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(deliberativeBoundary, authority, plan, stage); err != nil {
+		t.Fatalf("deliberative internal decision boundary was rejected before the writer boundary: %v", err)
+	}
+	if err := validateProcessFactualClaimsForStage(deliberativeBoundary, authority.Claims, plan, writeStage); err == nil {
+		t.Fatal("deliberative internal decision boundary escaped into the downstream document writer")
+	}
+	factBearingModal := `{"report_story_spine_v1":{"counterargument":{"claim":"The platform may solve the problem."}}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(factBearingModal, authority, plan, stage); err == nil {
+		t.Fatal("deliberative modal escaped into a fact-bearing story claim")
 	}
 }
 
@@ -852,6 +868,37 @@ func TestProcessClaimGateTreatsExactLayoutIdentityTokensAsClosedStructuralData(t
 	malformed := strings.Replace(body, `"grid":"single_axis"`, `"grid":"invented_grid"`, 1)
 	if err := validateProcessFactualClaimsForStage(malformed, authority.Claims, plan, stage); err == nil {
 		t.Fatal("malformed closed identity tokens passed the layout claim boundary")
+	}
+}
+
+func TestProcessClaimGateTreatsExactLayoutElementStyleAsStructuralData(t *testing.T) {
+	authority := scopedEvidenceAuthorityFixture()
+	plan := &goalPlan{ProcessID: packagingStudioProcessID}
+	stage := ProcessStage{ID: "layout_plan", OutputContract: "layout_plan_v3"}
+	body := `{"visual_identity":{"tokens":{"palette":"background=#F6F4EF;foreground=#181818;accent=#2F5D50;surface=#FFFFFF;muted=#8A8A84","type":"heading=editorial_serif;body=humanist_sans;accent=monospace_accent","spacing":"airy","grid":"single_axis","graphic_motif":"rules","image_treatment":"restrained_monochrome","data_viz_treatment":"direct_labels","refusals":"gradients,glass,decorative_charts,logos,generic_ai_motifs,dense_copy"}},"slides":[{"slide_id":"1","slide_kind":"cover","background":"#F6F4EF","grid":"single_axis","elements":[{"id":"headline","type":"text","x":120,"y":144,"width":1560,"height":180,"z":1,"opacity":1,"rotation":0,"text":"Reliable Work Flow","copy_role":"headline","typography":{"font_token":"editorial_serif","font_family":"Iowan Old Style, Georgia, Times New Roman, serif","font_size":72,"font_weight":700,"line_height":1.05,"letter_spacing":0,"alignment":"left","color":"#181818"},"claim_ids":[],"claim_renderings":[]},{"id":"hero","type":"image","x":0,"y":0,"width":1920,"height":1080,"z":0,"opacity":1,"rotation":0,"fig":1,"fit":"cover","crop":"faces","focal_point":{"x":0.5,"y":0.25}}]}]}`
+	if err := validateProcessFactualClaimsForStage(body, authority.Claims, plan, stage); err != nil {
+		t.Fatalf("closed layout element style was rejected as factual material: %v", err)
+	}
+	if err := validateProcessFactualClaims(body, authority.Claims); err == nil {
+		t.Fatal("generic factual validator accepted the stage-specific layout-style exception")
+	}
+	for name, policy := range map[string]struct {
+		plan  *goalPlan
+		stage ProcessStage
+	}{
+		"wrong process":  {&goalPlan{ProcessID: documentReportProcessID}, stage},
+		"wrong stage":    {plan, ProcessStage{ID: "write", OutputContract: "layout_plan_v3"}},
+		"wrong contract": {plan, ProcessStage{ID: "layout_plan", OutputContract: "layout_plan_v2"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateProcessFactualClaimsForStage(body, authority.Claims, policy.plan, policy.stage); err == nil {
+				t.Fatal("layout element-style exception escaped its exact process-stage-output policy")
+			}
+		})
+	}
+	injected := strings.Replace(body, `"text":"Reliable Work Flow"`, `"text":"Acme powers every creator."`, 1)
+	if err := validateProcessFactualClaimsForStage(injected, authority.Claims, plan, stage); err == nil {
+		t.Fatal("unsupported visible copy passed through the layout structural exception")
 	}
 }
 

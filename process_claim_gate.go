@@ -134,7 +134,7 @@ var (
 	processMissingProofSubjectPattern              = regexp.MustCompile(`(?i)\b(?:claim|evidence|proof|source|support|verification)\b`)
 	processMissingProofAbsencePattern              = regexp.MustCompile(`(?i)\b(?:absent|missing|needs?|not|no|pending|requires?|unavailable|unproven|unsupported|unverified|without)\b`)
 	processJSONRootWrapperPathPattern              = regexp.MustCompile(`^\$\.(canvas|grid|palette|typography)$`)
-	processJSONSceneWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.(canvas|grid|palette|typography|style|position|dimensions|resolution)$`)
+	processJSONSceneWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.(canvas|grid|palette|typography|style|position|dimensions|resolution|focal_point)$`)
 	processJSONStyleWrapperPathPattern             = regexp.MustCompile(`^\$\.slides\[\d+\](?:\.elements\[\d+\])?\.style\.(palette|typography|position|dimensions)$`)
 )
 
@@ -834,7 +834,9 @@ func processJSONStructuralField(path, key string) bool {
 	case "palette":
 		return oneOf(normalized, "background", "color", "fill", "stroke", "border", "primary", "secondary", "accent", "surface", "foreground")
 	case "typography":
-		return oneOf(normalized, "font", "font_family", "fontfamily", "font_size", "fontsize", "font_weight", "fontweight", "line_height", "lineheight", "letter_spacing", "letterspacing", "tracking", "alignment", "text_align", "textalign", "size")
+		return oneOf(normalized, "font", "font_family", "fontfamily", "font_size", "fontsize", "font_weight", "fontweight", "line_height", "lineheight", "letter_spacing", "letterspacing", "tracking", "alignment", "text_align", "textalign", "color", "size")
+	case "focal_point":
+		return oneOf(normalized, "x", "y")
 	case "style":
 		return oneOf(normalized,
 			"x", "y", "width", "height", "z", "z_index", "zindex", "opacity", "rotation", "blur", "scale", "zoom",
@@ -1002,7 +1004,12 @@ func validateProcessStoryInternalMetadataText(text, path string) error {
 		return nil
 	}
 	for _, token := range processMaterialTokens(trimmed) {
-		if token.Kind == "assertion" {
+		// Deliberative modals describe what a reader may consider inside this
+		// exact internal story-planning boundary. They still fail in every
+		// fact-bearing story field and in the downstream document/deck writer.
+		// Other mutation language (reportedly, allegedly, no longer, and so on)
+		// remains closed here so an admitted claim cannot be quietly rewritten.
+		if token.Kind == "assertion" || (token.Kind == "claim modifier" && oneOf(strings.ToLower(strings.TrimSpace(token.Value)), "may", "might", "could")) {
 			continue
 		}
 		return fmt.Errorf("%s: internal story metadata contains material %s %q", path, token.Kind, compactAssistantLine(token.Value))
