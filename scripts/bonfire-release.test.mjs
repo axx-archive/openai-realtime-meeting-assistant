@@ -1010,6 +1010,11 @@ test('rendered candidate Compose is an exact singleton topology before mutation'
 test('rendered candidate Compose rejects security, storage, network, port, and lifecycle widening', () => {
   const receipt = makeReceipt()
   const exact = renderedComposeConfig(receipt)
+
+  const retainedReadyzBridge = structuredClone(exact)
+  retainedReadyzBridge.services.meetingassist.healthcheck.test = ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz']
+  assert.equal(validateRenderedComposeConfig(retainedReadyzBridge, receipt, topologyContext), retainedReadyzBridge)
+
   const reject = (mutate, pattern) => {
     const candidate = structuredClone(exact)
     mutate(candidate)
