@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -495,6 +496,7 @@ func TestStudioProjectsRootOnlyClassificationAndViewerReceipt(t *testing.T) {
 	}
 	presentation = updateStudioProjectPlan(t, kanbanApp, presentation, func(plan *goalPlan) {
 		plan.Report.DeliverableArtifactID = deck.ID
+		plan.Blocker = "process gate factual_integrity blocked: private provider diagnostic"
 	})
 
 	cookies := loginAs(t, owner, "B0NFIRE!")
@@ -526,8 +528,11 @@ func TestStudioProjectsRootOnlyClassificationAndViewerReceipt(t *testing.T) {
 	for _, project := range payload.Projects {
 		byID[project.ID] = project
 	}
-	if got := byID[presentation.ID]; got.Kind != studioProjectKindPresentation || got.Status != studioProjectStatusNeedsAttention || got.Result == nil || got.Result.ArtifactID != deck.ID || !got.Result.CanEdit {
+	if got := byID[presentation.ID]; got.Kind != studioProjectKindPresentation || got.Status != studioProjectStatusNeedsAttention || got.Result == nil || got.Result.ArtifactID != deck.ID || !got.Result.CanEdit || got.Href != "/work?project="+url.QueryEscape(presentation.ID) || got.Attention == nil || got.Attention.Title != "Quality checks didn’t pass" {
 		t.Fatalf("presentation=%+v, want blocked root plus exact editable deck", got)
+	}
+	if strings.Contains(response.Body.String(), "private provider diagnostic") {
+		t.Fatalf("Studio projection leaked a raw blocker: %s", response.Body.String())
 	}
 	if got := byID[document.ID]; got.Kind != studioProjectKindDocument || got.Status != studioProjectStatusNeedsInput || got.Checkpoint == nil || len(got.Checkpoint.Options) != 2 {
 		t.Fatalf("document=%+v, want one actionable needs-input report root", got)
@@ -551,8 +556,8 @@ func TestStudioProjectsRootOnlyClassificationAndViewerReceipt(t *testing.T) {
 	if receiptSourceCalls != 0 {
 		t.Fatalf("quiet receipts authorized/decoded an unprojected source %d times, want zero", receiptSourceCalls)
 	}
-	if projected.Thread == nil || projected.StudioProject == nil || projected.StudioProject.ID != presentation.ID || projected.StudioProject.Href == "" {
-		t.Fatalf("viewer projection lost legacy ref or studio receipt: %+v", projected)
+	if projected.Thread == nil || projected.StudioProject == nil || projected.StudioProject.ID != presentation.ID || projected.StudioProject.Href != "/work?project="+url.QueryEscape(presentation.ID) || projected.StudioProject.ProgressPercent != 72 || projected.StudioProject.Phase != "build" || projected.StudioProject.Attention == nil {
+		t.Fatalf("viewer projection lost legacy ref or studio receipt: message=%+v receipt=%+v", projected, projected.StudioProject)
 	}
 	denied := kanbanApp.projectScoutChatMessageForViewer("tim@shareability.com", thread, message, context.Background())
 	if denied.StudioProject != nil {
@@ -681,6 +686,70 @@ func TestStudioProjectRenameUsesRevisionCASWithoutRenamingResult(t *testing.T) {
 	readOnlyRename := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+root.ID+`","title":"Should not land","expectedRevision":2}`, cookies, studioProjectsHandler)
 	if readOnlyRename.Code != http.StatusNotFound {
 		t.Fatalf("read-only rename=%d body=%s, want opaque denial", readOnlyRename.Code, readOnlyRename.Body.String())
+	}
+}
+
+func TestStudioProjectArchiveHidesOnlyFailedWorkAndRemainsRecoverable(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+
+	owner := "aj@shareability.com"
+	thread, err := kanbanApp.createScoutChatThread(owner, "AJ", "Archive source", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := seedStudioProjectRoot(t, kanbanApp, thread, packagingStudioProcessID, "Failed presentation", goalStateBlocked)
+	active := seedStudioProjectRoot(t, kanbanApp, thread, documentReportProcessID, "Active research", goalStateExecute)
+	approval := seedStudioProjectRoot(t, kanbanApp, thread, documentReportProcessID, "Research awaiting a decision", goalStateApproval)
+	cookies := loginAs(t, owner, "B0NFIRE!")
+
+	activeArchive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+active.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)
+	if activeArchive.Code != http.StatusConflict {
+		t.Fatalf("active archive=%d body=%s", activeArchive.Code, activeArchive.Body.String())
+	}
+	approvalArchive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+approval.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)
+	if approvalArchive.Code != http.StatusConflict {
+		t.Fatalf("approval archive=%d body=%s", approvalArchive.Code, approvalArchive.Body.String())
+	}
+
+	archive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+failed.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)
+	if archive.Code != http.StatusOK {
+		t.Fatalf("failed archive=%d body=%s", archive.Code, archive.Body.String())
+	}
+	var archivedPayload struct {
+		Project studioProjectView `json:"project"`
+	}
+	if err := json.Unmarshal(archive.Body.Bytes(), &archivedPayload); err != nil {
+		t.Fatal(err)
+	}
+	if archivedPayload.Project.ID != failed.ID || archivedPayload.Project.Revision != 2 {
+		t.Fatalf("archived project=%+v", archivedPayload.Project)
+	}
+	stored, found := kanbanApp.osArtifactByID(failed.ID)
+	if !found || !studioProjectArchived(stored) || strings.TrimSpace(stored.Metadata["studioArchivedBy"]) == "" {
+		t.Fatalf("archive receipt was not preserved on root: %+v", stored.Metadata)
+	}
+
+	list := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1", "", cookies, studioProjectsHandler)
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), failed.ID) || !strings.Contains(list.Body.String(), active.ID) || !strings.Contains(list.Body.String(), approval.ID) {
+		t.Fatalf("archived list status=%d body=%s", list.Code, list.Body.String())
+	}
+	exact := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1?id="+url.QueryEscape(failed.ID), "", cookies, studioProjectsHandler)
+	if exact.Code != http.StatusOK || !strings.Contains(exact.Body.String(), failed.ID) {
+		t.Fatalf("archived exact recovery status=%d body=%s", exact.Code, exact.Body.String())
+	}
+
+	restore := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+failed.ID+`","archived":false,"expectedRevision":2}`, cookies, studioProjectsHandler)
+	if restore.Code != http.StatusOK {
+		t.Fatalf("restore=%d body=%s", restore.Code, restore.Body.String())
+	}
+	list = artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1", "", cookies, studioProjectsHandler)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), failed.ID) {
+		t.Fatalf("restored list status=%d body=%s", list.Code, list.Body.String())
 	}
 }
 

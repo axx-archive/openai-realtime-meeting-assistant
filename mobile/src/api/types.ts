@@ -103,6 +103,14 @@ export type StudioProjectCheckpoint = {
   }>;
 };
 
+/** Viewer-safe recovery guidance projected by the server for attention states. */
+export type StudioProjectAttention = {
+  kind?: string;
+  title: string;
+  body?: string;
+  actionLabel?: string;
+};
+
 export type StudioProjectResult = {
   artifactId: string;
   type: string;
@@ -143,6 +151,7 @@ export type StudioProject = {
   companyProject?: { id: string; title?: string };
   result?: StudioProjectResult;
   checkpoint?: StudioProjectCheckpoint;
+  attention?: StudioProjectAttention;
   canRename: boolean;
 };
 
@@ -165,6 +174,10 @@ export type ScoutStudioProjectRef = {
   title: string;
   status: StudioProjectStatus;
   href: string;
+  /** Optional while older servers roll forward to the richer quiet receipt. */
+  progressPercent?: number;
+  phase?: string;
+  attention?: StudioProjectAttention;
   /** Viewer-gated human decision. Raw goal checkpoints never drive Studio UI. */
   checkpoint?: StudioProjectCheckpoint;
 };

@@ -157,6 +157,12 @@ type agentThreadGoalSpec struct {
 	// packaging_deck_v1 child's response IS the HTML file, not a workflow
 	// report). Only process writer stages set it.
 	OutputContract string
+	// ProviderReplayClass is a server-owned, closed authorization for freezing
+	// and replaying one in-process provider request after restart. Only current
+	// authored Studio writer stages receive the recognized value.
+	ProviderReplayClass         string
+	ProviderReplayProcessID     string
+	ProviderReplayProcessDigest string
 	// ParentGoalRouteDigest binds a goal child to the exact verified
 	// conversation receipt that authorized its parent. Provider admission and
 	// follow-up revalidate the parent and this digest before trusting mode,
@@ -186,43 +192,46 @@ type launchFunnelLineage struct {
 func (spec agentThreadGoalSpec) metadata() map[string]string {
 	metadata := map[string]string{}
 	for key, value := range map[string]string{
-		"objective":                   spec.Objective,
-		"toolTemplate":                spec.ToolTemplate,
-		"contextRefs":                 spec.ContextRefs,
-		"sourceMessageId":             spec.SourceMessageID,
-		"sourceMessageDigest":         spec.SourceMessageDigest,
-		"sourceWindowDigest":          spec.SourceWindowDigest,
-		"operationId":                 spec.OperationID,
-		"operationBodyDigest":         spec.OperationBodyDigest,
-		"originSurface":               spec.OriginSurface,
-		"requestedBy":                 spec.RequestedBy,
-		"authority":                   spec.Authority,
-		"visibility":                  spec.Visibility,
-		"workLabel":                   spec.WorkLabel,
-		"packageId":                   spec.PackageID,
-		"agentId":                     spec.AgentID,
-		"agentName":                   spec.AgentName,
-		"agentRole":                   spec.AgentRole,
-		"agentOutcome":                spec.AgentOutcome,
-		"agentPersona":                spec.AgentPersona,
-		"agentVoice":                  spec.AgentVoice,
-		"agentStyle":                  spec.AgentStyle,
-		"agentTraits":                 spec.AgentTraits,
-		"agentCapabilities":           spec.AgentCapabilities,
-		"agentMemoryPolicy":           spec.AgentMemoryPolicy,
-		"agentCoreMemories":           spec.AgentCoreMemories,
-		"agentActiveLearning":         spec.AgentActiveLearning,
-		"agentDigest":                 spec.AgentDigest,
-		"delegatedBy":                 spec.DelegatedBy,
-		projectWorkBindingMetadataKey: spec.ProjectWorkBinding,
-		workstreamAffinityMetadataKey: spec.WorkstreamAffinity,
-		"projectWorkId":               spec.ProjectWorkID,
-		"projectWorkTitle":            spec.ProjectWorkTitle,
-		"goalParentId":                spec.ParentGoalID,
-		"goalSubtaskId":               spec.SubtaskID,
-		"assignedRunner":              spec.AssignedRunner,
-		"outputContract":              spec.OutputContract,
-		"goalRouteDigest":             spec.ParentGoalRouteDigest,
+		"objective":                             spec.Objective,
+		"toolTemplate":                          spec.ToolTemplate,
+		"contextRefs":                           spec.ContextRefs,
+		"sourceMessageId":                       spec.SourceMessageID,
+		"sourceMessageDigest":                   spec.SourceMessageDigest,
+		"sourceWindowDigest":                    spec.SourceWindowDigest,
+		"operationId":                           spec.OperationID,
+		"operationBodyDigest":                   spec.OperationBodyDigest,
+		"originSurface":                         spec.OriginSurface,
+		"requestedBy":                           spec.RequestedBy,
+		"authority":                             spec.Authority,
+		"visibility":                            spec.Visibility,
+		"workLabel":                             spec.WorkLabel,
+		"packageId":                             spec.PackageID,
+		"agentId":                               spec.AgentID,
+		"agentName":                             spec.AgentName,
+		"agentRole":                             spec.AgentRole,
+		"agentOutcome":                          spec.AgentOutcome,
+		"agentPersona":                          spec.AgentPersona,
+		"agentVoice":                            spec.AgentVoice,
+		"agentStyle":                            spec.AgentStyle,
+		"agentTraits":                           spec.AgentTraits,
+		"agentCapabilities":                     spec.AgentCapabilities,
+		"agentMemoryPolicy":                     spec.AgentMemoryPolicy,
+		"agentCoreMemories":                     spec.AgentCoreMemories,
+		"agentActiveLearning":                   spec.AgentActiveLearning,
+		"agentDigest":                           spec.AgentDigest,
+		"delegatedBy":                           spec.DelegatedBy,
+		projectWorkBindingMetadataKey:           spec.ProjectWorkBinding,
+		workstreamAffinityMetadataKey:           spec.WorkstreamAffinity,
+		"projectWorkId":                         spec.ProjectWorkID,
+		"projectWorkTitle":                      spec.ProjectWorkTitle,
+		"goalParentId":                          spec.ParentGoalID,
+		"goalSubtaskId":                         spec.SubtaskID,
+		"assignedRunner":                        spec.AssignedRunner,
+		"outputContract":                        spec.OutputContract,
+		goalChildProviderReplayClassKey:         spec.ProviderReplayClass,
+		goalChildProviderReplayProcessIDKey:     spec.ProviderReplayProcessID,
+		goalChildProviderReplayProcessDigestKey: spec.ProviderReplayProcessDigest,
+		"goalRouteDigest":                       spec.ParentGoalRouteDigest,
 	} {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			metadata[key] = trimmed
@@ -693,10 +702,10 @@ func (app *kanbanBoardApp) activateReservedGoalAgentThread(thread scoutAgentThre
 		return fmt.Errorf("goal child activation was not durable")
 	}
 	thread.Artifact = activated
-	if agentThreadUsesExternalEvidenceV2Contract(thread) {
+	if goalChildUsesDurableProviderReplay(thread) {
 		prepared, prepareErr := app.preparePublicConversationProviderRequest(thread)
 		if prepareErr != nil {
-			_, _, _ = app.updateOSArtifactWithMetadata(activated.ID, "", activated.Text, "external_evidence_preflight", map[string]string{
+			_, _, _ = app.updateOSArtifactWithMetadata(activated.ID, "", activated.Text, "goal_provider_preflight", map[string]string{
 				"status": "error", "threadStatus": "error", "goalStatus": "needs_attention", "reviewGate": "blocked",
 				"error": prepareErr.Error(), "completedAt": time.Now().UTC().Format(time.RFC3339Nano),
 			})
@@ -709,17 +718,25 @@ func (app *kanbanBoardApp) activateReservedGoalAgentThread(thread scoutAgentThre
 	return nil
 }
 
-// replayStartedGoalExternalEvidenceThread is the one narrow exception to the
-// ordinary fail-closed rule for a started goal child after process loss. It is
-// safe only when the exact external-evidence request was privately persisted:
-// prepare reauthorizes the live route/context, validates the hash-bound snapshot
-// without rebuilding its source packet, and the provider idempotency key remains
-// identical to the pre-crash attempt.
-func (app *kanbanBoardApp) replayStartedGoalExternalEvidenceThread(thread scoutAgentThread) error {
-	if app == nil || !agentThreadUsesExternalEvidenceV2Contract(thread) ||
-		strings.TrimSpace(thread.Artifact.Metadata["goalChildActivationState"]) != goalChildActivationStarted ||
-		strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) == "" {
+// replayStartedGoalProviderThread is the closed restart exception for a goal
+// child on the provider-handoff path. External evidence and current Studio
+// writers are the only admitted classes. Both reauthorize the live parent
+// route first. A frozen request is reused byte-for-byte; if the process died
+// after durable activation but before the freeze reference committed, absence
+// of that reference proves this code path could not yet have handed off, so it
+// may freeze once before starting.
+func (app *kanbanBoardApp) replayStartedGoalProviderThread(thread scoutAgentThread) error {
+	if app == nil || !goalChildUsesDurableProviderReplay(thread) ||
+		strings.TrimSpace(thread.Artifact.Metadata["goalChildActivationState"]) != goalChildActivationStarted {
 		return fmt.Errorf("goal child provider replay is unavailable")
+	}
+	if err := app.verifyGoalChildRoute(thread.Artifact); err != nil {
+		return fmt.Errorf("goal child provider route changed: %w", err)
+	}
+	if goalChildUsesStudioWriterProviderReplay(thread) {
+		if err := app.verifyStudioWriterProviderReplayAuthority(thread.Artifact); err != nil {
+			return err
+		}
 	}
 	prepared, err := app.preparePublicConversationProviderRequest(thread)
 	if err != nil {
@@ -728,6 +745,20 @@ func (app *kanbanBoardApp) replayStartedGoalExternalEvidenceThread(thread scoutA
 	app.markGoalChildStartedInProcess(prepared.Artifact.ID)
 	startAgentThreadAsync(app, prepared)
 	return nil
+}
+
+// replayStartedGoalExternalEvidenceThread is the one narrow exception to the
+// ordinary fail-closed rule for a started goal child after process loss. It is
+// safe only when the exact external-evidence request was privately persisted:
+// prepare reauthorizes the live route/context, validates the hash-bound snapshot
+// without rebuilding its source packet, and the provider idempotency key remains
+// identical to the pre-crash attempt.
+func (app *kanbanBoardApp) replayStartedGoalExternalEvidenceThread(thread scoutAgentThread) error {
+	if app == nil || !agentThreadUsesExternalEvidenceV2Contract(thread) ||
+		strings.TrimSpace(thread.Artifact.Metadata["goalChildActivationState"]) != goalChildActivationStarted {
+		return fmt.Errorf("goal child provider replay is unavailable")
+	}
+	return app.replayStartedGoalProviderThread(thread)
 }
 
 func (app *kanbanBoardApp) markGoalChildStartedInProcess(childID string) {
@@ -2276,6 +2307,11 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 		return thread, fmt.Errorf("public conversation provider reservation is unavailable")
 	}
 	thread.Artifact = current
+	if goalChildUsesStudioWriterProviderReplay(thread) {
+		if err := app.verifyStudioWriterProviderReplayAuthority(current); err != nil {
+			return thread, err
+		}
+	}
 	refreshed, err := app.reauthorizeAgentThreadProfile(thread)
 	if err != nil {
 		return thread, err
@@ -2390,7 +2426,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 	if request.PreflightError != nil {
 		return "", request.PreflightError
 	}
-	output, err := responder(ctx, apiKey, request)
+	output, err := callOpenAITextWithBoundedInvocationRetry(ctx, apiKey, request, responder)
 	if err != nil {
 		return "", err
 	}

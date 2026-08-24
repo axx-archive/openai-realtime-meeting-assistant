@@ -119,8 +119,8 @@ func TestDirectNamedAgentAuthoredOutputsUseServerOwnedStudios(t *testing.T) {
 		processID   string
 		visibleText string
 	}{
-		{name: "presentation", request: "Create a ten-slide investor presentation", processID: packagingStudioProcessID, visibleText: "Presentation in progress"},
-		{name: "substantial document", request: "Write a market opportunity report for Country+Golf", processID: documentReportProcessID, visibleText: "Document in progress"},
+		{name: "presentation", request: "Create a ten-slide investor presentation", processID: packagingStudioProcessID, visibleText: "I’m building your presentation now. I’ll post the finished file here."},
+		{name: "substantial document", request: "Write a market opportunity report for Country+Golf", processID: documentReportProcessID, visibleText: "I’m researching and writing your report now. I’ll post the finished file here."},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

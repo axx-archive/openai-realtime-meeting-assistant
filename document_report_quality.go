@@ -408,18 +408,27 @@ func compileDocumentReportDraftRender(app *kanbanBoardApp, plan *goalPlan, paren
 		}
 	}
 	if strings.TrimSpace(report.Metadata["renderJobId"]) == "" {
-		job, _, queueErr := enqueueBoundRenderExportPDFJob(binding)
-		if queueErr != nil {
-			return documentReportAttentionRecord("PDF render enqueue failed: "+queueErr.Error(), report, documentReportRenderBinding{})
+		job, _, recoverErr := recoverOrEnqueueStudioBoundRenderExportPDFJob(binding)
+		if recoverErr != nil {
+			return documentReportAttentionRecord("PDF render recovery failed: "+recoverErr.Error(), report, documentReportRenderBinding{})
+		}
+		renderMetadata := queuedRenderMetadataForInput(report, job.ID, renderJobKindPaper, binding.SourceContentDigest)
+		if job.Status == renderJobStatusRunning {
+			renderMetadata["renderStatus"] = renderJobStatusRunning
+		} else if job.Status == renderJobStatusComplete {
+			renderMetadata = recoveredCompletedRenderMetadataForInput(report, job.ID, renderJobKindPaper, binding.SourceContentDigest)
 		}
 		header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(report))
 		updated, changed, stampErr := app.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(header, map[string]string{
 			"renderJobId": strings.TrimSpace(report.Metadata["renderJobId"]),
-		}, report.ID, queuedRenderMetadataForInput(report, job.ID, renderJobKindPaper, binding.SourceContentDigest))
+		}, report.ID, renderMetadata)
 		if stampErr != nil || !changed {
 			return documentReportAttentionRecord("the render job could not bind to the exact document revision", report, documentReportRenderBinding{})
 		}
 		report = updated
+		if job.Status == renderJobStatusComplete {
+			return documentReportAttentionRecord("the exact PDF render completed, but its attachment callback is not yet confirmed", report, documentReportRenderBinding{})
+		}
 	}
 
 	deadline := time.Now().Add(documentReportRenderWaitTimeout())

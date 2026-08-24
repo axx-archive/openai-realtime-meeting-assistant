@@ -5667,6 +5667,11 @@ func scoutChatWorkStatusCopy(artifact meetingMemoryEntry, agentThreadID string, 
 	case "queued":
 		return label + " queued", true
 	case "running":
+		if kind := studioProjectKindForProcessID(metadata["processId"]); kind == studioProjectKindPresentation {
+			return "I’m building your presentation now. I’ll post the finished file here.", true
+		} else if kind == studioProjectKindDocument {
+			return "I’m researching and writing your report now. I’ll post the finished file here.", true
+		}
 		return label + " in progress", true
 	case "approval_required", "needs_input", "needs-input":
 		return label + " needs input", true

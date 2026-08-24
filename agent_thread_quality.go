@@ -1363,6 +1363,128 @@ func externalEvidenceUnitsLabelValid(units, candidate string) bool {
 	return true
 }
 
+// quarantineSoftInvalidExternalEvidenceRows preserves every provider-fetched
+// row that can safely enter the evidence pipeline and records the rest as an
+// explicit exclusion. Provider URL/receipt authority is deliberately checked
+// before any quarantine decision: an unsafe or unreceipted source is not a
+// quality shortfall that downstream scope reduction can make safe.
+func quarantineSoftInvalidExternalEvidenceRows(envelope externalEvidenceEnvelope, receipt researchCitationReceipt) (externalEvidenceEnvelope, error) {
+	if len(envelope.Evidence) > 12 {
+		return envelope, fmt.Errorf("external evidence quality gate rejected output: evidence must contain at most 12 decision-useful rows")
+	}
+	questions := make(map[string]bool, len(envelope.ResearchQuestions))
+	for _, question := range envelope.ResearchQuestions {
+		questions[strings.TrimSpace(question)] = true
+	}
+	hadProviderExclusion := len(envelope.ExcludedOrUnverified) > 0
+	retained := make([]externalEvidenceEnvelopeRow, 0, len(envelope.Evidence))
+	quarantined := make([]string, 0, len(envelope.Evidence))
+	questionEvidence := make(map[string]int, len(questions))
+	for index, row := range envelope.Evidence {
+		rowNumber := index + 1
+		if len(row.URL) > 2048 {
+			return envelope, fmt.Errorf("external evidence quality gate rejected output: evidence row %d URL is oversized", rowNumber)
+		}
+		if _, ok := parseBareHTTPSURL(row.URL); !ok {
+			return envelope, fmt.Errorf("external evidence quality gate rejected output: evidence row %d must contain one valid bare HTTPS URL", rowNumber)
+		}
+		if !receipt.CitationURLs[row.URL] {
+			return envelope, fmt.Errorf("external evidence quality gate rejected output: evidence row %d URL is absent from the provider citation receipt", rowNumber)
+		}
+		for _, value := range []string{row.ResearchQuestion, row.SourceFact, row.SourceTitle, row.PublishedOrUpdated, row.Units, row.Confidence, row.DeckImplication} {
+			if len(researchURLPattern.FindAllString(value, -1)) > 0 {
+				return envelope, fmt.Errorf("external evidence quality gate rejected output: evidence row %d contains a URL outside its url field", rowNumber)
+			}
+		}
+
+		// Source identity is provider-owned. Replace the model-authored title
+		// before semantic validation so an empty or decorative title cannot
+		// discard an otherwise usable, receipted row.
+		title := strings.TrimSpace(receipt.CitationTitles[row.URL])
+		if title == "" || len(title) > 500 {
+			if parsed, ok := parseBareHTTPSURL(row.URL); ok {
+				host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+				title = "Source at " + host
+			}
+		}
+		row.SourceTitle = firstNonEmptyString(title, "Provider-fetched source")
+
+		var reasons []string
+		question := strings.TrimSpace(row.ResearchQuestion)
+		if question == "" || len(row.ResearchQuestion) > 500 || !questions[question] {
+			reasons = append(reasons, "question mismatch")
+		}
+		for _, field := range []struct {
+			name  string
+			value string
+			max   int
+		}{
+			{"source fact", row.SourceFact, 2000},
+			{"date", row.PublishedOrUpdated, 120},
+			{"units", row.Units, 120},
+			{"confidence", row.Confidence, 12},
+			{"deck implication", row.DeckImplication, 2000},
+		} {
+			if strings.TrimSpace(field.value) == "" || len(field.value) > field.max {
+				reasons = append(reasons, "invalid "+field.name)
+			}
+		}
+		if _, _, ok := externalEvidenceDateLabel(row.PublishedOrUpdated); !ok {
+			reasons = append(reasons, "invalid date")
+		}
+		if !externalEvidenceUnitsLabelValid(row.Units, row.SourceFact) {
+			reasons = append(reasons, "invalid units")
+		}
+		confidence := strings.ToLower(strings.TrimSpace(row.Confidence))
+		if confidence != "high" && confidence != "medium" {
+			reasons = append(reasons, "confidence not admissible")
+		}
+		if len(reasons) > 0 {
+			quarantined = append(quarantined, fmt.Sprintf("row %d (%s)", rowNumber, strings.Join(uniqueStrings(reasons), ", ")))
+			continue
+		}
+		retained = append(retained, row)
+		questionEvidence[question]++
+	}
+
+	envelope.Evidence = retained
+	if len(quarantined) > 0 {
+		envelope.ExcludedOrUnverified = appendExternalEvidenceExclusion(envelope.ExcludedOrUnverified,
+			"Server quarantined provider evidence "+strings.Join(quarantined, "; ")+"; no claim from those rows was admitted.")
+	}
+	missing := make([]string, 0, len(envelope.ResearchQuestions))
+	for index, question := range envelope.ResearchQuestions {
+		if questionEvidence[strings.TrimSpace(question)] == 0 {
+			missing = append(missing, strconv.Itoa(index+1))
+		}
+	}
+	if len(missing) > 0 && (len(retained) > 0 || len(quarantined) > 0 || hadProviderExclusion) {
+		envelope.ExcludedOrUnverified = appendExternalEvidenceExclusion(envelope.ExcludedOrUnverified,
+			"No admissible provider-fetched evidence remained for research question(s) "+strings.Join(missing, ", ")+"; downstream work must stay explicitly scoped.")
+	}
+	return envelope, nil
+}
+
+func appendExternalEvidenceExclusion(items []string, item string) []string {
+	item = compactAssistantLine(item)
+	if item == "" {
+		return items
+	}
+	if len(items) < 40 {
+		return append(items, item)
+	}
+	// Preserve the bounded schema even when the provider already used every
+	// exclusion slot. The server-authored quarantine record is authoritative;
+	// retain as much of the final provider item as fits beside it.
+	last := strings.TrimSpace(items[len(items)-1])
+	available := 2000 - len(item) - len("; ")
+	if available > 0 && len(last) > available {
+		last = last[:available]
+	}
+	items[len(items)-1] = strings.TrimSpace(last + "; " + item)
+	return items
+}
+
 func validateExternalEvidenceEnvelope(envelope externalEvidenceEnvelope, receipt researchCitationReceipt) error {
 	var failures []string
 	if len(envelope.ResearchQuestions) < 1 || len(envelope.ResearchQuestions) > externalEvidenceMaxResearchQuestions {
@@ -1386,7 +1508,6 @@ func validateExternalEvidenceEnvelope(envelope externalEvidenceEnvelope, receipt
 	if len(envelope.Evidence) == 0 && len(envelope.ExcludedOrUnverified) == 0 {
 		failures = append(failures, "empty evidence requires a specific excluded_or_unverified reason after a real provider search")
 	}
-	questionEvidence := make(map[string]int, len(questions))
 	for index, row := range envelope.Evidence {
 		rowNumber := index + 1
 		fields := []struct {
@@ -1406,8 +1527,6 @@ func validateExternalEvidenceEnvelope(envelope externalEvidenceEnvelope, receipt
 		}
 		if !questions[strings.TrimSpace(row.ResearchQuestion)] {
 			failures = append(failures, fmt.Sprintf("evidence row %d research_question is not an exact listed question", rowNumber))
-		} else {
-			questionEvidence[strings.TrimSpace(row.ResearchQuestion)]++
 		}
 		if _, _, ok := externalEvidenceDateLabel(row.PublishedOrUpdated); !ok {
 			failures = append(failures, fmt.Sprintf("evidence row %d published_or_updated must be Published, Updated, or Accessed plus an exact YYYY-MM-DD date", rowNumber))
@@ -1432,12 +1551,6 @@ func validateExternalEvidenceEnvelope(envelope externalEvidenceEnvelope, receipt
 				failures = append(failures, fmt.Sprintf("evidence row %d contains a URL outside its url field", rowNumber))
 				break
 			}
-		}
-	}
-	for _, question := range envelope.ResearchQuestions {
-		question = strings.TrimSpace(question)
-		if len(envelope.Evidence) > 0 && question != "" && questionEvidence[question] == 0 {
-			failures = append(failures, fmt.Sprintf("research question %q has no provider-fetched evidence row", question))
 		}
 	}
 	if len(envelope.ExcludedOrUnverified) > 40 {
@@ -1531,28 +1644,17 @@ func normalizeExternalEvidenceArtifactWithQuestions(body string, authorizedQuest
 	if err != nil {
 		return "", err
 	}
-	if err := validateExternalEvidenceEnvelope(envelope, receipt); err != nil {
-		return "", err
-	}
 	if authorizedQuestions != nil {
 		if err := validateExternalEvidenceResearchQuestions(envelope.ResearchQuestions, authorizedQuestions); err != nil {
 			return "", fmt.Errorf("external evidence quality gate rejected output: %w", err)
 		}
 	}
-	// SourceTitle is model-authored structured content. A matching URL proves
-	// only that the provider fetched that URL, so never let the model decorate
-	// the visible source identity. Prefer the provider-owned citation title and
-	// fall back to a deterministic label derived from the provider-owned URL.
-	for index := range envelope.Evidence {
-		row := &envelope.Evidence[index]
-		title := strings.TrimSpace(receipt.CitationTitles[row.URL])
-		if title == "" {
-			if parsed, ok := parseBareHTTPSURL(row.URL); ok {
-				host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
-				title = "Source at " + host
-			}
-		}
-		row.SourceTitle = firstNonEmptyString(title, "Provider-fetched source")
+	envelope, err = quarantineSoftInvalidExternalEvidenceRows(envelope, receipt)
+	if err != nil {
+		return "", err
+	}
+	if err := validateExternalEvidenceEnvelope(envelope, receipt); err != nil {
+		return "", err
 	}
 	compactReceipt, err := compactExternalEvidenceReceipt(envelope, receipt)
 	if err != nil {

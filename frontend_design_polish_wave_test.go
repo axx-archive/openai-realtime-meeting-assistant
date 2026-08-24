@@ -145,7 +145,7 @@ func TestPD1PresentationRejectionFixtureKeepsOneActivityStateOutOfConversation(t
 	fixture := functionBody(html, "function pd1PresentationWorkFixtureThread(")
 	for _, want := range []string{
 		"pd1PresentationFixture", "Can you make a 10 slide deck pitching me this platform?",
-		"Create a polished 10-slide pitch deck for the STRIDE platform", "Presentation in progress",
+		"Create a polished 10-slide pitch deck for the STRIDE platform", "I’m building your presentation now. I’ll post the finished file here.",
 		"intentOutcome: 'start_private_work'", "kind: 'thread'", "mode: 'goal'",
 	} {
 		if !strings.Contains(fixture, want) {

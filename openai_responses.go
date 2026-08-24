@@ -304,6 +304,61 @@ func isProviderInvocationFailure(err error) bool {
 	return errors.As(err, &requestFailure)
 }
 
+const defaultOpenAIProviderInvocationRetryDelay = 150 * time.Millisecond
+
+type openAIProviderInvocationRetryDelayContextKey struct{}
+
+// withOpenAIProviderInvocationRetryDelay is the test/control seam for the one
+// bounded provider-invocation retry. A negative duration restores the default;
+// zero keeps deterministic tests immediate without package-global mutation.
+func withOpenAIProviderInvocationRetryDelay(ctx context.Context, delay time.Duration) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, openAIProviderInvocationRetryDelayContextKey{}, delay)
+}
+
+func waitForOpenAIProviderInvocationRetry(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	delay := defaultOpenAIProviderInvocationRetryDelay
+	if configured, ok := ctx.Value(openAIProviderInvocationRetryDelayContextKey{}).(time.Duration); ok && configured >= 0 {
+		delay = configured
+	}
+	if delay <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// callOpenAITextWithBoundedInvocationRetry retries exactly once only when the
+// caller supplied a deterministic idempotency key and the provider invocation
+// itself failed. The request is reused byte-for-byte. Output/quality rejection,
+// preflight/ACL failure, and ordinary unkeyed model work remain one-shot.
+func callOpenAITextWithBoundedInvocationRetry(ctx context.Context, apiKey string, request openAITextRequest, responder openAITextResponder) (string, error) {
+	output, err := responder(ctx, apiKey, request)
+	if err == nil || strings.TrimSpace(request.IdempotencyKey) == "" || !isProviderInvocationFailure(err) {
+		return output, err
+	}
+	if waitErr := waitForOpenAIProviderInvocationRetry(ctx); waitErr != nil {
+		return "", waitErr
+	}
+	return responder(ctx, apiKey, request)
+}
+
 var createOpenAITextResponse openAITextResponder = createOpenAITextResponseHTTP
 
 func meetingBrainModel() string {

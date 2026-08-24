@@ -1048,7 +1048,7 @@ func TestPrivateDeckConfirmationRoutesEffectiveAskToPackagingStudio(t *testing.T
 	}
 	projected := app.projectScoutChatMutationResponseForViewer(user.Email, thread.ID, response)
 	answer := projected["answer"].(scoutChatMessageRecord)
-	if answer.Kind != "thread" || answer.Thread == nil || answer.Text != "Presentation in progress" || answer.StudioProject == nil || answer.StudioProject.Kind != studioProjectKindPresentation || answer.StudioProject.Href == "" || strings.Contains(strings.ToLower(answer.Text), "<!doctype html") || strings.Contains(strings.ToLower(answer.Text), "open it in presentations") {
+	if answer.Kind != "thread" || answer.Thread == nil || answer.Text != "I’m building your presentation now. I’ll post the finished file here." || answer.StudioProject == nil || answer.StudioProject.Kind != studioProjectKindPresentation || !strings.HasPrefix(answer.StudioProject.Href, "/work?project=") || strings.Contains(strings.ToLower(answer.Text), "<!doctype html") || strings.Contains(strings.ToLower(answer.Text), "open it in presentations") {
 		t.Fatalf("deck confirmation answer=%+v", answer)
 	}
 }

@@ -66,6 +66,13 @@ const (
 	processResearchCoverageMissing   = "missing"
 )
 
+const (
+	processEvidenceNoScopeAdjustment       = "No automatic scope adjustment was required. Optional evidence gaps remain disclosed and cannot be rendered as facts."
+	processEvidenceCriticalScopeAdjustment = "External proof did not support a decision-critical lane. Automatically narrow the recommendation to admitted facts, make the unresolved question explicit, and present an uncertainty-first next step. Do not answer the missing question as fact or imply that the original decision is fully proved."
+	processEvidenceNoStrongScopeAdjustment = "External proof supported no authorized research question strongly. Automatically narrow the recommendation to admitted facts, make every unresolved question explicit, and present an uncertainty-first next step. Do not answer a missing question as fact or imply that the original decision is fully proved."
+	processEvidenceOptionalScopeAdjustment = "One or more optional research questions remain incomplete. Keep those gaps explicit, limit supporting detail to admitted facts, and do not present an unresolved optional question as proved."
+)
+
 // processResearchQuestionCoverage is deliberately small and replayable. The
 // compile seam derives it from the frozen question authority, provider
 // candidates, source snapshots, and entailment rows; later stages validate the
@@ -187,9 +194,11 @@ func canonicalProcessResearchQuestionCoverageManifest(researchMode string, cover
 	strongQuestions := 0
 	loadBearingQuestions := 0
 	strongLoadBearingQuestions := 0
+	completeQuestions := 0
 	for _, item := range coverage {
 		if item.Coverage == processResearchCoverageSupported {
 			strongQuestions++
+			completeQuestions++
 		}
 		if item.Importance == "load_bearing" {
 			loadBearingQuestions++
@@ -202,16 +211,34 @@ func canonicalProcessResearchQuestionCoverageManifest(researchMode string, cover
 		}, " | ")+" |")
 	}
 	adequacy := processEvidenceAdequacySufficient
-	// Optional corroboration may remain visibly weak without dead-ending a
-	// supported artifact. If the one allowed load-bearing lane is unproved (or
-	// nothing external was strongly proved), continue only under an automatic
-	// uncertainty-first scope reduction; the missing answer never becomes fact.
+	// Any incomplete authorized question is a disclosed evidence boundary. The
+	// run may continue, but only under the automatic uncertainty-first scope
+	// reduction; optional questions cannot silently look complete downstream.
 	if len(coverage) == 0 {
 		adequacy = processEvidenceAdequacyInsufficient
-	} else if strongQuestions == 0 || strongLoadBearingQuestions != loadBearingQuestions {
+	} else if completeQuestions != len(coverage) || strongQuestions == 0 || strongLoadBearingQuestions != loadBearingQuestions {
 		adequacy = processEvidenceAdequacyScoped
 	}
 	return strings.Join(lines, "\n"), adequacy, strongQuestions, processResearchQuestionCoverageDigest(coverage), nil
+}
+
+func processEvidenceScopeAdjustment(coverage []processResearchQuestionCoverage, adequacy string) string {
+	if adequacy != processEvidenceAdequacyScoped {
+		return processEvidenceNoScopeAdjustment
+	}
+	strongQuestions := 0
+	for _, item := range coverage {
+		if item.Coverage == processResearchCoverageSupported {
+			strongQuestions++
+		}
+		if item.Importance == "load_bearing" && item.Coverage != processResearchCoverageSupported {
+			return processEvidenceCriticalScopeAdjustment
+		}
+	}
+	if strongQuestions == 0 {
+		return processEvidenceNoStrongScopeAdjustment
+	}
+	return processEvidenceOptionalScopeAdjustment
 }
 
 func processResearchQuestionCoverageRows(body, researchMode string) ([]processResearchQuestionCoverage, error) {
@@ -894,10 +921,7 @@ func compileProcessEvidenceDossier(app *kanbanBoardApp, plan *goalPlan, parentID
 			strongLoadBearingQuestionCount++
 		}
 	}
-	scopeAdjustment := "No automatic scope adjustment was required. Optional evidence gaps remain disclosed and cannot be rendered as facts."
-	if evidenceAdequacy == processEvidenceAdequacyScoped {
-		scopeAdjustment = "External proof did not support a decision-critical lane, or supported no external lane strongly. Automatically narrow the recommendation to admitted facts, make the unresolved question explicit, and present an uncertainty-first next step. Do not answer the missing question as fact or imply that the original decision is fully proved."
-	}
+	scopeAdjustment := processEvidenceScopeAdjustment(researchCoverage, evidenceAdequacy)
 
 	body := strings.Join([]string{
 		"## Evidence admission dossier",
@@ -987,9 +1011,11 @@ func validateProcessEvidenceDossier(plan *goalPlan, artifact meetingMemoryEntry)
 	strongQuestions := 0
 	loadBearingQuestions := 0
 	strongLoadBearingQuestions := 0
+	completeQuestions := 0
 	for _, item := range coverage {
 		if item.Coverage == processResearchCoverageSupported {
 			strongQuestions++
+			completeQuestions++
 		}
 		if item.Importance == "load_bearing" {
 			loadBearingQuestions++
@@ -1015,15 +1041,16 @@ func validateProcessEvidenceDossier(plan *goalPlan, artifact meetingMemoryEntry)
 		wantAdequacy = processEvidenceAdequacySufficient
 		if len(coverage) == 0 {
 			wantAdequacy = processEvidenceAdequacyInsufficient
-		} else if strongQuestions == 0 || strongLoadBearingQuestions != loadBearingQuestions {
+		} else if completeQuestions != len(coverage) || strongQuestions == 0 || strongLoadBearingQuestions != loadBearingQuestions {
 			wantAdequacy = processEvidenceAdequacyScoped
 		}
 	}
 	if strings.TrimSpace(artifact.Metadata["evidenceAdequacy"]) != wantAdequacy {
 		return fmt.Errorf("evidence dossier adequacy metadata does not match its coverage manifest")
 	}
-	if wantAdequacy == processEvidenceAdequacyScoped && !strings.Contains(prefix, "## Automatic scope adjustment\nExternal proof did not support a decision-critical lane") {
-		return fmt.Errorf("scoped evidence dossier is missing its automatic uncertainty-first instruction")
+	wantScopeAdjustment := processEvidenceScopeAdjustment(coverage, wantAdequacy)
+	if !strings.Contains(prefix, "## Automatic scope adjustment\n"+wantScopeAdjustment) {
+		return fmt.Errorf("evidence dossier is missing its exact automatic scope instruction")
 	}
 	return nil
 }

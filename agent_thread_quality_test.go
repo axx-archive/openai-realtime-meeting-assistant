@@ -1632,7 +1632,7 @@ func TestExternalEvidenceV2AllowsHonestZeroUsableEvidenceAfterProviderSearch(t *
 	}
 }
 
-func TestExternalEvidenceV2BindsExactAuthorizedQuestionsAndRejectsLowConfidence(t *testing.T) {
+func TestExternalEvidenceV2BindsExactAuthorizedQuestionsAndQuarantinesLowConfidence(t *testing.T) {
 	fixture := focusedEntailmentThreadForTest(t, "The official program has 4,200 opted-in creators in 2026.", "https://example.org/creator-program", "")
 	questions, err := authorizedExternalEvidenceResearchQuestionsForThread(fixture.app, fixture.researchThread)
 	if err != nil || len(questions) != 1 || questions[0] != fixture.authorizedQuestion {
@@ -1664,8 +1664,54 @@ func TestExternalEvidenceV2BindsExactAuthorizedQuestionsAndRejectsLowConfidence(
 	lowConfidence := appendOpenAIResponseWebSources(externalEvidenceJSONForTest(t, externalEvidenceEnvelope{
 		ResearchQuestions: []string{fixture.authorizedQuestion}, Evidence: []externalEvidenceEnvelopeRow{row},
 	}), providerEvidence)
-	if _, err := normalizeExternalEvidenceArtifactWithQuestions(lowConfidence, questions); err == nil || !strings.Contains(err.Error(), "must remain excluded") {
-		t.Fatalf("Low-confidence evidence row passed: %v", err)
+	normalized, err := normalizeExternalEvidenceArtifactWithQuestions(lowConfidence, questions)
+	if err != nil {
+		t.Fatalf("Low-confidence evidence row rejected the complete research result: %v", err)
+	}
+	rows, rowsErr := externalEvidenceLedgerRows(normalized)
+	if rowsErr != nil || len(rows) != 0 || !strings.Contains(normalized, "Server quarantined provider evidence row 1") || !strings.Contains(normalized, "downstream work must stay explicitly scoped") {
+		t.Fatalf("Low-confidence row was not quarantined truthfully: rows=%v err=%v\n%s", rows, rowsErr, normalized)
+	}
+}
+
+func TestExternalEvidenceV2QuarantinesSoftInvalidRowsAndPreservesValidEvidence(t *testing.T) {
+	questions := []string{"What is the official creator count?", "What current rule constrains participation?"}
+	valid := externalEvidenceEnvelopeRow{
+		ResearchQuestion: questions[0], SourceFact: "The program reports 4,200 participating creators.", SourceTitle: "model title",
+		URL: "https://example.org/count", PublishedOrUpdated: "Accessed 2026-08-21", Units: "creators", Confidence: "High", DeckImplication: "Use as a bounded count.",
+	}
+	badUnits := valid
+	badUnits.ResearchQuestion, badUnits.URL, badUnits.Units = questions[1], "https://example.org/rules", "n/a"
+	badQuestion := valid
+	badQuestion.ResearchQuestion, badQuestion.URL = "What unrelated question slipped in?", "https://example.org/other"
+	body := appendOpenAIResponseWebSources(externalEvidenceJSONForTest(t, externalEvidenceEnvelope{
+		ResearchQuestions: questions, Evidence: []externalEvidenceEnvelopeRow{valid, badUnits, badQuestion},
+	}), openAIResponseWebEvidence{ResponseID: "resp_soft_quarantine", SearchCalls: 1, Citations: []openAIResponseWebCitation{
+		{Title: "Official count", URL: valid.URL}, {Title: "Official rules", URL: badUnits.URL}, {Title: "Other", URL: badQuestion.URL},
+	}})
+	normalized, err := normalizeExternalEvidenceArtifactWithQuestions(body, questions)
+	if err != nil {
+		t.Fatalf("soft-invalid rows rejected valid evidence: %v", err)
+	}
+	rows, err := externalEvidenceLedgerRows(normalized)
+	if err != nil || len(rows) != 1 || rows[0][1] != valid.SourceFact || rows[0][2] != "Official count" {
+		t.Fatalf("valid row was not preserved with provider title: rows=%#v err=%v\n%s", rows, err, normalized)
+	}
+	for _, want := range []string{"row 2 (invalid units)", "row 3 (question mismatch)", "downstream work must stay explicitly scoped"} {
+		if !strings.Contains(normalized, want) {
+			t.Fatalf("quarantine output missing %q:\n%s", want, normalized)
+		}
+	}
+}
+
+func TestExternalEvidenceV2SoftQuarantineStillFailsClosedOnSourceAuthority(t *testing.T) {
+	question := "What is the official creator count?"
+	row := externalEvidenceEnvelopeRow{ResearchQuestion: question, SourceFact: "The program reports 4,200 creators.", SourceTitle: "Count", URL: "http://example.org/count", PublishedOrUpdated: "Accessed 2026-08-21", Units: "creators", Confidence: "Low", DeckImplication: "Use cautiously."}
+	body := appendOpenAIResponseWebSources(externalEvidenceJSONForTest(t, externalEvidenceEnvelope{ResearchQuestions: []string{question}, Evidence: []externalEvidenceEnvelopeRow{row}}), openAIResponseWebEvidence{
+		ResponseID: "resp_unsafe_quarantine", SearchCalls: 1, Citations: []openAIResponseWebCitation{{Title: "Count", URL: "https://example.org/count"}},
+	})
+	if _, err := normalizeExternalEvidenceArtifactWithQuestions(body, []string{question}); err == nil || !strings.Contains(err.Error(), "valid bare HTTPS URL") {
+		t.Fatalf("unsafe source was softened into an exclusion: %v", err)
 	}
 }
 

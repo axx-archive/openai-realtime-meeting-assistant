@@ -13,18 +13,22 @@ import (
 )
 
 const (
-	publicConversationWorkActivationState = "publicConversationWorkActivationState"
-	publicConversationWorkActivationOwner = "publicConversationWorkActivationOwner"
-	publicConversationWorkActivationTime  = "publicConversationWorkActivatedAt"
-	publicConversationWorkReserved        = "reserved"
-	publicConversationWorkStarted         = "started"
-	publicConversationWorkComplete        = "complete"
-	publicConversationWorkNeedsAttention  = "needs_attention"
-	publicConversationProviderRequestKey  = "publicConversationProviderRequestBlobRef"
-	publicConversationProviderRequestHash = "publicConversationProviderRequestDigest"
-	publicConversationProviderBlobPrefix  = "private-provider-request:"
-	publicConversationProviderBlobMax     = 4 << 20
-	publicConversationProviderStoreMax    = 64 << 20
+	publicConversationWorkActivationState   = "publicConversationWorkActivationState"
+	publicConversationWorkActivationOwner   = "publicConversationWorkActivationOwner"
+	publicConversationWorkActivationTime    = "publicConversationWorkActivatedAt"
+	publicConversationWorkReserved          = "reserved"
+	publicConversationWorkStarted           = "started"
+	publicConversationWorkComplete          = "complete"
+	publicConversationWorkNeedsAttention    = "needs_attention"
+	publicConversationProviderRequestKey    = "publicConversationProviderRequestBlobRef"
+	publicConversationProviderRequestHash   = "publicConversationProviderRequestDigest"
+	publicConversationProviderBlobPrefix    = "private-provider-request:"
+	publicConversationProviderBlobMax       = 4 << 20
+	publicConversationProviderStoreMax      = 64 << 20
+	goalChildProviderReplayClassKey         = "goalChildProviderReplayClass"
+	goalChildProviderReplayProcessIDKey     = "goalChildProviderReplayProcessId"
+	goalChildProviderReplayProcessDigestKey = "goalChildProviderReplayProcessDigest"
+	goalChildProviderReplayStudioWriterV1   = "studio_writer_v1"
 )
 
 var publicConversationProviderBlobMu sync.Mutex
@@ -42,13 +46,21 @@ var publicConversationWorkAfterTerminalCommitProbe func(meetingMemoryEntry) erro
 
 func publicConversationProviderOperationKey(thread scoutAgentThread) string {
 	metadata := thread.Artifact.Metadata
-	if strings.TrimSpace(metadata["operationId"]) == "" || strings.TrimSpace(metadata["operationBodyDigest"]) == "" {
-		return ""
-	}
 	if strings.TrimSpace(metadata[publicConversationWorkActivationState]) == "" {
-		if !agentThreadUsesExternalEvidenceV2Contract(thread) ||
+		if (!agentThreadUsesExternalEvidenceV2Contract(thread) && !goalChildUsesStudioWriterProviderReplay(thread)) ||
 			strings.TrimSpace(metadata["goalChildActivationState"]) != goalChildActivationStarted ||
 			strings.TrimSpace(metadata["goalParentId"]) == "" || strings.TrimSpace(metadata["goalSubtaskId"]) == "" {
+			return ""
+		}
+		if goalChildUsesStudioWriterProviderReplay(thread) && !agentThreadUsesExternalEvidenceV2Contract(thread) {
+			return "goal-studio-writer-" + sha256Hex([]byte(strings.Join([]string{
+				"goal-studio-writer-provider-operation/v1", metadata[goalChildProviderReplayProcessIDKey], metadata[goalChildProviderReplayProcessDigestKey],
+				metadata["operationId"], metadata["operationBodyDigest"],
+				metadata["goalParentId"], metadata["goalSubtaskId"], metadata["goalRouteDigest"], metadata["outputContract"],
+				thread.ID, thread.Artifact.ID,
+			}, "\x00")))
+		}
+		if strings.TrimSpace(metadata["operationId"]) == "" || strings.TrimSpace(metadata["operationBodyDigest"]) == "" {
 			return ""
 		}
 		return "goal-child-work-" + sha256Hex([]byte(strings.Join([]string{
@@ -56,9 +68,26 @@ func publicConversationProviderOperationKey(thread scoutAgentThread) string {
 			metadata["goalParentId"], metadata["goalSubtaskId"], metadata["goalRouteDigest"], thread.ID, thread.Artifact.ID,
 		}, "\x00")))
 	}
+	if strings.TrimSpace(metadata["operationId"]) == "" || strings.TrimSpace(metadata["operationBodyDigest"]) == "" {
+		return ""
+	}
 	return "public-work-" + sha256Hex([]byte(strings.Join([]string{
 		"public-conversation-provider-operation/v1", metadata["operationId"], metadata["operationBodyDigest"], thread.ID, thread.Artifact.ID,
 	}, "\x00")))
+}
+
+func goalChildUsesStudioWriterProviderReplay(thread scoutAgentThread) bool {
+	metadata := thread.Artifact.Metadata
+	return strings.TrimSpace(metadata[goalChildProviderReplayClassKey]) == goalChildProviderReplayStudioWriterV1 &&
+		strings.TrimSpace(metadata["goalParentId"]) != "" && strings.TrimSpace(metadata["goalSubtaskId"]) != "" &&
+		strings.TrimSpace(metadata["outputContract"]) != "" && strings.TrimSpace(metadata["assignedRunner"]) == agentRunnerOpenAIText &&
+		oneOf(strings.TrimSpace(metadata[goalChildProviderReplayProcessIDKey]), packagingStudioProcessID, documentReportProcessID) &&
+		isHexDigest(strings.TrimSpace(metadata[goalChildProviderReplayProcessDigestKey])) &&
+		normalizeCodexJobAuthority(metadata["authority"]) != codexJobAuthorityExternalWrite
+}
+
+func goalChildUsesDurableProviderReplay(thread scoutAgentThread) bool {
+	return agentThreadUsesExternalEvidenceV2Contract(thread) || goalChildUsesStudioWriterProviderReplay(thread)
 }
 
 func providerRequestReservationExpectedMetadata(artifact meetingMemoryEntry) (map[string]string, error) {
@@ -87,7 +116,7 @@ func artifactRetainsPrivateProviderRequest(artifact meetingMemoryEntry) bool {
 	metadata := artifact.Metadata
 	return oneOf(strings.TrimSpace(metadata[publicConversationWorkActivationState]), publicConversationWorkReserved, publicConversationWorkStarted) ||
 		(strings.TrimSpace(metadata["goalChildActivationState"]) == goalChildActivationStarted &&
-			agentThreadUsesExternalEvidenceV2Contract(scoutAgentThread{ID: metadata["threadId"], Artifact: artifact}))
+			goalChildUsesDurableProviderReplay(scoutAgentThread{ID: metadata["threadId"], Artifact: artifact}))
 }
 
 func validPrivateProviderDigest(value string) bool {

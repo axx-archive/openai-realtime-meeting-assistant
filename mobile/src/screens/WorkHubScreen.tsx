@@ -99,6 +99,8 @@ export function WorkHubScreen({ navigation, route }: Props) {
   const split = width >= WORK_HUB_SPLIT_WIDTH;
   const requestVersionRef = useRef(0);
   const handledRouteProjectRef = useRef('');
+  const attemptedRouteProjectRef = useRef('');
+  const currentRouteProjectRef = useRef('');
   const [projects, setProjects] = useState<StudioProject[]>([]);
   const [filter, setFilter] = useState<StudioProjectFilter>('all');
   const [selectedId, setSelectedId] = useState('');
@@ -109,10 +111,17 @@ export function WorkHubScreen({ navigation, route }: Props) {
   const [nextBefore, setNextBefore] = useState('');
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
+  const [routeError, setRouteError] = useState('');
   const [actionError, setActionError] = useState('');
   const [busyAction, setBusyAction] = useState('');
+  const [routeRetryVersion, setRouteRetryVersion] = useState(0);
   const requestedProjectId = route.name === 'WorkHome' ? String(route.params?.projectId ?? '').trim() : '';
   const requestedRootRunId = route.name === 'WorkHome' ? String(route.params?.rootRunId ?? '').trim() : '';
+  currentRouteProjectRef.current = requestedProjectId
+    ? `project:${requestedProjectId}`
+    : requestedRootRunId
+      ? `root:${requestedRootRunId}`
+      : '';
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId) ?? null,
@@ -195,37 +204,70 @@ export function WorkHubScreen({ navigation, route }: Props) {
     const requestKey = requestedProjectId ? `project:${requestedProjectId}` : requestedRootRunId ? `root:${requestedRootRunId}` : '';
     if (!requestKey) {
       handledRouteProjectRef.current = '';
+      attemptedRouteProjectRef.current = '';
       return;
     }
     if (handledRouteProjectRef.current === requestKey || loading) return;
-    handledRouteProjectRef.current = requestKey;
     const local = projects.find((project) => requestedProjectId
       ? project.id === requestedProjectId
       : project.rootRunId === requestedRootRunId);
     if (local) {
+      handledRouteProjectRef.current = requestKey;
+      attemptedRouteProjectRef.current = '';
+      setRouteError('');
+      setError('');
       setSelectedId(local.id);
       if (!split) setSheetVisible(true);
       if (route.name === 'WorkHome') navigation.setParams({ projectId: undefined, rootRunId: undefined });
       return;
     }
+    const attemptKey = `${requestKey}:${routeRetryVersion}`;
+    if (attemptedRouteProjectRef.current === attemptKey) return;
+    attemptedRouteProjectRef.current = attemptKey;
     if (!sessionToken || !requestedProjectId) {
-      setError('That Studio project is not available in your current work.');
-      if (route.name === 'WorkHome') navigation.setParams({ projectId: undefined, rootRunId: undefined });
+      setRouteError('That Work request is not in the projects loaded so far. Try again to refresh it.');
       return;
     }
     void api.studioProject(sessionToken, requestedProjectId)
       .then((response) => {
+        if (currentRouteProjectRef.current !== requestKey) return;
+        handledRouteProjectRef.current = requestKey;
+        attemptedRouteProjectRef.current = '';
+        setRouteError('');
+        setError('');
         setProjects((current) => current.some((project) => project.id === response.project.id)
           ? current.map((project) => project.id === response.project.id ? response.project : project)
           : [response.project, ...current]);
         setSelectedId(response.project.id);
         if (!split) setSheetVisible(true);
-      })
-      .catch((caught) => setError(errorMessage(caught)))
-      .finally(() => {
         if (route.name === 'WorkHome') navigation.setParams({ projectId: undefined, rootRunId: undefined });
+      })
+      .catch((caught) => {
+        if (currentRouteProjectRef.current !== requestKey) return;
+        if (caught instanceof BonfireApiError && (caught.status === 403 || caught.status === 404)) {
+          handledRouteProjectRef.current = requestKey;
+          attemptedRouteProjectRef.current = '';
+          setRouteError('That Work request is not available for this account.');
+          if (route.name === 'WorkHome') navigation.setParams({ projectId: undefined, rootRunId: undefined });
+          return;
+        }
+        setRouteError(errorMessage(caught));
       });
-  }, [loading, navigation, projects, requestedProjectId, requestedRootRunId, route.name, sessionToken, split]);
+  }, [loading, navigation, projects, requestedProjectId, requestedRootRunId, route.name, routeRetryVersion, sessionToken, split]);
+
+  const retryLoad = useCallback(() => {
+    setError('');
+    setRouteError('');
+    if (requestedProjectId) {
+      setRouteRetryVersion((version) => version + 1);
+      return;
+    }
+    if (requestedRootRunId) {
+      void load(true).finally(() => setRouteRetryVersion((version) => version + 1));
+      return;
+    }
+    void load(true);
+  }, [load, requestedProjectId, requestedRootRunId]);
 
   const openProject = useCallback((project: StudioProject) => {
     setActionError('');
@@ -439,9 +481,9 @@ export function WorkHubScreen({ navigation, route }: Props) {
             refreshing={refreshing}
             showsVerticalScrollIndicator={false}
           />
-          {error ? (
-            <Pressable accessibilityRole="button" accessibilityLabel={`${error}. Try again`} onPress={() => { void load(true); }} style={styles.error}>
-              <Text numberOfLines={2} style={styles.errorText}>{error}</Text>
+          {routeError || error ? (
+            <Pressable accessibilityRole="button" accessibilityLabel={`${routeError || error}. Try again`} onPress={retryLoad} style={styles.error}>
+              <Text numberOfLines={2} style={styles.errorText}>{routeError || error}</Text>
               <Text style={styles.errorAction}>Try again</Text>
             </Pressable>
           ) : null}

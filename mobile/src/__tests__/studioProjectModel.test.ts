@@ -3,8 +3,11 @@ import test from 'node:test';
 
 import type { StudioProject } from '../api/types';
 import {
+  studioProjectAttentionCopy,
+  studioProjectBoundedProgress,
   studioProjectListRows,
   studioProjectOpenTarget,
+  studioProjectPhaseLabel,
   studioProjectRelativeTime,
   studioProjectResultIsFinal,
   studioProjectSection,
@@ -41,7 +44,7 @@ function project(
   };
 }
 
-test('Studio projects group into calm decision, active, and recent sections', () => {
+test('Studio projects keep actionable decisions separate from attention and recovery work', () => {
   const projects = [
     project('ready', { status: 'ready', progressPercent: 100 }),
     project('input', { status: 'needs_input' }),
@@ -52,6 +55,7 @@ test('Studio projects group into calm decision, active, and recent sections', ()
   ];
 
   assert.equal(studioProjectSection(projects[1]), 'needs-you');
+  assert.equal(studioProjectSection(projects[3]), 'needs-attention');
   assert.equal(studioProjectSection(projects[2]), 'in-progress');
   assert.equal(studioProjectSection(projects[0]), 'recent');
   assert.deepEqual(
@@ -59,6 +63,7 @@ test('Studio projects group into calm decision, active, and recent sections', ()
     [
       'section:needs-you',
       'project:input',
+      'section:needs-attention',
       'project:attention',
       'section:in-progress',
       'project:running',
@@ -68,6 +73,30 @@ test('Studio projects group into calm decision, active, and recent sections', ()
       'project:stopped',
     ],
   );
+});
+
+test('quiet receipts clamp progress, allowlist phases, and bound viewer-safe attention copy', () => {
+  assert.equal(studioProjectBoundedProgress(42.4), 42);
+  assert.equal(studioProjectBoundedProgress(120), 100);
+  assert.equal(studioProjectBoundedProgress(-12), 0);
+  assert.equal(studioProjectBoundedProgress('42'), null);
+  assert.equal(studioProjectPhaseLabel(' BUILD '), 'Build');
+  assert.equal(studioProjectPhaseLabel('ship_compile'), '');
+
+  assert.deepEqual(studioProjectAttentionCopy({
+    title: '  Final review needs another pass  ',
+    body: ' The current result did not pass its latest rendered review. ',
+    actionLabel: 'Review request',
+  }, true), {
+    title: 'Final review needs another pass',
+    body: 'The current result did not pass its latest rendered review.',
+    actionLabel: 'Review request',
+  });
+  assert.deepEqual(studioProjectAttentionCopy(undefined, true), {
+    title: 'This work needs attention',
+    body: 'Open the source conversation to review what happened and tell Scout how to continue.',
+    actionLabel: '',
+  });
 });
 
 test('Studio filters presentation and research without creating new navigation destinations', () => {

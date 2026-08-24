@@ -32,6 +32,7 @@ test('the Work hub is one filtered, virtualized project library with calm sectio
   assert.match(model, /\{ id: 'presentation', label: 'Presentations' \}/u);
   assert.match(model, /\{ id: 'document', label: 'Research' \}/u);
   assert.match(model, /case 'needs-you': return 'Needs you'/u);
+  assert.match(model, /case 'needs-attention': return 'Needs attention'/u);
   assert.match(model, /case 'in-progress': return 'In progress'/u);
   assert.match(model, /case 'recent': return 'Recent'/u);
   assert.doesNotMatch(hub, /BoardScreen|WorkHomeScreen/u);
@@ -47,9 +48,12 @@ test('iPhone uses one swipe-dismissable project sheet while iPad keeps list and 
   assert.match(sheet, /presentationStyle="formSheet"/u);
   assert.match(sheet, /allowSwipeDismissal/u);
   assert.match(sheet, /SCOUT NEEDS YOUR CALL/u);
-  assert.match(sheet, /accessibilityLabel="Open source conversation"/u);
 	assert.match(sheet, /const hasSource = Boolean/u);
-	assert.match(sheet, />Source conversation</u);
+	assert.match(sheet, /studioProjectAttentionCopy\(project\.attention, hasSource\)/u);
+	assert.match(sheet, /accessibilityRole="alert"[\s\S]*attention\.title[\s\S]*attention\.body/u);
+	assert.match(sheet, /attention \? null : \(/u);
+	assert.match(sheet, /accessibilityLabel=\{attention\?\.actionLabel \|\| 'Open source conversation'\}/u);
+	assert.match(sheet, /\{attention\?\.actionLabel \|\| 'Source conversation'\}/u);
   assert.match(sheet, /You can keep working elsewhere; Scout will update this project here/u);
   assert.match(sheet, /Full slide editing is available on desktop/u);
 	assert.match(sheet, /'Review changes'/u);
@@ -94,8 +98,23 @@ test('Home continuity and chat receipts hand off quietly to the same Work projec
   assert.match(thread, /navigation\.navigate\('WorkHome', \{ projectId: normalizedId \}\)/u);
   assert.match(thread, /currentWorkMessage && !currentWorkMessage\.studioProject && showCurrentWorkActivity/u);
   assert.match(bubble, /const studioProject = message\.studioProject/u);
-  assert.match(bubble, /accessibilityHint="Opens this work in Studio"/u);
+  assert.match(bubble, /accessibilityHint="Opens this exact request in Work"/u);
+	assert.match(bubble, />View in Work</u);
+	assert.match(bubble, /studioProjectBoundedProgress\(studioProject\.progressPercent\)/u);
 	assert.match(bubble, /studioProject\.checkpoint/u);
 	assert.match(bubble, /onResolveWorkCheckpoint\?\.\(message, option\)/u);
   assert.doesNotMatch(bubble, /JSON\.stringify\(studioProject/u);
+});
+
+test('an exact Work target is consumed only after success or authoritative unavailability', () => {
+  const hub = source('src', 'screens', 'WorkHubScreen.tsx');
+
+  assert.match(hub, /const attemptedRouteProjectRef = useRef\(''\)/u);
+	assert.match(hub, /const \[routeError, setRouteError\] = useState\(''\)/u);
+  assert.match(hub, /const attemptKey = `\$\{requestKey\}:\$\{routeRetryVersion\}`/u);
+  assert.match(hub, /\.then\(\(response\) => \{[\s\S]*handledRouteProjectRef\.current = requestKey[\s\S]*navigation\.setParams/u);
+  assert.match(hub, /caught instanceof BonfireApiError && \(caught\.status === 403 \|\| caught\.status === 404\)[\s\S]*navigation\.setParams/u);
+  assert.match(hub, /setRouteRetryVersion\(\(version\) => version \+ 1\)/u);
+	assert.match(hub, /\{routeError \|\| error \? \(/u);
+  assert.doesNotMatch(hub, /\.catch\([^)]*\)[\s\S]{0,120}\.finally\(\(\) => \{[\s\S]*navigation\.setParams/u);
 });

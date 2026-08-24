@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -4035,12 +4036,37 @@ func (app *kanbanBoardApp) enqueueStudioRender(artifact meetingMemoryEntry, side
 		}
 		printHTML = string(expanded)
 	}
-	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, printHTML, artifact.Metadata["title"])
-	if err != nil {
-		return "", "render export enqueue failed: " + compactAssistantLine(err.Error())
+	binding := renderPDFJobBinding{
+		ArtifactID: artifact.ID, Kind: kind, HTML: printHTML, Title: artifact.Metadata["title"],
+		SourceArtifactVersion: artifactVersion(artifact), SourceSceneRef: strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]),
+		SourceContentDigest: renderPDFContentDigest(kind, printHTML),
 	}
-	if _, _, err := app.memory.updateOSArtifactMetadata(artifact.ID, queuedRenderMetadata(artifact, job.ID, kind)); err != nil {
+	if _, _, complete := completedRenderAssetForBinding(artifact, binding); complete {
+		return "", ""
+	}
+	var job renderRunnerJob
+	if active, reusable, reuseErr := activeRenderJobForBinding(artifact, binding); reuseErr != nil && !os.IsNotExist(reuseErr) {
+		return "", "render export recovery failed: " + compactAssistantLine(reuseErr.Error())
+	} else if reusable {
+		job = active
+	} else {
+		var recoverErr error
+		job, _, recoverErr = recoverOrEnqueueStudioBoundRenderExportPDFJob(binding)
+		if recoverErr != nil {
+			return "", "render export recovery failed: " + compactAssistantLine(recoverErr.Error())
+		}
+	}
+	renderMetadata := queuedRenderMetadataForInput(artifact, job.ID, kind, binding.SourceContentDigest)
+	if job.Status == renderJobStatusRunning {
+		renderMetadata["renderStatus"] = renderJobStatusRunning
+	} else if job.Status == renderJobStatusComplete {
+		renderMetadata = recoveredCompletedRenderMetadataForInput(artifact, job.ID, kind, binding.SourceContentDigest)
+	}
+	if _, _, err := app.memory.updateOSArtifactMetadata(artifact.ID, renderMetadata); err != nil {
 		log.Errorf("packaging_studio ship: renderJobId stamp on %s failed: %v", artifact.ID, err)
+	}
+	if job.Status == renderJobStatusComplete {
+		return "", "the exact render job completed, but its PDF attachment callback is not yet confirmed"
 	}
 	return job.ID, ""
 }

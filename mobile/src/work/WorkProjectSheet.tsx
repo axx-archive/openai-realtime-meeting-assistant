@@ -14,6 +14,7 @@ import { SymbolView } from 'expo-symbols';
 import type { StudioProject, StudioProjectCheckpoint } from '../api/types';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
 import {
+  studioProjectAttentionCopy,
   studioProjectKindLabel,
   studioProjectOpenTarget,
   studioProjectResultIsFinal,
@@ -73,9 +74,10 @@ export function WorkProjectDetail({
     && Boolean(project.checkpoint?.question)
     && checkpointOptions.length > 0;
 	const hasSource = Boolean(String(project.source?.threadId ?? '').trim());
-  const needsSourceAction = (project.status === 'needs_input' || project.status === 'needs_attention')
-    && !decision
-	&& hasSource;
+  const needsSourceAction = project.status === 'needs_input' && !decision && hasSource;
+  const attention = project.status === 'needs_attention'
+    ? studioProjectAttentionCopy(project.attention, hasSource)
+    : null;
   const resultLabel = project.kind === 'presentation' ? 'Presentation' : 'Research report';
 	const finalReady = studioProjectResultIsFinal(project);
 
@@ -179,10 +181,18 @@ export function WorkProjectDetail({
           </View>
         ) : null}
 
-        {needsSourceAction ? (
+        {attention ? (
+          <View accessibilityRole="alert" style={styles.attentionCard}>
+            <View style={styles.attentionHead}>
+              <SymbolView name="exclamationmark.triangle.fill" tintColor={colors.warn} size={16} />
+              <Text style={styles.attentionTitle}>{attention.title}</Text>
+            </View>
+            <Text style={styles.attentionBody}>{attention.body}</Text>
+          </View>
+        ) : needsSourceAction ? (
           <View style={styles.sourceActionCard}>
             <View style={styles.sourceActionCopy}>
-              <Text style={styles.sourceActionTitle}>{project.status === 'needs_input' ? 'Scout needs your input' : 'Scout needs help moving this forward'}</Text>
+              <Text style={styles.sourceActionTitle}>Scout needs your input</Text>
               <Text style={styles.sourceActionBody}>{project.checkpoint?.question || 'Open the source conversation to answer or adjust the direction.'}</Text>
             </View>
           </View>
@@ -240,12 +250,14 @@ export function WorkProjectDetail({
               </View>
             ) : null}
           </View>
-        ) : (
+        ) : attention ? null : (
           <View style={styles.pendingResult}>
-            <SymbolView name="sparkles" tintColor={colors.emberText} size={18} />
+            <SymbolView name={project.status === 'stopped' ? 'stop.circle' : 'sparkles'} tintColor={project.status === 'stopped' ? colors.text3 : colors.emberText} size={18} />
             <View style={styles.pendingResultCopy}>
-              <Text style={styles.pendingResultTitle}>The finished work will land here</Text>
-              <Text style={styles.pendingResultBody}>You can keep working elsewhere; Scout will update this project here.</Text>
+              <Text style={styles.pendingResultTitle}>{project.status === 'stopped' ? 'No final file was attached' : 'The finished work will land here'}</Text>
+              <Text style={styles.pendingResultBody}>{project.status === 'stopped'
+                ? 'This request stopped before Scout attached a verified result.'
+                : 'You can keep working elsewhere; Scout will update this project here.'}</Text>
             </View>
           </View>
         )}
@@ -258,14 +270,14 @@ export function WorkProjectDetail({
         ) : null}
 
 		{hasSource ? (
-		  <Pressable
-			accessibilityRole="button"
-			accessibilityLabel="Open source conversation"
-			onPress={() => onOpenSource(project)}
-			style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}
-		  >
-			<SymbolView name="bubble.left.and.bubble.right" tintColor={colors.text2} size={14} />
-			<Text style={styles.sourceLinkText}>Source conversation</Text>
+			<Pressable
+				accessibilityRole="button"
+				accessibilityLabel={attention?.actionLabel || 'Open source conversation'}
+				onPress={() => onOpenSource(project)}
+				style={({ pressed }) => [styles.sourceLink, pressed && styles.pressed]}
+			  >
+				<SymbolView name="bubble.left.and.bubble.right" tintColor={colors.text2} size={14} />
+				<Text style={styles.sourceLinkText}>{attention?.actionLabel || 'Source conversation'}</Text>
 			<SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
 		  </Pressable>
 		) : null}
@@ -357,6 +369,10 @@ const styles = StyleSheet.create({
   sourceActionCopy: { gap: 2 },
   sourceActionTitle: { ...type.bodyMedium, color: colors.text1 },
   sourceActionBody: { ...type.caption, color: colors.text2 },
+	attentionCard: { gap: space[2], padding: space[4], borderRadius: radius.xl, borderCurve: 'continuous', backgroundColor: colors.warnSoft },
+	attentionHead: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
+	attentionTitle: { ...type.bodyMedium, flex: 1, color: colors.text1 },
+	attentionBody: { ...type.caption, color: colors.text2 },
 	  sourceLink: { minHeight: hitMin, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[3], borderRadius: radius.lg, backgroundColor: colors.surface2 },
 	  sourceLinkText: { ...type.captionMedium, flex: 1, color: colors.text2 },
   resultCard: { gap: space[3], padding: space[4], borderRadius: radius.xl, borderCurve: 'continuous', backgroundColor: colors.surface1, ...shadow[1] },

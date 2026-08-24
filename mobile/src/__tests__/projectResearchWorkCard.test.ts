@@ -8,7 +8,7 @@ test('Project-bound Research uses governed actions while Project presentations k
           export const ActivityIndicator='ActivityIndicator';
           export const Animated={View:'AnimatedView'};
           export const findNodeHandle=()=>1;
-          export const Pressable='Pressable'; export const ScrollView='ScrollView'; export const Text='Text'; export const TextInput='TextInput'; export const View='View';
+          export const Modal='Modal'; export const Pressable='Pressable'; export const ScrollView='ScrollView'; export const Text='Text'; export const TextInput='TextInput'; export const View='View';
           export const StyleSheet={create:value=>value};
           export const useWindowDimensions=()=>({width:390,height:844,fontScale:1});
         `,
@@ -18,6 +18,7 @@ test('Project-bound Research uses governed actions while Project presentations k
         'project-work-card-stub:expo-linking': `export const openURL=async()=>{};`,
         'project-work-card-stub:expo-blur': `export const BlurView='BlurView';`,
         'project-work-card-stub:expo-glass-effect': `export const GlassView='GlassView'; export const isLiquidGlassAvailable=()=>false;`,
+		'project-work-card-stub:react-native-safe-area-context': `export const SafeAreaView='SafeAreaView';`,
         'project-work-card-stub:@shopify/flash-list': `export const useMappingHelper=()=>({getMappingKey:value=>String(value)});`,
         'project-work-card-stub:../api/client': `export const api={};`,
         'project-work-card-stub:../files/fileActions': `export const authenticatedFileHeaders=()=>({}); export const authenticatedFileUrl=()=>'';`,
@@ -37,6 +38,7 @@ test('Project-bound Research uses governed actions while Project presentations k
   const React = (await import('react')).default;
   const { act, create } = await import('react-test-renderer');
   const { MessageBubble } = await import('../messaging/MessageBubble');
+  const { WorkProjectDetail } = await import('../work/WorkProjectSheet');
   const message = {
     id: 'project-research-work', kind: 'thread', role: 'scout', text: 'Research delivered.', createdAt: '2026-08-13T18:00:00Z',
     thread: { id: 'run-project-research', mode: 'research', query: 'Research the durable creator-economy evidence', status: 'complete', artifactId: 'artifact-project-research', projectId: 'project-research', projectTitle: 'Research Project', progressPercent: 100 },
@@ -46,6 +48,7 @@ test('Project-bound Research uses governed actions while Project presentations k
   let saved = 0;
   let openedDrive = 0;
   let regenerated = 0;
+  let openedStudio = '';
   const render = (workSaved: boolean) => React.createElement(MessageBubble as React.ComponentType<any>, {
     message, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
     workDriveSaveAvailability: 'available', workSaved,
@@ -53,7 +56,45 @@ test('Project-bound Research uses governed actions while Project presentations k
     onOpenSavedWorkArtifact: () => { openedDrive += 1; }, onRegenerateWorkArtifact: () => { regenerated += 1; },
   } as any);
   let renderer: import('react-test-renderer').ReactTestRenderer;
-  await act(async () => { renderer = create(render(false)); });
+  const studioMessage = {
+    id: 'studio-project-receipt', kind: 'thread', role: 'scout', text: 'Presentation filed.', createdAt: '2026-08-13T17:58:00Z',
+    studioProject: {
+      id: 'studio-project-like-a-farmer', kind: 'presentation', title: 'Like A Farmer decision deck', status: 'running',
+      href: '/work?project=studio-project-like-a-farmer', phase: 'build', progressPercent: 42,
+    },
+  };
+  const renderStudio = (studioProject: Record<string, unknown>) => React.createElement(MessageBubble as React.ComponentType<any>, {
+    message: { ...studioMessage, studioProject }, own: false, showAuthor: true, sessionToken: 'session', viewerEmail: 'aj@example.test', timestampReveal,
+    onOpenStudioProject: (projectId: string) => { openedStudio = projectId; },
+  } as any);
+  const renderedText = () => renderer!.root.findAllByType('Text' as any)
+    .flatMap((node) => node.children)
+    .filter((value): value is string => typeof value === 'string');
+
+  await act(async () => { renderer = create(renderStudio(studioMessage.studioProject)); });
+  const studioReceipt = renderer!.root.findByProps({ accessibilityLabel: 'Presentation. Like A Farmer decision deck. Build · 42%. View in Work.' });
+  assert.ok(renderedText().includes('Build · 42%'));
+  assert.ok(renderedText().includes('View in Work'));
+  await act(async () => { studioReceipt.props.onPress(); });
+  assert.equal(openedStudio, 'studio-project-like-a-farmer');
+
+  await act(async () => {
+    renderer!.update(renderStudio({
+      ...studioMessage.studioProject,
+      status: 'needs_attention',
+      progressPercent: 76,
+      phase: 'polish',
+      attention: {
+        title: 'Final review needs another pass',
+        body: 'Scout saved the draft, but its latest rendered review did not pass.',
+      },
+    }));
+  });
+  assert.ok(renderedText().includes('Final review needs another pass'));
+  assert.ok(renderedText().includes('Scout saved the draft, but its latest rendered review did not pass.'));
+  assert.ok(renderedText().includes('View in Work'));
+
+  await act(async () => { renderer!.update(render(false)); });
   assert.equal(renderer!.root.findByProps({ accessibilityLabel: 'Project: Research Project' }).findByType('Text' as any).children.join(''), 'Project · Research Project');
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Open deliverable' }).props.onPress(); });
   await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Save deliverable to Drive' }).props.onPress(); });
@@ -165,4 +206,37 @@ test('Project-bound Research uses governed actions while Project presentations k
   const historicalPreview = renderer!.root.findByType('InlineArtifactPreview' as any);
   assert.equal(historicalPreview.props.previewOnlyLabel, 'Preview only');
   assert.equal(historicalPreview.props.onPresent, undefined);
+
+  const attentionProject = {
+    schemaVersion: 1, id: 'attention-project', kind: 'document', title: 'Market evidence report', revision: 1,
+    status: 'needs_attention', progressPercent: 74, phase: 'polish',
+    phases: [
+      { id: 'brief', label: 'Brief', status: 'complete' },
+      { id: 'build', label: 'Build', status: 'complete' },
+      { id: 'polish', label: 'Polish', status: 'needs_attention' },
+      { id: 'ready', label: 'Ready', status: 'upcoming' },
+    ],
+    createdAt: '2026-08-13T17:00:00Z', updatedAt: '2026-08-13T18:15:00Z',
+    rootRunId: 'attention-run', rootArtifactId: 'attention-project', href: '/work?project=attention-project',
+    source: { threadId: 'source-thread', kind: 'channel' },
+    attention: { title: 'Source access changed', body: 'Scout can’t verify one of the sources needed to finish this work.', actionLabel: 'Review sources' },
+    canRename: true,
+  };
+  let openedAttentionSource = '';
+  await act(async () => {
+    renderer!.update(React.createElement(WorkProjectDetail as React.ComponentType<any>, {
+      project: attentionProject,
+      onOpenResult: () => {},
+      onOpenSource: (project: { id: string }) => { openedAttentionSource = project.id; },
+      onContinueResult: () => {},
+      onResolveCheckpoint: () => {},
+      onRename: () => {},
+    }));
+  });
+  assert.ok(renderedText().includes('Source access changed'));
+  assert.ok(renderedText().includes('Scout can’t verify one of the sources needed to finish this work.'));
+  assert.ok(renderedText().includes('Review sources'));
+  assert.equal(renderedText().includes('The finished work will land here'), false);
+  await act(async () => { renderer!.root.findByProps({ accessibilityLabel: 'Review sources' }).props.onPress(); });
+  assert.equal(openedAttentionSource, 'attention-project');
 });

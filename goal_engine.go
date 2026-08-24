@@ -330,17 +330,22 @@ type goalSubtask struct {
 	// human_checkpoint). Empty for free-form goals. Inline roles execute
 	// inside the engine step (runInlineProcessStages); only writer subtasks
 	// dispatch child threads.
-	Role       string             `json:"role,omitempty"`
-	Mode       string             `json:"mode"`
-	Runner     string             `json:"runner"`
-	Authority  string             `json:"authority"`
-	DependsOn  []string           `json:"dependsOn"`
-	Status     string             `json:"status"`
-	ArtifactID string             `json:"artifactId,omitempty"`
-	ThreadID   string             `json:"threadId,omitempty"`
-	Attempts   int                `json:"attempts"`
-	Revisions  int                `json:"revisions,omitempty"`
-	Review     *goalSubtaskReview `json:"review"`
+	Role       string   `json:"role,omitempty"`
+	Mode       string   `json:"mode"`
+	Runner     string   `json:"runner"`
+	Authority  string   `json:"authority"`
+	DependsOn  []string `json:"dependsOn"`
+	Status     string   `json:"status"`
+	ArtifactID string   `json:"artifactId,omitempty"`
+	ThreadID   string   `json:"threadId,omitempty"`
+	Attempts   int      `json:"attempts"`
+	Revisions  int      `json:"revisions,omitempty"`
+	// InlineExecutionKey is reserved and persisted before an authored inline
+	// stage crosses either a model or local-effect boundary. A restart reuses
+	// this exact attempt instead of incrementing Attempts, which keeps provider
+	// idempotency and the deterministic stage artifact identity stable.
+	InlineExecutionKey string             `json:"inlineExecutionKey,omitempty"`
+	Review             *goalSubtaskReview `json:"review"`
 	// FailureClass is a server-authored durable retry hint copied from the exact
 	// child terminal record. It is never accepted from the model. In particular,
 	// a source-valid external-evidence syntax failure blocks instead of launching
@@ -1627,6 +1632,11 @@ func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID str
 	// work, so it earns the heavier generation budget too.
 	if plan.ProcessID != "" && st.Role == processRoleWriter {
 		spec.Deliverable = true
+		if goalUsesAuthoritativeRenderedAdmission(plan) && st.Runner == agentRunnerOpenAIText && goalChildAuthority(st.Authority, plan.Authority) != codexJobAuthorityExternalWrite {
+			spec.ProviderReplayClass = goalChildProviderReplayStudioWriterV1
+			spec.ProviderReplayProcessID = strings.TrimSpace(plan.ProcessID)
+			spec.ProviderReplayProcessDigest = strings.TrimSpace(plan.ProcessDigest)
+		}
 	}
 	// Goal children retain the parent's source authority for provider admission
 	// and revision, while goalParentId continues to suppress per-child creator
@@ -2230,20 +2240,39 @@ func (e *goalEngine) runInlineProcessStages(ctx context.Context, plan *goalPlan,
 			e.persist(plan, parentID, "")
 			continue
 		}
+		if strings.TrimSpace(st.InlineExecutionKey) == "" {
+			st.Attempts++
+			st.InlineExecutionKey = goalInlineStageExecutionKey(plan, parentID, st, stage)
+		} else if st.InlineExecutionKey != goalInlineStageExecutionKey(plan, parentID, st, stage) {
+			st.Status = subtaskFailed
+			st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "saved inline execution identity changed", By: "process_engine"}
+			e.persist(plan, parentID, "")
+			continue
+		}
 		st.Status = subtaskRunning
-		st.Attempts++
-		e.persist(plan, parentID, "")
+		if persisted := e.persist(plan, parentID, ""); strings.TrimSpace(persisted.ID) == "" || e.conditionalPersistFailed {
+			// The provider must never observe an execution identity that the
+			// parent did not durably reserve. Leave the durable ready state intact;
+			// a later boot/re-drive can safely reserve and start the attempt.
+			log.Errorf("goal %s inline stage %s reservation was not durable; provider admission refused", parentID, st.ID)
+			return true
+		}
 		if stage.Role == processRoleHumanCheckpoint {
+			st.InlineExecutionKey = ""
 			e.parkProcessCheckpoint(plan, parentID, st, stage)
 			return true
 		}
+		stageContext := ctx
+		if goalInlineStageUsesModel(stage.Role) {
+			stageContext = withGoalInlineProviderOperation(ctx, st.InlineExecutionKey)
+		}
 		switch stage.Role {
 		case processRolePanel, processRoleJudges:
-			e.runProcessPanelStage(ctx, plan, parentID, st, stage)
+			e.runProcessPanelStage(stageContext, plan, parentID, st, stage)
 		case processRoleSynthesizer:
-			e.runProcessSynthesizerStage(ctx, plan, parentID, st, stage)
+			e.runProcessSynthesizerStage(stageContext, plan, parentID, st, stage)
 		case processRoleGate:
-			e.runProcessGateStage(ctx, plan, parentID, st, stage)
+			e.runProcessGateStage(stageContext, plan, parentID, st, stage)
 		case processRoleRender:
 			e.runProcessRenderStage(plan, parentID, st, stage)
 		case processRoleCompile:
@@ -2252,19 +2281,50 @@ func (e *goalEngine) runInlineProcessStages(ctx context.Context, plan *goalPlan,
 			st.Status = subtaskFailed
 			st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "unknown inline stage role " + stage.Role, By: "process_engine"}
 		}
+		st.InlineExecutionKey = ""
 		// A stage may deliberately turn a judgment-resolvable blocker into a
 		// human checkpoint. parkProcessCheckpoint already persisted and projected
 		// that approval state; stop this engine step instead of falling through to
 		// review and replacing the actionable card with a generic error.
 		if plan.State == goalStateApproval {
+			e.persist(plan, parentID, "")
 			return true
 		}
 		if plan.State == goalStateBlocked {
+			e.persist(plan, parentID, "")
 			return true
 		}
 		e.persist(plan, parentID, "")
 	}
 	return false
+}
+
+func goalInlineStageUsesModel(role string) bool {
+	return oneOf(strings.TrimSpace(role), processRolePanel, processRoleJudges, processRoleSynthesizer, processRoleGate)
+}
+
+func goalInlineStageExecutionKey(plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage) string {
+	if plan == nil || st == nil || strings.TrimSpace(parentID) == "" || st.Attempts < 1 {
+		return ""
+	}
+	routeDigest := ""
+	if plan.RouteReceipt != nil {
+		routeDigest = strings.TrimSpace(plan.RouteReceipt.Digest)
+	}
+	return "goal-inline-stage-" + sha256Hex([]byte(strings.Join([]string{
+		"goal-inline-stage-execution/v1", strings.TrimSpace(parentID), strings.TrimSpace(plan.GoalID), strings.TrimSpace(plan.ProcessID),
+		strconv.Itoa(plan.ProcessVersion), strings.TrimSpace(plan.ProcessDigest), strings.TrimSpace(plan.ProcessImplementationRevision),
+		routeDigest, strings.TrimSpace(st.ID), strings.TrimSpace(stage.Role), strings.TrimSpace(stage.OutputContract),
+		strconv.Itoa(st.Attempts), strconv.Itoa(st.Revisions),
+	}, "\x00")))
+}
+
+func goalInlineStageArtifactID(executionKey string) string {
+	executionKey = strings.TrimSpace(executionKey)
+	if executionKey == "" {
+		return ""
+	}
+	return "os-artifact-process-stage-" + sha256Hex([]byte("goal-inline-stage-artifact/v1\x00" + executionKey))[:24]
 }
 
 // skipInactiveProcessStages resolves the intentionally small RunIf contract.
@@ -2674,6 +2734,20 @@ func (e *goalEngine) processStageTaskAuthorized(ctx context.Context, plan *goalP
 // inline records are the engine's own work, so the review-model pass never
 // re-judges them.
 func (e *goalEngine) completeProcessStage(plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage, body string, note string, extraMetadata map[string]string) {
+	executionKey := strings.TrimSpace(st.InlineExecutionKey)
+	// Normal execution reserves and persists this identity before invoking the
+	// provider. Keep direct/internal stage runners on the same deterministic
+	// contract as well: they do not cross an external-write boundary, and an
+	// exact key still makes their artifact commit restart-safe.
+	if goalUsesAuthoritativeRenderedAdmission(plan) && executionKey == "" {
+		// Direct/internal callers arrive after setting the stage running, without
+		// crossing runInlineProcessStages' reservation seam. Count every such
+		// execution, including a legitimate cascade/review re-run, so it cannot
+		// collide with the prior completed attempt's deterministic artifact.
+		st.Attempts++
+		st.InlineExecutionKey = goalInlineStageExecutionKey(plan, parentID, st, stage)
+		executionKey = strings.TrimSpace(st.InlineExecutionKey)
+	}
 	metadata := map[string]string{
 		"source":        "process_stage",
 		"goalParentId":  parentID,
@@ -2683,6 +2757,12 @@ func (e *goalEngine) completeProcessStage(plan *goalPlan, parentID string, st *g
 		"processRole":   stage.Role,
 		"status":        "complete",
 		"threadStatus":  "complete",
+	}
+	if executionKey != "" {
+		metadata["goalStageExecutionKey"] = executionKey
+		metadata["goalStageAttempt"] = strconv.Itoa(st.Attempts)
+		metadata["goalStageRevision"] = strconv.Itoa(st.Revisions)
+		metadata["goalStageContentDigest"] = sha256Hex([]byte(body))
 	}
 	if contract := strings.TrimSpace(stage.OutputContract); contract != "" {
 		metadata["artifactContract"] = contract
@@ -2699,15 +2779,37 @@ func (e *goalEngine) completeProcessStage(plan *goalPlan, parentID string, st *g
 	for key, value := range extraMetadata {
 		metadata[key] = value
 	}
-	artifact, _, err := e.app.createOSArtifactWithMetadata("workflow", stage.Title, body, scoutParticipantName, metadata)
+	artifactID := ""
+	if goalUsesAuthoritativeRenderedAdmission(plan) {
+		if executionKey == "" || executionKey != goalInlineStageExecutionKey(plan, parentID, st, stage) {
+			st.Status = subtaskFailed
+			st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "stage execution identity is unavailable", By: "process_engine"}
+			return
+		}
+		artifactID = goalInlineStageArtifactID(executionKey)
+	}
+	artifact, appended, _, err := e.app.createOSArtifactWithIDAndMetadataAcknowledged(artifactID, "workflow", stage.Title, body, scoutParticipantName, metadata)
 	if err != nil || strings.TrimSpace(artifact.ID) == "" {
 		st.Status = subtaskFailed
 		st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "stage artifact was not saved", By: "process_engine"}
 		return
 	}
+	if !appended && artifactID != "" {
+		stored, found := e.app.osArtifactByID(artifactID)
+		if !found || !goalInlineStageArtifactMatches(plan, parentID, st, stage, stored, executionKey) || strings.TrimSpace(stored.Text) != strings.TrimSpace(body) {
+			st.Status = subtaskFailed
+			st.Review = &goalSubtaskReview{Verdict: goalReviewFail, Reasons: "saved stage artifact conflicts with this exact execution", By: "process_engine"}
+			return
+		}
+		artifact = stored
+	}
 	st.ArtifactID = artifact.ID
 	st.Status = subtaskComplete
 	st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: note, By: "process_stage"}
+	// The execution key belongs to the in-flight attempt. Its identity is now
+	// preserved on the immutable stage artifact; clearing the plan field lets a
+	// legitimate later cascade/review re-run reserve the next Attempts value.
+	st.InlineExecutionKey = ""
 	// The deliverable lands in the origin thread AS IT COMPLETES (P0-2), not
 	// only at the goal's terminal delivery. Role-gated inside the reporter.
 	if !stage.Internal {
@@ -2718,6 +2820,35 @@ func (e *goalEngine) completeProcessStage(plan *goalPlan, parentID string, st *g
 		e.app.postGoalStageMessage(parentID, stage.Title, stage.Role, messageArtifactID,
 			goalStageMessageLine(stage.Title, note, st.Revisions))
 	}
+}
+
+func goalInlineStageArtifactMatches(plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage, artifact meetingMemoryEntry, executionKey string) bool {
+	if plan == nil || st == nil || strings.TrimSpace(artifact.ID) == "" || strings.TrimSpace(artifact.Text) == "" {
+		return false
+	}
+	metadata := artifact.Metadata
+	if strings.TrimSpace(metadata["source"]) != "process_stage" || strings.TrimSpace(metadata["goalParentId"]) != strings.TrimSpace(parentID) ||
+		strings.TrimSpace(metadata["goalSubtaskId"]) != strings.TrimSpace(st.ID) || strings.TrimSpace(metadata["processId"]) != strings.TrimSpace(plan.ProcessID) ||
+		strings.TrimSpace(metadata["processStage"]) != strings.TrimSpace(stage.ID) || strings.TrimSpace(metadata["processRole"]) != strings.TrimSpace(stage.Role) ||
+		strings.TrimSpace(metadata["status"]) != "complete" || strings.TrimSpace(metadata["threadStatus"]) != "complete" ||
+		strings.TrimSpace(metadata["artifactContract"]) != strings.TrimSpace(stage.OutputContract) {
+		return false
+	}
+	if executionKey = strings.TrimSpace(executionKey); executionKey != "" {
+		if strings.TrimSpace(metadata["goalStageExecutionKey"]) != executionKey ||
+			strings.TrimSpace(metadata["goalStageAttempt"]) != strconv.Itoa(st.Attempts) ||
+			strings.TrimSpace(metadata["goalStageRevision"]) != strconv.Itoa(st.Revisions) ||
+			strings.TrimSpace(metadata["goalStageContentDigest"]) != sha256Hex([]byte(artifact.Text)) ||
+			strings.TrimSpace(artifact.ID) != goalInlineStageArtifactID(executionKey) {
+			return false
+		}
+	}
+	for key, want := range goalRouteChildBindingMetadata(plan) {
+		if strings.TrimSpace(metadata[key]) != strings.TrimSpace(want) {
+			return false
+		}
+	}
+	return true
 }
 
 // failProcessStage marks an inline stage failed with the reason on record; the
@@ -3309,18 +3440,52 @@ func (e *goalEngine) runProcessRenderStage(plan *goalPlan, parentID string, st *
 		return
 	}
 	kind := serverRenderKindForArtifact(artifact)
-	job, err := enqueueRenderExportPDFJob(artifact.ID, kind, artifact.Text, artifact.Metadata["title"])
-	if err != nil {
-		skip("export enqueue failed: " + err.Error())
+	binding := renderPDFJobBinding{
+		ArtifactID: artifact.ID, Kind: kind, HTML: artifact.Text, Title: artifact.Metadata["title"],
+		SourceArtifactVersion: artifactVersion(artifact), SourceSceneRef: strings.TrimSpace(artifact.Metadata[deckSceneRefMetadataKey]),
+		SourceContentDigest: renderPDFContentDigest(kind, artifact.Text),
+	}
+	if asset, _, complete := completedRenderAssetForBinding(artifact, binding); complete {
+		body := strings.Join([]string{
+			"Render export already complete",
+			"",
+			"- PDF asset: " + asset.Ref,
+			"- Kind: " + kind,
+			"- Source artifact: " + artifact.ID,
+		}, "\n")
+		e.completeProcessStage(plan, parentID, st, stage, body, "exact completed render asset recovered", map[string]string{"renderRecovered": "true", "renderAssetRef": asset.Ref})
 		return
+	}
+	var job renderRunnerJob
+	if active, reusable, reuseErr := activeRenderJobForBinding(artifact, binding); reuseErr != nil && !os.IsNotExist(reuseErr) {
+		skip("existing export could not be resumed: " + reuseErr.Error())
+		return
+	} else if reusable {
+		job = active
+	} else {
+		var recoverErr error
+		job, _, recoverErr = recoverOrEnqueueStudioBoundRenderExportPDFJob(binding)
+		if recoverErr != nil {
+			skip("export recovery failed: " + recoverErr.Error())
+			return
+		}
 	}
 	// Job-identity stamp on the SOURCE artifact, mirroring the export route,
 	// so the render callback verifies and lands the PDF asset there.
-	if _, _, err := e.app.memory.updateOSArtifactMetadata(artifact.ID, queuedRenderMetadata(artifact, job.ID, kind)); err != nil {
+	renderMetadata := queuedRenderMetadataForInput(artifact, job.ID, kind, binding.SourceContentDigest)
+	statusLabel := "queued"
+	if job.Status == renderJobStatusRunning {
+		renderMetadata["renderStatus"] = renderJobStatusRunning
+		statusLabel = "already running"
+	} else if job.Status == renderJobStatusComplete {
+		renderMetadata = recoveredCompletedRenderMetadataForInput(artifact, job.ID, kind, binding.SourceContentDigest)
+		statusLabel = "already completed; PDF attachment callback pending"
+	}
+	if _, _, err := e.app.memory.updateOSArtifactMetadata(artifact.ID, renderMetadata); err != nil {
 		log.Errorf("goal %s render stage %s: renderJobId stamp failed: %v", parentID, stage.ID, err)
 	}
 	body := strings.Join([]string{
-		"Render export queued",
+		"Render export " + statusLabel,
 		"",
 		"- Job: " + job.ID,
 		"- Kind: " + kind,
@@ -5613,12 +5778,12 @@ func (e *goalEngine) recoverCheckpointDrive(plan *goalPlan, parentID string) (bo
 		if childFound && e.app.goalChildStartedInProcess(child.ID) {
 			return true, nil
 		}
-		if childFound && strings.TrimSpace(child.Metadata[publicConversationProviderRequestKey]) != "" {
+		if childFound && goalChildUsesDurableProviderReplay(scoutAgentThread{ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Artifact: child}) {
 			thread := scoutAgentThread{
 				ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Mode: normalizeAgentThreadMode(child.Metadata["mode"]),
 				Query: firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), Status: "running", Artifact: child,
 			}
-			if err := e.app.replayStartedGoalExternalEvidenceThread(thread); err != nil {
+			if err := e.app.replayStartedGoalProviderThread(thread); err != nil {
 				return false, fmt.Errorf("saved goal child provider replay is unavailable")
 			}
 			return true, nil
@@ -6222,9 +6387,14 @@ func (app *kanbanBoardApp) reconcileGoalThreadsAtBoot() {
 	if app == nil || app.memory == nil {
 		return
 	}
-	for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, goalReconcileScanLimit) {
+	seen := make(map[string]bool, goalReconcileScanLimit)
+	schedule := func(artifact meetingMemoryEntry) {
+		if seen[artifact.ID] {
+			return
+		}
+		seen[artifact.ID] = true
 		if artifact.Metadata["mode"] != "goal" {
-			continue
+			return
 		}
 		plan, planOK := decodeGoalPlan(artifact.Metadata["goalPlan"])
 		if artifact.Metadata["currentStage"] == goalStateApproval {
@@ -6248,16 +6418,29 @@ func (app *kanbanBoardApp) reconcileGoalThreadsAtBoot() {
 				break
 			}
 			if !planOK {
-				continue
+				return
 			}
 		}
 		if artifact.Metadata["currentStage"] == goalStateApproval {
-			continue
+			return
 		}
 		if isTerminalGoalState(artifact.Metadata["currentStage"]) || strings.TrimSpace(app.currentOpenAIAPIKey()) == "" {
-			continue
+			return
 		}
 		go app.reconcileGoalThread(artifact.ID)
+	}
+	for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, goalReconcileScanLimit) {
+		schedule(artifact)
+	}
+	// The generic cap protects boot from cloning years of artifact bodies, but
+	// canonical Presentation and Research roots must never age out of recovery.
+	// Their maintained body-free index is proportional only to Studio work and
+	// includes every canonical root, not just the newest 200 OS artifacts.
+	for _, candidate := range app.memory.studioProjectProjectionSnapshot() {
+		artifact := candidate.Entry
+		if _, _, canonical := studioProjectCandidate(artifact); canonical {
+			schedule(artifact)
+		}
 	}
 }
 
@@ -6303,9 +6486,49 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 		engine.fail(&plan, parentID, err.Error())
 		return
 	}
+	processDef, _ := engine.resolvedProcess(&plan)
 	for index := range plan.Subtasks {
 		st := &plan.Subtasks[index]
 		if st.Status != subtaskRunning {
+			continue
+		}
+		if goalUsesAuthoritativeRenderedAdmission(&plan) && processStageRoleIsInline(st.Role) {
+			stage, found := processDef.stageByID(st.ID)
+			if !found || stage.Role != st.Role {
+				engine.fail(&plan, parentID, "saved inline process stage authority is unavailable; nothing was replayed")
+				return
+			}
+			recovered, found, recoverErr := app.recoverStudioInlineStageArtifact(&plan, parentID, st, stage)
+			if recoverErr != nil {
+				engine.fail(&plan, parentID, "saved inline process stage is ambiguous; nothing was replayed")
+				return
+			}
+			if found {
+				st.ArtifactID = recovered.ID
+				st.Status = subtaskComplete
+				st.FailureClass = ""
+				st.InlineExecutionKey = ""
+				st.Review = &goalSubtaskReview{Verdict: goalReviewPass, Reasons: "recovered exact completed stage artifact after restart", By: "process_stage_recovery"}
+				// The original completion may already have posted its narration before
+				// the parent fold was lost. Adoption never posts a second timestamped
+				// message; the recovered artifact and later root projection are the
+				// durable progress truth.
+				continue
+			}
+			// No durable output crossed the seam. Reserve (or retain) the exact
+			// attempt and re-drive it. Legacy keyless Studio stages get one
+			// server-owned key now; they have no external-write authority and are
+			// safer to recompute than to strand permanently.
+			if st.Attempts < 1 {
+				st.Attempts = 1
+			}
+			expectedKey := goalInlineStageExecutionKey(&plan, parentID, st, stage)
+			if st.InlineExecutionKey != "" && st.InlineExecutionKey != expectedKey {
+				engine.fail(&plan, parentID, "saved inline process execution identity changed; nothing was replayed")
+				return
+			}
+			st.InlineExecutionKey = expectedKey
+			st.Status = subtaskReady
 			continue
 		}
 		child, childFound := app.osArtifactByID(st.ArtifactID)
@@ -6355,12 +6578,12 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 			// A real process restart has an empty map and fails closed below.
 			return
 		}
-		if strings.TrimSpace(child.Metadata[publicConversationProviderRequestKey]) != "" {
+		if goalChildUsesDurableProviderReplay(scoutAgentThread{ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Artifact: child}) {
 			thread := scoutAgentThread{
 				ID: firstNonEmptyString(strings.TrimSpace(child.Metadata["threadId"]), st.ThreadID), Mode: normalizeAgentThreadMode(child.Metadata["mode"]),
 				Query: firstNonEmptyString(child.Metadata["threadQuery"], child.Metadata["query"]), Status: "running", Artifact: child,
 			}
-			if err := app.replayStartedGoalExternalEvidenceThread(thread); err != nil {
+			if err := app.replayStartedGoalProviderThread(thread); err != nil {
 				engine.fail(&plan, parentID, "saved goal child provider replay is unavailable; nothing was replayed")
 			}
 			return
@@ -6374,6 +6597,87 @@ func (app *kanbanBoardApp) reconcileGoalThread(parentID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), engine.timeout)
 	defer cancel()
 	engine.drive(ctx, &plan, parentID)
+}
+
+func (app *kanbanBoardApp) recoverStudioInlineStageArtifact(plan *goalPlan, parentID string, st *goalSubtask, stage ProcessStage) (meetingMemoryEntry, bool, error) {
+	if app == nil || app.memory == nil || plan == nil || st == nil || !goalUsesAuthoritativeRenderedAdmission(plan) || !processStageRoleIsInline(stage.Role) {
+		return meetingMemoryEntry{}, false, nil
+	}
+	executionKey := strings.TrimSpace(st.InlineExecutionKey)
+	if executionKey != "" {
+		artifactID := goalInlineStageArtifactID(executionKey)
+		artifact, found := app.osArtifactByID(artifactID)
+		if !found {
+			return meetingMemoryEntry{}, false, nil
+		}
+		if !goalInlineStageArtifactMatches(plan, parentID, st, stage, artifact, executionKey) {
+			return meetingMemoryEntry{}, false, fmt.Errorf("deterministic inline stage artifact binding changed")
+		}
+		return artifact, true, nil
+	}
+
+	// Compatibility for an inline stage that completed immediately before this
+	// release but whose parent fold did not persist. Adopt only one exact legacy
+	// process-stage record; multiple candidates are revision-ambiguous.
+	candidates := make([]meetingMemoryEntry, 0, 1)
+	for _, indexed := range app.memory.artifactMetadataSnapshot() {
+		metadata := indexed.Metadata
+		if strings.TrimSpace(metadata["source"]) != "process_stage" || strings.TrimSpace(metadata["goalParentId"]) != strings.TrimSpace(parentID) ||
+			strings.TrimSpace(metadata["goalSubtaskId"]) != strings.TrimSpace(st.ID) || strings.TrimSpace(metadata["processId"]) != strings.TrimSpace(plan.ProcessID) ||
+			strings.TrimSpace(metadata["processStage"]) != strings.TrimSpace(stage.ID) || strings.TrimSpace(metadata["status"]) != "complete" {
+			continue
+		}
+		artifact, found := app.osArtifactByID(indexed.ID)
+		if found && goalInlineStageArtifactMatches(plan, parentID, st, stage, artifact, "") {
+			candidates = append(candidates, artifact)
+		}
+	}
+	if len(candidates) > 1 {
+		return meetingMemoryEntry{}, false, fmt.Errorf("multiple completed legacy inline stage artifacts match")
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true, nil
+	}
+	return meetingMemoryEntry{}, false, nil
+}
+
+func (app *kanbanBoardApp) verifyStudioWriterProviderReplayAuthority(child meetingMemoryEntry) error {
+	thread := scoutAgentThread{ID: strings.TrimSpace(child.Metadata["threadId"]), Artifact: child}
+	if app == nil || !goalChildUsesStudioWriterProviderReplay(thread) {
+		return fmt.Errorf("Studio writer provider replay authority is unavailable")
+	}
+	if err := app.verifyGoalChildRoute(child); err != nil {
+		return fmt.Errorf("Studio writer provider replay route changed: %w", err)
+	}
+	parentID := strings.TrimSpace(child.Metadata["goalParentId"])
+	parent, found := app.osArtifactByID(parentID)
+	if !found {
+		return fmt.Errorf("Studio writer provider replay parent is unavailable")
+	}
+	plan, decoded := decodeGoalPlan(parent.Metadata["goalPlan"])
+	if !decoded || !goalUsesAuthoritativeRenderedAdmission(&plan) || normalizeCodexJobAuthority(plan.Authority) == codexJobAuthorityExternalWrite {
+		return fmt.Errorf("Studio writer provider replay process is unavailable")
+	}
+	if strings.TrimSpace(child.Metadata[goalChildProviderReplayProcessIDKey]) != strings.TrimSpace(plan.ProcessID) ||
+		strings.TrimSpace(child.Metadata[goalChildProviderReplayProcessDigestKey]) != strings.TrimSpace(plan.ProcessDigest) {
+		return fmt.Errorf("Studio writer provider replay process binding changed")
+	}
+	engine := newGoalEngine(app)
+	if err := engine.prepareGoalRoute(&plan, parentID); err != nil {
+		return fmt.Errorf("Studio writer provider replay route is unavailable: %w", err)
+	}
+	def, resolved := engine.resolvedProcess(&plan)
+	st := plan.subtaskByID(strings.TrimSpace(child.Metadata["goalSubtaskId"]))
+	if !resolved || st == nil || st.Status != subtaskRunning || st.Role != processRoleWriter || st.Runner != agentRunnerOpenAIText ||
+		goalChildAuthority(st.Authority, plan.Authority) == codexJobAuthorityExternalWrite {
+		return fmt.Errorf("Studio writer provider replay stage is unavailable")
+	}
+	stage, found := def.stageByID(st.ID)
+	if !found || stage.Role != processRoleWriter || strings.TrimSpace(stage.OutputContract) == "" ||
+		strings.TrimSpace(child.Metadata["outputContract"]) != strings.TrimSpace(stage.OutputContract) {
+		return fmt.Errorf("Studio writer provider replay contract changed")
+	}
+	return nil
 }
 
 func goalChildTerminalStatus(app *kanbanBoardApp, artifactID string) (string, bool) {
@@ -6703,6 +7007,36 @@ func goalStatusLabel(state string) string {
 
 func (app *kanbanBoardApp) nowUnixNano() int64 { return time.Now().UnixNano() }
 
+type goalInlineProviderOperationContextKey struct{}
+
+func withGoalInlineProviderOperation(ctx context.Context, executionKey string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	executionKey = strings.TrimSpace(executionKey)
+	if executionKey == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, goalInlineProviderOperationContextKey{}, executionKey)
+}
+
+func goalInlineProviderOperationKey(ctx context.Context, model, seat, system, user string) string {
+	if ctx == nil {
+		return ""
+	}
+	executionKey, _ := ctx.Value(goalInlineProviderOperationContextKey{}).(string)
+	if strings.TrimSpace(executionKey) == "" {
+		return ""
+	}
+	// One authored stage may make several intentional model calls (panel seats
+	// plus synthesis). Bind each wire request to its exact stable payload so a
+	// restart deduplicates the same call without collapsing distinct seats.
+	return "goal-inline-model-" + sha256Hex([]byte(strings.Join([]string{
+		"goal-inline-provider-operation/v1", executionKey, strings.TrimSpace(model), strings.TrimSpace(seat),
+		sha256Hex([]byte(system)), sha256Hex([]byte(user)),
+	}, "\x00")))
+}
+
 // callModel is a single no-tools OpenAI Responses orchestrator call.
 // Every callModel lane (decompose, panel, stage synthesis, report, verify)
 // bills to the goal_engine seat (W0 item 3).
@@ -6756,8 +7090,9 @@ func (e *goalEngine) callModelAs(ctx context.Context, model string, seat string,
 	if e.openAIResponder == nil {
 		return "", fmt.Errorf("OpenAI goal responder is unavailable")
 	}
-	return e.openAIResponder(ctx, apiKey, openAITextRequest{
+	request := openAITextRequest{
 		Model:           model,
+		IdempotencyKey:  goalInlineProviderOperationKey(ctx, model, seat, system, user),
 		Instructions:    system,
 		Input:           user,
 		ReasoningEffort: effort,
@@ -6765,7 +7100,8 @@ func (e *goalEngine) callModelAs(ctx context.Context, model string, seat string,
 		MaxOutputTokens: e.maxTokens,
 		Seat:            seat,
 		Workflow:        "goal_engine",
-	})
+	}
+	return callOpenAITextWithBoundedInvocationRetry(ctx, apiKey, request, e.openAIResponder)
 }
 
 func anthropicResponseText(response anthropicMessagesResponse) string {

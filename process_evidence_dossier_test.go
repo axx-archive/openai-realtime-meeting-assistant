@@ -356,8 +356,12 @@ func TestProcessExternalResearchCoverageTracksMissingPartialAndStrongPerExactQue
 		}
 	}
 	manifest, adequacy, strong, digest, err := canonicalProcessResearchQuestionCoverageManifest("external", coverage)
-	if err != nil || adequacy != processEvidenceAdequacySufficient || strong != 1 || digest == "" || !strings.Contains(manifest, authorities[2].Question) {
+	if err != nil || adequacy != processEvidenceAdequacyScoped || strong != 1 || digest == "" || !strings.Contains(manifest, authorities[2].Question) {
 		t.Fatalf("coverage manifest adequacy=%q strong=%d digest=%q err=%v\n%s", adequacy, strong, digest, err, manifest)
+	}
+	adjustment := processEvidenceScopeAdjustment(coverage, adequacy)
+	if adjustment != processEvidenceOptionalScopeAdjustment || strings.Contains(adjustment, "decision-critical") {
+		t.Fatalf("optional-only gap got misleading scope adjustment %q", adjustment)
 	}
 }
 

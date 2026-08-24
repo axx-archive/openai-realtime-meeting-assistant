@@ -1318,7 +1318,7 @@ func TestConversationPresentationRequestShowsOnePremiumWorkCardNotInternalProces
 		t.Fatalf("messages=%#v, want one user turn plus one work card", saved.Messages)
 	}
 	card := saved.Messages[1]
-	if card.Kind != "thread" || card.IntentOutcome != string(conversationIntentStartPrivateWork) || card.Thread == nil || card.Text != "Presentation in progress" {
+	if card.Kind != "thread" || card.IntentOutcome != string(conversationIntentStartPrivateWork) || card.Thread == nil || card.Text != "I’m building your presentation now. I’ll post the finished file here." {
 		t.Fatalf("presentation card=%#v", card)
 	}
 	serialized, _ := json.Marshal(saved.Messages)

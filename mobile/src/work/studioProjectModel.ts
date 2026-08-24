@@ -1,12 +1,13 @@
 import type {
   StudioProject,
+  StudioProjectAttention,
   StudioProjectKind,
   StudioProjectStatus,
 } from '../api/types';
 import { artifactStudioKind } from '../artifacts/studioRoutes';
 
 export type StudioProjectFilter = 'all' | StudioProjectKind;
-export type StudioProjectSection = 'needs-you' | 'in-progress' | 'recent';
+export type StudioProjectSection = 'needs-you' | 'needs-attention' | 'in-progress' | 'recent';
 
 export type StudioProjectListRow =
   | { type: 'section'; id: `section:${StudioProjectSection}`; section: StudioProjectSection; title: string }
@@ -31,9 +32,14 @@ export type StudioProjectOpenTarget =
       canEdit: boolean;
     };
 
-const needsYouStatuses = new Set<StudioProjectStatus>(['needs_input', 'needs_attention']);
 const inProgressStatuses = new Set<StudioProjectStatus>(['queued', 'running']);
 const exactDigest = /^[0-9a-f]{64}$/u;
+const phaseLabels = new Map([
+  ['brief', 'Brief'],
+  ['build', 'Build'],
+  ['polish', 'Polish'],
+  ['ready', 'Ready'],
+]);
 
 export const studioProjectFilters: ReadonlyArray<{ id: StudioProjectFilter; label: string }> = [
   { id: 'all', label: 'All' },
@@ -56,8 +62,41 @@ export function studioProjectStatusLabel(status: StudioProjectStatus): string {
   }
 }
 
+export function studioProjectBoundedProgress(value: unknown): number | null {
+  const progress = typeof value === 'number' ? value : Number.NaN;
+  if (!Number.isFinite(progress)) return null;
+  return Math.max(0, Math.min(100, Math.round(progress)));
+}
+
+/** Only expose the small, customer-facing phase vocabulary in conversation. */
+export function studioProjectPhaseLabel(value: unknown): string {
+  const phase = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return phaseLabels.get(phase) ?? '';
+}
+
+function boundedViewerCopy(value: unknown, maxLength: number): string {
+  if (typeof value !== 'string') return '';
+  const normalized = value.trim().replace(/\s+/gu, ' ');
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+export function studioProjectAttentionCopy(
+  attention: StudioProjectAttention | null | undefined,
+  hasSource: boolean,
+): { title: string; body: string; actionLabel: string } {
+  return {
+    title: boundedViewerCopy(attention?.title, 100) || 'This work needs attention',
+    body: boundedViewerCopy(attention?.body, 240) || (hasSource
+      ? 'Open the source conversation to review what happened and tell Scout how to continue.'
+      : 'Scout could not finish or verify a final file. Ask Scout to continue from the original request.'),
+    actionLabel: boundedViewerCopy(attention?.actionLabel, 44),
+  };
+}
+
 export function studioProjectSection(project: StudioProject): StudioProjectSection {
-  if (needsYouStatuses.has(project.status)) return 'needs-you';
+  if (project.status === 'needs_input') return 'needs-you';
+  if (project.status === 'needs_attention') return 'needs-attention';
   if (inProgressStatuses.has(project.status)) return 'in-progress';
   return 'recent';
 }
@@ -65,6 +104,7 @@ export function studioProjectSection(project: StudioProject): StudioProjectSecti
 export function studioProjectSectionTitle(section: StudioProjectSection): string {
   switch (section) {
     case 'needs-you': return 'Needs you';
+    case 'needs-attention': return 'Needs attention';
     case 'in-progress': return 'In progress';
     case 'recent': return 'Recent';
   }
@@ -85,7 +125,7 @@ export function studioProjectListRows(
     ? projects
     : projects.filter((project) => project.kind === filter);
   const rows: StudioProjectListRow[] = [];
-  for (const section of ['needs-you', 'in-progress', 'recent'] as const) {
+  for (const section of ['needs-you', 'needs-attention', 'in-progress', 'recent'] as const) {
     const sectionProjects = visible.filter((project) => studioProjectSection(project) === section);
     if (sectionProjects.length === 0) continue;
     rows.push({

@@ -37,7 +37,13 @@ import {
   governedWorkResultArtifactKind,
   workResultArtifactKind,
 } from './workTimeline';
-import { studioProjectKindLabel, studioProjectStatusLabel } from '../work/studioProjectModel';
+import {
+  studioProjectAttentionCopy,
+  studioProjectBoundedProgress,
+  studioProjectKindLabel,
+  studioProjectPhaseLabel,
+  studioProjectStatusLabel,
+} from '../work/studioProjectModel';
 
 /**
  * Detect the artifact kind from a work message for inline rendering.
@@ -476,6 +482,15 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (studioProject) {
     const statusLabel = studioProjectStatusLabel(studioProject.status);
     const kindLabel = studioProjectKindLabel(studioProject.kind);
+    const activeStudioProject = studioProject.status === 'queued' || studioProject.status === 'running';
+    const studioProgress = studioProjectBoundedProgress(studioProject.progressPercent);
+    const studioPhase = studioProjectPhaseLabel(studioProject.phase);
+    const studioProgressLabel = activeStudioProject && studioProgress !== null
+      ? `${studioPhase || statusLabel} · ${studioProgress}%`
+      : statusLabel;
+    const studioAttention = studioProject.status === 'needs_attention' && studioProject.attention
+      ? studioProjectAttentionCopy(studioProject.attention, false)
+      : null;
     const studioCheckpoint = studioProject.status === 'needs_input' && studioProject.checkpoint?.question && (studioProject.checkpoint.options?.length ?? 0) > 0
       ? studioProject.checkpoint
       : null;
@@ -487,20 +502,50 @@ export const MessageBubble = React.memo(function MessageBubble({
         <Animated.View style={[styles.stack, styles.stackWork, styles.studioReceiptStack, translated]}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`${kindLabel} Studio. ${studioProject.title}. ${statusLabel}. Open project.`}
-            accessibilityHint="Opens this work in Studio"
+            accessibilityLabel={`${kindLabel}. ${studioProject.title}. ${studioAttention?.title || studioProgressLabel}. View in Work.`}
+            accessibilityHint="Opens this exact request in Work"
             onPress={() => onOpenStudioProject?.(studioProject.id)}
             style={({ pressed }) => [styles.studioReceipt, pressed && styles.studioReceiptPressed]}
           >
-            <View style={styles.studioReceiptIcon}>
-              <SymbolView name={studioProject.kind === 'presentation' ? 'rectangle.stack.fill' : 'doc.text.fill'} tintColor={colors.emberText} size={17} />
+            <View style={styles.studioReceiptHeader}>
+              <View style={styles.studioReceiptIcon}>
+                <SymbolView name={studioProject.kind === 'presentation' ? 'rectangle.stack.fill' : 'doc.text.fill'} tintColor={colors.emberText} size={17} />
+              </View>
+              <View style={styles.studioReceiptCopy}>
+                <Text style={styles.studioReceiptEyebrow}>SCOUT · {kindLabel.toUpperCase()}</Text>
+                <Text maxFontSizeMultiplier={1.6} numberOfLines={2} style={styles.studioReceiptTitle}>{studioProject.title}</Text>
+              </View>
             </View>
-            <View style={styles.studioReceiptCopy}>
-              <Text style={styles.studioReceiptEyebrow}>SCOUT · {kindLabel.toUpperCase()}</Text>
-              <Text maxFontSizeMultiplier={1.6} numberOfLines={2} style={styles.studioReceiptTitle}>{studioProject.title}</Text>
-              <Text style={styles.studioReceiptStatus}>{statusLabel}</Text>
+            {studioAttention ? (
+              <Text maxFontSizeMultiplier={1.6} numberOfLines={2} style={styles.studioReceiptAttention}>{studioAttention.body}</Text>
+            ) : null}
+            <View style={styles.studioReceiptFooter}>
+              <View style={styles.studioReceiptState}>
+                <View
+                  accessibilityElementsHidden
+                  style={[
+                    styles.studioReceiptSignal,
+                    studioProject.status === 'ready'
+                      ? styles.studioReceiptSignalReady
+                      : studioProject.status === 'needs_input' || studioProject.status === 'needs_attention'
+                        ? styles.studioReceiptSignalAttention
+                        : studioProject.status === 'stopped'
+                          ? styles.studioReceiptSignalStopped
+                          : styles.studioReceiptSignalActive,
+                  ]}
+                />
+                <Text numberOfLines={1} style={styles.studioReceiptStatus}>{studioAttention?.title || studioProgressLabel}</Text>
+              </View>
+              <View accessibilityElementsHidden style={styles.studioReceiptCta}>
+                <Text style={styles.studioReceiptCtaText}>View in Work</Text>
+                <SymbolView name="chevron.right" tintColor={colors.emberText} size={11} />
+              </View>
             </View>
-            <SymbolView name="chevron.right" tintColor={colors.text3} size={12} />
+            {activeStudioProject && studioProgress !== null ? (
+              <View accessibilityElementsHidden style={styles.studioReceiptProgressTrack}>
+                <View style={[styles.studioReceiptProgressFill, { width: `${studioProgress}%` }]} />
+              </View>
+            ) : null}
           </Pressable>
           {studioCheckpoint ? (
             <View accessible accessibilityRole="summary" style={styles.checkpointCard}>
@@ -1207,14 +1252,27 @@ const styles = StyleSheet.create({
   stackOwn: { alignItems: 'flex-end' },
   bubble: { paddingHorizontal: space[4], paddingVertical: 10, borderRadius: radius.lg, gap: 2 },
   bubbleWork: { width: '100%', maxWidth: 720, alignSelf: 'stretch' },
-  studioReceipt: { width: '100%', minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.xl, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1, ...shadow[1] },
+  studioReceipt: { width: '100%', minHeight: 104, gap: space[3], padding: space[3], borderRadius: radius.xl, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1, ...shadow[1] },
   studioReceiptStack: { gap: space[2] },
   studioReceiptPressed: { opacity: 0.82, transform: [{ scale: 0.96 }] },
+  studioReceiptHeader: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
   studioReceiptIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: radius.lg, backgroundColor: colors.emberSoft },
   studioReceiptCopy: { flex: 1, minWidth: 0 },
   studioReceiptEyebrow: { ...type.label, color: colors.emberText },
   studioReceiptTitle: { ...type.bodyMedium, marginTop: 2, color: colors.text1 },
-  studioReceiptStatus: { ...type.caption, marginTop: 1, color: colors.text2 },
+  studioReceiptAttention: { ...type.caption, color: colors.text2 },
+  studioReceiptFooter: { minHeight: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
+  studioReceiptState: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: space[2] },
+  studioReceiptSignal: { width: 7, height: 7, borderRadius: radius.full },
+  studioReceiptSignalActive: { backgroundColor: colors.ember },
+  studioReceiptSignalReady: { backgroundColor: colors.success },
+  studioReceiptSignalAttention: { backgroundColor: colors.warn },
+  studioReceiptSignalStopped: { backgroundColor: colors.text3 },
+  studioReceiptStatus: { ...type.caption, flex: 1, color: colors.text2, fontVariant: ['tabular-nums'] },
+  studioReceiptCta: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: space[1] },
+  studioReceiptCtaText: { ...type.captionMedium, color: colors.emberText },
+  studioReceiptProgressTrack: { height: 4, overflow: 'hidden', borderRadius: radius.full, backgroundColor: colors.surface3 },
+  studioReceiptProgressFill: { height: '100%', borderRadius: radius.full, backgroundColor: colors.ember },
   richWorkResult: { width: '100%', gap: space[3] },
   checkpointCard: { gap: space[3], padding: space[4], borderRadius: radius.lg, backgroundColor: colors.surface2, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.ember },
   checkpointStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },

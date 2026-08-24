@@ -12782,13 +12782,13 @@
 	  }
 	  .scout-studio-receipt {
 		width: 100%;
-        min-height: 52px;
+        min-height: 76px;
         display: grid;
-        grid-template-columns: 34px minmax(0, 1fr) auto 18px;
+        grid-template-columns: 38px minmax(0, 1fr) auto 18px;
         align-items: center;
-        gap: 10px;
+        gap: 11px;
 		margin: 0;
-        padding: 8px 11px;
+        padding: 11px 12px;
         border: 1px solid var(--line-1);
         border-radius: 16px;
         background: color-mix(in srgb, var(--surface-2) 84%, transparent);
@@ -12803,8 +12803,8 @@
       }
       .scout-studio-receipt:active { transform: scale(.96); }
       .scout-studio-receipt__icon {
-        width: 34px;
-        height: 34px;
+        width: 38px;
+        height: 38px;
         display: grid;
         place-items: center;
         border-radius: 11px;
@@ -12812,10 +12812,28 @@
         color: color-mix(in srgb, var(--ember) 75%, var(--text-1));
       }
       .scout-studio-receipt__icon svg { width: 17px; height: 17px; }
-      .scout-studio-receipt__copy { min-width: 0; display: grid; gap: 2px; }
+      .scout-studio-receipt__copy { min-width: 0; display: grid; gap: 4px; }
       .scout-studio-receipt__title { overflow: hidden; color: var(--text-1); font: var(--type-caption-medium); text-overflow: ellipsis; white-space: nowrap; }
       .scout-studio-receipt__kind,
       .scout-studio-receipt__status { color: var(--text-3); font: var(--type-label); white-space: nowrap; }
+	  .scout-studio-receipt__progress {
+		height: 3px;
+		overflow: hidden;
+		border-radius: 999px;
+		background: var(--line-1);
+	  }
+	  .scout-studio-receipt__progress-fill {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: var(--ember);
+		transition: width var(--dur-med) var(--ease);
+	  }
+	  .scout-studio-receipt[data-status="ready"] .scout-studio-receipt__progress-fill { background: var(--live); }
+	  .scout-studio-receipt[data-status="needs_input"] .scout-studio-receipt__progress-fill,
+	  .scout-studio-receipt[data-status="needs_attention"] .scout-studio-receipt__progress-fill { background: var(--danger); }
+	  .scout-studio-receipt__edge { display: grid; justify-items: end; gap: 3px; }
+	  .scout-studio-receipt__action { color: var(--text-2); font: var(--type-label); white-space: nowrap; }
       .scout-studio-receipt__status[data-status="ready"] { color: var(--live); }
       .scout-studio-receipt__status[data-status="needs_input"],
       .scout-studio-receipt__status[data-status="needs_attention"] { color: var(--danger); }
@@ -45296,10 +45314,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		const resultReady = Boolean(project?.result?.artifactId)
 		const finalReady = studioProjectResultIsFinal(project)
 		const needsAttention = project.status === 'needs_attention'
+		const attention = project?.attention || {}
 		deliverableCopy.append(
 		  bfEl('p', 'studio-project-deliverable__kicker', finalReady ? 'Final deliverable' : resultReady ? 'Draft available · review needed' : project.status === 'needs_input' ? 'A decision is needed' : needsAttention ? 'Scout needs attention' : 'Scout is working'),
-		  bfEl('h4', 'studio-project-deliverable__title', resultReady ? (project.result.title || project.title) : project.status === 'needs_input' ? (structuredCheckpoint ? 'Waiting for your decision' : 'Review the open question with Scout') : needsAttention ? 'Help Scout move this forward' : `${studioProjectStatusLabel(project.status)} · ${project.phase || 'brief'}`),
-		  bfEl('p', 'studio-project-deliverable__meta', resultReady ? `${studioProjectResultCapabilityCopy(project)}${finalReady ? '' : project.result.canContinue === true ? ' · Revise and return to review' : ' · Review before presenting or downloading'}` : structuredCheckpoint ? 'Choose above and Scout will continue from this exact point.' : needsAttention ? 'Open the source conversation to review what is blocking the work.' : 'This project will update here as the work advances.')
+		  bfEl('h4', 'studio-project-deliverable__title', resultReady ? (project.result.title || project.title) : project.status === 'needs_input' ? (structuredCheckpoint ? 'Waiting for your decision' : 'Review the open question with Scout') : needsAttention ? (attention.title || 'Scout couldn’t finish automatically') : `${studioProjectStatusLabel(project.status)} · ${project.phase || 'brief'}`),
+		  bfEl('p', 'studio-project-deliverable__meta', resultReady ? `${studioProjectResultCapabilityCopy(project)}${finalReady ? '' : project.result.canContinue === true ? ' · Revise and return to review' : ' · Review before presenting or downloading'}` : structuredCheckpoint ? 'Choose above and Scout will continue from this exact point.' : needsAttention ? (attention.body || 'The last automated attempt stopped before a verified final file was ready.') : 'This project will update here as the work advances.')
 		)
         const actions = bfEl('div', 'studio-project-detail__actions')
         if (resultReady) {
@@ -45320,7 +45339,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
             actions.appendChild(pdf)
           }
         } else if (!structuredCheckpoint && project.source?.threadId) {
-          actions.appendChild(studioProjectAction(project.status === 'needs_input' ? 'Review with Scout' : 'Open conversation', true, () => openStudioProjectSource(project)))
+          actions.appendChild(studioProjectAction(project.status === 'needs_input' ? 'Review with Scout' : (attention.actionLabel || 'Open conversation'), true, () => openStudioProjectSource(project)))
         }
         deliverable.append(deliverableCopy, actions)
         if (resultReady || !structuredCheckpoint) root.appendChild(deliverable)
@@ -45361,7 +45380,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		const canonicalDestination = project.kind === 'presentation' ? 'Presentations' : 'Research'
 		const currentDestination = location.pathname === '/presentations' ? 'Presentations' : (location.pathname === '/research' ? 'Research' : 'Work')
 		if (currentDestination === 'Work' || currentDestination === canonicalDestination) return
-		const canonical = new URL(String(project.href || (project.kind === 'presentation' ? '/presentations' : '/research')), location.origin)
+		const canonical = new URL(PD1_PATHS[canonicalDestination], location.origin)
+		canonical.searchParams.set('project', String(project.id))
 		history.replaceState({ view: 'pd1', destination: canonicalDestination }, '', `${canonical.pathname}${canonical.search}`)
 		studioProjectFilter = project.kind
 		syncPD1Destination(canonicalDestination)
@@ -45382,7 +45402,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		const projects = filteredStudioProjects()
 		const compactStudio = window.matchMedia('(max-width: 640px)').matches
 		const unavailableSelected = Boolean(studioProjectDeepLinkUnavailable) && studioProjectDeepLinkUnavailable === selectedStudioProjectId
-		if (!projects.some(project => String(project.id || '') === selectedStudioProjectId) && !unavailableSelected && (!compactStudio || !studioProjectsMobileLibraryOpen)) selectedStudioProjectId = projects[0]?.id || ''
+		const routedProjectId = new URL(location.href).searchParams.get('project') || ''
+		const routedSelectionPending = Boolean(routedProjectId) && routedProjectId === selectedStudioProjectId
+		if (!projects.some(project => String(project.id || '') === selectedStudioProjectId) && !unavailableSelected && !routedSelectionPending && (!compactStudio || !studioProjectsMobileLibraryOpen)) selectedStudioProjectId = projects[0]?.id || ''
 		studioProjectsWorkspace?.classList.toggle('is-library-view', compactStudio && studioProjectsMobileLibraryOpen)
 		renderStudioProjectList(projects)
 		if (studioProjectDeepLinkUnavailable && studioProjectDeepLinkUnavailable === selectedStudioProjectId) {
@@ -45421,20 +45443,27 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  const params = new URLSearchParams({ limit: '200' })
 		  if (append) params.set('before', studioProjectsNextBefore)
 		  const response = await fetch(`/api/studio-projects/v1?${params.toString()}`, { cache: 'no-store', headers })
-          if (response.status === 304) return
-          const payload = await response.json().catch(() => ({}))
-          if (!response.ok || !Array.isArray(payload?.projects)) throw new Error(payload?.error || 'Work could not be loaded')
-		  if (append) {
-			const incoming = new Map(payload.projects.map(project => [String(project?.id || ''), project]))
-			studioProjects = [...studioProjects.filter(project => !incoming.has(String(project?.id || ''))), ...payload.projects]
-		  } else {
-			studioProjects = payload.projects
-			studioProjectsETag = response.headers.get('ETag') || ''
+		  // Read the requested card after the page request returns. A receipt can
+		  // atomically change the route while an earlier conditional list refresh
+		  // is in flight; even a 304 must still hydrate that exact project.
+		  const requestedID = String(options.projectId || new URL(location.href).searchParams.get('project') || '').trim()
+		  if (response.status !== 304) {
+			const payload = await response.json().catch(() => ({}))
+			if (!response.ok || !Array.isArray(payload?.projects)) throw new Error(payload?.error || 'Work could not be loaded')
+			if (append) {
+			  const incoming = new Map(payload.projects.map(project => [String(project?.id || ''), project]))
+			  studioProjects = [...studioProjects.filter(project => !incoming.has(String(project?.id || ''))), ...payload.projects]
+			} else {
+			  studioProjects = payload.projects
+			  studioProjectsETag = response.headers.get('ETag') || ''
+			}
+			studioProjectsHasMore = payload.hasMore === true
+			studioProjectsNextBefore = studioProjectsHasMore ? String(payload.nextBefore || '') : ''
+		  } else if (!requestedID) {
+			return
 		  }
-		  studioProjectsHasMore = payload.hasMore === true
-		  studioProjectsNextBefore = studioProjectsHasMore ? String(payload.nextBefore || '') : ''
-          const requestedID = new URL(location.href).searchParams.get('project') || ''
 		  if (!append && requestedID && !studioProjects.some(project => String(project.id || '') === requestedID)) {
+			studioProjectDeepLinkUnavailable = ''
 			const exact = await fetch(`/api/studio-projects/v1?id=${encodeURIComponent(requestedID)}`, { cache: 'no-store' })
 			const exactPayload = await exact.json().catch(() => ({}))
 			if (exact.ok && exactPayload?.project?.id) {
@@ -45442,9 +45471,11 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			  studioProjects = [exactProject, ...studioProjects]
 			  canonicalizeStudioProjectRoute(exactProject)
 			  studioProjectDeepLinkUnavailable = ''
-			} else {
+			} else if (exact.status === 403 || exact.status === 404) {
 			  studioProjectDeepLinkUnavailable = requestedID
 			  selectedStudioProjectId = requestedID
+			} else {
+			  throw new Error(exactPayload?.error || 'That Work request could not be loaded. Try again.')
 			}
 		  }
 		  if (requestedID && studioProjects.some(project => String(project.id || '') === requestedID)) {
@@ -45566,15 +45597,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
       function selectPD1Destination(destination, options = {}) {
         if (!pd1DestinationAllowed(destination) || guestMode || !appShell.classList.contains('is-authed')) return false
-        const path = PD1_PATHS[destination]
-        const destinationChanges = appShell.dataset.pd1Destination !== destination || location.pathname !== path
+		const path = PD1_PATHS[destination]
+		const requestedProjectId = ['Work', 'Presentations', 'Research'].includes(destination) ? String(options.projectId || '').trim() : ''
+		const requestedPath = requestedProjectId ? `${path}?project=${encodeURIComponent(requestedProjectId)}` : path
+		const currentProjectId = new URL(location.href).searchParams.get('project') || ''
+		const destinationChanges = appShell.dataset.pd1Destination !== destination || location.pathname !== path || (requestedProjectId && currentProjectId !== requestedProjectId)
         // Session/bootstrap reconciliation may repeat the already-canonical
         // destination after the user has opened Settings. Treat that as state
         // confirmation, not navigation, so it cannot tear down newer intent.
         if ((destinationChanges || options.closeOverlays === true) && !closePD1OverlaysForNavigation()) return false
         setWorkToolMenuOpen(false)
-        if (options.push !== false && location.pathname !== path) {
-          history.pushState({ view: 'pd1', destination }, '', path)
+		if (options.push !== false && (location.pathname !== path || (requestedProjectId && currentProjectId !== requestedProjectId))) {
+		  history.pushState({ view: 'pd1', destination }, '', requestedPath)
         }
         if (destination === 'Home') {
           clearPD1DestinationSurface()
@@ -45603,9 +45637,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
         if (destination === 'Work' || destination === 'Presentations' || destination === 'Research') {
           clearPD1DestinationSurface()
           studioProjectFilter = destination === 'Presentations' ? 'presentation' : (destination === 'Research' ? 'document' : 'all')
+		  if (requestedProjectId) {
+			selectedStudioProjectId = requestedProjectId
+			studioProjectsMobileLibraryOpen = false
+		  }
           setActiveTool('research', { history: false })
           syncPD1Destination(destination)
-          loadStudioProjects({ onlyIfChanged: true })
+		  loadStudioProjects({ onlyIfChanged: true, projectId: requestedProjectId })
           renderStudioProjects()
           return true
         }
@@ -67102,7 +67140,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return {
 	          id: 'pd1-presentation-work-fixture',
 	          title: 'Pitch the STRIDE platform',
-	          preview: 'Presentation in progress',
+	          preview: 'Presentation · Building',
 	          ownerEmail: 'aj@shareability.com',
 	          createdBy: 'AJ',
 	          visibility: 'private',
@@ -67111,7 +67149,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          messages: [
 	            { id: 'pd1-presentation-request', kind: 'message', role: 'user', text: request, authorName: 'AJ', authorEmail: 'aj@shareability.com', createdAt: '2026-08-11T17:31:00Z' },
 	            {
-	              id: 'pd1-presentation-work-card', kind: 'thread', role: 'scout', text: 'Presentation in progress', authorName: 'Scout',
+	              id: 'pd1-presentation-work-card', kind: 'thread', role: 'scout', text: 'I’m building your presentation now. I’ll post the finished file here.', authorName: 'Scout',
 	              intentOutcome: 'start_private_work', causedByMessageId: 'pd1-presentation-request', createdAt: '2026-08-11T17:32:00Z',
 	              thread: {
 	                id: 'pd1-presentation-run', mode: 'goal', query: objective, status: 'running', artifactId: 'pd1-presentation-artifact',
@@ -74265,10 +74303,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!project?.id) return
         selectedStudioProjectId = String(project.id)
 		studioProjectsMobileLibraryOpen = false
-        studioProjectFilter = project.kind === 'presentation' ? 'presentation' : 'document'
-        selectPD1Destination(project.kind === 'presentation' ? 'Presentations' : 'Research')
-        loadStudioProjects({ onlyIfChanged: true })
-        renderStudioProjects()
+        studioProjectFilter = 'all'
+		if (!selectPD1Destination('Work', { projectId: selectedStudioProjectId })) return
+		selectStudioProject(project.id, { updateURL: false })
       }
 
       function scoutStudioReceiptNode(message) {
@@ -74278,17 +74315,28 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         node.type = 'button'
         node.dataset.messageId = String(message?.id || '')
         node.dataset.studioProjectId = String(project.id || '')
-        node.setAttribute('aria-label', `Open ${project.title || studioProjectKindLabel(project.kind)} in ${project.kind === 'presentation' ? 'Presentations' : 'Research'}`)
+		node.dataset.status = String(project.status || 'running')
+		const progress = project.status === 'ready' ? 100 : Math.max(0, Math.min(100, Number(project.progressPercent || 0)))
+        node.setAttribute('aria-label', `View ${project.title || studioProjectKindLabel(project.kind)} in Work · ${studioProjectStatusLabel(project.status)} · ${progress}%`)
         const icon = bfEl('span', 'scout-studio-receipt__icon')
         icon.appendChild(studioProjectIcon(project.kind).firstElementChild)
         const copy = bfEl('span', 'scout-studio-receipt__copy')
+		const phase = String(project.phase || 'brief').replace(/_/g, ' ')
+		const progressTrack = bfEl('span', 'scout-studio-receipt__progress')
+		progressTrack.setAttribute('aria-hidden', 'true')
+		const progressFill = bfEl('span', 'scout-studio-receipt__progress-fill')
+		progressFill.style.width = `${progress}%`
+		progressTrack.appendChild(progressFill)
         copy.append(
+		  bfEl('span', 'scout-studio-receipt__kind', `${studioProjectKindLabel(project.kind)} · ${phase.charAt(0).toUpperCase()}${phase.slice(1)}`),
           bfEl('span', 'scout-studio-receipt__title', project.title || studioProjectKindLabel(project.kind)),
-          bfEl('span', 'scout-studio-receipt__kind', project.kind === 'presentation' ? 'Presentations' : 'Research')
+		  progressTrack
         )
+		const edge = bfEl('span', 'scout-studio-receipt__edge')
         const status = bfEl('span', 'scout-studio-receipt__status', studioProjectStatusLabel(project.status))
         status.dataset.status = String(project.status || 'running')
-        node.append(icon, copy, status, bfEl('span', 'scout-studio-receipt__chevron', '›'))
+		edge.append(status, bfEl('span', 'scout-studio-receipt__action', 'View in Work'))
+        node.append(icon, copy, edge, bfEl('span', 'scout-studio-receipt__chevron', '›'))
         node.addEventListener('click', () => openStudioProjectReceipt(project))
 		group.appendChild(node)
 		const checkpoint = studioProjectStructuredCheckpoint(project)

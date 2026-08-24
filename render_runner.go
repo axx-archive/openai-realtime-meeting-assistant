@@ -268,6 +268,13 @@ func queuedRenderMetadataForInput(artifact meetingMemoryEntry, jobID string, kin
 	}
 }
 
+func recoveredCompletedRenderMetadataForInput(artifact meetingMemoryEntry, jobID string, kind string, contentDigest string) map[string]string {
+	metadata := queuedRenderMetadataForInput(artifact, jobID, kind, contentDigest)
+	metadata["renderStatus"] = renderJobStatusComplete
+	metadata["renderError"] = "The exact render job completed, but its PDF attachment callback is not yet confirmed."
+	return metadata
+}
+
 func renderPDFContentDigest(kind string, html string) string {
 	digest := sha256.Sum256([]byte(normalizeRenderJobKind(kind) + "\x00" + html))
 	return fmt.Sprintf("%x", digest[:])
@@ -535,6 +542,41 @@ func (store *renderRunnerJobStore) reusableBoundJob(binding renderPDFJobBinding)
 	return nil, nil
 }
 
+// completedBoundJob finds one already-finished export for the exact immutable
+// source binding. Studio restart recovery uses this separately from ordinary
+// enqueue reuse: a terminal job must never be enqueued again automatically,
+// but its PDF callback/attachment state still has to be disclosed truthfully.
+// Multiple exact terminal jobs are historical ambiguity, so recovery stops
+// instead of selecting whichever directory entry happens to sort first.
+func (store *renderRunnerJobStore) completedBoundJob(binding renderPDFJobBinding) (*renderRunnerJob, error) {
+	entries, err := os.ReadDir(store.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read render runner queue: %w", err)
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	var matched *renderRunnerJob
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		job, readErr := store.read(entry.Name())
+		if readErr != nil {
+			return nil, readErr
+		}
+		if job.Status != renderJobStatusComplete || !renderRunnerJobMatchesBinding(*job, binding) {
+			continue
+		}
+		if matched != nil && matched.ID != job.ID {
+			return nil, fmt.Errorf("multiple completed render jobs match the exact source binding")
+		}
+		matched = job
+	}
+	return matched, nil
+}
+
 func renderRunnerJobMatchesBinding(job renderRunnerJob, binding renderPDFJobBinding) bool {
 	if strings.TrimSpace(job.ArtifactID) != strings.TrimSpace(binding.ArtifactID) ||
 		normalizeRenderJobKind(job.Kind) != normalizeRenderJobKind(binding.Kind) {
@@ -610,28 +652,52 @@ func enqueueRenderExportPDFJob(artifactID string, kind string, html string, titl
 	})
 }
 
-// enqueueBoundRenderExportPDFJob is the Studio-safe trigger. A retry after a
-// browser polling timeout reuses the durable queued/running job for the exact
-// source revision instead of creating a second render or invalidating the
-// first job's eventual callback.
-func enqueueBoundRenderExportPDFJob(binding renderPDFJobBinding) (renderRunnerJob, bool, error) {
+func normalizeBoundRenderPDFJobBinding(binding renderPDFJobBinding) (renderPDFJobBinding, error) {
 	binding.ArtifactID = strings.TrimSpace(binding.ArtifactID)
 	binding.Kind = normalizeRenderJobKind(binding.Kind)
 	binding.SourceSceneRef = strings.TrimSpace(binding.SourceSceneRef)
 	if binding.ArtifactID == "" {
-		return renderRunnerJob{}, false, fmt.Errorf("artifact id is required for PDF export")
+		return renderPDFJobBinding{}, fmt.Errorf("artifact id is required for PDF export")
 	}
 	if strings.TrimSpace(binding.HTML) == "" {
-		return renderRunnerJob{}, false, fmt.Errorf("artifact HTML body is required for PDF export")
+		return renderPDFJobBinding{}, fmt.Errorf("artifact HTML body is required for PDF export")
 	}
 	if len(binding.HTML) > defaultRenderMaxHTMLBytes {
-		return renderRunnerJob{}, false, fmt.Errorf("artifact HTML body is %d bytes, above the %d-byte render queue limit", len(binding.HTML), defaultRenderMaxHTMLBytes)
+		return renderPDFJobBinding{}, fmt.Errorf("artifact HTML body is %d bytes, above the %d-byte render queue limit", len(binding.HTML), defaultRenderMaxHTMLBytes)
 	}
 	if binding.SourceArtifactVersion < 1 {
-		return renderRunnerJob{}, false, fmt.Errorf("source artifact version is required for PDF export")
+		return renderPDFJobBinding{}, fmt.Errorf("source artifact version is required for PDF export")
 	}
 	if strings.TrimSpace(binding.SourceContentDigest) == "" {
 		binding.SourceContentDigest = renderPDFContentDigest(binding.Kind, binding.HTML)
+	}
+	return binding, nil
+}
+
+// enqueueBoundRenderExportPDFJob is the ordinary bound trigger. A retry after
+// a browser polling timeout reuses the durable queued/running job for the exact
+// source revision instead of creating a second render or invalidating the
+// first job's eventual callback. Ordinary callers do not adopt an unattached
+// terminal receipt: their request/authorization boundary decides how to expose
+// that state.
+func enqueueBoundRenderExportPDFJob(binding renderPDFJobBinding) (renderRunnerJob, bool, error) {
+	return enqueueBoundRenderExportPDFJobWithTerminalRecovery(binding, false)
+}
+
+// recoverOrEnqueueStudioBoundRenderExportPDFJob is the restart-safe Studio
+// trigger. The active and terminal scans plus any new enqueue share one local
+// critical section, so the renderer cannot cross queued -> complete between a
+// terminal scan and a second enqueue. Only one unique exact COMPLETE receipt
+// is adoptable; failed or ambiguous terminal work remains fail-closed.
+func recoverOrEnqueueStudioBoundRenderExportPDFJob(binding renderPDFJobBinding) (renderRunnerJob, bool, error) {
+	return enqueueBoundRenderExportPDFJobWithTerminalRecovery(binding, true)
+}
+
+func enqueueBoundRenderExportPDFJobWithTerminalRecovery(binding renderPDFJobBinding, recoverCompleted bool) (renderRunnerJob, bool, error) {
+	var err error
+	binding, err = normalizeBoundRenderPDFJobBinding(binding)
+	if err != nil {
+		return renderRunnerJob{}, false, err
 	}
 
 	renderPDFEnqueueMu.Lock()
@@ -641,6 +707,13 @@ func enqueueBoundRenderExportPDFJob(binding renderPDFJobBinding) (renderRunnerJo
 		return renderRunnerJob{}, false, err
 	} else if reusable != nil {
 		return *reusable, true, nil
+	}
+	if recoverCompleted {
+		if completed, completedErr := store.completedBoundJob(binding); completedErr != nil {
+			return renderRunnerJob{}, false, completedErr
+		} else if completed != nil {
+			return *completed, true, nil
+		}
 	}
 	job, err := store.enqueue(renderRunnerJob{
 		Type:       renderJobTypeExportPDF,

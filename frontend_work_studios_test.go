@@ -25,6 +25,9 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 		`id="studioProjectDetail"`,
 		`const params = new URLSearchParams({ limit: '200' })`,
 		`function scoutStudioReceiptNode(message)`,
+		`scout-studio-receipt__progress`,
+		`View in Work`,
+		`selectPD1Destination('Work')`,
 		`if (message?.studioProject?.id) return scoutStudioReceiptIsLatest(message)`,
 		`openDeckStudio(result.artifactId`,
 		`openDocumentStudio(result.artifactId`,
@@ -93,24 +96,28 @@ const legacyDisposition={tenantId:'tenant-studio',artifactId:'deck-final',conten
 const actions=[];
 const driveSaves=[];
 const requestLog=[];
+const conditionalStudioRequests=[];
 const pdfExports=[];
 let reviewAttempts=0;
 let documentRendered=false;
+let transientExactAttempts=0;
 const phases=(active)=>['brief','build','polish','ready'].map((id,index)=>({id,label:id[0].toUpperCase()+id.slice(1),status:index<active?'complete':index===active?'active':'upcoming'}));
 const projects=[
- {schemaVersion:1,id:'deck-root',kind:'presentation',title:'Western engagement army',revision:1,status:'ready',progressPercent:100,phase:'ready',phases:phases(4).map(item=>({...item,status:'complete'})),createdAt:'2026-08-23T12:00:00Z',updatedAt:'2026-08-23T12:10:00Z',rootRunId:'deck-run',rootArtifactId:'deck-root',href:'/presentations?project=deck-root',source:{threadId:'private-scout'},result:{artifactId:'deck-final',type:'html_deck',version:4,digest,title:'Western engagement army',qualityState:'admitted',canEdit:true,canPresent:true,canExport:true},canRename:true},
- {schemaVersion:1,id:'doc-running',kind:'document',title:'Market opportunity report',revision:1,status:'running',progressPercent:54,phase:'build',phases:phases(1),createdAt:'2026-08-23T11:00:00Z',updatedAt:'2026-08-23T12:05:00Z',rootRunId:'doc-run',rootArtifactId:'doc-running',href:'/research?project=doc-running',source:{threadId:'private-scout'},canRename:false},
+ {schemaVersion:1,id:'deck-root',kind:'presentation',title:'Western engagement army',revision:1,status:'ready',progressPercent:100,phase:'ready',phases:phases(4).map(item=>({...item,status:'complete'})),createdAt:'2026-08-23T12:00:00Z',updatedAt:'2026-08-23T12:10:00Z',rootRunId:'deck-run',rootArtifactId:'deck-root',href:'/work?project=deck-root',source:{threadId:'private-scout'},result:{artifactId:'deck-final',type:'html_deck',version:4,digest,title:'Western engagement army',qualityState:'admitted',canEdit:true,canPresent:true,canExport:true},canRename:true},
+ {schemaVersion:1,id:'doc-running',kind:'document',title:'Market opportunity report',revision:1,status:'running',progressPercent:54,phase:'build',phases:phases(1),createdAt:'2026-08-23T11:00:00Z',updatedAt:'2026-08-23T12:05:00Z',rootRunId:'doc-run',rootArtifactId:'doc-running',href:'/work?project=doc-running',source:{threadId:'private-scout'},canRename:false},
  {schemaVersion:1,id:'doc-needs',kind:'document',title:'Audience choice',revision:1,status:'needs_input',progressPercent:18,phase:'brief',phases:[{id:'brief',label:'Brief',status:'needs_input'},{id:'build',label:'Build',status:'upcoming'},{id:'polish',label:'Polish',status:'upcoming'},{id:'ready',label:'Ready',status:'upcoming'}],createdAt:'2026-08-23T10:00:00Z',updatedAt:'2026-08-23T12:01:00Z',rootRunId:'needs-run',rootArtifactId:'doc-needs',href:'/research?project=doc-needs',source:{threadId:'private-scout'},checkpoint:{id:'goal-checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',question:'Which audience should anchor the report?',options:[{id:'checkpoint-option-111111111111111111111111',label:'Operators and brand leaders',action:'proceed'},{id:'checkpoint-option-222222222222222222222222',label:'Change the audience',action:'revise'},{id:'checkpoint-option-333333333333333333333333',label:'Hold for now',action:'hold'}]},canRename:false}
  ,{schemaVersion:1,id:'doc-draft',kind:'document',title:'Edited opportunity draft',revision:2,status:'needs_attention',progressPercent:100,phase:'polish',phases:[{id:'brief',label:'Brief',status:'complete'},{id:'build',label:'Build',status:'complete'},{id:'polish',label:'Polish',status:'needs_attention'},{id:'ready',label:'Ready',status:'upcoming'}],createdAt:'2026-08-23T09:00:00Z',updatedAt:'2026-08-23T11:58:00Z',rootRunId:'draft-run',rootArtifactId:'doc-draft',href:'/research?project=doc-draft',source:{threadId:'private-scout'},result:{artifactId:'doc-draft-result',type:'markdown',version:7,digest,title:'Edited opportunity draft',qualityState:'edited_after_admission',canEdit:true,canContinue:true,canPresent:false,canExport:false},canRename:true}
 ];
 const olderProject={schemaVersion:1,id:'older-deck',kind:'presentation',title:'Earlier presentation',revision:1,status:'ready',progressPercent:100,phase:'ready',phases:phases(4).map(item=>({...item,status:'complete'})),createdAt:'2026-08-20T12:00:00Z',updatedAt:'2026-08-20T12:10:00Z',rootRunId:'older-run',rootArtifactId:'older-deck',href:'/presentations?project=older-deck',source:{threadId:'source-older'},result:{artifactId:'older-final',type:'html_deck',version:2,digest,title:'Earlier presentation',qualityState:'',reviewManaged:false,canEdit:false,canContinue:false,canPresent:true,canExport:false},canRename:false};
+const receiptOnlyProject={...olderProject,id:'receipt-only-deck',title:'Receipt-only presentation',rootRunId:'receipt-only-run',rootArtifactId:'receipt-only-deck',href:'/work?project=receipt-only-deck'};
+const transientExactProject={...olderProject,id:'transient-deck',title:'Recovered exact presentation',rootRunId:'transient-run',rootArtifactId:'transient-deck',href:'/work?project=transient-deck'};
 const firstRenderDocument={schemaVersion:1,id:'doc-render-root',kind:'document',title:'First-render report',revision:1,status:'ready',progressPercent:100,phase:'ready',phases:phases(4).map(item=>({...item,status:'complete'})),createdAt:'2026-08-23T12:00:00Z',updatedAt:'2026-08-23T12:10:00Z',rootRunId:'doc-render-run',rootArtifactId:'doc-render-root',href:'/research?project=doc-render-root',source:{threadId:'private-scout'},result:{artifactId:'doc-render',type:'markdown',version:3,digest:documentDigest,title:'First-render report',qualityState:'admitted',canEdit:true,canPresent:false,canExport:true},canRename:true};
 const server=http.createServer((req,res)=>{
 	requestLog.push(req.url);
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'Synthetic',shellAccess:'full'}));}
  if(req.url==='/api/stride/v1/mobile/surfaces/organizations'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({availability:'available',surface:'organizations',revision:1,items:[{id:'membership',title:'Synthetic Lab',status:'current',kind:'organization-summary',detail:{kind:'organization-summary',isCurrent:true,role:'owner'},actions:[]}]}));}
- if(req.url.startsWith('/api/studio-projects/v1')){const parsed=new URL(req.url,'http://local');const id=parsed.searchParams.get('id');if(id){if(id==='older-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:olderProject}));}res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({error:'studio project not found'}));}if(parsed.searchParams.get('before')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,projects:[olderProject],hasMore:false}));}res.writeHead(200,{'content-type':'application/json','etag':'"studio-v1"'});return res.end(JSON.stringify({ok:true,projects,hasMore:true,nextBefore:'page-one'}));}
+ if(req.url.startsWith('/api/studio-projects/v1')){const parsed=new URL(req.url,'http://local');const id=parsed.searchParams.get('id');if(id){if(id==='older-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:olderProject}));}if(id==='receipt-only-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:receiptOnlyProject}));}if(id==='transient-deck'){if(++transientExactAttempts===1){res.writeHead(503,{'content-type':'application/json'});return res.end(JSON.stringify({error:'Temporary Work service interruption'}));}res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:transientExactProject}));}res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({error:'studio project not found'}));}if(parsed.searchParams.get('before')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,projects:[olderProject],hasMore:false}));}if(req.headers['if-none-match']==='"studio-v1"'){conditionalStudioRequests.push(req.url);res.writeHead(304);return res.end();}res.writeHead(200,{'content-type':'application/json','etag':'"studio-v1"'});return res.end(JSON.stringify({ok:true,projects,hasMore:true,nextBefore:'page-one'}));}
  if(req.url.startsWith('/assistant/chat-threads/source-older?')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({thread:{id:'source-older',title:'Earlier private source',visibility:'private',updatedAt:'2026-08-20T12:11:00Z',messages:[]},history:{mode:'tail',hasEarlier:false,messageCount:0}}));}
  if(req.url==='/artifacts/deck?id=deck-final'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({artifact:{id:'deck-final',title:'Western engagement army',type:'html_deck',version:4,contentDigest:digest,sceneRef},deck:{schemaVersion:1,width:1920,height:1080,slides:[]},canWrite:true}));}
  if(req.url==='/artifacts?id=deck-final'){const artifact={id:'deck-final',kind:'os_artifact',text:'<!doctype html><title>Deck</title>',metadata:{title:'Western engagement army',type:'html_deck',artifactVersion:'4',contentDigest:'0'.repeat(64),capabilityDigest:digest,deckSceneRef:sceneRef,assets:JSON.stringify([{ref:pdfRef,kind:'pdf',mime:'application/pdf',name:'Western engagement army.pdf'}]),renderPdfArtifactVersion:'4',renderPdfSourceSceneRef:sceneRef,renderPdfAssetRef:pdfRef}};res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifacts:[artifact],dispositionRef:legacyDisposition}));}
@@ -216,20 +223,56 @@ const server=http.createServer((req,res)=>{
  await page.click('.studio-project-detail__actions button',{position:{x:12,y:12}});
  await page.waitForTimeout(120);
  assert.deepEqual(actions[2],{id:'doc-draft',action:'review_changes',resultArtifactId:'doc-draft-result',expectedResultVersion:7,expectedResultDigest:digest});
+ const conditionalBefore=conditionalStudioRequests.length;
  const receipt=await page.evaluate(project=>{
    const old={id:'receipt-old',kind:'thread',studioProject:{id:project.id,kind:project.kind,title:project.title,status:'running',href:project.href}};
-   const latest={id:'receipt-latest',kind:'manifest',studioProject:{id:project.id,kind:project.kind,title:project.title,status:'ready',href:project.href}};
+   const latest={id:'receipt-latest',kind:'manifest',studioProject:{id:project.id,kind:project.kind,title:project.title,status:'ready',progressPercent:100,phase:'ready',href:project.href}};
    scoutChatThreads=[{id:'private-scout',title:'Scout',visibility:'private',messagesLoaded:true,messages:[old,latest]}];activeScoutThreadId='private-scout';
    const oldHost=document.createElement('div');oldHost.appendChild(scoutChatMessageRecordNode(old));
    const newHost=document.createElement('div');newHost.appendChild(scoutChatMessageRecordNode(latest));
    document.body.appendChild(newHost);
    const button=newHost.querySelector('.scout-studio-receipt');button.click();
-   return{oldChildren:oldHost.childElementCount,newChildren:newHost.childElementCount,text:button.innerText,path:location.pathname,deckCards:newHost.querySelectorAll('.scout-chat-deck-result,.manifest-card,.scout-chat-work-card').length};
- },projects[0]);
+   return{
+     oldChildren:oldHost.childElementCount,
+     newChildren:newHost.childElementCount,
+     text:button.innerText,
+     path:location.pathname,
+     projectParam:new URL(location.href).searchParams.get('project'),
+     selectedProjectId:selectedStudioProjectId,
+     deckCards:newHost.querySelectorAll('.scout-chat-deck-result,.manifest-card,.scout-chat-work-card').length,
+   };
+ },receiptOnlyProject);
+ await page.waitForFunction(()=>document.querySelector('.studio-project-detail__title')?.textContent==='Receipt-only presentation');
+ if(renderDir){await page.evaluate(()=>document.querySelectorAll('.toast').forEach(node=>node.remove()));await page.locator('.scout-studio-receipt').last().screenshot({path:path.join(renderDir,'chat-work-receipt.png')});}
  assert.equal(receipt.oldChildren,0,JSON.stringify(receipt));
  assert.equal(receipt.newChildren,1,JSON.stringify(receipt));
- assert.match(receipt.text,/Western engagement army/);assert.match(receipt.text,/Ready/);
- assert.equal(receipt.path,'/presentations');assert.equal(receipt.deckCards,0);
+ assert.match(receipt.text,/Receipt-only presentation/);assert.match(receipt.text,/Ready/);assert.match(receipt.text,/View in Work/);
+ assert.equal(receipt.path,'/work');assert.equal(receipt.deckCards,0);
+ assert.equal(receipt.projectParam,'receipt-only-deck',JSON.stringify(receipt));
+ assert.equal(receipt.selectedProjectId,'receipt-only-deck',JSON.stringify(receipt));
+ assert.equal(await page.locator('.studio-project-detail__title').innerText(),'Receipt-only presentation');
+ assert.ok(conditionalStudioRequests.length>conditionalBefore,JSON.stringify({conditionalBefore,conditionalStudioRequests,requestLog}));
+ assert.ok(requestLog.includes('/api/studio-projects/v1?id=receipt-only-deck'),JSON.stringify(requestLog));
+
+ const transientFirst=await page.evaluate(async()=>{
+   history.replaceState({view:'pd1',destination:'Work'},'','/work?project=transient-deck');
+   selectedStudioProjectId='transient-deck';
+   await loadStudioProjects({force:true,projectId:'transient-deck'});
+   return{unavailable:studioProjectDeepLinkUnavailable,error:studioProjectsError,selected:selectedStudioProjectId};
+ });
+ assert.equal(transientFirst.unavailable,'',JSON.stringify(transientFirst));
+ assert.match(transientFirst.error,/Temporary Work service interruption/);
+ assert.equal(transientFirst.selected,'transient-deck');
+ await page.evaluate(()=>loadStudioProjects({force:true,projectId:'transient-deck'}));
+ await page.waitForFunction(()=>document.querySelector('.studio-project-detail__title')?.textContent==='Recovered exact presentation');
+ assert.equal(await page.locator('.studio-project-detail__title').innerText(),'Recovered exact presentation');
+ assert.equal(transientExactAttempts,2);
+
+ await page.evaluate(project=>renderStudioProjectDetail({...project,id:'blocked-report',status:'needs_attention',result:undefined,attention:{title:'Quality checks didn’t pass',body:'Scout stopped instead of publishing a result it could not verify.',actionLabel:'Open conversation'}}),projects[1]);
+ assert.equal(await page.locator('.studio-project-deliverable__title').innerText(),'Quality checks didn’t pass');
+ assert.match(await page.locator('.studio-project-deliverable__meta').innerText(),/stopped instead of publishing/i);
+ assert.equal(await page.locator('.studio-project-detail__actions button').innerText(),'Open conversation');
+ if(renderDir)await page.locator('.studio-project-detail').screenshot({path:path.join(renderDir,'work-needs-attention.png')});
 
  await page.goto(base+'/presentations?project=older-deck',{waitUntil:'domcontentloaded'});
  await page.waitForFunction(()=>document.querySelector('.studio-project-detail__title')?.textContent==='Earlier presentation');

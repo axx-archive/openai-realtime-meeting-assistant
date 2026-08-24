@@ -52,6 +52,7 @@ type studioProjectView struct {
 	CompanyProject  *studioCompanyProjectRef    `json:"companyProject,omitempty"`
 	Result          *studioProjectResultRef     `json:"result,omitempty"`
 	Checkpoint      *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	Attention       *studioProjectAttentionView `json:"attention,omitempty"`
 	CanRename       bool                        `json:"canRename"`
 }
 
@@ -59,6 +60,16 @@ type studioProjectPhaseView struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Status string `json:"status"`
+}
+
+// studioProjectAttentionView is intentionally viewer-safe. Raw goal blockers
+// can contain provider diagnostics, source titles, or implementation details;
+// the Studio only needs to explain what kind of recovery stopped and what the
+// viewer can do next.
+type studioProjectAttentionView struct {
+	Title       string `json:"title"`
+	Body        string `json:"body,omitempty"`
+	ActionLabel string `json:"actionLabel,omitempty"`
 }
 
 type studioProjectSourceRef struct {
@@ -195,12 +206,15 @@ type studioProjectResultRef struct {
 // scoutChatStudioProjectRef is the quiet conversation receipt. It is
 // synthesized at the viewer seam and never persisted as a second lifecycle.
 type scoutChatStudioProjectRef struct {
-	ID         string                      `json:"id"`
-	Kind       string                      `json:"kind"`
-	Title      string                      `json:"title"`
-	Status     string                      `json:"status"`
-	Href       string                      `json:"href"`
-	Checkpoint *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	ID              string                      `json:"id"`
+	Kind            string                      `json:"kind"`
+	Title           string                      `json:"title"`
+	Status          string                      `json:"status"`
+	ProgressPercent int                         `json:"progressPercent"`
+	Phase           string                      `json:"phase"`
+	Href            string                      `json:"href"`
+	Checkpoint      *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	Attention       *studioProjectAttentionView `json:"attention,omitempty"`
 }
 
 func studioProjectKindForProcessID(processID string) string {
@@ -319,6 +333,10 @@ func studioProjectRevision(entry meetingMemoryEntry) int {
 		return 1
 	}
 	return revision
+}
+
+func studioProjectArchived(entry meetingMemoryEntry) bool {
+	return strings.TrimSpace(entry.Metadata["studioArchivedAt"]) != ""
 }
 
 func studioProjectCheckpointActionable(checkpoint *scoutChatWorkCheckpointRef) bool {
@@ -469,11 +487,47 @@ func studioProjectUpdatedAt(entry meetingMemoryEntry) time.Time {
 }
 
 func studioProjectHref(kind, id string) string {
-	path := "/research"
-	if kind == studioProjectKindPresentation {
-		path = "/presentations"
+	return "/work?project=" + url.QueryEscape(strings.TrimSpace(id))
+}
+
+func studioProjectAttention(status string, plan goalPlan, resultReady bool) *studioProjectAttentionView {
+	if status != studioProjectStatusNeedsAttention {
+		return nil
 	}
-	return path + "?project=" + url.QueryEscape(strings.TrimSpace(id))
+	if strings.TrimSpace(plan.State) == goalStateVerified && !resultReady {
+		return &studioProjectAttentionView{
+			Title:       "Final file needs reconnecting",
+			Body:        "Scout finished the work, but the exact verified file is not available yet.",
+			ActionLabel: "Open conversation",
+		}
+	}
+	blocker := strings.ToLower(strings.TrimSpace(plan.Blocker))
+	switch {
+	case strings.Contains(blocker, "restart"), strings.Contains(blocker, "execution state"), strings.Contains(blocker, "child authority"), strings.Contains(blocker, "saved goal"):
+		return &studioProjectAttentionView{
+			Title:       "Automatic recovery stopped",
+			Body:        "The request was interrupted before Scout could safely resume it.",
+			ActionLabel: "Open conversation",
+		}
+	case strings.Contains(blocker, "source"), strings.Contains(blocker, "authorization"), strings.Contains(blocker, "revoked"), strings.Contains(blocker, "access"):
+		return &studioProjectAttentionView{
+			Title:       "Source access changed",
+			Body:        "Scout can’t verify one of the sources needed to finish this work.",
+			ActionLabel: "Review sources",
+		}
+	case strings.Contains(blocker, "gate"), strings.Contains(blocker, "revision"), strings.Contains(blocker, "evidence"), strings.Contains(blocker, "format"), strings.Contains(blocker, "quality"):
+		return &studioProjectAttentionView{
+			Title:       "Quality checks didn’t pass",
+			Body:        "Scout stopped instead of publishing a result it could not verify.",
+			ActionLabel: "Open conversation",
+		}
+	default:
+		return &studioProjectAttentionView{
+			Title:       "Scout couldn’t finish automatically",
+			Body:        "The last automated attempt stopped before a verified final file was ready.",
+			ActionLabel: "Open conversation",
+		}
+	}
 }
 
 func studioProjectStatusCanRename(status string) bool {
@@ -595,6 +649,7 @@ func studioProjectViewForCandidateProjectionWithApp(app *kanbanBoardApp, ctx con
 	view.Status = status
 	view.Phase = phase
 	view.Phases = studioProjectPhases(status, phase)
+	view.Attention = studioProjectAttention(status, plan, resultReady)
 	view.CanRename = studioProjectCanRename(ctx, viewer, candidate, status)
 	return view, true
 }
@@ -628,6 +683,9 @@ func studioProjectList(ctx context.Context, viewer *userAccount, kind string) []
 	companyCache := newStudioProjectCompanyAccessCache()
 	views := make([]studioProjectView, 0)
 	for _, candidate := range authorizedStudioProjectCandidates(ctx, viewer, candidates) {
+		if studioProjectArchived(candidate.Entry) {
+			continue
+		}
 		view, ok := studioProjectViewForCandidateWithAccessCache(ctx, viewer, candidate, index, sourceCache, companyCache)
 		if !ok || (kind != "" && view.Kind != kind) {
 			continue
@@ -676,6 +734,7 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			ID               string `json:"id"`
 			Title            string `json:"title"`
+			Archived         *bool  `json:"archived"`
 			ExpectedRevision int    `json:"expectedRevision"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil {
@@ -684,8 +743,15 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		payload.ID = strings.TrimSpace(payload.ID)
 		payload.Title = boundedStudioProjectTitle(payload.Title)
-		if payload.ID == "" || payload.Title == "" || payload.ExpectedRevision < 1 {
-			writeAuthError(w, http.StatusBadRequest, "project id, title, and expected revision are required")
+		updateCount := 0
+		if payload.Title != "" {
+			updateCount++
+		}
+		if payload.Archived != nil {
+			updateCount++
+		}
+		if payload.ID == "" || payload.ExpectedRevision < 1 || updateCount != 1 {
+			writeAuthError(w, http.StatusBadRequest, "project id, expected revision, and exactly one title or archived update are required")
 			return
 		}
 		prior, found := authorizedArtifactByID(r.Context(), viewer, ACLWrite, payload.ID)
@@ -699,17 +765,43 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := studioProjectStatus(prior, plan, canonical && studioProjectCheckpointForViewer(prior, viewer) != nil)
-		if !studioProjectStatusCanRename(status) {
+		if payload.Title != "" && !studioProjectStatusCanRename(status) {
 			writeAuthError(w, http.StatusConflict, "project can be renamed after Scout finishes or stops")
 			return
 		}
-		if studioProjectTitle(prior, plan) != payload.Title {
+		archiveEligible := status == studioProjectStatusNeedsAttention
+		if canonical {
+			// Archive authority comes from the durable lifecycle, never from the
+			// viewer-specific checkpoint projection. An approval root without an
+			// actionable/admin-visible checkpoint may look like needs_attention to
+			// this viewer, but it is still genuine approval work and must survive.
+			archiveEligible = strings.TrimSpace(plan.State) == goalStateBlocked
+		}
+		if payload.Archived != nil && *payload.Archived && !archiveEligible {
+			writeAuthError(w, http.StatusConflict, "only failed work that needs attention can be archived")
+			return
+		}
+		archiveChanged := payload.Archived != nil && studioProjectArchived(prior) != *payload.Archived
+		titleChanged := payload.Title != "" && studioProjectTitle(prior, plan) != payload.Title
+		if titleChanged || archiveChanged {
 			header := resolveArtifactHeaderOwner(artifactAuthorizationHeaderFromEntry(prior))
 			expectedRawRevision := strings.TrimSpace(prior.Metadata["studioRevision"])
 			updates := map[string]string{
 				"studioSchemaVersion": strconv.Itoa(studioProjectSchemaVersion),
-				"studioTitle":         payload.Title, "studioRevision": strconv.Itoa(payload.ExpectedRevision + 1),
-				"studioTitleUpdatedAt": time.Now().UTC().Format(time.RFC3339Nano), "studioTitleUpdatedBy": viewer.Name,
+				"studioRevision":      strconv.Itoa(payload.ExpectedRevision + 1),
+			}
+			if titleChanged {
+				updates["studioTitle"] = payload.Title
+				updates["studioTitleUpdatedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+				updates["studioTitleUpdatedBy"] = viewer.Name
+			}
+			if archiveChanged {
+				updates["studioArchivedAt"] = ""
+				updates["studioArchivedBy"] = ""
+				if *payload.Archived {
+					updates["studioArchivedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+					updates["studioArchivedBy"] = viewer.Name
+				}
 			}
 			var changed bool
 			err := kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
@@ -833,8 +925,9 @@ func studioProjectReceiptFromIndexedRoot(ctx context.Context, app *kanbanBoardAp
 		return nil, false
 	}
 	return &scoutChatStudioProjectRef{
-		ID: view.ID, Kind: view.Kind, Title: view.Title, Status: view.Status, Href: view.Href,
-		Checkpoint: view.Checkpoint,
+		ID: view.ID, Kind: view.Kind, Title: view.Title, Status: view.Status,
+		ProgressPercent: view.ProgressPercent, Phase: view.Phase, Href: view.Href,
+		Checkpoint: view.Checkpoint, Attention: view.Attention,
 	}, true
 }
 
@@ -866,13 +959,13 @@ func (app *kanbanBoardApp) projectScoutChatStudioProjectRef(ctx context.Context,
 }
 
 func studioProjectLaunchCopy(processID, label string) string {
-	label = firstNonEmptyString(strings.TrimSpace(label), "Work")
 	switch strings.TrimSpace(processID) {
 	case packagingStudioProcessID:
-		return label + " filed — open it in Presentations while Scout builds it"
+		return "I’m building your presentation now. I’ll post the finished file here."
 	case documentReportProcessID:
-		return label + " filed — open it in Research while Scout builds it"
+		return "I’m researching and writing your report now. I’ll post the finished file here."
 	default:
+		label = firstNonEmptyString(strings.TrimSpace(label), "Work")
 		return label + " started — progress and the finished result will stay in this conversation"
 	}
 }
