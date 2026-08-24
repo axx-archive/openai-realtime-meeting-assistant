@@ -54,10 +54,10 @@ services:
     ports:
       - "40000-40100:40000-40100/udp"
     healthcheck:
-      # Docker liveness must prove the serving process, not run the full
-      # capability/parity audit every 30s. Exact-release activation and the
-      # retained verifier still gate public /readyz separately.
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/livez"]
+      # Transitional bootstrap: retain the currently approved readiness probe
+      # so the serving release tool can install this compatibility release.
+      # Its successor switches Docker liveness to /livez.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/readyz"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1006,7 +1006,11 @@ function validateHealthcheck(serviceName, value, expected) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`rendered candidate Compose service ${serviceName} healthcheck is invalid`)
   const allowed = new Set(['test', 'interval', 'timeout', 'retries', 'start_period', 'start_interval', 'disable'])
   for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`rendered candidate Compose service ${serviceName} healthcheck has unsupported field ${key}`)
-  exactStringSequence(value.test, expected.test, `rendered candidate Compose service ${serviceName} healthcheck command`, { ordered: true })
+  if (expected.tests) {
+    exactStringSequenceOneOf(value.test, expected.tests, `rendered candidate Compose service ${serviceName} healthcheck command`, { ordered: true })
+  } else {
+    exactStringSequence(value.test, expected.test, `rendered candidate Compose service ${serviceName} healthcheck command`, { ordered: true })
+  }
   exactDuration(value.interval, expected.interval[0], expected.interval[1], `rendered candidate Compose service ${serviceName} healthcheck interval`)
   exactDuration(value.timeout, expected.timeout[0], expected.timeout[1], `rendered candidate Compose service ${serviceName} healthcheck timeout`)
   exactDuration(value.start_period, expected.startPeriod[0], expected.startPeriod[1], `rendered candidate Compose service ${serviceName} healthcheck start period`)
@@ -1274,7 +1278,13 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
   validateExactEnvironment('caddy', config.services.caddy.environment, [])
 
   validateHealthcheck('meetingassist', config.services.meetingassist.healthcheck, {
-    test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/livez'], interval: ['30s', 30_000_000_000],
+    // One reviewed transition release must verify its retained /readyz probe
+    // and admit the direct successor's /livez probe. The successor removes
+    // this one-of allowance and returns the policy to one exact command.
+    tests: [
+      ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/readyz'],
+      ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/livez']
+    ], interval: ['30s', 30_000_000_000],
     timeout: ['5s', 5_000_000_000], startPeriod: ['5m0s', 300_000_000_000], retries: 3
   })
   validateHealthcheck('canonical-postgres', config.services['canonical-postgres'].healthcheck, {
