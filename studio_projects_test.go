@@ -705,6 +705,16 @@ func TestStudioProjectArchiveHidesOnlyFailedWorkAndRemainsRecoverable(t *testing
 	failed := seedStudioProjectRoot(t, kanbanApp, thread, packagingStudioProcessID, "Failed presentation", goalStateBlocked)
 	active := seedStudioProjectRoot(t, kanbanApp, thread, documentReportProcessID, "Active research", goalStateExecute)
 	approval := seedStudioProjectRoot(t, kanbanApp, thread, documentReportProcessID, "Research awaiting a decision", goalStateApproval)
+	legacyFailed, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Legacy failed research", "# Legacy failed research", "Scout", map[string]string{
+		"type": artifactTypeMarkdown, "source": "scout_thread", "mode": "research", "threadId": "legacy-failed-research",
+		"status": codexJobStatusFailed, "threadStatus": codexJobStatusFailed,
+		"originKind": agentThreadOriginPrivateThread, "originId": "missing-legacy-source", "visibility": scoutChatVisibilityPrivate,
+		"ownerEmail": owner, "requestedBy": owner, "sourceMessageId": "missing-source-message",
+		"sourceMessageDigest": strings.Repeat("a", 64), "sourceWindowDigest": strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cookies := loginAs(t, owner, "B0NFIRE!")
 
 	activeArchive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+active.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)
@@ -714,6 +724,14 @@ func TestStudioProjectArchiveHidesOnlyFailedWorkAndRemainsRecoverable(t *testing
 	approvalArchive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+approval.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)
 	if approvalArchive.Code != http.StatusConflict {
 		t.Fatalf("approval archive=%d body=%s", approvalArchive.Code, approvalArchive.Body.String())
+	}
+	legacyRename := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+legacyFailed.ID+`","title":"Should remain source fenced","expectedRevision":1}`, cookies, studioProjectsHandler)
+	if legacyRename.Code != http.StatusConflict {
+		t.Fatalf("legacy rename=%d body=%s, want stale-source conflict", legacyRename.Code, legacyRename.Body.String())
+	}
+	legacyArchive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+legacyFailed.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)
+	if legacyArchive.Code != http.StatusOK {
+		t.Fatalf("legacy failed archive=%d body=%s", legacyArchive.Code, legacyArchive.Body.String())
 	}
 
 	archive := artifactAuthorizationRequest(t, http.MethodPatch, "/api/studio-projects/v1", `{"id":"`+failed.ID+`","archived":true,"expectedRevision":1}`, cookies, studioProjectsHandler)

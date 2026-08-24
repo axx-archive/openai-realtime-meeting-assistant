@@ -804,7 +804,7 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			var changed bool
-			err := kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, func() error {
+			updateProject := func() error {
 				var updateErr error
 				_, changed, updateErr = kanbanApp.memory.updateOSArtifactMetadataIfHeaderAndMetadataMatch(
 					header, map[string]string{"studioRevision": expectedRawRevision}, prior.ID, updates,
@@ -816,7 +816,20 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 					return errors.New("studio project changed")
 				}
 				return nil
-			})
+			}
+			// Renaming changes user-visible authored identity, so it remains
+			// fenced by the exact originating conversation. Archiving/restoring is
+			// owner bookkeeping over an already-failed root: old legacy work often
+			// points at a conversation revision that no longer exists, and that
+			// stale source must not make the failure impossible to clear. ACLWrite,
+			// the authorization header, and the studio-revision CAS still bind the
+			// exact project mutation.
+			var err error
+			if titleChanged {
+				err = kanbanApp.withCurrentAgentThreadSource(scoutAgentThread{Artifact: prior}, updateProject)
+			} else {
+				err = updateProject()
+			}
 			if err != nil {
 				writeAuthError(w, http.StatusConflict, "project changed; reload and try again")
 				return
