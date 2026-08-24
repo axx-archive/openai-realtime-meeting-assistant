@@ -21,6 +21,7 @@ import {
   reviewedInventoryDigest, validateBuildInputs, validateCandidateBundleManifest, validatePrepareState,
   validateActiveReleaseLedger, validateProjectResourceBaseline, validateProjectServiceInventory, validateReleaseReceipt, validateReleaseScopePolicy,
   validateReleaseTransition, validateRenderedComposeConfig, validateRendererRuntimeConfinement, validateReviewedInventory, validateSourceReceipt,
+  validateGeneration212LivenessRecoveryRequest, validateGeneration212LivenessRecoveryState,
   verifyArchiveIdentity, verifyCandidateConfig, verifyLabels, verifyProbeRelease,
   verifyExecutingReleaseTool, verifyReleaseEnvironmentFile, verifyRenderRunnerHeartbeat,
   verifyRetainedReleaseActivator, verifyRuntimeEnvironment,
@@ -33,6 +34,7 @@ import {
   priorBaseEnvCommitDisposition, releaseTransactionCompletionEvidence,
   reinstallCommittedTargetBaseEnvPatch, requestedQualificationRollbackReceipt, requestedTargetBaseEnvPatch,
   restorePriorBaseEnv,
+  retainedDurableRecoveryArgs,
   strideE10W4MaintenanceArgs, strideE10W4RecoveryPlan, strideE10W4ReleaseTransitionPlan,
   validateBaseEnvPatchPlan, validateBaseEnvPatchReceipt, validatePrivateReleasePathInfo,
   validateReleaseTransactionJournal, verifyBaseEnvPatchRuntimeEnvironment,
@@ -1454,6 +1456,57 @@ test('rollback requires the ledger exact previous release and rejects arbitrary 
   const arbitrary = transitionReceipt('3', '5', '6', '7')
   assert.throws(() => validateReleaseTransition('rolledBack', ledger, previousDir, arbitrary, currentDir, current), /rollback target.*differs/)
   assert.doesNotThrow(() => validateReleaseTransition('activated', null, arbitraryDir, arbitrary, currentDir, current))
+})
+
+test('one-time generation-212 liveness recovery is bound to the exact reviewed lineage', () => {
+  const request = {
+    command: 'recover-generation-212-liveness-lineage',
+    releaseDir: '/opt/meetingassist-releases/39108281d6e1f02532b80cbefd057c0f3ae31487',
+    rollbackReleaseDir: '/opt/meetingassist-releases/8d013afdba0904f0eca69cbc0f78a7c56ab37f75',
+    recoveryReleaseDir: `/opt/meetingassist-releases/${'a'.repeat(40)}`,
+    baseEnv: '/opt/meetingassist/deploy/digitalocean/.env',
+    healthUrl: 'https://thebonfire.xyz/healthz',
+    readyUrl: 'https://thebonfire.xyz/readyz',
+    qualificationRollbackReceipt: '/opt/meetingassist-backups/base-env-8d013afdba0904f0eca69cbc0f78a7c56ab37f75-073e7607-5c14-41a4-a5fe-722f51e24142.receipt.json'
+  }
+  const plan = validateGeneration212LivenessRecoveryRequest(request)
+  const target = {
+    source: { releaseCommit: '39108281d6e1f02532b80cbefd057c0f3ae31487' },
+    bundleSha256: '78885530034e3b2338a281e0e22363c4aec913f5479f20648d8d7c915e196fab',
+    images: {
+      meetingassist: { imageId: 'sha256:e45f9eeb11c16fa9d7a67edbe40daadeff6eb72d8baa21a8abf33556d57ece63' },
+      renderRunner: { imageId: 'sha256:338ad88a005bf6bafdc4f7ee3807c4d4e66a519b682bf2539a901159d6ba90dd' }
+    }
+  }
+  const current = {
+    source: { releaseCommit: '8d013afdba0904f0eca69cbc0f78a7c56ab37f75' },
+    bundleSha256: 'bef453eb640a63745ec9ddeeccc425bae64ed9e8e6fb0cd39d3dd3c54e3b7090',
+    images: {
+      meetingassist: { imageId: 'sha256:f797b197a7a9290e0d94d32d7970dda1665ffc490ae8d41ea4dec4fae1745d83' },
+      renderRunner: { imageId: 'sha256:bd809d0d138399901ba3e7fbee6af1a5733b231a51521da81ed3500aa5b46aff' }
+    }
+  }
+  assert.equal(validateGeneration212LivenessRecoveryState(plan, target, current, { generation: 212 }), plan)
+  assert.throws(() => validateGeneration212LivenessRecoveryRequest({ ...request, force: 'true' }), /arguments are not exact/)
+  assert.throws(() => validateGeneration212LivenessRecoveryRequest({ ...request, releaseDir: request.rollbackReleaseDir }), /releaseDir is not exact/)
+  assert.throws(() => validateGeneration212LivenessRecoveryRequest({ ...request, recoveryReleaseDir: '/tmp/recovery' }), /utility release directory is invalid/)
+  assert.throws(() => validateGeneration212LivenessRecoveryState(plan, target, current, { generation: 211 }), /ledger generation/)
+  assert.throws(() => validateGeneration212LivenessRecoveryState(plan,
+    { ...target, bundleSha256: digest('0') }, current, { generation: 212 }), /target bundle identity/)
+  assert.throws(() => validateGeneration212LivenessRecoveryState(plan,
+    target, { ...current, images: { ...current.images, meetingassist: { imageId: `sha256:${digest('0')}` } } }, { generation: 212 }), /current bundle identity/)
+
+  const recoveryArgs = retainedDurableRecoveryArgs(request, request.releaseDir,
+    `${request.rollbackReleaseDir}/sealed-candidate/scripts/bonfire-release.mjs`)
+  assert.deepEqual(recoveryArgs, [
+    `${request.rollbackReleaseDir}/sealed-candidate/scripts/bonfire-release.mjs`, 'recover',
+    '--release-dir', request.releaseDir,
+    '--base-env', request.baseEnv,
+    '--health-url', request.healthUrl,
+    '--ready-url', request.readyUrl
+  ])
+  assert.equal(recoveryArgs.includes('--qualification-rollback-receipt'), false)
+  assert.equal(recoveryArgs.includes('--recovery-release-dir'), false)
 })
 
 test('labels, runtime environment, probes, and exact release env fail on drift', () => {
