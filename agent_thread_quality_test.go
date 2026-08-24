@@ -821,6 +821,33 @@ func TestFreshDirectResearchAuthorityCanonicalizesModelWordingWithoutWideningSco
 	}
 }
 
+func TestFreshContextCanonicalizationTypesNullBrandAssetsAsEmptyArray(t *testing.T) {
+	app, plan, _ := authorizedExternalEvidenceTestContext(t)
+	body := externalEvidenceContextWithQuestionsForTest(t, plan, []any{})
+	var object map[string]any
+	if err := json.Unmarshal([]byte(body), &object); err != nil {
+		t.Fatal(err)
+	}
+	object["research_mode"] = "none"
+	object["brand_assets"] = nil
+	raw, err := json.Marshal(object)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, mode, canonical, err := authorizeAndCanonicalizeExternalEvidenceResearchText(app, &plan, string(raw))
+	if err != nil || mode != "none" {
+		t.Fatalf("canonicalize no-research context: mode=%q err=%v", mode, err)
+	}
+	var canonicalObject map[string]any
+	if err := json.Unmarshal([]byte(canonical), &canonicalObject); err != nil {
+		t.Fatal(err)
+	}
+	brandAssets, ok := canonicalObject["brand_assets"].([]any)
+	if !ok || len(brandAssets) != 0 {
+		t.Fatalf("canonical brand_assets=%#v, want typed empty array", canonicalObject["brand_assets"])
+	}
+}
+
 func TestFreshDirectResearchAuthorityRefusesLossyFallback(t *testing.T) {
 	authority := externalEvidenceResearchQuestionAuthority{
 		Question: "What is the market opportunity for official program?", ResearchKind: "direct_evidence", Importance: "load_bearing",

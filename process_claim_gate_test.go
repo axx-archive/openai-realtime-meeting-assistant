@@ -295,6 +295,16 @@ func TestProcessClaimGateTreatsTypedStoryNarrativeAsInternalPlanning(t *testing.
 			plan:  documentPlan,
 			stage: documentStage,
 		},
+		"nested thesis planning requirement": {
+			body:  `{"report_story_spine_v1":{"opening_thesis":{"evidence_assigned":[{"requirement":"The authorized prompt is the complete source boundary."}]}}}`,
+			plan:  documentPlan,
+			stage: documentStage,
+		},
+		"nested selection reason visible string": {
+			body:  `{"selected_story":{"selection_reason":{"visible_string":"Recommendation: Choose the direct request-to-result arc because it gives the reader a clean decision path."}}}`,
+			plan:  packagingPlan,
+			stage: packagingStage,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := validateProcessPanelVoiceFactualClaimsForStage(test.body, authority, test.plan, test.stage); err != nil {
@@ -330,6 +340,14 @@ func TestProcessClaimGateInternalStoryMetadataCannotCarryMaterialFactsOrEscapeDo
 	outside := `{"report_story_spine_v1":{"headline":"The middle beat carries the tension from request to result."}}`
 	if err := validateProcessPanelVoiceFactualClaimsForStage(outside, authority, plan, stage); err == nil {
 		t.Fatal("story-planning exception escaped into a client-facing headline")
+	}
+	visibleThesis := `{"report_story_spine_v1":{"opening_thesis":{"visible_string":"Acme powers every creator."}}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(visibleThesis, authority, plan, stage); err == nil {
+		t.Fatal("story-planning exception escaped into a nested visible thesis")
+	}
+	visibleClaim := `{"report_story_spine_v1":{"claims":[{"text":"Acme powers every creator."}]}}`
+	if err := validateProcessPanelVoiceFactualClaimsForStage(visibleClaim, authority, plan, stage); err == nil {
+		t.Fatal("story-planning exception escaped into a nested visible claim")
 	}
 	internalOnly := `{"report_story_spine_v1":{"reader_use":{"text":"They can proceed because Acme powers every creator."}}}`
 	if err := validateProcessPanelVoiceFactualClaimsForStage(internalOnly, authority, plan, stage); err != nil {

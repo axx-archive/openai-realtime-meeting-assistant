@@ -129,7 +129,7 @@ var (
 	processJSONPlanningContinuationLeadPattern     = regexp.MustCompile(`(?i)^\s*(?:retaining|preserving|keeping|carrying|reusing|echoing|combining|weaving|borrowing|grafting|using|making|completing|showing|connecting|ending|landing|framing|turning|translating|ensuring|reinforcing|holding|leaving)\b`)
 	processJSONPlanningConnectorPattern            = regexp.MustCompile(`(?i)^\s*(?:and|then|while|with|by|without)\s+`)
 	processJSONPlanningHiddenSyntaxPattern         = regexp.MustCompile(`(?i)(?:<!--|-->|\[\[\s*claim\s*:|stride-claim\s*:)`)
-	processJSONStoryFactBearingPathPattern         = regexp.MustCompile(`(?i)(?:^|\.)(?:headline|thesis|opening_thesis|claim|claims|fact|facts|proof|evidence|copy|visible_copy|body|statement|finding|assertion|source|quote|exact_quote|display_claim)(?:\.|\[|$)`)
+	processJSONStoryFactBearingKeyPattern          = regexp.MustCompile(`(?i)^(?:headline|thesis|opening_thesis|claim|claims|fact|facts|proof|evidence|copy|visible_copy|body|statement|finding|assertion|source|quote|exact_quote|display_claim)$`)
 	processJSONMissingProofStatusPathPattern       = regexp.MustCompile(`^\$(?:\.story_spine_v2)?\.claims_needing_proof\[\d+\]\.proof_status$`)
 	processMissingProofSubjectPattern              = regexp.MustCompile(`(?i)\b(?:claim|evidence|proof|source|support|verification)\b`)
 	processMissingProofAbsencePattern              = regexp.MustCompile(`(?i)\b(?:absent|missing|needs?|not|no|pending|requires?|unavailable|unproven|unsupported|unverified|without)\b`)
@@ -947,8 +947,34 @@ func processStoryPlanningImperativeText(text string) bool {
 	return match != nil && match[0] == 0
 }
 
+func processStoryPathLastKey(path string) string {
+	trimmed := strings.TrimSpace(path)
+	for strings.HasSuffix(trimmed, "]") {
+		open := strings.LastIndex(trimmed, "[")
+		if open < 0 {
+			break
+		}
+		trimmed = trimmed[:open]
+	}
+	if dot := strings.LastIndex(trimmed, "."); dot >= 0 {
+		trimmed = trimmed[dot+1:]
+	}
+	return strings.TrimSpace(trimmed)
+}
+
 func processStoryFactBearingField(path, key string) bool {
-	return processJSONStoryFactBearingPathPattern.MatchString(path + "." + strings.TrimSpace(key))
+	key = strings.TrimSpace(key)
+	if processJSONStoryFactBearingKeyPattern.MatchString(key) {
+		return true
+	}
+	// A fact-bearing value may be expressed as an object with a generic visible
+	// scalar, for example opening_thesis.visible_string or claims[0].text.
+	// Do not make the whole descendant subtree strict: story schemas also nest
+	// private planning metadata such as opening_thesis.evidence_assigned[].requirement.
+	if !oneOf(strings.ToLower(key), "text", "value", "visible_string", "content", "rendering", "sentence", "label", "title") {
+		return false
+	}
+	return processJSONStoryFactBearingKeyPattern.MatchString(processStoryPathLastKey(path))
 }
 
 // validateProcessStoryInternalMetadataText is the typed boundary for a

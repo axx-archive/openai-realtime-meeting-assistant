@@ -88,6 +88,30 @@ func TestPackagingStudioIdentityCandidatesAndJuryShareOneExactSampleSet(t *testi
 	}
 }
 
+func TestPackagingStudioNullBrandAssetsIsConservativeNoAssetContext(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context", `{"brand_assets":null}`, scoutParticipantName, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := &goalPlan{ProcessID: packagingStudioProcessID, Subtasks: []goalSubtask{
+		{ID: "context_snapshot", Status: subtaskComplete, ArtifactID: contextArtifact.ID},
+	}}
+	refs, err := packagingStudioAuthorizedBrandAssetRefs(app, plan)
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("null optional brand assets should conservatively mean no assets: refs=%v err=%v", refs, err)
+	}
+
+	malformedArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Malformed context", `{"brand_assets":{"name":"invented"}}`, scoutParticipantName, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Subtasks[0].ArtifactID = malformedArtifact.ID
+	if _, err := packagingStudioAuthorizedBrandAssetRefs(app, plan); err == nil || !strings.Contains(err.Error(), "must be an array") {
+		t.Fatalf("non-null malformed brand assets did not fail closed: %v", err)
+	}
+}
+
 func TestPackagingStudioDecisionEditorSelectsWithoutMergingAndValidatesImmediately(t *testing.T) {
 	app := newIsolatedKanbanBoardApp(t)
 	contextArtifact, _, err := app.createOSArtifactWithMetadata("workflow", "Context", `{"brand_assets":[]}`, scoutParticipantName, nil)

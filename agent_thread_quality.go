@@ -913,6 +913,11 @@ func canonicalExternalEvidenceResearchText(text string, authorities []externalEv
 	if !ok {
 		return "", fmt.Errorf("context snapshot is not a JSON object")
 	}
+	if brandAssets, exists := object["brand_assets"]; exists && brandAssets == nil {
+		// Preserve the semantic no-asset decision in its typed collection form so
+		// later identity stages do not depend on a model choosing [] over null.
+		object["brand_assets"] = []any{}
+	}
 	rawQuestions, ok := object["research_questions"].([]any)
 	if !ok || len(rawQuestions) != len(authorities) {
 		return "", fmt.Errorf("context snapshot research authority count changed during canonicalization")

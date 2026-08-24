@@ -1936,7 +1936,14 @@ func packagingStudioAuthorizedBrandAssetRefs(app *kanbanBoardApp, plan *goalPlan
 	if err != nil {
 		return nil, err
 	}
-	rawAssets, ok := contextObject["brand_assets"].([]any)
+	rawBrandAssets, exists := contextObject["brand_assets"]
+	if !exists || rawBrandAssets == nil {
+		// Model-produced context commonly uses JSON null for an explicitly empty
+		// optional collection. Treat that only as the conservative no-asset case:
+		// it cannot grant brand authority or select extension mode.
+		return map[string]string{}, nil
+	}
+	rawAssets, ok := rawBrandAssets.([]any)
 	if !ok {
 		return nil, fmt.Errorf("deck context brand_assets must be an array")
 	}
