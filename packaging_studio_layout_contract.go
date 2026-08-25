@@ -788,8 +788,9 @@ func validatePackagingStudioLayoutText(label, slideKind string, layout map[strin
 	if err != nil || !lineHeightOK || math.Abs(lineHeight-scene.LineHeight) > packagingGeneratedSceneEpsilon {
 		return "", fmt.Errorf("%s line_height drifted or is invalid", label)
 	}
-	letterSpacing, err := packagingStudioLayoutString(typography, "letter_spacing", label+" typography", false)
-	if err != nil || letterSpacing != scene.LetterSpacing || !deckTrackingPattern.MatchString(letterSpacing) {
+	layoutTracking, layoutTrackingOK := packagingStudioLayoutTrackingPixels(typography["letter_spacing"], fontSize)
+	sceneTracking, sceneTrackingOK := packagingStudioTrackingPixels(scene.LetterSpacing, fontSize)
+	if !layoutTrackingOK || !sceneTrackingOK || math.Abs(layoutTracking-sceneTracking) > packagingGeneratedSceneEpsilon {
 		return "", fmt.Errorf("%s letter_spacing drifted or is invalid", label)
 	}
 	alignment, err := packagingStudioLayoutString(typography, "alignment", label+" typography", false)
@@ -1006,4 +1007,18 @@ func packagingStudioTrackingPixels(value string, fontSize float64) (float64, boo
 		return 0, false
 	}
 	return number, true
+}
+
+func packagingStudioLayoutTrackingPixels(value any, fontSize float64) (float64, bool) {
+	if numeric, ok := packagingStudioJSONNumber(value); ok {
+		if math.IsNaN(numeric) || math.IsInf(numeric, 0) || numeric < -4 || numeric > 20 {
+			return 0, false
+		}
+		return numeric, true
+	}
+	text, ok := value.(string)
+	if !ok {
+		return 0, false
+	}
+	return packagingStudioTrackingPixels(text, fontSize)
 }

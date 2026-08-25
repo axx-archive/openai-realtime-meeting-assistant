@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -287,6 +288,29 @@ func TestPackagingStudioLayoutShapeAllowsOnlyInvisibleStrokeOmission(t *testing.
 	scene.Stroke = "#FFFFFF"
 	if err := validatePackagingStudioLayoutShape("shape", layout, scene, map[string]bool{"#2f5d50": true, "#ffffff": true}); err == nil || !strings.Contains(err.Error(), "stroke drifted") {
 		t.Fatalf("conflicting zero-width stroke error=%v, want color rejection", err)
+	}
+}
+
+func TestPackagingStudioLayoutTrackingNormalizesNumericPixels(t *testing.T) {
+	for _, test := range []struct {
+		value any
+		want  float64
+	}{
+		{value: json.Number("2.2"), want: 2.2},
+		{value: json.Number("-2"), want: -2},
+		{value: "2.2px", want: 2.2},
+		{value: ".1em", want: 10},
+		{value: "normal", want: 0},
+	} {
+		got, ok := packagingStudioLayoutTrackingPixels(test.value, 100)
+		if !ok || math.Abs(got-test.want) > packagingGeneratedSceneEpsilon {
+			t.Fatalf("tracking %v = %v, %v; want %v, true", test.value, got, ok, test.want)
+		}
+	}
+	for _, value := range []any{json.Number("21"), json.Number("-5"), "1rem", true} {
+		if _, ok := packagingStudioLayoutTrackingPixels(value, 100); ok {
+			t.Fatalf("unsafe tracking %v passed", value)
+		}
 	}
 }
 
