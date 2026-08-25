@@ -456,6 +456,18 @@ func TestPackagingGeneratedSceneQualityRequiresExactPremiumLockedLayout(t *testi
 	if err := validatePackagingGeneratedScene(app, plan, driftedSlideKind, nil); err == nil || !strings.Contains(err.Error(), "data-deck-slide-kind drifted") {
 		t.Fatalf("slide-kind drift error=%v, want locked-layout rejection", err)
 	}
+	decoratedText := strings.Replace(source, `data-deck-element="cover-title" data-deck-type="text"`, `data-deck-element="cover-title" data-deck-type="text" data-deck-copy-role="headline" data-deck-font-token="modern_grotesk"`, 1)
+	if err := validatePackagingGeneratedScene(app, plan, decoratedText, nil); err != nil {
+		t.Fatalf("closed optional text metadata: %v", err)
+	}
+	driftedCopyRole := strings.Replace(decoratedText, `data-deck-copy-role="headline"`, `data-deck-copy-role="body"`, 1)
+	if err := validatePackagingGeneratedScene(app, plan, driftedCopyRole, nil); err == nil || !strings.Contains(err.Error(), "data-deck-copy-role drifted") {
+		t.Fatalf("copy-role drift error=%v, want locked-layout rejection", err)
+	}
+	driftedFontToken := strings.Replace(decoratedText, `data-deck-font-token="modern_grotesk"`, `data-deck-font-token="humanist_sans"`, 1)
+	if err := validatePackagingGeneratedScene(app, plan, driftedFontToken, nil); err == nil || !strings.Contains(err.Error(), "data-deck-font-token drifted") {
+		t.Fatalf("font-token drift error=%v, want locked-layout rejection", err)
+	}
 	styledChild := strings.Replace(source, ">Locked Proof</div>", `><span style="font-size:8px;color:#ffffff;font-family:Georgia">Locked Proof</span></div>`, 1)
 	if err := validatePackagingGeneratedScene(app, plan, styledChild, nil); err == nil || (!strings.Contains(err.Error(), "inline style on an unowned span") && !strings.Contains(err.Error(), "nested or styled text markup")) {
 		t.Fatalf("rich-text child bypass error=%v, want premium typography rejection", err)

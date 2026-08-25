@@ -625,6 +625,16 @@ func validatePackagingGeneratedSceneLockedLayoutPremium(app *kanbanBoardApp, pla
 				if err != nil {
 					return err
 				}
+				if renderedRole := source.ElementRole[sceneElement.ID]; renderedRole != "" && renderedRole != role {
+					return fmt.Errorf("%s data-deck-copy-role drifted from the locked layout", elementLabel)
+				}
+				if renderedFont := source.ElementFont[sceneElement.ID]; renderedFont != "" {
+					typography, _ := layoutElement["typography"].(map[string]any)
+					fontToken, tokenErr := packagingStudioLayoutString(typography, "font_token", elementLabel+" typography", false)
+					if tokenErr != nil || renderedFont != fontToken {
+						return fmt.Errorf("%s data-deck-font-token drifted from the locked layout", elementLabel)
+					}
+				}
 				if source.SafeZoneExempt[sceneElement.ID] && role != "counter" {
 					return fmt.Errorf("%s locked %s copy may not claim the background-furniture safe-zone exemption", elementLabel, role)
 				}

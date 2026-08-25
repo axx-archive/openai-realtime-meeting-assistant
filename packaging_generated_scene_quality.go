@@ -31,6 +31,8 @@ type packagingGeneratedSceneSource struct {
 	SlideKind      map[string]string
 	SlideElements  map[string][]string
 	ElementSlide   map[string]string
+	ElementRole    map[string]string
+	ElementFont    map[string]string
 	OverlapAllowed map[string]bool
 	SafeZoneExempt map[string]bool
 	VisuallyHidden map[string]bool
@@ -119,7 +121,7 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 	}
 
 	source := packagingGeneratedSceneSource{
-		SlideKind: make(map[string]string), SlideElements: make(map[string][]string), ElementSlide: make(map[string]string), OverlapAllowed: make(map[string]bool), SafeZoneExempt: make(map[string]bool), VisuallyHidden: make(map[string]bool),
+		SlideKind: make(map[string]string), SlideElements: make(map[string][]string), ElementSlide: make(map[string]string), ElementRole: make(map[string]string), ElementFont: make(map[string]string), OverlapAllowed: make(map[string]bool), SafeZoneExempt: make(map[string]bool), VisuallyHidden: make(map[string]bool),
 		Identity: make(map[string]string), ImageFig: make(map[string]string), ImageCrop: make(map[string]string), ImageFocalX: make(map[string]string), ImageFocalY: make(map[string]string), ImageFit: make(map[string]string), ImagePosition: make(map[string]string), UnsafeTextTree: make(map[string]bool),
 		TextLines: make(map[string][]string),
 	}
@@ -178,6 +180,8 @@ func parsePackagingGeneratedSceneSource(sourceHTML string) (packagingGeneratedSc
 						source.ImageFit[elementID] = strings.TrimSpace(styles["object-fit"])
 						source.ImagePosition[elementID] = strings.TrimSpace(styles["object-position"])
 					} else if typ == "text" {
+						source.ElementRole[elementID] = strings.ToLower(strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-copy-role")))
+						source.ElementFont[elementID] = strings.TrimSpace(legacyNodeAttr(elementNode, "data-deck-font-token"))
 						source.UnsafeTextTree[elementID] = packagingGeneratedTextTreeHasVisualOverrides(elementNode)
 						source.TextLines[elementID] = packagingGeneratedTextTreeLines(elementNode)
 					}
@@ -458,11 +462,19 @@ func validatePackagingGeneratedPremiumElementDOM(node *xhtml.Node) error {
 		}
 		common["data-deck-furniture"] = true
 		common["aria-hidden"] = true
+		common["data-deck-copy-role"] = true
+		common["data-deck-font-token"] = true
 		if err := packagingGeneratedExactAttributeKeys(node, common, "text"); err != nil {
 			return err
 		}
 		if strings.TrimSpace(legacyNodeAttr(node, "class")) != "" {
 			return fmt.Errorf("premium generated text may not carry reserved or authored classes")
+		}
+		copyRole := strings.ToLower(strings.TrimSpace(legacyNodeAttr(node, "data-deck-copy-role")))
+		fontToken := strings.TrimSpace(legacyNodeAttr(node, "data-deck-font-token"))
+		_, mappedFont := packagingStudioResolvedFontStack(fontToken)
+		if (copyRole == "") != (fontToken == "") || (copyRole != "" && (!oneOf(copyRole, "headline", "kicker", "body", "evidence", "source", "counter") || !mappedFont)) {
+			return fmt.Errorf("premium generated text has invalid optional locked typography metadata")
 		}
 		furniture := strings.TrimSpace(legacyNodeAttr(node, "data-deck-furniture"))
 		ariaHidden := strings.TrimSpace(legacyNodeAttr(node, "aria-hidden"))
