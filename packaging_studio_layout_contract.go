@@ -906,13 +906,19 @@ func validatePackagingStudioLayoutShape(label string, layout map[string]any, sce
 	if err != nil || (!deckHexColorPattern.MatchString(fill) && fill != "transparent") || !strings.EqualFold(fill, scene.Fill) || (fill != "transparent" && !palette[strings.ToLower(fill)]) {
 		return fmt.Errorf("%s fill drifted from the selected palette or scene", label)
 	}
-	stroke, err := packagingStudioLayoutString(layout, "stroke", label, true)
-	if err != nil || (stroke != "" && !deckHexColorPattern.MatchString(stroke)) || !strings.EqualFold(stroke, scene.Stroke) || (stroke != "" && !palette[strings.ToLower(stroke)]) {
-		return fmt.Errorf("%s stroke drifted from the selected palette or scene", label)
-	}
 	strokeWidth, err := packagingStudioLayoutNumber(layout, "stroke_width", label)
 	if err != nil || math.Abs(strokeWidth-scene.StrokeWidth) > packagingGeneratedSceneEpsilon || strokeWidth < 0 {
 		return fmt.Errorf("%s stroke_width drifted or is invalid", label)
+	}
+	stroke, err := packagingStudioLayoutString(layout, "stroke", label, true)
+	strokeMatchesScene := strings.EqualFold(stroke, scene.Stroke)
+	// A zero-width stroke has no rendered pixels. The HTML writer may therefore
+	// omit the border while retaining the locked palette color in layout_plan_v3.
+	// This normalization applies only when both widths are zero and the scene
+	// carries no conflicting stroke; every visible stroke remains byte-bound.
+	zeroWidthOmission := strokeWidth <= packagingGeneratedSceneEpsilon && scene.StrokeWidth <= packagingGeneratedSceneEpsilon && scene.Stroke == ""
+	if err != nil || (stroke != "" && !deckHexColorPattern.MatchString(stroke)) || (!strokeMatchesScene && !zeroWidthOmission) || (stroke != "" && !palette[strings.ToLower(stroke)]) {
+		return fmt.Errorf("%s stroke drifted from the selected palette or scene", label)
 	}
 	return nil
 }

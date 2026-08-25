@@ -271,6 +271,25 @@ func TestPackagingGeneratedSceneQualityAcceptsEquivalentPixelLineHeight(t *testi
 	}
 }
 
+func TestPackagingStudioLayoutShapeAllowsOnlyInvisibleStrokeOmission(t *testing.T) {
+	palette := map[string]bool{"#2f5d50": true}
+	layout := map[string]any{"shape": "rectangle", "fill": "transparent", "stroke": "#2F5D50", "stroke_width": json.Number("0")}
+	scene := deckElement{Type: "shape", Shape: "rectangle", Fill: "transparent"}
+	if err := validatePackagingStudioLayoutShape("shape", layout, scene, palette); err != nil {
+		t.Fatalf("zero-width omitted scene stroke: %v", err)
+	}
+
+	layout["stroke_width"] = json.Number("2")
+	if err := validatePackagingStudioLayoutShape("shape", layout, scene, palette); err == nil || !strings.Contains(err.Error(), "stroke_width drifted") {
+		t.Fatalf("visible omitted stroke error=%v, want width rejection", err)
+	}
+	layout["stroke_width"] = json.Number("0")
+	scene.Stroke = "#FFFFFF"
+	if err := validatePackagingStudioLayoutShape("shape", layout, scene, map[string]bool{"#2f5d50": true, "#ffffff": true}); err == nil || !strings.Contains(err.Error(), "stroke drifted") {
+		t.Fatalf("conflicting zero-width stroke error=%v, want color rejection", err)
+	}
+}
+
 func TestPackagingGeneratedSceneQualityGeometryAndMappingAdversaries(t *testing.T) {
 	good := packagingGeneratedSceneGoodHTML()
 	tests := []struct {
