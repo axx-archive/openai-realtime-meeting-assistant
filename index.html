@@ -225,6 +225,25 @@
            accessibility gain. */
         --ember-text: #86290F;
 
+        /* The semantic hues have the same problem --ember-text was created to
+           solve, and it was never extended to them. --warn/--live/--danger/
+           --info are the iOS system hues: they are tuned for a black ground and
+           they measure 1.40 / 1.38 / 2.32 / 2.49 against this warm putty ground.
+           At ~120 `color:` call sites that is status text, error copy and badges
+           rendered at or near invisibility — #lobbyJoinError ("couldn't reach
+           your camera or microphone") measured 1.40:1 at 11px.
+           These cuts follow the --ember-text recipe: hue and saturation held,
+           lightness dropped until AA clears on --paper-200, the deep well and
+           the tight one. They measure 7.6:1 on cards, 6.0:1 on the ground,
+           5.2:1 on the well, 4.5:1 on the deep well.
+           FILLS keep the bright hue for the same reason ember does: --*-soft
+           chips, dots, rings and borders carry no text. */
+        --warn-text: #6A4100;
+        --danger-text: #970800;
+        --info-text: #004992;
+        --live-text: #135523;
+        --success-text: #135523;
+
         /* AJ-supplied production wordmarks: black on light, orange on dark.
            The variable is retained for legacy text fallbacks; the artwork
            itself is selected by .wordmark below. */
@@ -418,6 +437,16 @@
            true black, which is where the orange belongs. One token, two
            values, so callers never have to ask which theme they are in. */
         --ember-text: var(--ember-500);
+
+        /* Dark needs no cut either: on #000 through --surface-3 the system hues
+           measure 8.07 / 8.21 / 4.87 / 4.55 at worst, so the text tokens are
+           the hues themselves. One token, two values, so callers never have to
+           ask which theme they are in. */
+        --warn-text: var(--warn);
+        --danger-text: var(--danger);
+        --info-text: var(--info);
+        --live-text: var(--live);
+        --success-text: var(--success);
 
         --wordmark: var(--ember-500);
         --wordmark-image: url(/public/stride-wordmark-orange.png);
@@ -1213,7 +1242,7 @@
       @media (hover: hover) and (pointer: fine) {
         .topbar-live-leave:hover {
           background: var(--danger-soft);
-          color: var(--danger);
+          color: var(--danger-text);
         }
       }
       .topbar-live-leave:active {
@@ -1288,7 +1317,7 @@
 
       .room-transcription-pill[data-state="live"] {
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .room-transcription-pill[data-state="live"] .room-transcription-pill__dot {
@@ -1297,12 +1326,12 @@
 
       .room-transcription-pill[data-state="paused"] {
         background: var(--warn-soft);
-        color: var(--warn);
+        color: var(--warn-text);
       }
 
       .room-transcription-pill[data-state="pending"] {
         background: var(--info-soft);
-        color: var(--info);
+        color: var(--info-text);
       }
 
       .room-transcription-pill[data-state="unavailable"] {
@@ -1571,7 +1600,7 @@
       /* breathe — ONLY while the room actually listens */
       .pill--listening {
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
       .pill--listening .pill__dot,
       .pill--breathe .pill__dot {
@@ -1583,15 +1612,15 @@
       }
       .pill--room {
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
       .pill--connecting {
         background: var(--info-soft);
-        color: var(--info);
+        color: var(--info-text);
       }
       .pill--offline {
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       @keyframes bf-breathe {
@@ -3131,7 +3160,7 @@
 
       .card-work-context .card-badge--project.is-missing {
         border-style: dashed;
-        color: var(--warn);
+        color: var(--warn-text);
       }
 
       .card-work-context .card-badge--project.is-linked {
@@ -3243,7 +3272,7 @@
       .card-date[data-date-state="soon"] {
         border-color: transparent;
         background: var(--warn-soft);
-        color: var(--warn);
+        color: var(--warn-text);
       }
 
       .card-date[data-date-state="today"] {
@@ -3255,13 +3284,13 @@
       .card-date[data-date-state="overdue"] {
         border-color: transparent;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .card-date[data-date-state="done"] {
         border-color: transparent;
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
 
       /* kit Avatar — initials on a quiet surface, never colorful per-user */
@@ -3808,7 +3837,7 @@
       .assistant-message--answer .assistant-meta,
       .assistant-message--action .assistant-meta,
       .assistant-message--archive .assistant-meta { color: var(--text-1); }
-      .assistant-message--error .assistant-meta { color: var(--danger); }
+      .assistant-message--error .assistant-meta { color: var(--danger-text); }
 
       .assistant-text {
         white-space: pre-wrap;
@@ -4173,14 +4202,14 @@
       .board-dock-icon.recording-toggle.is-recording {
         border-color: transparent;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .btn--recording.is-paused,
       .board-dock-icon.recording-toggle.is-paused {
         border-color: transparent;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       /* on the dark dock pill the recording states keep literal color washes */
@@ -4188,14 +4217,14 @@
       .controls .btn--recording.is-recording:hover:not([disabled]) {
         border-color: transparent;
         background: rgba(255, 69, 58, 0.25);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .controls .btn--recording.is-paused,
       .controls .btn--recording.is-paused:hover:not([disabled]) {
         border-color: transparent;
         background: rgba(255, 69, 58, 0.25);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .btn--recording.is-paused .record-dot,
@@ -4422,7 +4451,7 @@
       .consent-lane__choices button { min-width: 48px; padding: 7px 9px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface-1); color: var(--text-2); font: 600 11px/1 var(--font-sans); cursor: pointer; }
       .consent-lane__choices button[aria-pressed="true"] { border-color: var(--text-1); background: var(--text-1); color: var(--surface-1); }
       .consent-lane__choices button:disabled { opacity: .48; cursor: wait; }
-      .consent-panel__status[data-kind="error"] { color: var(--danger); }
+      .consent-panel__status[data-kind="error"] { color: var(--danger-text); }
 
       @media (max-width: 640px) {
         .consent-panel { bottom: 82px; padding: 15px; border-radius: 19px; }
@@ -4514,7 +4543,7 @@
 
       .btn--danger {
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
         border-color: transparent;
       }
 
@@ -4585,11 +4614,11 @@
       }
 
       .text-link--danger {
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .text-link--danger:hover:not([disabled]) {
-        color: var(--danger);
+        color: var(--danger-text);
         filter: brightness(1.14);
       }
 
@@ -4675,9 +4704,9 @@
         width: 100%;
         height: 100%;
       }
-      .toast--done .toast__bar { color: var(--live); }
-      .toast--note .toast__bar { color: var(--info); }
-      .toast--error .toast__bar { color: var(--danger); }
+      .toast--done .toast__bar { color: var(--live-text); }
+      .toast--note .toast__bar { color: var(--info-text); }
+      .toast--error .toast__bar { color: var(--danger-text); }
 
       /* Deploy-refresh banner: shown only while a call is live so we never yank
          someone out mid-meeting. It sits above the toast lane and reloads the
@@ -5244,7 +5273,7 @@
       }
 
       .av-status-warn {
-        color: var(--warn);
+        color: var(--warn-text);
       }
 
       .av-suppression {
@@ -5603,7 +5632,7 @@
       }
 
       .relationship-memory__danger {
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .relationship-memory__status-row .relationship-memory__danger {
@@ -5991,7 +6020,7 @@
 
       .memory-import-dialog__actions { display: flex; gap: 8px; flex: none; }
       .memory-import-dialog__feedback { min-width: 0; flex: 1; }
-      .memory-import-dialog__status[data-state="error"] { color: var(--danger); }
+      .memory-import-dialog__status[data-state="error"] { color: var(--danger-text); }
       .memory-import-dialog__status[data-state="ready"] { color: var(--text-1); }
 
       .memory-import-progress {
@@ -6685,7 +6714,7 @@
       .key-date-edit-remove:hover {
         border-color: transparent;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .card-detail-edit-label {
@@ -7686,7 +7715,7 @@
 		font: 700 11px/1 var(--font-sans);
 	  }
 	  .project-correction-dialog__choice[aria-checked="true"] .project-correction-dialog__choice-mark { background: var(--text-1); box-shadow: none; color: var(--surface-1); }
-	  .project-correction-dialog__status { min-height: 18px; margin: -4px 0 0; color: var(--danger); font: var(--type-caption); text-wrap: pretty; }
+	  .project-correction-dialog__status { min-height: 18px; margin: -4px 0 0; color: var(--danger-text); font: var(--type-caption); text-wrap: pretty; }
 	  .project-correction-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
 	  .project-correction-dialog__action {
 		min-height: 44px;
@@ -8502,7 +8531,7 @@
       }
 
       .voice-island[data-state="talking"] .os-wave {
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .os-assistant__toggle {
@@ -8609,7 +8638,7 @@
         animation: voice-island-consent 1.8s var(--ease) infinite;
       }
       .voice-island[data-state="hand-raised"] .os-wave {
-        color: var(--warn);
+        color: var(--warn-text);
       }
       .voice-island[data-state="hand-raised"] .bf-wave-bar {
         animation: none;
@@ -9061,7 +9090,7 @@
         text-align: right;
       }
 
-      .grillstage__row.is-weak .grillstage__count { color: var(--warn); }
+      .grillstage__row.is-weak .grillstage__count { color: var(--warn-text); }
 
       .grillstage__verdict {
         font: var(--type-title-1);
@@ -9241,7 +9270,7 @@
       .os-assistant__voice[aria-pressed="true"] {
         border-color: transparent;
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
         box-shadow: 0 0 0 4px var(--live-soft);
       }
 
@@ -9335,7 +9364,7 @@
         display: grid;
         grid-template-columns: 36px minmax(0, 1fr) auto;
         align-items: center;
-        gap: 11px;
+        gap: 8px;
         padding: 10px;
         border: 1px solid transparent;
         border-radius: 16px;
@@ -9432,9 +9461,9 @@
         font: var(--type-label-lg);
         white-space: nowrap;
       }
-      .studio-project-status[data-status="ready"] { background: var(--live-soft); color: var(--live); }
+      .studio-project-status[data-status="ready"] { background: var(--live-soft); color: var(--live-text); }
       .studio-project-status[data-status="needs_input"] { background: var(--ember-soft); color: var(--ember-text); }
-      .studio-project-status[data-status="needs_attention"] { background: var(--danger-soft); color: var(--danger); }
+      .studio-project-status[data-status="needs_attention"] { background: var(--danger-soft); color: var(--danger-text); }
       .studio-project-status__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
       .studio-project-detail__meta { margin: 9px 0 0; color: var(--text-3); font: var(--type-caption); }
       .studio-project-phases {
@@ -9548,7 +9577,7 @@
       }
       .studio-projects__loading,
       .studio-projects__error { padding: 20px 10px; color: var(--text-3); font: var(--type-caption); text-align: center; }
-      .studio-projects__error { color: var(--danger); }
+      .studio-projects__error { color: var(--danger-text); }
 	  .studio-projects__load-more {
 		width: calc(100% - 16px);
 		min-height: 42px;
@@ -11858,11 +11887,11 @@
       }
 
       .manifest-card__status--shipped {
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .manifest-card__status--skips {
-        color: var(--warn);
+        color: var(--warn-text);
       }
 
       .manifest-card__held-pill {
@@ -12028,7 +12057,7 @@
         gap: 8px;
         padding: 10px 2px 0;
         font: var(--type-caption);
-        color: var(--warn);
+        color: var(--warn-text);
       }
 
       .manifest-card__skip:last-of-type {
@@ -12226,7 +12255,7 @@
 	    color: var(--text-3);
 	    text-transform: lowercase;
 	  }
-	  .scout-chat-work-record__status { color: var(--success); }
+	  .scout-chat-work-record__status { color: var(--success-text); }
 	  .scout-chat-work-record__title {
 	    margin: 18px 0 7px;
 	    font: var(--type-title-sm);
@@ -12329,10 +12358,10 @@
 	    padding: 7px 10px;
 	    border-radius: var(--r-full);
 	    background: color-mix(in srgb, var(--success) 12%, transparent);
-	    color: var(--success);
+	    color: var(--success-text);
 	    font: var(--type-caption);
 	  }
-	  .governed-work-viewer__error { color: var(--danger); }
+	  .governed-work-viewer__error { color: var(--danger-text); }
 
       /* Long ordinary prose keeps the exact geometry and skin of its author.
          Rendered height adds only the quiet Show more control below it. */
@@ -12484,7 +12513,7 @@
       }
       .scout-chat-msg__delete:hover,
       .scout-chat-msg__delete[data-armed="1"] {
-        color: var(--danger);
+        color: var(--danger-text);
       }
       /* the chat tool's row anatomy seats the control beside the bubble; it
          rides the article, so follow-up grouping's meta lift never eats it */
@@ -12527,6 +12556,17 @@
         flex-direction: column;
         align-items: flex-start;
         gap: 4px;
+        /* The hover action bar for a message with no reactions yet is
+           position:absolute with top:-18px/right:-8px, meaning "just above and
+           just outside MY bubble". Nothing on the path — this stack, the
+           .scout-chat-msg article, #scoutChatThread — was positioned, so the
+           containing block resolved all the way up to #scoutPrivatePane and
+           every one of those bars stacked in the pane's top corner instead:
+           measured at 1440px, a message at y=415 had its bar at y=45. That is
+           81% of messages (57 of 70 in the office thread), and it is the only
+           way to add a first reaction, riff, reply in thread, or reach the
+           overflow menu. This is that containing block. */
+        position: relative;
       }
 
       #chatTool .scout-chat-msg--user .scout-chat-msg__stack {
@@ -12834,9 +12874,9 @@
 	  .scout-studio-receipt[data-status="needs_attention"] .scout-studio-receipt__progress-fill { background: var(--danger); }
 	  .scout-studio-receipt__edge { display: grid; justify-items: end; gap: 3px; }
 	  .scout-studio-receipt__action { color: var(--text-2); font: var(--type-label); white-space: nowrap; }
-      .scout-studio-receipt__status[data-status="ready"] { color: var(--live); }
+      .scout-studio-receipt__status[data-status="ready"] { color: var(--live-text); }
       .scout-studio-receipt__status[data-status="needs_input"],
-      .scout-studio-receipt__status[data-status="needs_attention"] { color: var(--danger); }
+      .scout-studio-receipt__status[data-status="needs_attention"] { color: var(--danger-text); }
       .scout-studio-receipt__chevron { color: var(--text-3); font-size: 18px; }
 	  .studio-project-decision--chat {
 		gap: 12px;
@@ -13642,14 +13682,14 @@
       }
       .deck-editor__save-state[data-state="dirty"] { color: var(--ember-text); border-color: color-mix(in srgb, var(--ember) 38%, var(--line-1)); }
       .deck-editor__save-state[data-state="saving"] { color: var(--accent); }
-      .deck-editor__save-state[data-state="error"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--line-1)); }
+      .deck-editor__save-state[data-state="error"] { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 38%, var(--line-1)); }
       .deck-editor__save-state[data-state="saved"] {
         padding-inline: 2px;
         border-color: transparent;
         background: transparent;
         color: var(--text-3);
       }
-      .deck-editor__save-state[data-state="saved"]::before { content: '✓'; margin-right: 4px; color: var(--live); }
+      .deck-editor__save-state[data-state="saved"]::before { content: '✓'; margin-right: 4px; color: var(--live-text); }
       .deck-editor__publication-state {
         flex: none;
         display: inline-flex;
@@ -14156,7 +14196,12 @@
       }
       .deck-editor__notes {
         width: 100%;
-        min-height: 220px;
+        /* 220px fixed cut a real presenter note off mid-sentence: measured
+           scrollHeight 284 against clientHeight 218, so the field was 66px
+           shorter than its own content with no scrollbar shown. The inspector
+           panel had 694px to give. This is the field you read while you are
+           presenting — show the note. */
+        min-height: clamp(220px, 40vh, 420px);
         resize: vertical;
         padding: 10px;
         border: 1px solid var(--line-1);
@@ -14314,12 +14359,12 @@
       .deck-editor__zorder + .deck-editor__action-label { margin-top: 6px; }
       .deck-editor__zorder--final { margin-top: 4px; }
       .deck-editor__zorder .deck-editor__danger {
-        color: var(--danger);
+        color: var(--danger-text);
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent);
       }
       .deck-editor__zorder .deck-editor__danger:hover {
         background: color-mix(in srgb, var(--danger) 8%, var(--surface-2));
-        color: var(--danger);
+        color: var(--danger-text);
       }
       .deck-editor__scrim,
       .document-editor__scrim {
@@ -14579,8 +14624,8 @@
         border: 0;
         cursor: pointer;
       }
-      .document-editor__mobile-status[data-state="error"] { color: var(--danger); }
-      .document-editor__mobile-status[data-state="saved"] { color: var(--live); }
+      .document-editor__mobile-status[data-state="error"] { color: var(--danger-text); }
+      .document-editor__mobile-status[data-state="saved"] { color: var(--live-text); }
       .document-editor__title {
         min-width: 0;
         max-width: 300px;
@@ -14933,8 +14978,8 @@
       }
       .document-editor__meta strong { display: block; margin-bottom: 2px; color: var(--text-1); font: var(--type-caption-medium); }
       .document-editor__meta > .deck-editor__btn { margin-top: 2px; }
-      .document-editor__status[data-state="error"] { color: var(--danger); }
-      .document-editor__status[data-state="saved"] { color: var(--live); }
+      .document-editor__status[data-state="error"] { color: var(--danger-text); }
+      .document-editor__status[data-state="saved"] { color: var(--live-text); }
       .document-editor__details {
         margin-top: 14px;
         border-top: 1px solid var(--line-1);
@@ -14971,7 +15016,7 @@
       }
       .document-editor__table-actions .deck-editor__btn { min-width: 0; }
       .document-editor__table-actions .document-editor__table-wide { grid-column: 1 / -1; }
-      .document-editor__table-actions .document-editor__table-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 22%, var(--line-1)); }
+      .document-editor__table-actions .document-editor__table-danger { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 22%, var(--line-1)); }
       .document-editor__field { display: grid; gap: 6px; color: var(--text-3); font: var(--type-label); }
       .document-editor__field input,
       .document-editor__field select {
@@ -15244,7 +15289,7 @@
       /* color = state: an error bubble wears danger, nothing else does */
       .scout-chat-msg--error .scout-chat-text {
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
         border: 1px solid transparent;
         border-radius: 18px 18px 18px 6px;
       }
@@ -15661,11 +15706,11 @@
 
       /* state hue only — the same tokens pill--listening / pill--offline use */
       .scout-chat-research__delta.is-up {
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .scout-chat-research__delta.is-down {
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .scout-chat-research__delta.is-flat {
@@ -16911,7 +16956,7 @@
         }
 
         #chatTool .desktop-chat-more .desktop-chat-more__menu button[data-danger="true"] {
-          color: var(--danger);
+          color: var(--danger-text);
         }
 
         #chatTool .desktop-chat-more__divider {
@@ -16922,7 +16967,7 @@
         }
 
         #chatTool .chat-context-card__message-action[data-armed="1"] {
-          color: var(--danger);
+          color: var(--danger-text);
           background: color-mix(in srgb, var(--danger) 10%, transparent);
         }
 
@@ -18662,7 +18707,7 @@
 
         #chatTool .chat-work-indicator[data-work-state="complete"] .chat-work-indicator__signal {
           background: var(--live-soft);
-          color: var(--live);
+          color: var(--live-text);
         }
 
         #chatTool .chat-work-indicator[data-work-state="complete"] .chat-work-indicator__signal span {
@@ -18676,7 +18721,7 @@
 
         #chatTool .chat-work-indicator[data-work-state="failed"] .chat-work-indicator__signal {
           background: color-mix(in srgb, var(--danger) 14%, transparent);
-          color: var(--danger);
+          color: var(--danger-text);
         }
 
         #chatTool .chat-work-indicator[data-work-state="failed"] .chat-work-indicator__signal span {
@@ -18745,7 +18790,7 @@
         }
 
         #chatTool .chat-work-indicator__action-button[data-state="saved"] {
-          color: var(--live);
+          color: var(--live-text);
           cursor: default;
         }
 
@@ -19184,7 +19229,7 @@
 	        background: color-mix(in srgb, var(--warn) 7%, var(--surface-1));
 	      }
 	      #chatTool .scout-chat-work-card__checkpoint-kicker {
-	        color: var(--warn);
+	        color: var(--warn-text);
 	        font: var(--type-label);
 	        letter-spacing: var(--track-label);
 	        text-transform: uppercase;
@@ -19228,8 +19273,8 @@
 	      }
 	      #chatTool .scout-chat-work-card__checkpoint[data-state="pending"] .scout-chat-work-card__checkpoint-choice { cursor: wait; opacity: .62; }
 	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] { border-color: var(--danger); }
-	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] .scout-chat-work-card__checkpoint-status { color: var(--danger); }
-	      #chatTool .scout-chat-work-card__checkpoint[data-state="selected"] .scout-chat-work-card__checkpoint-status { color: var(--live); }
+	      #chatTool .scout-chat-work-card__checkpoint[data-state="failed"] .scout-chat-work-card__checkpoint-status { color: var(--danger-text); }
+	      #chatTool .scout-chat-work-card__checkpoint[data-state="selected"] .scout-chat-work-card__checkpoint-status { color: var(--live-text); }
 	      #chatTool .scout-chat-work-card__checkpoint-revision {
 	        display: grid;
 	        gap: 8px;
@@ -21005,7 +21050,7 @@
       .drive-detail__action { flex: 1; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 0 12px; border: 1px solid var(--line-1); border-radius: 11px; background: var(--surface-3); color: var(--text-1); font: var(--type-caption-medium); text-decoration: none; cursor: pointer; transition-property: color, background-color, border-color, transform; transition-duration: var(--dur-fast); transition-timing-function: var(--ease); }
       .drive-detail__action:hover { border-color: var(--line-2); }
       .drive-detail__action:active { transform: scale(0.96); }
-      .drive-detail__action--danger { flex: 0 0 auto; color: var(--danger); background: transparent; }
+      .drive-detail__action--danger { flex: 0 0 auto; color: var(--danger-text); background: transparent; }
 
       .drive-results-head {
         display: flex;
@@ -21225,7 +21270,7 @@
         padding: 5px 9px;
         border-radius: var(--r-full);
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
@@ -21370,7 +21415,7 @@
 
       .files-badge--ingested {
         background: transparent;
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .files-badge--ingested::before {
@@ -21380,13 +21425,17 @@
       /* A private-thread attachment is still indexed; source ACLs determine
          where recall may use it, not a second noisy badge vocabulary. */
       .files-badge--thread {
-        color: var(--live);
+        color: var(--live-text);
       }
 
       /* kit Files grid — responsive tiles (segmented grid view) */
       .files-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+        /* 210px tracks packed 5 columns at 1440 and clipped the meta line on 8 of
+           9 cards (worst 59px), eating the timestamp on every one. 240px packs
+           4 columns (268px tracks) and leaves a single 2px clip on the longest
+           string — the density costs one column and the cards read complete. */
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
         gap: 14px;
       }
 
@@ -21685,7 +21734,7 @@
       }
 
       .files-folder-menu__item--danger {
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .files-folder-menu__item[disabled] {
@@ -22301,7 +22350,7 @@
 
       /* alignment reached = the one state hue this section earns */
       .intel-item--alignment .intel-item__glyph {
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .intel-item__text {
@@ -22954,7 +23003,7 @@
       .artifact-item__badge--published {
         border-color: transparent;
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .artifact-item__badge--running {
@@ -22966,7 +23015,7 @@
       .artifact-item__badge--error {
         border-color: transparent;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .artifact-item__status {
@@ -22987,7 +23036,7 @@
       .artifact-item__status--complete {
         border-color: transparent;
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .artifact-item__status--queued,
@@ -23002,7 +23051,7 @@
       .artifact-item__status--error {
         border-color: transparent;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       /* canon live indicator — icon + text in live color when published */
@@ -23010,7 +23059,7 @@
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        color: var(--live);
+        color: var(--live-text);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
@@ -23080,7 +23129,7 @@
         padding: 0 10px;
         border-radius: var(--r-full);
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
         font: var(--type-label);
         letter-spacing: var(--track-label);
       }
@@ -23981,7 +24030,7 @@
       .research-job__status--complete,
       .research-job__status--published {
         background: var(--live-soft);
-        color: var(--live);
+        color: var(--live-text);
       }
 
       .research-job__status--queued,
@@ -23994,7 +24043,7 @@
       .research-job__status--error,
       .research-job__status--rejected {
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .research-job__time,
@@ -24527,6 +24576,11 @@
       .memory-tool__search-input {
         flex: 1;
         min-width: 0;
+        /* The shell is 40px tall; an unstretched input left 11px of dead band
+           top and bottom, so 55% of the visible search bar did not take a
+           click (verified: elementFromPoint at shell.top+4 returned the shell
+           and activeElement stayed BODY). Fill the shell. */
+        align-self: stretch;
         border: none;
         background: transparent;
         color: var(--text-1);
@@ -24832,7 +24886,7 @@
       .pip-control.is-off {
         background: var(--danger-soft);
         border-color: transparent;
-        color: var(--danger);
+        color: var(--danger-text);
       }
 
       .pip-control svg:last-child {
@@ -25047,7 +25101,7 @@
       .lobby__badge { display: inline-flex; align-items: center; gap: 5px; }
       .lobby__badge svg { flex: none; }
       .lobby__badge--warn {
-        color: var(--warn);
+        color: var(--warn-text);
         background: var(--warn-soft);
         padding: 3px 9px;
         border-radius: var(--r-full);
@@ -25077,9 +25131,9 @@
         60% { transform: translateX(-4px); }
         80% { transform: translateX(3px); }
       }
-      .lobby__passerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); }
+      .lobby__passerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn-text); }
       .lobby__passerror[hidden] { display: none; }
-      .lobby__joinerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); max-width: 360px; text-align: center; }
+      .lobby__joinerror { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn-text); max-width: 360px; text-align: center; }
       .lobby__joinerror[hidden] { display: none; }
 
       /* Same-account handoff: joining is a deliberate device decision when a
@@ -25815,7 +25869,7 @@
         flex: none;
       }
       .lobby__meta svg { width: 12px; height: 12px; flex: none; }
-      .lobby__meta .lobby__listen { color: var(--warn); }
+      .lobby__meta .lobby__listen { color: var(--warn-text); }
       .lobby__more {
         flex: none;
         display: inline-flex;
@@ -26046,8 +26100,8 @@
         cursor: pointer;
       }
       .lobby-pop__item:hover { background: rgba(var(--lob-fg), 0.08); color: var(--lob-ink); }
-      .lobby-pop__item--danger { color: var(--danger); }
-      .lobby-pop__item--danger:hover { background: var(--danger-soft); color: var(--danger); }
+      .lobby-pop__item--danger { color: var(--danger-text); }
+      .lobby-pop__item--danger:hover { background: var(--danger-soft); color: var(--danger-text); }
       .lobby-pop__divider { display: block; height: 1px; margin: 4px 6px; background: rgba(var(--lob-fg), 0.12); }
       .lobby-pop__note {
         padding: 8px 10px;
@@ -26060,7 +26114,7 @@
         padding: 9px 10px;
         border-radius: 10px;
         background: var(--warn-soft);
-        color: var(--warn);
+        color: var(--warn-text);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         line-height: 1.5;
@@ -26813,8 +26867,8 @@
       }
       /* color = state: overdue is danger, shipped is live —
          but a zero count is not a state, so it stays quiet */
-      .board-stat__value--warn { color: var(--danger); }
-      .board-stat__value--done { color: var(--live); }
+      .board-stat__value--warn { color: var(--danger-text); }
+      .board-stat__value--done { color: var(--live-text); }
       .board-stat__value.is-zero { color: var(--text-2); }
       .board-stat__label {
         font: var(--type-label);
@@ -28394,7 +28448,7 @@
         border-radius: 50%;
         background: var(--warn);
       }
-      .approval__state { font: 600 12px var(--font-sans); color: var(--warn); }
+      .approval__state { font: 600 12px var(--font-sans); color: var(--warn-text); }
       .approval__actions { display: flex; gap: 8px; flex: none; }
       .approval__btn {
         min-height: 36px;
@@ -28454,13 +28508,13 @@
       .portfolio__score { font: 700 18px var(--font-sans); font-variant-numeric: tabular-nums; color: var(--text-1); }
       .portfolio__score-max { font: 12px var(--font-sans); color: var(--text-3); }
       .portfolio__delta { font: 600 12px var(--font-sans); font-variant-numeric: tabular-nums; }
-      .portfolio__delta--up { color: var(--live); }
-      .portfolio__delta--down { color: var(--warn); }
+      .portfolio__delta--up { color: var(--live-text); }
+      .portfolio__delta--down { color: var(--warn-text); }
       .portfolio__metertrack { height: 6px; border-radius: 999px; background: var(--surface-3, rgba(127,127,127,0.16)); overflow: hidden; }
       .portfolio__meterfill { height: 100%; border-radius: 999px; background: var(--accent); }
       .portfolio__meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
       .portfolio__meta b { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-2); }
-      .portfolio__nudge { font: 12.5px var(--font-sans); color: var(--warn); }
+      .portfolio__nudge { font: 12.5px var(--font-sans); color: var(--warn-text); }
       .portfolio__gaps { display: flex; gap: 6px; flex-wrap: wrap; }
       .portfolio__gap { font: var(--type-label); letter-spacing: var(--track-label); text-transform: lowercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-1); color: var(--text-3); }
 
@@ -28653,7 +28707,7 @@
         border-radius: 12px;
         border: none;
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
         font: 600 13.5px var(--font-sans);
         transition: transform var(--dur-fast) var(--ease);
       }
@@ -28928,21 +28982,21 @@
         .controls .btn--ghost.is-off:hover:not([disabled]) {
           border-color: transparent;
           background: var(--danger-soft);
-          color: var(--danger);
+          color: var(--danger-text);
         }
 
         .controls .btn--recording.is-recording,
         .controls .btn--recording.is-recording:hover:not([disabled]) {
           border-color: transparent;
           background: var(--danger-soft);
-          color: var(--danger);
+          color: var(--danger-text);
         }
 
         .controls .btn--recording.is-paused,
         .controls .btn--recording.is-paused:hover:not([disabled]) {
           border-color: transparent;
           background: var(--danger-soft);
-          color: var(--danger);
+          color: var(--danger-text);
         }
 
         .controls #screenShare.is-sharing,
@@ -30067,7 +30121,7 @@
         /* recording paused — danger */
         #appShell.is-in-room #recordMeeting.is-paused {
           background: rgba(255, 69, 58, 0.25);
-          color: var(--danger);
+          color: var(--danger-text);
         }
 
         #muteMic .mute-label,
@@ -31527,8 +31581,8 @@
       }
       /* GREEN success voice (sheet overrules the old green-is-live-only law):
          a verified run wears the live check */
-      .goalcard__glyph--complete { background: var(--live-soft); color: var(--live); }
-      .goalcard__glyph--error { background: var(--danger-soft); color: var(--danger); }
+      .goalcard__glyph--complete { background: var(--live-soft); color: var(--live-text); }
+      .goalcard__glyph--error { background: var(--danger-soft); color: var(--danger-text); }
       .goalcard__glyph--gate::before {
         content: "";
         width: 7px; height: 7px;
@@ -31593,7 +31647,7 @@
         transition: background var(--dur-fast) var(--ease);
       }
       .goalcard__menu-item:hover { background: var(--accent-soft); }
-      .goalcard__menu-item--danger { color: var(--danger); }
+      .goalcard__menu-item--danger { color: var(--danger-text); }
 
       /* --- the stage rail (sheet 3a): 5px dots, one 8px ember heartbeat ---
          hidden once the run settles — verified rides the green bar instead */
@@ -31699,7 +31753,7 @@
         border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line-1));
         border-radius: var(--r-full);
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
         font: var(--type-label);
         letter-spacing: var(--track-label);
         text-transform: uppercase;
@@ -31794,7 +31848,7 @@
         font-variant-numeric: tabular-nums;
         color: var(--text-2);
       }
-      .goalcard__trust-flag { color: var(--warn); }
+      .goalcard__trust-flag { color: var(--warn-text); }
       .goalcard__trust .goalcard__disclosure { margin-left: auto; }
       .goalcard__terminal-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
       .goalcard__terminal[hidden] { display: none; }
@@ -31905,7 +31959,7 @@
         background: var(--text-1);
         animation: goalcard-spark 520ms var(--ease-out) forwards;
       }
-      .goalcard__wait { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn); }
+      .goalcard__wait { font: var(--type-label); letter-spacing: var(--track-label); color: var(--warn-text); }
       /* the salvage line on a failed run — quiet, honest, not a band */
       .goalcard__salvage { font: var(--type-caption); color: var(--text-2); }
       /* sheet 3a parkline — amber dot + mono call + honest checkpoint count */
@@ -31925,7 +31979,7 @@
       .goalcard__parkline-label {
         font: var(--type-label);
         letter-spacing: var(--track-label);
-        color: var(--warn);
+        color: var(--warn-text);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -33110,7 +33164,7 @@
         background: var(--success-soft);
         border-color: transparent;
       }
-      .artifact-report__verdict--pass .artifact-report__verdict-label { color: var(--success); }
+      .artifact-report__verdict--pass .artifact-report__verdict-label { color: var(--success-text); }
       .artifact-report__tags {
         display: flex;
         flex-wrap: wrap;
@@ -33425,7 +33479,7 @@
       .deal-room-row__name { font: 500 13.5px var(--font-sans); color: var(--text-1); overflow: hidden; text-overflow: ellipsis; }
       .deal-room-row__meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: var(--type-label); letter-spacing: var(--track-label); color: var(--text-3); }
       .deal-room-row__state { font: 600 12px var(--font-sans); text-transform: uppercase; letter-spacing: 0.04em; }
-      .deal-room-row.is-pending .deal-room-row__state { color: var(--warn); }
+      .deal-room-row.is-pending .deal-room-row__state { color: var(--warn-text); }
       .deal-room-row.is-active .deal-room-row__state { color: var(--agent); }
       .deal-room-row__link { font: 12.5px var(--font-mono, var(--font-sans)); color: var(--text-2); overflow-wrap: anywhere; }
       .deal-room-row__actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -33901,7 +33955,7 @@
 
       .pip-control--end {
         background: var(--danger-soft);
-        color: var(--danger);
+        color: var(--danger-text);
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent);
       }
 

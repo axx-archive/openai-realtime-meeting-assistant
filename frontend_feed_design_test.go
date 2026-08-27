@@ -131,7 +131,11 @@ func TestIndexGoalcardHeroContract(t *testing.T) {
 	for _, want := range []string{
 		".goalcard__link--primary {",
 		".goalcard__trust-score {",
-		".goalcard__trust-flag { color: var(--warn); }",
+		// --warn is the iOS amber and measures 1.40:1 as text on the light
+		// putty ground; --warn-text is the contrast-safe cut of the same hue
+		// (6.04:1 on the ground, AA on every light surface). The pin keeps its
+		// intent — the trust flag is warn-coloured — on the readable token.
+		".goalcard__trust-flag { color: var(--warn-text); }",
 		"border-top: 1px solid var(--line-1);",
 	} {
 		if !strings.Contains(html, want) {
