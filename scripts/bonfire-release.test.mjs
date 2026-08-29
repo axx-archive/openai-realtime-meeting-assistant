@@ -52,7 +52,7 @@ const configPaths = [
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
-  'scripts/bonfire-release.mjs'
+  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
 ]
 const sidecarRefs = {
   canonicalPostgres: `postgres@sha256:${digest('a')}`,
@@ -757,6 +757,7 @@ test('build end to end uses a hermetic Docker fake for both owned images and pin
     assert.match(releaseEnvironmentBody, new RegExp(`BONFIRE_RENDER_IMAGE=sha256:${digest('f')}`))
     assert.doesNotMatch(releaseEnvironmentBody, /STRIDE_E10_W4_/)
     assert.equal(await readFile(join(releaseDir, 'sealed-candidate/deploy/digitalocean/Caddyfile'), 'utf8'), ':80\n')
+    assert.equal(await readFile(join(releaseDir, 'sealed-candidate/scripts/private-realtime-dequalification-bridge.mjs'), 'utf8'), await readFile(dequalificationBridgePath, 'utf8'))
     verifyRetained7ac93bCompatibility(receipt, releaseEnvironmentBody, renderedComposeConfig(receipt))
 
     const liveReleaseDir = join(root, 'release-live')
