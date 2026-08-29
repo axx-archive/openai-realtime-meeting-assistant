@@ -95,6 +95,10 @@
     {
       "kind": "exact",
       "path": "scripts/private-realtime-dequalification-bridge.mjs"
+    },
+    {
+      "kind": "exact",
+      "path": "scripts/canonical-migration-gate.mjs"
     }
   ],
   "requiredPaths": [
@@ -117,6 +121,7 @@
     "deploy/digitalocean/stride-e10-w4-deployment-policy.json",
     "deploy/digitalocean/release-scope-policy.json",
     "scripts/bonfire-release.mjs",
+    "scripts/canonical-migration-gate.mjs",
     "scripts/private-realtime-dequalification-bridge.mjs"
   ],
   "releaseConfigPaths": [

@@ -43,6 +43,7 @@ const digest = char => char.repeat(64)
 const execFileAsync = promisify(execFile)
 const releaseToolPath = fileURLToPath(new URL('./bonfire-release.mjs', import.meta.url))
 const dequalificationBridgePath = fileURLToPath(new URL('./private-realtime-dequalification-bridge.mjs', import.meta.url))
+const canonicalMigrationGatePath = fileURLToPath(new URL('./canonical-migration-gate.mjs', import.meta.url))
 const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 const releaseCommit = '1'.repeat(40)
 const configPaths = [
@@ -511,6 +512,7 @@ async function fixtureFiles() {
     'deploy/digitalocean/stride-e10-w4-deployment-policy.json': `${JSON.stringify(w4CanaryPolicy, null, 2)}\n`,
     'deploy/digitalocean/release-scope-policy.json': `${JSON.stringify(policy, null, 2)}\n`,
     'scripts/bonfire-release.mjs': await readFile(releaseToolPath, 'utf8'),
+    'scripts/canonical-migration-gate.mjs': await readFile(canonicalMigrationGatePath, 'utf8'),
     'scripts/private-realtime-dequalification-bridge.mjs': await readFile(dequalificationBridgePath, 'utf8'),
     'stride-site/secret.txt': 'not a release input\n', 'data/kanban-board.json': '{}\n',
     'docs/evidence/e10/provider.jsonl': '{"untrusted":true}\n', 'mobile/App.tsx': 'unrelated\n',
