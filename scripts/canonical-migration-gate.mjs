@@ -61,7 +61,7 @@ export function assertMigrationIdleReadiness(payload) {
 
 export function validateMigrationProof(value, targetVersion, expectedSha256) {
   if (value?.version !== targetVersion || value?.sha256 !== expectedSha256 || value?.migrationCount < targetVersion ||
-      (targetVersion === 25 && (value.sourceEpisodeTables !== 4 || value.sourceEpisodeTriggers !== 4))) {
+      (targetVersion === 25 && (value.sourceEpisodeTables !== 5 || value.sourceEpisodeTriggers !== 6))) {
     throw new Error('canonical migration proof is incomplete or differs from the sealed migration')
   }
   return value

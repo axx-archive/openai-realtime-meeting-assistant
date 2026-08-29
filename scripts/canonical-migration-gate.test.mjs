@@ -23,6 +23,6 @@ test('migration gate requires idle rooms and disconnected shared realtime', () =
 
 test('migration proof binds the installed checksum and SourceEpisode schema', () => {
   const digest = 'a'.repeat(64)
-  assert.equal(validateMigrationProof({ version: 25, sha256: digest, migrationCount: 25, sourceEpisodeTables: 4, sourceEpisodeTriggers: 4 }, 25, digest).version, 25)
-  assert.throws(() => validateMigrationProof({ version: 25, sha256: digest, migrationCount: 25, sourceEpisodeTables: 3, sourceEpisodeTriggers: 4 }, 25, digest), /incomplete/)
+  assert.equal(validateMigrationProof({ version: 25, sha256: digest, migrationCount: 25, sourceEpisodeTables: 5, sourceEpisodeTriggers: 6 }, 25, digest).version, 25)
+  assert.throws(() => validateMigrationProof({ version: 25, sha256: digest, migrationCount: 25, sourceEpisodeTables: 4, sourceEpisodeTriggers: 6 }, 25, digest), /incomplete/)
 })
