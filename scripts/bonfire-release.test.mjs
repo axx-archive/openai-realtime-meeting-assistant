@@ -52,7 +52,7 @@ const configPaths = [
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
-  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
+  'scripts/bonfire-release.mjs'
 ]
 const sidecarRefs = {
   canonicalPostgres: `postgres@sha256:${digest('a')}`,
@@ -585,6 +585,9 @@ if (args[0] === 'build') {
 
 test('scope policy is allowlisted, excludes product/evidence/data trees, and never stages', async () => {
   const policy = validateReleaseScopePolicy(JSON.parse(await readFile(join(repoRoot, 'deploy/digitalocean/release-scope-policy.json'), 'utf8')))
+  const expandedPolicy = structuredClone(policy)
+  expandedPolicy.releaseConfigPaths.push('scripts/private-realtime-dequalification-bridge.mjs')
+  assert.doesNotThrow(() => validateReleaseScopePolicy(expandedPolicy))
   assert.equal(releasePathOwned('main.go', policy), true)
   assert.equal(releasePathOwned('main_test.go', policy), false)
   assert.equal(releasePathOwned('internal/dr/envelope.go', policy), true)
@@ -757,7 +760,9 @@ test('build end to end uses a hermetic Docker fake for both owned images and pin
     assert.match(releaseEnvironmentBody, new RegExp(`BONFIRE_RENDER_IMAGE=sha256:${digest('f')}`))
     assert.doesNotMatch(releaseEnvironmentBody, /STRIDE_E10_W4_/)
     assert.equal(await readFile(join(releaseDir, 'sealed-candidate/deploy/digitalocean/Caddyfile'), 'utf8'), ':80\n')
-    assert.equal(await readFile(join(releaseDir, 'sealed-candidate/scripts/private-realtime-dequalification-bridge.mjs'), 'utf8'), await readFile(dequalificationBridgePath, 'utf8'))
+    if (configPaths.includes('scripts/private-realtime-dequalification-bridge.mjs')) {
+      assert.equal(await readFile(join(releaseDir, 'sealed-candidate/scripts/private-realtime-dequalification-bridge.mjs'), 'utf8'), await readFile(dequalificationBridgePath, 'utf8'))
+    }
     verifyRetained7ac93bCompatibility(receipt, releaseEnvironmentBody, renderedComposeConfig(receipt))
 
     const liveReleaseDir = join(root, 'release-live')

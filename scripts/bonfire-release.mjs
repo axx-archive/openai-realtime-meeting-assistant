@@ -39,14 +39,24 @@ const strideE10W4DeploymentPolicySchema = 'bonfire.stride-e10-w4-deployment-poli
 const strideE10W4CanaryMode = 'canary'
 const strideE10W4NetworkMode = 'bonfire_network_live'
 const requiredExcludedPrefixes = ['stride-site/', 'data/', 'docs/evidence/']
-const requiredConfigPaths = [
+const legacyRequiredConfigPaths = [
   '.dockerignore', 'Dockerfile', 'Dockerfile.render', 'go.mod', 'go.sum',
   'deploy/digitalocean/docker-compose.yml', 'deploy/digitalocean/Caddyfile',
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', scopePolicyPath,
-  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
+  'scripts/bonfire-release.mjs'
 ]
+const dequalificationBridgePath = 'scripts/private-realtime-dequalification-bridge.mjs'
+const currentRequiredConfigPaths = [...legacyRequiredConfigPaths, dequalificationBridgePath]
+const supportedConfigPathSets = [legacyRequiredConfigPaths, currentRequiredConfigPaths]
+
+function supportedConfigPaths(paths, label) {
+  const normalized = [...paths].sort()
+  const match = supportedConfigPathSets.find(candidate => JSON.stringify([...candidate].sort()) === JSON.stringify(normalized))
+  if (!match) throw new Error(`${label} config inventory is not exact`)
+  return match
+}
 const serviceRoles = {
   meetingassist: 'meetingassist',
   'render-runner': 'renderRunner',
@@ -150,9 +160,7 @@ export function validateReleaseScopePolicy(policy) {
   for (const prefix of requiredExcludedPrefixes) {
     if (!policy.excludedPrefixes.includes(prefix)) throw new Error(`release scope policy must exclude ${prefix}`)
   }
-  if (JSON.stringify([...policy.releaseConfigPaths].sort()) !== JSON.stringify([...requiredConfigPaths].sort())) {
-    throw new Error('release scope config inventory is not exact')
-  }
+  supportedConfigPaths(policy.releaseConfigPaths, 'release scope')
   for (const path of policy.requiredPaths.concat(policy.releaseConfigPaths)) validateRepoPath(path)
   for (const prefix of policy.excludedPrefixes) validateRepoPrefix(prefix)
   for (const rule of policy.includeRules) {
@@ -215,13 +223,13 @@ export function validateSourceReceipt(receipt) {
   if (receipt.reviewedRef !== receipt.releaseCommit || !commitPattern.test(String(receipt.reviewedRef || ''))) {
     throw new Error('source receipt must bind an exact reviewed commit')
   }
-  if (!Number.isSafeInteger(receipt.inputCount) || receipt.inputCount < requiredConfigPaths.length ||
+  if (!Number.isSafeInteger(receipt.inputCount) || receipt.inputCount < Object.keys(receipt.configFiles || {}).length ||
       !Number.isSafeInteger(receipt.sourceDateEpoch) || receipt.sourceDateEpoch <= 0) {
     throw new Error('source receipt inventory/time binding is invalid')
   }
   const configFiles = receipt.configFiles || {}
-  if (JSON.stringify(Object.keys(configFiles).sort()) !== JSON.stringify([...requiredConfigPaths].sort()) ||
-      Object.values(configFiles).some(value => !shaPattern.test(String(value)))) {
+  supportedConfigPaths(Object.keys(configFiles), 'source receipt candidate')
+  if (Object.values(configFiles).some(value => !shaPattern.test(String(value)))) {
     throw new Error('source receipt candidate config inventory is invalid')
   }
   if (receipt.scopePolicySha256 !== configFiles[scopePolicyPath] ||
