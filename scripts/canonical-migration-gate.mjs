@@ -170,11 +170,13 @@ async function readLedger(activeDir, previousDir) {
 }
 
 async function proveMigration(activeDir, targetVersion) {
-  const migrationName = (await import('node:fs/promises')).readdir(join(activeDir, 'sealed-candidate/migrations')).then(entries =>
-    entries.filter(name => name.startsWith(`${String(targetVersion).padStart(4, '0')}_`) && name.endsWith('.sql')))
-  const names = await migrationName
-  if (names.length !== 1) throw new Error('sealed candidate migration inventory is ambiguous')
-  const expectedSha256 = sha256(await readFile(join(activeDir, 'sealed-candidate/migrations', names[0])))
+  const archive = join(activeDir, 'source.tar')
+  const { stdout: inventory } = await execFileAsync('tar', ['-tf', archive], { maxBuffer: 16 << 20 })
+  const prefix = `migrations/${String(targetVersion).padStart(4, '0')}_`
+  const names = String(inventory).trim().split('\n').filter(name => name.startsWith(prefix) && name.endsWith('.sql'))
+  if (names.length !== 1) throw new Error('reviewed source migration inventory is ambiguous')
+  const { stdout: migrationBody } = await execFileAsync('tar', ['-xOf', archive, names[0]], { encoding: 'buffer', maxBuffer: 16 << 20 })
+  const expectedSha256 = sha256(migrationBody)
   const { stdout } = await execFileAsync('docker', ['exec', 'digitalocean-canonical-postgres-1', 'psql', '-U', 'bonfire', '-d', 'bonfire', '-Atqc', `
     SELECT json_build_object(
       'version', ${targetVersion},
