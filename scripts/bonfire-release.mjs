@@ -45,7 +45,7 @@ const requiredConfigPaths = [
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', scopePolicyPath,
-  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
+  'scripts/bonfire-release.mjs'
 ]
 const serviceRoles = {
   meetingassist: 'meetingassist',

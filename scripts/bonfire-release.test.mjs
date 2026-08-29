@@ -51,7 +51,7 @@ const configPaths = [
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
-  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
+  'scripts/bonfire-release.mjs'
 ]
 const sidecarRefs = {
   canonicalPostgres: `postgres@sha256:${digest('a')}`,
