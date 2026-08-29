@@ -34125,6 +34125,10 @@
             <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4c-5.5 3-8 6.5-8 10a8 8 0 0 0 16 0c0-3.5-2.5-7-8-10Z"/><circle cx="12" cy="14" r="2.5"/></svg>
             <span>Home</span>
           </button>
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Video" aria-label="Rooms" aria-current="false" tabindex="-1">
+            <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="12" height="12" rx="2.5"/><path d="M15 9.5 20 7v10l-5-2.5"/></svg>
+            <span>Rooms</span>
+          </button>
           <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Conversations" aria-label="Conversations" aria-current="false" tabindex="-1">
             <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"/></svg>
             <span>Conversations</span>
@@ -36180,13 +36184,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
       const identityStorageKey = 'bonfire.identity.v1'
       const sessionPasswordKey = 'bonfire.session.v1'
       const artifactAdminEmail = 'aj@shareability.com'
-      const PD1_DESTINATIONS = Object.freeze(['Home', 'Conversations', 'Work', 'Drive'])
+      const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Conversations', 'Work', 'Drive'])
       const PD1_CORE_DESTINATIONS = PD1_DESTINATIONS
-      const PD1_PATHS = Object.freeze({ Home: '/', Conversations: '/conversations', Work: '/work', Drive: '/drive' })
-      // Existing bookmarks remain valid, but resolve into the four-destination
-      // contract instead of reviving a separate app or tool mode.
+      const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Conversations: '/conversations', Work: '/work', Drive: '/drive' })
+      // Existing bookmarks remain valid, but resolve into the compact primary
+      // contract instead of reviving retired apps or tool modes.
       const PD1_COMPATIBILITY_PATHS = Object.freeze({
-        '/video': { destination: 'Conversations', mode: 'meeting' },
         '/chat': { destination: 'Conversations', mode: 'chat' },
         '/memory': { destination: 'Conversations', mode: 'meeting-records' },
         '/files': { destination: 'Drive' },
@@ -38296,10 +38299,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       agentTemplateButtons.forEach(button => {
         button.addEventListener('click', () => applyAgentTemplate(button.dataset.agentTemplate, button.dataset.templateText))
       })
-      // Return through the canonical destination router so Home/Chat/Files
-      // update both the SPA tool and the durable /video URL in one transition.
-      pipExpand.addEventListener('click', () => selectPD1Destination('Conversations', { mode: 'meeting' }))
-      pipReturn?.addEventListener('click', () => selectPD1Destination('Conversations', { mode: 'meeting' }))
+      // Return through the canonical destination router so the rail and the
+      // durable /video URL stay aligned with the live room.
+      pipExpand.addEventListener('click', () => selectPD1Destination('Video'))
+      pipReturn?.addEventListener('click', () => selectPD1Destination('Video'))
       roomBoardToggleButton?.addEventListener('click', () => setRoomBoardPanel(roomBoardPanel?.hidden !== false))
       roomBoardPanelOpen?.addEventListener('click', () => {
         setRoomBoardPanel(false)
@@ -38380,7 +38383,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       undoDeleteButton.addEventListener('click', undoDeleteTicket)
       expandBoardButton.addEventListener('click', () => setBoardExpanded(true))
       // header live chip: pill → room, leave → exit
-      topbarLivePill?.addEventListener('click', () => setActiveTool('room'))
+      topbarLivePill?.addEventListener('click', () => selectPD1Destination('Video'))
       topbarLiveLeave?.addEventListener('click', () => leaveRoom())
       roomTranscriptPill?.addEventListener('click', openLiveMeetingTranscript)
       // mobile header (design §1): back chevron leaves the intel sub-screen,
@@ -43090,10 +43093,16 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncPD1Destination('Home')
           return true
         }
+        if (destination === 'Video') {
+          clearPD1DestinationSurface()
+          setActiveTool('room', { history: false })
+          syncPD1Destination('Video')
+          return true
+        }
         if (destination === 'Conversations') {
           clearPD1DestinationSurface()
           const mode = String(options.mode || pd1CompatibilityRoute(location.pathname)?.mode || 'chat')
-          setActiveTool(mode === 'meeting' ? 'room' : (mode === 'meeting-records' ? 'memory' : 'chat'), { history: false })
+          setActiveTool(mode === 'meeting-records' ? 'memory' : 'chat', { history: false })
           syncPD1Destination('Conversations')
           return true
         }
@@ -43130,7 +43139,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           syncPD1Destination(pathDestination)
           return
         }
-        const toolDestination = tool === 'office' ? 'Home' : (['room', 'chat', 'memory'].includes(tool) ? 'Conversations' : (tool === 'files' ? 'Drive' : 'Work'))
+        const toolDestination = tool === 'office' ? 'Home' : (tool === 'room' ? 'Video' : (['chat', 'memory'].includes(tool) ? 'Conversations' : (tool === 'files' ? 'Drive' : 'Work')))
         syncPD1Destination(toolDestination)
       }
 
@@ -87894,7 +87903,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
         if (route === 'room') {
           selectLobbyRoom(String(destination?.roomId || 'office'))
-          setActiveTool('room')
+          selectPD1Destination('Video')
           return
         }
         if (route !== 'thread' || !destination?.threadId) return
@@ -89360,7 +89369,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         // deep-link: land on the lobby with this room selected — never join
         row.addEventListener('click', () => {
           selectLobbyRoom(room.id)
-          setActiveTool('room')
+          selectPD1Destination('Video')
         })
         return row
       }

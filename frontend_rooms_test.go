@@ -436,7 +436,7 @@ func TestIndexRoomsLobbyHomeStripSlim(t *testing.T) {
 		}
 	}
 	rowBody := functionBody(html, "function homeLiveNowRow(room)")
-	if !strings.Contains(rowBody, "selectLobbyRoom(room.id)") || !strings.Contains(rowBody, "setActiveTool('room')") {
+	if !strings.Contains(rowBody, "selectLobbyRoom(room.id)") || !strings.Contains(rowBody, "selectPD1Destination('Video')") {
 		t.Error("a live-now row must deep-link to the lobby with the room selected — never join")
 	}
 	if strings.Contains(rowBody, "joinRoom(") {

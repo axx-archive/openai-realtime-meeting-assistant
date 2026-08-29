@@ -163,8 +163,8 @@ const server=http.createServer((req,res)=>{
    assert.equal(await page.locator('#appShell').getAttribute('data-tool'),'room');
    assert.equal(new URL(page.url()).pathname,'/video');
    assert.equal(await pip.isVisible(),true);
-   await page.evaluate(()=>{selectPD1Destination('Chat');renderPipMeeting()});
-   assert.equal(new URL(page.url()).pathname,'/chat');
+   await page.evaluate(()=>{selectPD1Destination('Conversations');renderPipMeeting()});
+   assert.equal(new URL(page.url()).pathname,'/conversations');
  };
 
  // Navigating channels and opening/closing a deck/document stage never owns

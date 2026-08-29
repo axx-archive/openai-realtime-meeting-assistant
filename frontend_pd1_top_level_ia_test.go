@@ -36,7 +36,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	nav := pd1Slice(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
 	re := regexp.MustCompile(`data-pd1-destination="([^"]+)"`)
 	matches := re.FindAllStringSubmatch(nav, -1)
-	want := []string{"Home", "Conversations", "Work", "Drive"}
+	want := []string{"Home", "Video", "Conversations", "Work", "Drive"}
 	if len(matches) != len(want) {
 		t.Fatalf("primary destination count=%d, want %d: %v", len(matches), len(want), matches)
 	}
@@ -48,10 +48,11 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	for _, marker := range []string{
 		`aria-label="Primary"`,
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
+		`data-pd1-destination="Video" aria-label="Rooms"`,
 		`data-pd1-destination="Conversations" aria-label="Conversations"`,
 		`data-pd1-destination="Work" aria-label="Work"`,
 		`data-pd1-destination="Drive" aria-label="Drive"`,
-		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Conversations', 'Work', 'Drive'])`,
+		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Conversations', 'Work', 'Drive'])`,
 		`aria-label="Application navigation"`,
 	} {
 		if !strings.Contains(html, marker) {
@@ -60,10 +61,9 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	}
 }
 
-func TestPD1LegacyRoutesConvergeWithoutRestoringOldDestinations(t *testing.T) {
+func TestPD1LegacyRoutesConvergeWithoutRestoringRetiredDestinations(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
-		`'/video': { destination: 'Conversations', mode: 'meeting' }`,
 		`'/chat': { destination: 'Conversations', mode: 'chat' }`,
 		`'/memory': { destination: 'Conversations', mode: 'meeting-records' }`,
 		`'/files': { destination: 'Drive' }`,
@@ -79,7 +79,7 @@ func TestPD1LegacyRoutesConvergeWithoutRestoringOldDestinations(t *testing.T) {
 		}
 	}
 	nav := pd1Slice(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
-	for _, forbidden := range []string{"Video", "Chat", "Files", "Presentations", "Research", "Network", "Marketplace", "Agent team"} {
+	for _, forbidden := range []string{"Chat", "Files", "Presentations", "Research", "Network", "Marketplace", "Agent team"} {
 		if strings.Contains(nav, `data-pd1-destination="`+forbidden+`"`) {
 			t.Errorf("legacy concept remains a primary destination: %q", forbidden)
 		}
@@ -92,10 +92,11 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 	for _, marker := range []string{
 		`closePD1OverlaysForNavigation()) return false`,
 		`setActiveTool('office', { history: false })`,
-		`setActiveTool(mode === 'meeting' ? 'room' : (mode === 'meeting-records' ? 'memory' : 'chat'), { history: false })`,
+		`setActiveTool('room', { history: false })`,
+		`setActiveTool(mode === 'meeting-records' ? 'memory' : 'chat', { history: false })`,
 		`setActiveTool('files', { history: false })`,
 		`setActiveTool('research', { history: false })`,
-		`const PD1_PATHS = Object.freeze({ Home: '/', Conversations: '/conversations', Work: '/work', Drive: '/drive' })`,
+		`const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Conversations: '/conversations', Work: '/work', Drive: '/drive' })`,
 		`history.pushState({ view: 'pd1', destination }, '', requestedPath)`,
 		`selectPD1Destination(destination, { push: false, focus: true })`,
 	} {
@@ -118,7 +119,7 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 	}
 }
 
-func TestPD1ShellAccessExposesOnlyTheFixedFourAndFailsClosed(t *testing.T) {
+func TestPD1ShellAccessExposesOnlyTheFixedFiveAndFailsClosed(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
 		`const PD1_CORE_DESTINATIONS = PD1_DESTINATIONS`,
@@ -301,7 +302,8 @@ const server = http.createServer((req, res) => {
   if(shellRenderDir)fs.mkdirSync(shellRenderDir,{recursive:true});
   await page.goto(base + '/video', {waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
-  await page.waitForFunction(() => location.pathname === '/video' && document.getElementById('appShell').dataset.tool === 'room' && document.getElementById('appShell').dataset.pd1Destination === 'Conversations');
+  await page.waitForFunction(() => location.pathname === '/video' && document.getElementById('appShell').dataset.tool === 'room' && document.getElementById('appShell').dataset.pd1Destination === 'Video');
+  assert.equal(await page.locator('#pd1PrimaryNav [data-pd1-destination="Video"]').getAttribute('aria-current'), 'page');
   await page.evaluate(() => { const marker=document.createElement('span'); marker.id='pd1-thread-continuity'; document.getElementById('scoutChatThread').append(marker); });
   if(shellRenderDir){await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());await page.screenshot({path:path.join(shellRenderDir,'desktop-conversations-meeting-mode.png')});}
   await page.click('#pd1PrimaryNav [data-pd1-destination="Conversations"]');
@@ -315,9 +317,9 @@ const server = http.createServer((req, res) => {
   if(shellRenderDir){
     await page.mouse.move(1279,799);
     await page.evaluate(()=>document.activeElement?.blur());
-    await page.screenshot({path:path.join(shellRenderDir,'desktop-four-destination-nav.png')});
+    await page.screenshot({path:path.join(shellRenderDir,'desktop-five-destination-nav.png')});
     await page.setViewportSize({width:390,height:844});
-    await page.screenshot({path:path.join(shellRenderDir,'phone-four-destination-nav.png')});
+    await page.screenshot({path:path.join(shellRenderDir,'phone-five-destination-nav.png')});
     await page.setViewportSize({width:1280,height:800});
   }
   await page.click('#pd1PrimaryNav [data-pd1-destination="Drive"]');
@@ -374,7 +376,7 @@ const server = http.createServer((req, res) => {
     const currentDestinations=await page.locator('#pd1PrimaryNav [aria-current="page"]').evaluateAll(buttons=>buttons.map(button=>button.dataset.pd1Destination));
     assert.deepEqual(currentDestinations,['Conversations']);
     await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());
-    const quietNav=await page.evaluate(()=>Object.fromEntries(['Home','Drive'].map(name=>{const style=getComputedStyle(document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]'));return[name,{background:style.backgroundColor,border:style.borderColor}]})));
+    const quietNav=await page.evaluate(()=>Object.fromEntries(['Home','Drive'].map(name=>{const node=document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]');const style=getComputedStyle(node);return[name,{current:node.getAttribute('aria-current'),background:style.backgroundColor,borderStyle:style.borderStyle}]})));
     assert.deepEqual(quietNav.Drive,quietNav.Home,JSON.stringify(quietNav));
     await page.screenshot({path:path.join(shellRenderDir,'desktop-country-golf-media-stable.png')});
   }
@@ -596,8 +598,8 @@ const server = http.createServer((req, res) => {
   await memberPage.waitForSelector('#appShell.is-authed');
   await memberPage.waitForFunction(()=>location.pathname==='/work'&&document.getElementById('appShell').dataset.pd1Destination==='Work');
   const memberShell=await memberPage.locator('#pd1PrimaryNav [data-pd1-destination]').evaluateAll(buttons=>buttons.map(button=>({name:button.dataset.pd1Destination,visible:!button.hidden&&!button.disabled&&getComputedStyle(button).display!=='none',display:getComputedStyle(button).display})));
-  assert.deepEqual(memberShell.filter(item=>item.visible).map(item=>item.name),['Home','Conversations','Work','Drive']);
-  if(shellRenderDir)await memberPage.screenshot({path:path.join(shellRenderDir,'phone-four-destination-nav.png')});
+  assert.deepEqual(memberShell.filter(item=>item.visible).map(item=>item.name),['Home','Video','Conversations','Work','Drive']);
+  if(shellRenderDir)await memberPage.screenshot({path:path.join(shellRenderDir,'phone-five-destination-nav.png')});
   await memberPage.close();
   await browser.close(); server.close();
 })().catch(error => { console.error(error); server.close(); process.exit(1); });`
