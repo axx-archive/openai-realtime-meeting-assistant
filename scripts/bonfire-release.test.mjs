@@ -52,7 +52,7 @@ const configPaths = [
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
-  'scripts/bonfire-release.mjs'
+  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
 ]
 const sidecarRefs = {
   canonicalPostgres: `postgres@sha256:${digest('a')}`,
@@ -586,7 +586,9 @@ if (args[0] === 'build') {
 test('scope policy is allowlisted, excludes product/evidence/data trees, and never stages', async () => {
   const policy = validateReleaseScopePolicy(JSON.parse(await readFile(join(repoRoot, 'deploy/digitalocean/release-scope-policy.json'), 'utf8')))
   const expandedPolicy = structuredClone(policy)
-  expandedPolicy.releaseConfigPaths.push('scripts/private-realtime-dequalification-bridge.mjs')
+  if (!expandedPolicy.releaseConfigPaths.includes('scripts/private-realtime-dequalification-bridge.mjs')) {
+    expandedPolicy.releaseConfigPaths.push('scripts/private-realtime-dequalification-bridge.mjs')
+  }
   assert.doesNotThrow(() => validateReleaseScopePolicy(expandedPolicy))
   assert.equal(releasePathOwned('main.go', policy), true)
   assert.equal(releasePathOwned('main_test.go', policy), false)
