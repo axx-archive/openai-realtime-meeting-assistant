@@ -131,7 +131,10 @@ func TestIndexGoalcardHeroContract(t *testing.T) {
 	for _, want := range []string{
 		".goalcard__link--primary {",
 		".goalcard__trust-score {",
-		// The semantic warning token is the contrast-safe cut of the same hue.
+		// --warn is the iOS amber and measures 1.40:1 as text on the light
+		// putty ground; --warn-text is the contrast-safe cut of the same hue
+		// (6.04:1 on the ground, AA on every light surface). The pin keeps its
+		// intent — the trust flag is warn-coloured — on the readable token.
 		".goalcard__trust-flag { color: var(--warn-text); }",
 		"border-top: 1px solid var(--line-1);",
 	} {

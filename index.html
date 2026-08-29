@@ -225,10 +225,19 @@
            accessibility gain. */
         --ember-text: #86290F;
 
-        /* Semantic state hues are tuned for dark surfaces and fail as text on
-           the warm light ground. These text-only variants preserve hue while
-           clearing AA on the deepest light-theme well; fills keep the brighter
-           state colors. Measured UX audit: worst status text 1.40:1 -> 6.04:1. */
+        /* The semantic hues have the same problem --ember-text was created to
+           solve, and it was never extended to them. --warn/--live/--danger/
+           --info are the iOS system hues: they are tuned for a black ground and
+           they measure 1.40 / 1.38 / 2.32 / 2.49 against this warm putty ground.
+           At ~120 `color:` call sites that is status text, error copy and badges
+           rendered at or near invisibility — #lobbyJoinError ("couldn't reach
+           your camera or microphone") measured 1.40:1 at 11px.
+           These cuts follow the --ember-text recipe: hue and saturation held,
+           lightness dropped until AA clears on --paper-200, the deep well and
+           the tight one. They measure 7.6:1 on cards, 6.0:1 on the ground,
+           5.2:1 on the well, 4.5:1 on the deep well.
+           FILLS keep the bright hue for the same reason ember does: --*-soft
+           chips, dots, rings and borders carry no text. */
         --warn-text: #6A4100;
         --danger-text: #970800;
         --info-text: #004992;
@@ -429,7 +438,10 @@
            values, so callers never have to ask which theme they are in. */
         --ember-text: var(--ember-500);
 
-        /* The uncut system hues already clear contrast on dark surfaces. */
+        /* Dark needs no cut either: on #000 through --surface-3 the system hues
+           measure 8.07 / 8.21 / 4.87 / 4.55 at worst, so the text tokens are
+           the hues themselves. One token, two values, so callers never have to
+           ask which theme they are in. */
         --warn-text: var(--warn);
         --danger-text: var(--danger);
         --info-text: var(--info);
@@ -12513,9 +12525,16 @@
         flex-direction: column;
         align-items: flex-start;
         gap: 4px;
-        /* Anchor the no-reaction hover toolbar to its own message. Without
-           this containing block, toolbars stacked in the conversation pane's
-           corner and most messages could not receive a first reaction. */
+        /* The hover action bar for a message with no reactions yet is
+           position:absolute with top:-18px/right:-8px, meaning "just above and
+           just outside MY bubble". Nothing on the path — this stack, the
+           .scout-chat-msg article, #scoutChatThread — was positioned, so the
+           containing block resolved all the way up to #scoutPrivatePane and
+           every one of those bars stacked in the pane's top corner instead:
+           measured at 1440px, a message at y=415 had its bar at y=45. That is
+           81% of messages (57 of 70 in the office thread), and it is the only
+           way to add a first reaction, riff, reply in thread, or reach the
+           overflow menu. This is that containing block. */
         position: relative;
       }
 
@@ -14146,7 +14165,11 @@
       }
       .deck-editor__notes {
         width: 100%;
-        /* Let real presenter notes use the available inspector height. */
+        /* 220px fixed cut a real presenter note off mid-sentence: measured
+           scrollHeight 284 against clientHeight 218, so the field was 66px
+           shorter than its own content with no scrollbar shown. The inspector
+           panel had 694px to give. This is the field you read while you are
+           presenting — show the note. */
         min-height: clamp(220px, 40vh, 420px);
         resize: vertical;
         padding: 10px;
@@ -21377,7 +21400,10 @@
       /* kit Files grid — responsive tiles (segmented grid view) */
       .files-grid {
         display: grid;
-        /* 240px prevents timestamps and metadata clipping in populated Drive. */
+        /* 210px tracks packed 5 columns at 1440 and clipped the meta line on 8 of
+           9 cards (worst 59px), eating the timestamp on every one. 240px packs
+           4 columns (268px tracks) and leaves a single 2px clip on the longest
+           string — the density costs one column and the cards read complete. */
         grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
         gap: 14px;
       }
@@ -24520,6 +24546,11 @@
            input instead of acting as dead click area. */
         align-self: stretch;
         min-width: 0;
+        /* The shell is 40px tall; an unstretched input left 11px of dead band
+           top and bottom, so 55% of the visible search bar did not take a
+           click (verified: elementFromPoint at shell.top+4 returned the shell
+           and activeElement stayed BODY). Fill the shell. */
+        align-self: stretch;
         border: none;
         background: transparent;
         color: var(--text-1);
