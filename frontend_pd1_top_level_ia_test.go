@@ -47,6 +47,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	}
 	for _, marker := range []string{
 		`aria-label="Primary"`,
+		`Rooms stays visible even when every room is idle: this is the permanent video doorway.`,
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
 		`data-pd1-destination="Video" aria-label="Rooms"`,
 		`data-pd1-destination="Conversations" aria-label="Conversations"`,
