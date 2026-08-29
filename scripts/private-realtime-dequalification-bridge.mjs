@@ -55,7 +55,7 @@ export function privateRealtimeVoiceDequalificationEnvPatch(body) {
 
 export function assertDequalificationIdleReadiness(payload) {
   if (payload?.ok !== true) throw new Error('readiness is not healthy enough for the dequalification bridge')
-  const rooms = payload?.capabilities?.brain?.rooms
+  const rooms = payload?.capabilities?.rooms
   if (!Array.isArray(rooms)) throw new Error('readiness lacks the room inventory required by the dequalification bridge')
   const busy = rooms.filter(room => Number(room?.participants || 0) !== 0 || room?.media?.active === true ||
     room?.media?.actor === true || room?.media?.mixer === true || String(room?.sittingId || '').trim())

@@ -24,14 +24,14 @@ test('dequalification patch changes only one canonical true assignment and prese
 test('dequalification requires an idle room and realtime inventory', () => {
   const idle = {
     ok: true,
-    capabilities: { brain: { rooms: [{ participants: 0, sittingId: '', media: { active: false, actor: false, mixer: false } }] } },
+    capabilities: { rooms: [{ participants: 0, sittingId: '', media: { active: false, actor: false, mixer: false } }] },
     checks: { realtime: { connected: false } }
   }
   assert.equal(assertDequalificationIdleReadiness(idle), true)
   assert.throws(() => assertDequalificationIdleReadiness({ ...idle, ok: false }), /readiness/)
-  assert.throws(() => assertDequalificationIdleReadiness({ ok: true, capabilities: { brain: {} } }), /room inventory/)
+  assert.throws(() => assertDequalificationIdleReadiness({ ok: true, capabilities: {} }), /room inventory/)
   assert.throws(() => assertDequalificationIdleReadiness({
-    ...idle, capabilities: { brain: { rooms: [{ participants: 1, media: { active: true } }] } }
+    ...idle, capabilities: { rooms: [{ participants: 1, media: { active: true } }] }
   }), /active/)
   assert.throws(() => assertDequalificationIdleReadiness({ ...idle, checks: { realtime: { connected: true } } }), /Realtime/)
 })
