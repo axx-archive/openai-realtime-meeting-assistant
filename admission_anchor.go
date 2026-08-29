@@ -415,7 +415,19 @@ func (store *meetingMemoryStore) captureAdmissionObservation(roomID, sittingID s
 	defer store.mu.Unlock()
 	admittedAt := now().UTC()
 	var watermark time.Time
-	for _, entry := range store.entries {
+	if store.meetingEntryIndexes == nil || store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	// Admission is a live-meeting operation. Inspect only the selected sitting's
+	// indexed rows rather than walking every historical transcript and artifact.
+	for _, index := range store.meetingEntryIndexes[sittingID] {
+		if index < 0 || index >= len(store.entries) {
+			continue
+		}
+		if store.meetingEntryVisitHook != nil {
+			store.meetingEntryVisitHook()
+		}
+		entry := store.entries[index]
 		if entry.Kind != meetingMemoryKindTranscript || normalizeRoomID(entry.Metadata["roomId"]) != roomID || strings.TrimSpace(entry.Metadata["meetingId"]) != sittingID {
 			continue
 		}
@@ -423,7 +435,7 @@ func (store *meetingMemoryStore) captureAdmissionObservation(roomID, sittingID s
 			watermark = entry.CreatedAt.UTC()
 		}
 	}
-	cutoff, err := currentDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+	cutoff, err := currentDurableCaptureSequence(store.path, store.maxPersistedCaptureSequenceLocked())
 	if err != nil {
 		return admittedAt, 0, time.Time{}, fmt.Errorf("capture sequence high-water: %w", err)
 	}

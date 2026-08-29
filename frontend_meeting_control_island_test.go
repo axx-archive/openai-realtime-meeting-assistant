@@ -56,12 +56,14 @@ func TestDesktopMeetingControlsUseOneCompactInvariantIsland(t *testing.T) {
 	if !strings.Contains(html, `roomChatInput.focus()`) {
 		t.Fatal("Chat action lacks an explicit visible focus destination")
 	}
-	if !strings.Contains(html, `meetingSpecialistsRestoreFocus = roomMoreToggleButton`) || !strings.Contains(html, `target.getClientRects().length`) {
-		t.Fatal("Agent team must restore focus to the visible More button, never a hidden menu item")
-	}
-	for _, nestedCapability := range []string{`Bring someone into this room`, `Scout and specialist participants`, `roomMeetingRecapToolbar()`, `Microphone privacy`} {
+	for _, nestedCapability := range []string{`Bring someone into this room`, `roomMeetingRecapToolbar()`, `Microphone privacy`} {
 		if !strings.Contains(html, nestedCapability) {
 			t.Fatalf("removed top-level action is orphaned instead of moving to a contextual surface: %s", nestedCapability)
+		}
+	}
+	for _, retiredAgentSurface := range []string{`id="meetingSpecialistsPanel"`, `/api/stride/v1/meeting-specialists`, `data-specialist-action=`} {
+		if strings.Contains(html, retiredAgentSurface) {
+			t.Fatalf("arbitrary meeting-agent addressability remains: %s", retiredAgentSurface)
 		}
 	}
 	for _, retired := range []string{`id="roomBoardToggle"`, `id="roomBoardPanel"`, `id="roomMoreBoard"`, `id="toolBoard"`} {
@@ -101,7 +103,7 @@ const server=http.createServer((req,res)=>{
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  await page.goto(base+'/video',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
- await page.waitForFunction(()=>{const shell=document.getElementById('appShell');return shell?.dataset.tool==='room'&&shell?.dataset.pd1Destination==='Video'});
+ await page.waitForFunction(()=>{const shell=document.getElementById('appShell');return shell?.dataset.tool==='room'&&shell?.dataset.pd1Destination==='Conversations'});
  await page.waitForLoadState('networkidle');
  await page.waitForTimeout(400);
  await page.evaluate(()=>{for(let timer=1;timer<50000;timer++){clearTimeout(timer);clearInterval(timer)}});
@@ -141,11 +143,8 @@ const server=http.createServer((req,res)=>{
  await page.evaluate(()=>{document.getElementById('appShell').classList.add('is-in-room');ws={readyState:WebSocket.OPEN};updateRoomChatAvailability();setRoomMoreOpen(true);document.getElementById('roomMoreChat').click()}); await page.waitForFunction(()=>document.activeElement?.id==='roomChatInput');
 	 await page.evaluate(()=>document.getElementById('roomMeetingRecapTab').click()); assert.equal(await page.evaluate(()=>roomMeetingMode),'recap');
 	 await page.evaluate(()=>document.getElementById('roomMeetingTranscriptTab').click()); assert.equal(await page.evaluate(()=>roomMeetingMode),'transcript'); assert.equal(await page.locator('#roomMeetingTranscript > .room-meeting-transcription-toolbar').count(),1);
-	 const unqualified=await page.evaluate(()=>{meetingSpecialistsRoomId=activeJoin.roomId||'office';meetingSpecialistsSnapshot={available:false};roomScoutVoiceAvailability={enabled:false,reason:'quality_gate_pending'};roomAgentParticipants=[];openRoomPeoplePopover();return {manage:Array.from(document.querySelectorAll('.invite-pop__action')).some(button=>button.textContent.trim()==='Manage'),chatHidden:document.getElementById('roomMoreChat').hidden}});
-	 assert.deepEqual(unqualified,{manage:false,chatHidden:false},'unqualified agent controls must disappear inside People while meeting chat stays available');
-	 await page.evaluate(()=>{closeInvitePopover();meetingSpecialistsSnapshot={available:true};openRoomPeoplePopover();Array.from(document.querySelectorAll('.invite-pop__action')).find(button=>button.textContent.trim()==='Manage').click()}); await page.waitForFunction(()=>!document.getElementById('meetingSpecialistsPanel').hidden);
- await page.evaluate(()=>document.getElementById('meetingSpecialistsClose').click()); assert.equal(await page.evaluate(()=>document.activeElement?.id),'roomMoreToggle');
-	 const peopleActions=await page.evaluate(()=>{meetingSpecialistsRoomId=activeJoin.roomId||'office';meetingSpecialistsSnapshot={available:true};openRoomPeoplePopover();return Array.from(document.querySelectorAll('.invite-pop__action')).map(button=>button.textContent.trim())}); assert.deepEqual(peopleActions,['Invite','Manage']);
+	 const peopleActions=await page.evaluate(()=>{roomScoutVoiceAvailability={enabled:true};roomAgentParticipants=[];openRoomPeoplePopover();return Array.from(document.querySelectorAll('.invite-pop__action')).map(button=>button.textContent.trim())}); assert.deepEqual(peopleActions,['Invite'],'People may invite humans but cannot address arbitrary agents');
+	 assert.equal(await page.locator('#meetingSpecialistsPanel').count(),0,'retired arbitrary-agent modal remains mounted');
 	 await page.evaluate(()=>Array.from(document.querySelectorAll('.invite-pop__action')).find(button=>button.textContent.trim()==='Invite').click());
 	 const inviteActions=await page.locator('.invite-pop__action').allTextContents(); assert.deepEqual(inviteActions.map(value=>value.trim()),['copy room link','mint guest link']); await page.evaluate(()=>closeInvitePopover());
 	 // Room settings remains a truthful action while the transient dock-level

@@ -958,7 +958,7 @@ func currentConsentCaptureCutoff() (uint64, error) {
 	}
 	app.memory.mu.Lock()
 	defer app.memory.mu.Unlock()
-	return currentDurableCaptureSequence(app.memory.path, maxPersistedCaptureSequence(app.memory.entries))
+	return currentDurableCaptureSequence(app.memory.path, app.memory.maxPersistedCaptureSequenceLocked())
 }
 
 var consentWithdrawalRuntime = struct {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -237,6 +238,33 @@ func TestAdmissionAnchorObservationIsLinearizedAgainstRawCapture(t *testing.T) {
 	admittedAt, cutoff, watermark, err := store.captureAdmissionObservation("room-a", "sitting-a", func() time.Time { return wantAdmission })
 	if err != nil || !admittedAt.Equal(wantAdmission) || cutoff != 19 || !watermark.Equal(lastAt) {
 		t.Fatalf("observation admittedAt=%s cutoff=%d watermark=%s err=%v", admittedAt, cutoff, watermark, err)
+	}
+}
+
+func TestAdmissionAnchorObservationReadsOnlyIndexedSitting(t *testing.T) {
+	base := time.Date(2026, 7, 22, 11, 0, 0, 0, time.UTC)
+	store := &meetingMemoryStore{path: filepath.Join(t.TempDir(), "meeting-memory.jsonl")}
+	for index := 0; index < 5000; index++ {
+		store.entries = append(store.entries, meetingMemoryEntry{
+			Kind: meetingMemoryKindTranscript, CreatedAt: base,
+			Metadata: map[string]string{"roomId": "historical-room", "meetingId": "historical-" + strconv.Itoa(index), "captureSequence": strconv.Itoa(index + 1)},
+		})
+	}
+	wantWatermark := base.Add(time.Hour)
+	store.entries = append(store.entries, meetingMemoryEntry{
+		Kind: meetingMemoryKindTranscript, CreatedAt: wantWatermark,
+		Metadata: map[string]string{"roomId": "room-a", "meetingId": "sitting-a", "captureSequence": "5001"},
+	})
+	store.rebuildMeetingEntryIndexesLocked()
+	visits := 0
+	store.meetingEntryVisitHook = func() { visits++ }
+
+	_, cutoff, watermark, err := store.captureAdmissionObservation("room-a", "sitting-a", time.Now)
+	if err != nil || cutoff != 5001 || !watermark.Equal(wantWatermark) {
+		t.Fatalf("indexed observation cutoff=%d watermark=%s err=%v", cutoff, watermark, err)
+	}
+	if visits != 1 {
+		t.Fatalf("indexed sitting visits=%d, want 1", visits)
 	}
 }
 

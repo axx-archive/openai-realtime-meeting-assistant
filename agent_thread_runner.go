@@ -1283,6 +1283,9 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		broadcastAssistantEvent("error", "Scout thread could not update its artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
 		return
 	}
+	// The artifact commit above is the source of truth. Only now may the
+	// customer WorkRun ledger expose terminal status or exact artifact lineage.
+	app.recordSTRIDEWorkRunTerminal(thread, artifact, status)
 	if publicConversationWorkAfterTerminalCommitProbe != nil && strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) != "" {
 		if publicConversationWorkAfterTerminalCommitProbe(artifact) != nil {
 			return
@@ -1631,10 +1634,10 @@ func agentLearningCandidateSummary(thread scoutAgentThread, artifact meetingMemo
 	return trimForStorage(fmt.Sprintf("Candidate lesson from %s: %s", compactAssistantLine(title), result), 600)
 }
 
-// Successful named-coworker work can teach the teammate, but never silently.
-// This seam proposes one provenance-bound memory candidate and persists the
-// signed product snapshot; only a later human approve/correct action makes it
-// active provider context.
+// Successful fixed-agent work can propose a visible compatibility record, but
+// never teach the provider silently. The matching governed audit candidate is
+// required to pass held-out evaluation, qualification, review, and human
+// ratification before the legacy record may become active provider context.
 func (app *kanbanBoardApp) proposeAgentLearningFromCompletedThread(thread scoutAgentThread, artifact meetingMemoryEntry, output string) {
 	agentID := strings.TrimSpace(artifact.Metadata["agentId"])
 	if app == nil || app.strideRuntime == nil || agentID == "" || strings.TrimSpace(artifact.ID) == "" || strings.TrimSpace(thread.ID) == "" {
@@ -1657,8 +1660,11 @@ func (app *kanbanBoardApp) proposeAgentLearningFromCompletedThread(thread scoutA
 	app.strideProductMu.Lock()
 	defer app.strideProductMu.Unlock()
 	proposed := false
+	var proposedAgent STRIDEProductTeamAgent
 	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-		_, created, proposalErr := ctx.Product.proposeAgentLearningFromWork(
+		var created bool
+		var proposalErr error
+		proposedAgent, created, proposalErr = ctx.Product.proposeAgentLearningFromWork(
 			agentID, subject, scope, agentLearningCandidateSummary(thread, artifact, output), thread.ID, artifact.ID, sourceThreadID,
 			sourceRefs, 0.6, nil, time.Now().UTC(),
 		)
@@ -1670,6 +1676,18 @@ func (app *kanbanBoardApp) proposeAgentLearningFromCompletedThread(thread scoutA
 	}
 	if err != nil {
 		log.Errorf("Failed to propose durable learning for agent %s from run %s: %v", agentID, thread.ID, err)
+		return
+	}
+	if proposed {
+		for _, learning := range proposedAgent.Learning {
+			if learning.Origin != "completed_work" || learning.RunID != thread.ID || learning.ArtifactID != artifact.ID {
+				continue
+			}
+			if auditErr := app.proposeGovernedLearningFromCompletedWork(agentID, learning.ID, thread, artifact, learning.Summary, time.Now().UTC()); auditErr != nil {
+				log.Errorf("Failed to propose governed learning for agent %s from run %s: %v", agentID, thread.ID, auditErr)
+			}
+			break
+		}
 	}
 }
 
@@ -1742,6 +1760,12 @@ func (app *kanbanBoardApp) updateQueuedAgentThread(thread scoutAgentThread, work
 		broadcastAssistantEvent("error", "Scout thread could not update its queued artifact", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, "error", ""))
 		return
 	}
+	progressPercent, _ := strconv.Atoi(strings.TrimSpace(workerResult.Metadata["progressPercent"]))
+	app.recordSTRIDEWorkRunProgress(thread, artifact, AgentProgress{
+		Stage: workerResult.Metadata["currentStage"], GoalStatus: workerResult.Metadata["goalStatus"],
+		ProgressPercent: progressPercent, ReviewGate: workerResult.Metadata["reviewGate"],
+		Note: workerResult.Metadata["progressNote"],
+	})
 
 	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", message, agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, status, "listening"))
@@ -1966,7 +1990,7 @@ func (app *kanbanBoardApp) reauthorizeAgentThreadProfile(thread scoutAgentThread
 	var profile STRIDEProductAgentContextProfile
 	found := false
 	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-		profile, found = ctx.Product.agentContextProfile(agentID)
+		profile, found = ctx.Product.addressableAgentContextProfile(agentID)
 		return nil
 	})
 	if err != nil || !found {
@@ -2043,11 +2067,12 @@ func (app *kanbanBoardApp) persistAgentThreadProgress(thread scoutAgentThread, u
 	if len(metadata) == 0 {
 		return
 	}
-	_, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, metadata)
+	artifact, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", thread.Artifact.Text, scoutParticipantName, metadata)
 	if err != nil {
 		log.Errorf("Failed to persist thread %s progress: %v", thread.ID, err)
 		return
 	}
+	app.recordSTRIDEWorkRunProgress(thread, artifact, update)
 	// The chat work card is a durable projection, not a launch-time snapshot.
 	// Persist and fan out every bounded runner update so native clients (which
 	// intentionally render from the authorized thread record) advance without

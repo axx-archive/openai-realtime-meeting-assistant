@@ -15,12 +15,9 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 	}
 	html := string(raw)
 	for _, marker := range []string{
-		`data-pd1-destination="Work" aria-label="Recent work"`,
-		`data-pd1-destination="Presentations" aria-label="Presentations"`,
-		`data-pd1-destination="Research" aria-label="Research"`,
-		`id="contentStudioRailLink"`,
-		`Presentations: '/presentations'`,
-		`Research: '/research'`,
+		`data-pd1-destination="Work" aria-label="Work"`,
+		`'/presentations': { destination: 'Work', output: 'presentation' }`,
+		`'/research': { destination: 'Work', output: 'document' }`,
 		`id="studioProjectList"`,
 		`id="studioProjectDetail"`,
 		`const params = new URLSearchParams({ limit: '200' })`,
@@ -62,7 +59,7 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 			t.Errorf("Studio bounded-pane contract missing %q", marker)
 		}
 	}
-	if strings.Contains(pd1Slice(t, html, `<span class="pd1-primary-nav__external-wrap pd1-primary-nav__studio-wrap"`, `</span>`), `aria-haspopup="menu"`) {
+	if strings.Contains(html, `id="workToolMenu"`) || strings.Contains(html, `.work-tool-menu`) {
 		t.Fatal("the Studio rail regressed into the retired Work flyout")
 	}
 }
@@ -138,7 +135,7 @@ const server=http.createServer((req,res)=>{
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  const pageErrors=[];page.on('pageerror',error=>pageErrors.push(error.message));
  await page.goto(base+'/presentations',{waitUntil:'domcontentloaded'});
- await page.waitForSelector('#appShell.is-authed[data-pd1-destination="Presentations"]');
+ await page.waitForSelector('#appShell.is-authed[data-pd1-destination="Work"]');
  await page.waitForSelector('#studioProjectList .studio-project-row');
  assert.equal(await page.locator('#studioProjectsTitle').innerText(),'Presentations');
  assert.equal(await page.locator('#studioProjectList .studio-project-row').count(),1);
@@ -176,7 +173,7 @@ const server=http.createServer((req,res)=>{
  await page.click('.studio-projects__load-more');
  await page.waitForSelector('.studio-project-row[data-project-id="older-deck"]');
  assert.equal(await page.locator('#studioProjectDetail .studio-project-detail__title').innerText(),'Western engagement army');
- await page.click('#pd1PrimaryNav [data-pd1-destination="Research"]');
+	await page.goto(base+'/research',{waitUntil:'domcontentloaded'});
 	await page.waitForFunction(()=>location.pathname==='/research'&&document.querySelectorAll('#studioProjectList .studio-project-row').length===3);
  assert.equal(await page.locator('#studioProjectsTitle').innerText(),'Research');
  assert.deepEqual(await page.locator('.studio-projects__group-title').allTextContents(),['Needs you','Needs attention','In progress']);
@@ -281,10 +278,10 @@ const server=http.createServer((req,res)=>{
  assert.doesNotMatch(await page.locator('.studio-project-deliverable').innerText(),/review needed|review before/i);
  await page.click('.studio-project-context button',{position:{x:10,y:10}});
  await page.waitForFunction(()=>activeScoutThreadId==='source-older'&&scoutChatThreads.some(thread=>thread.id==='source-older'&&thread.messagesLoaded===true));
- assert.equal(new URL(page.url()).pathname,'/chat');
+ assert.equal(new URL(page.url()).pathname,'/conversations');
 
  await page.goto(base+'/presentations?project=doc-running',{waitUntil:'domcontentloaded'});
- await page.waitForFunction(()=>location.pathname==='/research'&&new URL(location.href).searchParams.get('project')==='doc-running');
+ await page.waitForFunction(()=>location.pathname==='/work'&&new URL(location.href).searchParams.get('project')==='doc-running');
  assert.equal(await page.locator('.studio-project-detail__title').innerText(),'Market opportunity report');
 
  await page.goto(base+'/research?project=missing',{waitUntil:'domcontentloaded'});

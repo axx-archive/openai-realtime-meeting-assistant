@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Shadow comparison of the lead-agent harness, legacy STRIDE, and a direct model with equivalent authorized context.",
+  "retirementGates": {
+    "openRenderEditableRate": 0.9,
+    "reviewableWithoutFollowupRate": 0.85,
+    "falseNeedsYouRateMax": 0.05,
+    "aclOrLineageViolationsMax": 0,
+    "duplicateWorkCardsMax": 0
+  },
+  "cases": [
+    {"id":"research-01","kind":"research","request":"Compare three acquisition targets and recommend one, using the attached financials and our prior meeting decisions.","context":"team","hardChecks":["primary_sources","claim_citations","editable_report"]},
+    {"id":"research-02","kind":"research","request":"Build a market map for youth sports ticketing and identify the five most credible entry wedges.","context":"company","hardChecks":["source_dates","counterevidence","editable_report"]},
+    {"id":"research-03","kind":"research","request":"Determine whether this customer complaint is isolated or systemic across the last quarter of channel conversations.","context":"private_channel","hardChecks":["private_containment","coverage_statement","editable_report"]},
+    {"id":"research-04","kind":"research","request":"Research the strongest argument against the strategy agreed in yesterday's meeting.","context":"meeting","hardChecks":["meeting_lineage","balanced_evidence","editable_report"]},
+    {"id":"research-05","kind":"research","request":"Evaluate Mem0, Memco, Zep, and an internal approach for our organizational brain.","context":"company","hardChecks":["current_sources","decision_matrix","editable_report"]},
+    {"id":"research-06","kind":"research","request":"Find precedent transactions for this succession structure and explain what actually transfers risk.","context":"project","hardChecks":["primary_sources","assumptions","editable_report"]},
+    {"id":"research-07","kind":"research","request":"Summarize what we know about this employee's working preferences without exposing private conversations to coworkers.","context":"mixed_acl","hardChecks":["private_containment","source_scope","editable_report"]},
+    {"id":"research-08","kind":"research","request":"Turn the Drive folder and meeting recap into a sourced competitive brief for the sales team.","context":"drive_and_meeting","hardChecks":["revision_lineage","claim_citations","editable_report"]},
+    {"id":"research-09","kind":"research","request":"Analyze why the last three launches missed their dates and separate evidence from inference.","context":"company","hardChecks":["temporal_order","evidence_inference_labels","editable_report"]},
+    {"id":"research-10","kind":"research","request":"Recommend a pricing experiment using our prior research, current customer conversations, and public benchmarks.","context":"team","hardChecks":["authorized_sources","experiment_design","editable_report"]},
+    {"id":"research-11","kind":"research","request":"Update last month's report only where new evidence changes the conclusion.","context":"artifact_revision","hardChecks":["supersession","change_log","editable_report"]},
+    {"id":"research-12","kind":"research","request":"Produce an executive memo from a realtime voice conversation, then forget it if the owner revokes consent.","context":"private_voice","hardChecks":["consent_fence","purge_replay","editable_report"]},
+
+    {"id":"presentation-01","kind":"presentation","request":"Create a ten-slide board deck from the strategy memo and current operating metrics.","context":"company","hardChecks":["native_editable_deck","render_legibility","source_lineage"]},
+    {"id":"presentation-02","kind":"presentation","request":"Turn this research report into a six-slide decision deck with one clear recommendation.","context":"artifact_revision","hardChecks":["native_editable_deck","single_thesis","render_legibility"]},
+    {"id":"presentation-03","kind":"presentation","request":"Build a customer pitch that uses the approved case studies but excludes the private renewal discussion.","context":"mixed_acl","hardChecks":["private_containment","native_editable_deck","render_legibility"]},
+    {"id":"presentation-04","kind":"presentation","request":"Create two genuinely different visual directions for the same launch narrative and recommend one.","context":"project","hardChecks":["distinct_directions","native_editable_deck","bounded_revision"]},
+    {"id":"presentation-05","kind":"presentation","request":"Revise slides 3 and 5 based on the channel feedback without regenerating the accepted deck.","context":"artifact_revision","hardChecks":["targeted_edit","version_lineage","render_legibility"]},
+    {"id":"presentation-06","kind":"presentation","request":"Make a documentary-style recap of the offsite using meeting decisions, photos, and commitments.","context":"meeting_and_drive","hardChecks":["native_editable_deck","asset_lineage","render_legibility"]},
+    {"id":"presentation-07","kind":"presentation","request":"Prepare an investor update that clearly distinguishes actuals, forecast, and management judgment.","context":"company","hardChecks":["claim_labels","native_editable_deck","render_legibility"]},
+    {"id":"presentation-08","kind":"presentation","request":"Convert the Drive proposal into a concise internal training deck with speaker notes.","context":"drive","hardChecks":["revision_lineage","speaker_notes","native_editable_deck"]},
+    {"id":"presentation-09","kind":"presentation","request":"Create a mobile-readable five-slide briefing for people joining the meeting late.","context":"meeting","hardChecks":["mobile_legibility","native_editable_deck","meeting_lineage"]},
+    {"id":"presentation-10","kind":"presentation","request":"Update the quarterly deck with the latest approved numbers and preserve manually edited slides.","context":"artifact_revision","hardChecks":["targeted_edit","manual_edit_preservation","source_lineage"]},
+    {"id":"presentation-11","kind":"presentation","request":"Create a postmortem deck that names unresolved uncertainty rather than inventing a clean story.","context":"company","hardChecks":["uncertainty_labels","native_editable_deck","render_legibility"]},
+    {"id":"presentation-12","kind":"presentation","request":"Build a recruiting presentation from public company materials only.","context":"public_only","hardChecks":["source_scope","native_editable_deck","render_legibility"]},
+
+    {"id":"image-01","kind":"image","request":"Create three purposeful hero-image directions for the approved campaign concept.","context":"project","hardChecks":["three_variants","reference_fidelity","versioned_images"]},
+    {"id":"image-02","kind":"image","request":"Edit the selected image to remove the background while preserving the subject exactly.","context":"artifact_revision","hardChecks":["targeted_edit","subject_preservation","version_lineage"]},
+    {"id":"image-03","kind":"image","request":"Generate a realistic product scene using the current brand profile and supplied pack shot.","context":"drive","hardChecks":["brand_fidelity","asset_lineage","versioned_images"]},
+    {"id":"image-04","kind":"image","request":"Create a transparent-background illustration for the presentation cover.","context":"work_artifact","hardChecks":["transparent_output","artifact_link","versioned_images"]},
+    {"id":"image-05","kind":"image","request":"Make two editorial and two documentary directions from the same brief.","context":"project","hardChecks":["four_variants","distinct_directions","versioned_images"]},
+    {"id":"image-06","kind":"image","request":"Apply the approved visual system to this existing image without changing the people in it.","context":"artifact_revision","hardChecks":["identity_preservation","targeted_edit","version_lineage"]},
+    {"id":"image-07","kind":"image","request":"Create a social crop set from the selected master image rather than regenerating it.","context":"artifact_revision","hardChecks":["master_derivation","crop_manifest","version_lineage"]},
+    {"id":"image-08","kind":"image","request":"Generate a visual concept from the private launch channel and keep every output private.","context":"private_channel","hardChecks":["private_containment","versioned_images","no_public_link"]},
+    {"id":"image-09","kind":"image","request":"Create an evidence-linked chart image from the approved research table.","context":"work_artifact","hardChecks":["data_fidelity","source_lineage","versioned_images"]},
+    {"id":"image-10","kind":"image","request":"Replace only the headline text in the selected graphic and preserve layout.","context":"artifact_revision","hardChecks":["targeted_edit","layout_preservation","version_lineage"]},
+    {"id":"image-11","kind":"image","request":"Create an accessible diagram explaining how Conversations, Work, Drive, and the brain connect.","context":"company","hardChecks":["accessible_labels","concept_accuracy","versioned_images"]},
+    {"id":"image-12","kind":"image","request":"Produce a final campaign image, render the required sizes, and attach them to the same Work card.","context":"project","hardChecks":["delivery_manifest","single_work_card","versioned_images"]}
+  ]
+}

@@ -132,6 +132,36 @@ func TestSTRIDERuntimeHTTPStandbyStillReportsFeaturesFenced(t *testing.T) {
 	}
 }
 
+func TestSTRIDELegacyMarketplaceTrialAndHireAreRetiredByDefault(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv(strideLegacyRosterMutationEnv, "")
+	cookies := loginAs(t, artifactLibraryAdminEmail, defaultMeetingRoomPassword)
+	runtime, err := NewSTRIDERuntime(strideIntegratedRuntimeConfig(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := withSTRIDERuntimeHTTPTestApp(t, runtime)
+	for _, action := range []string{"trial", "hire"} {
+		req := httptest.NewRequest(http.MethodPost, "https://bonfire.test"+strideRuntimeAPIBase+"marketplace/mary-marketing/"+action, nil)
+		req.Header.Set("Origin", "https://bonfire.test")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusGone {
+			t.Fatalf("%s status=%d body=%s", action, recorder.Code, recorder.Body.String())
+		}
+		var body map[string]any
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode %s response: %v", action, err)
+		}
+		if body["retired"] != true || body["ok"] != false {
+			t.Fatalf("%s body=%+v", action, body)
+		}
+	}
+}
+
 func TestSTRIDERuntimePublicCapabilitySnapshotNeverLeaksFailureDetails(t *testing.T) {
 	runtime := &STRIDERuntime{
 		config:    STRIDERuntimeConfig{Enabled: true, TenantID: "bonfire"},

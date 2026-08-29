@@ -40,9 +40,6 @@ func TestAuthenticatedBootstrapStatePrecedesFirstRender(t *testing.T) {
 		"let chatChannelActivityPopover = null",
 		"let chatChannelActivityHideTimer = 0",
 		"let chatWorkTimerTicker = 0",
-		"let strideTeamLoadGeneration = 0",
-		"let strideRosterRecords = []",
-		"let strideMarketplaceRecords = []",
 		"let multiDeviceHandoffChip = null",
 		"let deviceOfferChip = null",
 	} {
@@ -111,7 +108,7 @@ func TestIndexThinkingShimmerResolvesIntoOneCommittedTurn(t *testing.T) {
 	if !strings.Contains(html, "let scoutChatTurnInFlight = false") {
 		t.Error("missing the scoutChatTurnInFlight session-local flag")
 	}
-	show := functionBody(html, "function showScoutChatThinking(text)")
+	show := functionBodyAfterSignature(html, "function showScoutChatThinking(text, scope = null)")
 	if show == "" || !strings.Contains(show, "scoutChatTurnInFlight = true") {
 		t.Error("showScoutChatThinking must raise scoutChatTurnInFlight")
 	}
@@ -119,7 +116,7 @@ func TestIndexThinkingShimmerResolvesIntoOneCommittedTurn(t *testing.T) {
 	if hide == "" || !strings.Contains(hide, "scoutChatTurnInFlight = false") {
 		t.Error("hideScoutChatThinking must clear scoutChatTurnInFlight")
 	}
-	render := functionBody(html, "function renderActiveScoutThread()")
+	render := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	if render == "" {
 		t.Fatal("could not extract renderActiveScoutThread body")
 	}
@@ -141,11 +138,7 @@ func TestIndexThinkingShimmerResolvesIntoOneCommittedTurn(t *testing.T) {
 		}
 	}
 	// server status echoes may only refresh an in-flight shimmer
-	chatEvent := functionBody(html, "function handleScoutChatEvent(payload)")
-	if chatEvent == "" {
-		t.Fatal("could not extract handleScoutChatEvent body")
-	}
-	if !strings.Contains(chatEvent, "if (scoutChatTurnInFlight)") {
+	if !strings.Contains(html, "if (scoutChatTurnInFlight && (!scoutChatTurnScope || scoutChatMutationSourceIsActive(scoutChatTurnScope)))") {
 		t.Error("handleScoutChatEvent status branch must be gated on scoutChatTurnInFlight")
 	}
 	// the keyless ws send starts its own shimmer (status can no longer)
@@ -222,12 +215,8 @@ func TestIndexParkedGoalCardRendersFromThreadRef(t *testing.T) {
 // state at all, so starter text cannot silently hijack a later message.
 func TestIndexComposerHasNoArmedToolState(t *testing.T) {
 	html := readIndexForLiveSimFixes(t)
-	handoff := functionBody(html, "function paletteConversationalHandoff(tool)")
-	if handoff == "" {
-		t.Fatal("could not extract paletteConversationalHandoff body")
-	}
-	if strings.Contains(handoff, "pendingScoutToolTemplate") || strings.Contains(handoff, "toolId: tool.id") {
-		t.Error("legacy palette handoff still arms a client-selected tool")
+	if strings.Contains(html, "function paletteConversationalHandoff(tool)") {
+		t.Fatal("retired Tool Palette conversational handoff remains in the customer client")
 	}
 	send := functionBody(html, "function sendScoutChat(text)")
 	if send == "" {

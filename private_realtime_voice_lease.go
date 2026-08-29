@@ -583,6 +583,12 @@ func (app *kanbanBoardApp) stopPrivateRealtimeVoiceLease(requesterEmail, session
 	if err := app.saveScoutChatThread(thread); err != nil {
 		return false, err
 	}
+	// The SourceEpisode boundary is strictly post-close: the stopped lease and
+	// exact session turns are already durable, and no live RTP/capture path calls
+	// this publisher. A ledger outage cannot resurrect or prolong the transport.
+	if err := app.publishClosedRealtimeVoiceSourceEpisode(thread); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) && !errors.Is(err, ErrSourceEpisodeBodyMissing) {
+		log.Errorf("SourceEpisode Realtime voice close publication unavailable: %v", err)
+	}
 	app.forgetPrivateRealtimeOfferReplay(requesterEmail, sessionHash, lease.OperationID)
 	return false, nil
 }

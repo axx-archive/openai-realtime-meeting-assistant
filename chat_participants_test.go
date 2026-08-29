@@ -41,20 +41,25 @@ func TestChatMentionHandleKeepsMultiwordNamesAsOneWireToken(t *testing.T) {
 	}
 }
 
-func TestChatMentionCandidatesIncludeOnlyCurrentlyHiredValidAgents(t *testing.T) {
+func TestChatMentionCandidatesExposeOnlyFixedAddressableSpecialists(t *testing.T) {
 	fixture := newSTRIDEProjectAuthorityFixture(t)
 	hired := hireResearchAgentForBridgeTest(t, fixture, "colton-research", strideProductAgentDirectThreadPrefix+"mention_candidate")
 
 	candidates := fixture.app.chatMentionCandidatesForViewer(fixture.user.Email)
-	found := false
+	found := map[string]chatMentionCandidate{}
 	for _, candidate := range candidates {
-		if candidate.AgentID != hired.ID {
-			continue
+		if candidate.AgentID != "" {
+			found[candidate.AgentID] = candidate
 		}
-		found = candidate.Kind == "agent" && candidate.Name == hired.DisplayName && candidate.Handle == chatMentionHandle(hired.DisplayName) && candidate.Email == "" && candidate.RoleTitle == "Research Partner"
 	}
-	if !found {
-		t.Fatalf("hired Colton missing from agent mention candidates: %+v", candidates)
+	if _, legacyVisible := found[hired.ID]; legacyVisible {
+		t.Fatalf("legacy hired seat remained customer-addressable: %+v", candidates)
+	}
+	if researcher := found["agent_researcher"]; researcher.Name != "Researcher" || researcher.Kind != "agent" || researcher.RoleTitle != "Researcher" {
+		t.Fatalf("Researcher mention contract missing: %+v", candidates)
+	}
+	if presenter := found["agent_presenter"]; presenter.Name != "Presenter" || presenter.Kind != "agent" || presenter.RoleTitle != "Presentation Designer" {
+		t.Fatalf("Presenter mention contract missing: %+v", candidates)
 	}
 
 	err := fixture.runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
@@ -70,7 +75,7 @@ func TestChatMentionCandidatesIncludeOnlyCurrentlyHiredValidAgents(t *testing.T)
 	}
 	for _, candidate := range fixture.app.chatMentionCandidatesForViewer(fixture.user.Email) {
 		if candidate.AgentID == hired.ID {
-			t.Fatalf("paused agent remained mentionable: %+v", candidate)
+			t.Fatalf("paused legacy agent became mentionable: %+v", candidate)
 		}
 	}
 }

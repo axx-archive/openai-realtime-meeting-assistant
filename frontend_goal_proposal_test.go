@@ -28,8 +28,8 @@ func TestIndexGoalRunProposalCard(t *testing.T) {
 		"const isGoal = String(proposal.kind || '') === 'goal_run'",
 		// it renders with a goal label, not a bogus "tool run"
 		"'Multi-step goal'",
-		// a goal has no registry tool: skip the tool lookup + the fields fetch
-		"(!isWorkstream && !isImage && !isGoal) ? paletteToolById(proposal.toolId) : null",
+		// every proposal uses one server-owned natural-language objective
+		"Legacy tool taxonomies and per-tool forms stay server",
 		// the governance-lane caption + its label mapping
 		"scout-proposal-card__lane",
 		"function scoutProposalLaneLabel(lane)",

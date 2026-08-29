@@ -131,7 +131,8 @@ func TestIndexGoalcardHeroContract(t *testing.T) {
 	for _, want := range []string{
 		".goalcard__link--primary {",
 		".goalcard__trust-score {",
-		".goalcard__trust-flag { color: var(--warn); }",
+		// The semantic warning token is the contrast-safe cut of the same hue.
+		".goalcard__trust-flag { color: var(--warn-text); }",
 		"border-top: 1px solid var(--line-1);",
 	} {
 		if !strings.Contains(html, want) {

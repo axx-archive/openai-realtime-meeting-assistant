@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestTranscriptCaptureSequenceIsDurableMonotonicAcrossDeletionAndRestart(t *testing.T) {
@@ -66,5 +67,33 @@ func TestTranscriptCaptureSequenceOverridesCallerAndFailsClosedOnCorruption(t *t
 	}
 	if len(store.entries) != before {
 		t.Fatal("failed sequence persistence changed in-memory transcript inventory")
+	}
+}
+
+func TestTranscriptCaptureSequenceUsesMaintainedHighWaterIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "meeting-memory.jsonl")
+	store, err := newMeetingMemoryStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		if _, appended, err := store.appendEntryForMeeting("room-a", meetingMemoryKindTranscript, "transcript-"+strconv.Itoa(index), "captured", nil, ""); err != nil || !appended {
+			t.Fatalf("append transcript %d appended=%v err=%v", index, appended, err)
+		}
+	}
+
+	store.mu.Lock()
+	indexed := store.maxPersistedCaptureSequenceLocked()
+	store.mu.Unlock()
+	if indexed != 3 {
+		t.Fatalf("indexed capture high-water=%d, want 3", indexed)
+	}
+
+	reserved, err := store.reserveTranscriptCapture(time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved.CaptureSequence != 4 {
+		t.Fatalf("reserved sequence=%d, want 4", reserved.CaptureSequence)
 	}
 }

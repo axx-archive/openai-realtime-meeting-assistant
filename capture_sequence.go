@@ -118,16 +118,3 @@ func entryCaptureSequence(entry meetingMemoryEntry) (uint64, bool) {
 	value, err := strconv.ParseUint(strings.TrimSpace(entry.Metadata["captureSequence"]), 10, 64)
 	return value, err == nil && value > 0
 }
-
-func maxPersistedCaptureSequence(entries []meetingMemoryEntry) uint64 {
-	var highWater uint64
-	for _, entry := range entries {
-		if entry.Kind != meetingMemoryKindTranscript {
-			continue
-		}
-		if sequence, ok := entryCaptureSequence(entry); ok && sequence > highWater {
-			highWater = sequence
-		}
-	}
-	return highWater
-}

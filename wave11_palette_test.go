@@ -162,27 +162,25 @@ func TestPackagingStudioServesInPaletteAndRouter(t *testing.T) {
 
 // --- Frontend markers: the three doors, the rail, the trust line ------------
 
-func TestIndexHasPaletteMarkers(t *testing.T) {
+func TestIndexRetiresPaletteAndKeepsGoalCards(t *testing.T) {
 	html := readIndexForPalette(t)
 
-	// Structural + style presence (namespaced, per monolith discipline).
+	// Goal cards remain, while the no-caller customer tool palette is gone.
 	for _, want := range []string{
-		".palette__sheet",
-		".palette__tile",
-		".palette__well",
-		".palette__empty-line",
 		".goalcard__rail",
 		".goalcard__node",
 		".goalcard__trust",
 		".returncard",
-		"function openToolPalette",
-		"function runGoalPipeline",
 		"function upsertGoalCardNode",
 		"function renderReturnCard",
-		"'/assistant/tools'",
 	} {
 		if !strings.Contains(html, want) {
-			t.Errorf("index.html missing palette/goalcard marker: %q", want)
+			t.Errorf("index.html missing goalcard marker: %q", want)
+		}
+	}
+	for _, retired := range []string{"function openToolPalette", "function runGoalPipeline", "'/assistant/tools'", ".palette__sheet", ".palette__tile"} {
+		if strings.Contains(html, retired) {
+			t.Errorf("retired customer palette remains: %q", retired)
 		}
 	}
 
@@ -208,23 +206,10 @@ func TestNormalComposerHasNoToolPaletteDoors(t *testing.T) {
 	}
 }
 
-// The legacy helper is a compatibility shim only: it must re-enter ordinary
-// conversation and cannot post any client-selected launch contract.
-func TestRunGoalPipelineReentersConversationRouter(t *testing.T) {
+func TestRunGoalPipelineIsStructurallyRemoved(t *testing.T) {
 	html := readIndexForPalette(t)
-	body := functionBody(html, "async function runGoalPipeline(spec)")
-	if body == "" {
-		t.Fatal("index.html missing runGoalPipeline")
-	}
-	for _, want := range []string{"sendScoutChat(objective)"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("runGoalPipeline missing %q — the conversation router migration is broken", want)
-		}
-	}
-	for _, forbidden := range []string{"/assistant/goal", "fetch(", "body.", "originSurface", "upsertGoalCardNode(", "body.toolTemplate", "body.authorityHint", "spec.toolTemplate", "spec.authorityHint"} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("runGoalPipeline still transmits client authority %q", forbidden)
-		}
+	if strings.Contains(html, "runGoalPipeline") {
+		t.Fatal("retired client-owned goal/tool pipeline remains")
 	}
 }
 

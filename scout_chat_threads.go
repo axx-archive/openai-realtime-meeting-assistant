@@ -278,6 +278,13 @@ type scoutChatThreadRef struct {
 	ResultCanPresent  bool                        `json:"resultCanPresent,omitempty"`
 	ResultCanExport   bool                        `json:"resultCanExport,omitempty"`
 	Checkpoint        *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
+	// WorkRun is projected from durable ledger replay at read time. It is never
+	// persisted in the chat record or advanced from provider-local state.
+	WorkRun *STRIDEWorkRunSideCard `json:"workRun,omitempty"`
+	// WorkRunRequired is durably stamped on new canonical research and
+	// presentation launches. When replay is temporarily unavailable, clients
+	// must show that gap instead of falling back to provider-local status.
+	WorkRunRequired bool `json:"workRunRequired,omitempty"`
 }
 
 // scoutChatThreadRefsEqual compares the complete viewer projection. Thread
@@ -7759,6 +7766,7 @@ func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadI
 	if _, _, continuityErr := app.rebuildConversationContinuity(thread, "audience_change"); continuityErr != nil {
 		log.Errorf("ConversationContinuity audience rebuild unavailable: %v", continuityErr)
 	}
+	app.reconcileConversationSourceEpisodeAuthority(thread)
 	return thread, nil
 }
 

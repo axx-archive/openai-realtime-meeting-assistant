@@ -535,10 +535,17 @@ func (resolver *PostgresPurgeGenerationResolver) CurrentPurgeGeneration(ctx cont
 }
 
 type productionCatchUpResolver struct {
-	Planner  BrainRetrievalPlanner
-	Sources  *MeetingMemoryBrainAdapter
-	Postgres *PostgresCanonicalStore
-	TenantID string
+	Planner          BrainRetrievalPlanner
+	LivePlanner      *BrainRetrievalPlanner
+	LegacyPlanner    *BrainRetrievalPlanner
+	Sources          *MeetingMemoryBrainAdapter
+	EpisodeCatalog   DurableSourceEpisodeAuthorizationCatalog
+	EpisodeAuthority SourceEpisodeBrainAuthority
+	EpisodePurge     BrainPurgeGenerationResolver
+	LiveSitting      func(string, string) bool
+	SourceOnly       bool
+	Postgres         *PostgresCanonicalStore
+	TenantID         string
 	// Test-only barrier after preflight succeeds and before conditional commit.
 	// Production leaves it nil.
 	beforeCommit func()
@@ -554,12 +561,59 @@ type productionCatchUpResolver struct {
 }
 
 func (resolver *productionCatchUpResolver) ResolveCatchUp(ctx context.Context, request BrainRetrievalRequest) (BrainRetrievalResult, error) {
+	// SourceEpisode inventory is the only serving default. An open sitting has
+	// no post-close episode yet and therefore returns an empty, truthful result;
+	// it never falls back to the legacy lifetime JSONL scan on live admission.
+	if request.Temporal.Interpretation == TemporalBeforeAdmission && resolver.LiveSitting != nil && resolver.LiveSitting(request.Temporal.RoomID, request.Temporal.SittingID) {
+		if resolver.LivePlanner == nil {
+			return BrainRetrievalResult{}, ErrBrainRetrievalUnavailable
+		}
+		return resolver.LivePlanner.Resolve(ctx, request)
+	}
 	return resolver.Planner.Resolve(ctx, request)
+}
+
+type emptyLiveBrainSourceAdapter struct{ now func() time.Time }
+
+func (adapter emptyLiveBrainSourceAdapter) InventoryBrainSources(_ context.Context, request BrainSourceInventoryRequest, cursor string) (BrainSourceInventoryPage, error) {
+	if cursor != "" || request.Temporal.Validate() != nil || request.Temporal.Interpretation != TemporalBeforeAdmission {
+		return BrainSourceInventoryPage{}, ErrBrainRetrievalInvalid
+	}
+	snapshotAt := time.Now().UTC()
+	if adapter.now != nil {
+		snapshotAt = adapter.now().UTC()
+	}
+	id, err := STRIDEContractDigest(struct {
+		TenantID  string
+		Principal ACLPrincipal
+		Temporal  TemporalQuery
+	}{request.TenantID, request.Principal, request.Temporal})
+	if err != nil {
+		return BrainSourceInventoryPage{}, err
+	}
+	manifest, _ := brainInventoryManifestDigest(nil)
+	return BrainSourceInventoryPage{InventoryID: id, InventoryManifest: manifest, Terminal: true, ResolvedStartUTC: request.Temporal.StartUTC, ResolvedEndUTC: request.Temporal.EndUTC, SnapshotAt: snapshotAt}, nil
+}
+
+func (emptyLiveBrainSourceAdapter) ReadBrainSource(_ context.Context, expected BrainEvidenceRef) (BrainSourceRead, error) {
+	return BrainSourceRead{Evidence: expected, Status: RecallSourceMissing}, nil
 }
 
 func (resolver *productionCatchUpResolver) CommitCatchUpPublication(ctx context.Context, principal ACLPrincipal, snapshot RetrievalSnapshot, publish func() error) error {
 	if resolver == nil || resolver.Sources == nil || resolver.Postgres == nil || publish == nil {
 		return ErrCatchUpUnavailable
+	}
+	if resolver.EpisodeCatalog != nil && resolver.EpisodeAuthority != nil && resolver.EpisodePurge != nil {
+		episodes, ok, episodeErr := resolver.sourceEpisodesForSnapshot(ctx, snapshot)
+		if episodeErr != nil {
+			return episodeErr
+		}
+		if ok {
+			return resolver.commitSourceEpisodePublication(ctx, principal, snapshot, episodes, publish)
+		}
+		if resolver.SourceOnly && len(snapshot.Sources) > 0 {
+			return ErrRetrievalSnapshotStale
+		}
 	}
 	// Mint exact contributor fences only after re-reading every authoritative
 	// body and canonical revision. They remain held through the canonical/body
@@ -581,6 +635,63 @@ func (resolver *productionCatchUpResolver) CommitCatchUpPublication(ctx context.
 		return commit()
 	}
 	return currentConsentLaneAuthority().CommitWithFences(ctx, fences, commit)
+}
+
+func (resolver *productionCatchUpResolver) sourceEpisodesForSnapshot(ctx context.Context, snapshot RetrievalSnapshot) ([]SourceEpisode, bool, error) {
+	episodes := make([]SourceEpisode, 0, len(snapshot.Sources))
+	for _, source := range snapshot.Sources {
+		object, _ := source.Evidence.ACLRefs()
+		episode, found, err := resolver.EpisodeCatalog.FindSourceEpisodeByACLObject(ctx, object)
+		if err != nil {
+			return nil, false, err
+		}
+		if !found || episode.RetrievalBody.ContentRevision != source.Evidence.ContentRevision || episode.RetrievalBody.ContentDigest != source.Evidence.ContentDigest {
+			return nil, false, nil
+		}
+		episodes = append(episodes, episode)
+	}
+	return episodes, len(episodes) > 0, nil
+}
+
+func (resolver *productionCatchUpResolver) commitSourceEpisodePublication(ctx context.Context, principal ACLPrincipal, snapshot RetrievalSnapshot, episodes []SourceEpisode, publish func() error) error {
+	if publish == nil || principal.TenantID != snapshot.TenantID || principal.Kind != snapshot.PrincipalKind || principal.ID != snapshot.PrincipalID {
+		return ErrRetrievalSnapshotStale
+	}
+	var hold func(int) error
+	hold = func(index int) error {
+		if index == len(episodes) {
+			return resolver.withCanonicalSourceEpisodePurgeFence(ctx, snapshot, publish)
+		}
+		episode := episodes[index]
+		allowed, err := resolver.EpisodeAuthority.AuthorizeSourceEpisodeMetadata(ctx, principal, episode)
+		if err != nil || !allowed {
+			return ErrRetrievalSnapshotStale
+		}
+		return resolver.EpisodeAuthority.WithCurrentSourceEpisodeAuthority(ctx, episode, func() error { return hold(index + 1) })
+	}
+	return hold(0)
+}
+
+func (resolver *productionCatchUpResolver) withCanonicalSourceEpisodePurgeFence(ctx context.Context, snapshot RetrievalSnapshot, publish func() error) error {
+	if resolver == nil || resolver.Postgres == nil || resolver.Postgres.pool == nil {
+		return ErrCatchUpUnavailable
+	}
+	tx, err := resolver.Postgres.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(ctx, `LOCK TABLE purge_ledger IN SHARE MODE`); err != nil {
+		return ErrRetrievalSnapshotStale
+	}
+	current, err := resolver.EpisodePurge.CurrentPurgeGeneration(ctx, snapshot.TenantID)
+	if err != nil || current != snapshot.PurgeGeneration {
+		return ErrRetrievalSnapshotStale
+	}
+	if err := publish(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // withCanonicalCatchUpSourceFence holds exact source objects and their grant
@@ -786,11 +897,32 @@ func configureProductionCatchUpResolver(app *kanbanBoardApp) {
 		Memory: app.memory, Objects: aclBrainCurrentObjectResolver{Store: runtime.postgres}, Kernel: AuthorizationKernel{Store: runtime.postgres}, Purge: purge,
 		Consent: appBrainSourceConsentVerifier{App: app}, Now: func() time.Time { return time.Now().UTC() },
 	}
+	if app.sourceEpisodes == nil || app.sourceEpisodeRegistry == nil || app.postgresMeetingSourceEpisodes == nil {
+		return
+	}
+	catalog, err := NewCompositeSourceEpisodeCatalog(app.sourceEpisodes, app.postgresMeetingSourceEpisodes)
+	if err != nil {
+		return
+	}
+	adapter, err := NewSourceEpisodeShadowBrainAdapter(catalog, app.sourceEpisodeRegistry, 128, func() time.Time { return time.Now().UTC() })
+	if err != nil {
+		return
+	}
+	canonicalPurge := &CanonicalSourceEpisodePurgeResolver{Canonical: purge, Ledger: app.sourceEpisodes, Now: func() time.Time { return time.Now().UTC() }}
+	limits := BrainPromptLimits{MaxSourceChunkBytes: 8 << 10, MaxPromptBytes: 64 << 10, MaxFoldInputs: 8, MaxFoldOutputBytes: 4 << 10}
+	planner, err := NewSourceEpisodeCatalogPlanner(adapter, catalog, app.sourceEpisodeRegistry, canonicalPurge, runtime.postgres, limits)
+	if err != nil {
+		return
+	}
+	emptyLive := emptyLiveBrainSourceAdapter{now: func() time.Time { return time.Now().UTC() }}
+	livePlanner := BrainRetrievalPlanner{Inventory: emptyLive, Bodies: emptyLive, Kernel: planner.Kernel, Purge: canonicalPurge, PromptLimits: limits}
 	resolver := &productionCatchUpResolver{
-		Sources: sources, Postgres: runtime.postgres, TenantID: runtime.tenantID,
-		Planner: BrainRetrievalPlanner{
-			Inventory: sources, Bodies: sources, Kernel: AuthorizationKernel{Store: runtime.postgres}, Purge: purge,
-			PromptLimits: BrainPromptLimits{MaxSourceChunkBytes: 8 << 10, MaxPromptBytes: 64 << 10, MaxFoldInputs: 8, MaxFoldOutputBytes: 4 << 10},
+		Sources: sources, Postgres: runtime.postgres, TenantID: runtime.tenantID, Planner: planner, LivePlanner: &livePlanner,
+		EpisodeCatalog: catalog, EpisodeAuthority: app.sourceEpisodeRegistry, EpisodePurge: canonicalPurge,
+		SourceOnly: true,
+		LiveSitting: func(roomID, sittingID string) bool {
+			record, found := app.meetings.recordByID(sittingID)
+			return found && record.EndedAt == "" && meetingRoomID(record) == normalizeRoomID(roomID)
 		},
 	}
 	app.catchUpRecapResolver = resolver

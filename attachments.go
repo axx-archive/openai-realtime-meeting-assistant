@@ -1710,6 +1710,7 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 			if ref.RootRunID == "" && ref.ParentRunID == "" {
 				ref.RootRunID = strings.TrimSpace(ref.ID)
 			}
+			ref.WorkRun = app.projectSTRIDEWorkRunSideCard(ref.ID)
 			projected.Messages[messageIndex].Thread = &ref
 		}
 		if original.Work != nil {

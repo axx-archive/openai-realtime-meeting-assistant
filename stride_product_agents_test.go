@@ -54,13 +54,19 @@ func TestSTRIDEProductMarketplaceLeadsWithCurrentTeamIdentities(t *testing.T) {
 	}
 }
 
-func TestSTRIDEProductMemberMarketplaceContainsOnlyCurrentTeam(t *testing.T) {
+func TestSTRIDEProductCustomerRosterIsFixedToThreeAddressableRoles(t *testing.T) {
 	state := NewSTRIDEProductState()
-	if catalog := state.candidateCatalogForViewer(false); len(catalog) != 1 || catalog[0].ID != "scout" {
-		t.Fatalf("member catalog before hire=%v, want included Scout only", catalog)
+	wantIDs := []string{"scout", "researcher", "presenter"}
+	if catalog := state.candidateCatalogForViewer(false); len(catalog) != 3 || catalog[0].ID != wantIDs[0] || catalog[1].ID != wantIDs[1] || catalog[2].ID != wantIDs[2] {
+		t.Fatalf("customer roster before compatibility hire=%v, want %v", catalog, wantIDs)
 	}
-	if adminCatalog := state.candidateCatalogForViewer(true); len(adminCatalog) < 3 {
-		t.Fatalf("administrator catalog unexpectedly filtered: %v", adminCatalog)
+	if adminCatalog := state.candidateCatalogForViewer(true); len(adminCatalog) != 3 {
+		t.Fatalf("administrator customer roster must not become a marketplace: %v", adminCatalog)
+	}
+	for _, id := range []string{"researcher", "presenter"} {
+		if _, err := state.beginTrial(id, "member_aj", time.Now().UTC()); err != ErrSTRIDEProductDenied {
+			t.Fatalf("fixed role %q entered legacy hire funnel: %v", id, err)
+		}
 	}
 
 	now := time.Date(2026, 8, 5, 20, 0, 0, 0, time.UTC)
@@ -68,8 +74,8 @@ func TestSTRIDEProductMemberMarketplaceContainsOnlyCurrentTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if catalog := state.candidateCatalogForViewer(false); len(catalog) != 1 || catalog[0].ID != "scout" {
-		t.Fatalf("trial seat leaked into member catalog: %v", catalog)
+	if catalog := state.candidateCatalogForViewer(false); len(catalog) != 3 {
+		t.Fatalf("legacy trial changed fixed customer roster: %v", catalog)
 	}
 	_, err = state.mutateAgent(trial.ID, trial.Revision, func(agent *STRIDEProductTeamAgent) error {
 		agent.Status = "hired_fenced"
@@ -81,8 +87,22 @@ func TestSTRIDEProductMemberMarketplaceContainsOnlyCurrentTeam(t *testing.T) {
 		t.Fatal(err)
 	}
 	catalog := state.candidateCatalogForViewer(false)
-	if len(catalog) != 2 || catalog[0].ID != "scout" || catalog[1].ID != "colton-research" {
-		t.Fatalf("member catalog after hire=%v, want Scout and Colton", catalog)
+	if len(catalog) != 3 || catalog[0].ID != "scout" || catalog[1].ID != "researcher" || catalog[2].ID != "presenter" {
+		t.Fatalf("legacy hire changed fixed customer roster: %v", catalog)
+	}
+}
+
+func TestSTRIDEProductAddressableSpecialistsHaveDistinctLearningAndOutputContracts(t *testing.T) {
+	state := NewSTRIDEProductState()
+	researcher, researchOK := state.addressableAgentContextProfile("agent_researcher")
+	presenter, presentationOK := state.addressableAgentContextProfile("agent_presenter")
+	if !researchOK || !presentationOK {
+		t.Fatalf("fixed specialists unavailable: researcher=%v presenter=%v", researchOK, presentationOK)
+	}
+	if !containsSTRIDEID(researcher.Capabilities, "deep_research") || containsSTRIDEID(presenter.Capabilities, "deep_research") ||
+		!containsSTRIDEID(presenter.Capabilities, "presentation_deck") || researcher.MemoryPolicy == "" || presenter.MemoryPolicy == "" ||
+		researcher.AgentID == presenter.AgentID || researcher.Digest == presenter.Digest {
+		t.Fatalf("specialist contracts are not distinct and governed: researcher=%#v presenter=%#v", researcher, presenter)
 	}
 }
 

@@ -753,7 +753,8 @@ func (app *kanbanBoardApp) updateOSArtifact(id string, title string, text string
 		updatedBy = rawUpdatedBy
 	}
 
-	return app.memory.updateOSArtifact(id, title, text, updatedBy)
+	entry, changed, err := app.memory.updateOSArtifact(id, title, text, updatedBy)
+	return entry, changed, err
 }
 
 func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {

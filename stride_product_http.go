@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,12 @@ func strideProductMarketplaceRoute(w http.ResponseWriter, r *http.Request) {
 }
 func strideProductRosterRoute(w http.ResponseWriter, r *http.Request) {
 	strideProductRosterHandle(w, r)
+}
+
+const strideLegacyRosterMutationEnv = "STRIDE_ADMIN_LEGACY_ROSTER_MUTATIONS"
+
+func strideLegacyRosterMutationEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv(strideLegacyRosterMutationEnv)), "true")
 }
 
 func strideProductAuthenticated(w http.ResponseWriter, r *http.Request, methods ...string) (*userAccount, *STRIDERuntime, bool) {
@@ -70,13 +77,13 @@ func decodeSTRIDEProductBody(w http.ResponseWriter, r *http.Request, value any) 
 func writeSTRIDEProductError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest
 	switch {
-	case errors.Is(err, ErrSTRIDEProductDisabled):
+	case errors.Is(err, ErrSTRIDEProductDisabled), errors.Is(err, ErrSTRIDELearningUnavailable):
 		status = http.StatusServiceUnavailable
 	case errors.Is(err, ErrSTRIDEProductUnknown):
 		status = http.StatusNotFound
-	case errors.Is(err, ErrSTRIDEProductConflict):
+	case errors.Is(err, ErrSTRIDEProductConflict), errors.Is(err, ErrSTRIDELearningGate):
 		status = http.StatusConflict
-	case errors.Is(err, ErrSTRIDEWorkSourceChanged):
+	case errors.Is(err, ErrSTRIDEWorkSourceChanged), errors.Is(err, ErrSTRIDELearningPrivacy):
 		status = http.StatusGone
 	case errors.Is(err, ErrSTRIDEProductDenied), errors.Is(err, ErrSTRIDEAdminRequired):
 		status = http.StatusForbidden
@@ -1327,11 +1334,19 @@ func strideProductMarketplaceHandle(w http.ResponseWriter, r *http.Request) {
 			writeSTRIDEProductError(w, err)
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "listing": candidate, "liveAdmissionFenced": true})
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "listing": candidate, "liveAdmissionFenced": candidate.ProviderExecutionFenced})
 		return
 	}
 	if len(parts) != 2 || r.Method != http.MethodPost {
 		http.NotFound(w, r)
+		return
+	}
+	if (parts[1] == "trial" || parts[1] == "hire") && !strideLegacyRosterMutationEnabled() {
+		writeAuthJSON(w, http.StatusGone, map[string]any{
+			"ok":      false,
+			"error":   "Agent trials and hiring are retired. Scout, Researcher, and Presenter are included in governed Work and conversations.",
+			"retired": true,
+		})
 		return
 	}
 	if !isArtifactApprovalAdmin(user) {
@@ -1519,11 +1534,28 @@ func strideProductRosterHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		var agent STRIDEProductTeamAgent
 		err := runtime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-			var e error
-			agent, e = ctx.Product.resolveAgentLearning(id, body.Revision, parts[2], parts[3], body.Summary, now)
-			return e
+			current, found := ctx.Product.agentRecord(id)
+			if !found {
+				return ErrSTRIDEProductUnknown
+			}
+			return kanbanApp.authorizeCompletedWorkLearningResolution(current, parts[2], parts[3], strideRuntimePrincipalForEmail(user.Email), now, func() error {
+				var mutationErr error
+				agent, mutationErr = ctx.Product.resolveAgentLearning(id, body.Revision, parts[2], parts[3], body.Summary, now)
+				if mutationErr != nil {
+					return mutationErr
+				}
+				if persistErr := ctx.Persist(); persistErr != nil {
+					ctx.Product.restoreAgentSnapshot(current)
+					return persistErr
+				}
+				return nil
+			})
 		})
-		strideProductWriteAgentMutation(w, runtime, agent, err)
+		if err != nil {
+			writeSTRIDEProductError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "seat": agent, "providerSessionStarted": false})
 		return
 	}
 	http.NotFound(w, r)

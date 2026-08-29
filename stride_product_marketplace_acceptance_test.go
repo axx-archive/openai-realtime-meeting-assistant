@@ -18,6 +18,12 @@ func TestSTRIDEProductCatalogStagesFiveDistinctFirstPartyListingsWithRichFencedD
 		if _, expected := wanted[candidate.Category]; expected {
 			wanted[candidate.Category] = true
 		}
+		if oneOf(candidate.ID, "scout", "researcher", "presenter") {
+			if candidate.Availability != "included" || !candidate.LiveAvailable || candidate.ProviderExecutionFenced || !candidate.ReceiptStatus["providerQuality"] || !candidate.ReceiptStatus["humanAdmission"] {
+				t.Fatalf("fixed role is not live and included: %#v", candidate)
+			}
+			continue
+		}
 		if candidate.LiveAvailable || !candidate.ProviderExecutionFenced || candidate.Availability != "internal_preview" || candidate.Visibility != "organization" || candidate.UpdatePolicy != "human_approval" ||
 			len(candidate.Capabilities) == 0 || len(candidate.RequiredAccess) == 0 || candidate.AccessSummary == "" || candidate.CostBand == "" || candidate.Publisher != "STRIDE" || candidate.Version == "" || candidate.MemoryPolicy == "" || !isHexDigest(candidate.PackageDigest) ||
 			candidate.ReceiptStatus["providerQuality"] || candidate.ReceiptStatus["humanAdmission"] {

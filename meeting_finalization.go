@@ -893,6 +893,8 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 		if record.Finalization != nil && record.Finalization.State == meetingFinalizationFinalized && record.Finalization.Source.equal(source) {
 			if app.meetingFinalizationOutputsReady(record) {
 				app.clearFinalizedLiveTemporalBrain(record)
+				app.publishFinalizedMeetingSourceEpisodeFailSoft(ctx, record)
+				app.scheduleMeetingSourceEpisodeRetrySweep()
 				return record, nil
 			}
 			record, err = app.meetings.beginFinalizationAtRevision(meetingID, source, observedRevision, true, time.Now().UTC())
@@ -915,6 +917,7 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 			}
 			if err == nil {
 				app.clearFinalizedLiveTemporalBrain(finalized)
+				app.scheduleMeetingSourceEpisodeRetrySweep()
 			}
 			return finalized, err
 		}
@@ -994,6 +997,8 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 		}
 		if err == nil {
 			app.clearFinalizedLiveTemporalBrain(finalized)
+			app.publishFinalizedMeetingSourceEpisodeFailSoft(ctx, finalized)
+			app.scheduleMeetingSourceEpisodeRetrySweep()
 		}
 		return finalized, err
 	}
@@ -1211,6 +1216,9 @@ func (app *kanbanBoardApp) handleDurableTranscriptCommit(entry meetingMemoryEntr
 	if !found || record.EndedAt == "" {
 		return
 	}
+	if episode, active := app.activeMeetingSourceEpisodeForMutation(meetingID); active {
+		go app.retractMeetingSourceEpisodeForMutation(meetingID, "transcript_source_changed", episode)
+	}
 	app.meetingFinalizationRunMu.Lock()
 	publishing := app.meetingArchivePublishing[record.ID]
 	app.meetingFinalizationRunMu.Unlock()
@@ -1231,6 +1239,9 @@ func (app *kanbanBoardApp) handleMeetingFinalizationOutputMutation(entry meeting
 	record, found := app.meetings.recordByID(meetingID)
 	if !found || record.EndedAt == "" || record.Finalization == nil {
 		return
+	}
+	if episode, active := app.activeMeetingSourceEpisodeForMutation(meetingID); active {
+		go app.retractMeetingSourceEpisodeForMutation(meetingID, "analysis_output_changed", episode)
 	}
 	app.scheduleMeetingCoreFinalization(meetingID)
 }
@@ -1613,6 +1624,7 @@ func (app *kanbanBoardApp) auditMeetingFinalizationsAfterBoot(records []meetingR
 				if record.ArchiveID != "" && record.Finalization.ArchiveSyncedAt == "" {
 					app.refreshMeetingArchiveFinalization(record)
 				}
+				app.publishFinalizedMeetingSourceEpisodeFailSoft(context.Background(), record)
 				continue
 			}
 			if _, err := app.meetings.beginFinalizationAtRevision(record.ID, source, observedRevision, true, time.Now().UTC()); err != nil {

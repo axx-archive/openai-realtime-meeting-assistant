@@ -173,7 +173,7 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 	}
 	for _, want := range []string{
 		"optimisticMessage.dataset.delivery = 'sending'",
-		"optimisticState.textContent = 'not sent'",
+		"optimisticState.textContent = 'not sent · draft restored'",
 		"function updateDesktopChatReaction(messageId, emoji, set, options = {})",
 		"method: intent.requested ? 'PUT' : 'DELETE'",
 		"queueMicrotask(() => void flushDesktopChatReactionIntent(intent))",
@@ -352,12 +352,16 @@ func TestDesktopThreadReplyRailMatchesFeedMediaAndComposerCapabilities(t *testin
 		"appendChatRichTextNodes(body, rawText)",
 		"appendChatMentionTextNodes(body, rawText)",
 		"mountDesktopChatLinkPreview(content, rawText)",
-		"desktopContextReactionRowNode(message)",
+		"attachDesktopContextMessageActions(thread, message, card, options)",
 		"sourceRow.setAttribute('aria-label', 'Reply sources')",
 	} {
 		if !strings.Contains(card, want) {
 			t.Errorf("desktop reply rendering parity missing %q", want)
 		}
+	}
+	interactions := functionBodyAfterSignature(html, "function attachDesktopContextMessageActions(thread, message, card, options = {})")
+	if !strings.Contains(interactions, "desktopContextReactionRowNode(message)") {
+		t.Error("desktop reply interactions no longer project the durable reaction row")
 	}
 	for _, want := range []string{
 		".chat-context-card--message .scout-chat-files",
@@ -425,10 +429,10 @@ func TestDesktopReplyMutationsDoNotRebuildMainFeed(t *testing.T) {
 
 	for signature, wants := range map[string][]string{
 		"function submitDesktopThreadReply(event)": {
-			"syncDesktopReplySurfaces(payload.thread, state.rootMessageId",
+			"syncDesktopReplySurfaces(merged, sourceRootMessageId",
 		},
 		"function beginDesktopContextMessageEdit(thread, message, card)": {
-			"syncDesktopReplySurfaces(payload.thread, root?.id",
+			"syncDesktopReplySurfaces(merged, root?.id",
 		},
 		"function deleteDesktopContextMessage(thread, message, control)": {
 			"syncDesktopReplySurfaces(payload.thread, root?.id",
@@ -487,7 +491,7 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 	for _, want := range []string{
 		"const feedMessages = desktopChatLayoutQuery.matches",
 		"messages.filter(message => !message?.replyTo?.messageId)",
-		"boundedFeedMessages.forEach((message, messageIndex) =>",
+		"projectedFeedMessages.forEach((message, messageIndex) =>",
 	} {
 		if !strings.Contains(renderBody, want) {
 			t.Errorf("desktop root-only feed projection missing %q", want)
@@ -513,7 +517,7 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 		"if (chatContextState.mode === 'thread')",
 		"const feedMessages = desktopChatLayoutQuery.matches",
 		"messages.filter(message => !message?.replyTo?.messageId)",
-		"boundedFeedMessages.forEach((message, messageIndex) =>",
+		"projectedFeedMessages.forEach((message, messageIndex) =>",
 		"openDesktopMessageContext(message, document.activeElement)",
 	} {
 		if !strings.Contains(html, want) {
@@ -629,8 +633,8 @@ func TestDesktopWorkContextReconcilesDurableTerminalState(t *testing.T) {
 		"researchArtifactSources(artifact)",
 		"desktopWorkFamily",
 		"desktopSafeWorkNote",
-		"desktopSaveToDriveControl(artifact)",
-		"artifactPdfControl(artifact",
+		"desktopSaveToDriveControl(terminalResultArtifact",
+		"artifactPdfControl(terminalResultArtifact",
 		"'Regenerate'",
 		"Terminal socket/poll updates must",
 	} {

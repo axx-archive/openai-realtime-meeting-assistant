@@ -11,7 +11,18 @@ import (
 	"time"
 )
 
-const meetingSpecialistProductBodyLimit = 16 << 10
+const (
+	meetingSpecialistProductBodyLimit                   = 16 << 10
+	legacyMeetingSpecialistCustomerMutationsEnvironment = "STRIDE_LEGACY_MEETING_SPECIALIST_CUSTOMER_MUTATIONS_ENABLED"
+)
+
+func legacyMeetingSpecialistCustomerMutationsEnabled() bool {
+	return boolEnv(legacyMeetingSpecialistCustomerMutationsEnvironment)
+}
+
+func rejectRetiredMeetingSpecialistMutation(w http.ResponseWriter) {
+	writeAuthError(w, http.StatusGone, "Meeting specialist invitations are retired. Scout is the only meeting participant agent; Researcher and Presenter work through governed Work.")
+}
 
 type appMeetingSpecialistProductAuthority struct {
 	app     *kanbanBoardApp
@@ -241,6 +252,10 @@ func meetingSpecialistRecommendationHandler(w http.ResponseWriter, r *http.Reque
 		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !legacyMeetingSpecialistCustomerMutationsEnabled() {
+		rejectRetiredMeetingSpecialistMutation(w)
+		return
+	}
 	user, product, ok := meetingSpecialistRequestContext(w, r)
 	if !ok {
 		return
@@ -280,6 +295,10 @@ func meetingSpecialistProductStatusHandler(w http.ResponseWriter, r *http.Reques
 func meetingSpecialistProductInvitationHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !legacyMeetingSpecialistCustomerMutationsEnabled() {
+		rejectRetiredMeetingSpecialistMutation(w)
 		return
 	}
 	user, product, ok := meetingSpecialistRequestContext(w, r)

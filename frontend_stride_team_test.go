@@ -6,184 +6,92 @@ import (
 	"testing"
 )
 
-func TestFrontendAgentTeamReachesAuthenticatedFencedProductLifecycles(t *testing.T) {
+func strideContractedShell(t *testing.T) string {
+	t.Helper()
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	html := string(source)
-	for _, want := range []string{
-		`data-tool="team"`,
-		`id="teamTool"`,
-		`/api/stride/v1/status`,
-		`/api/stride/v1/roster`,
-		`/api/stride/v1/marketplace`,
-		`/api/stride/v1/work`,
-		`profiles are read-only`,
-		`Best used for`,
-		`usageGuidance`,
-		`const teamListings = strideMarketplaceRecords.filter`,
-		`IDs are transport identifiers, not display copy`,
-		`const id = String(`,
-		`function scoutChatDirectAgentName(thread)`,
-		`const privateTarget = directAgent || 'Scout'`,
-		`Approve & run`,
-		`Edit scope`,
-		`provider execution fenced`,
-		`activation fenced`,
-		`strideTeamJSON`,
-		`credentials: 'same-origin'`,
-		`'Content-Type': 'application/json'`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("agent team surface is missing %q", want)
-		}
-	}
-	cardStart := strings.Index(html, "function strideAgentCard(record, kind)")
-	if cardStart < 0 {
-		t.Fatal("could not isolate member-facing agent card")
-	}
-	cardEnd := strings.Index(html[cardStart:], "function strideList(value)")
-	if cardEnd < 0 {
-		t.Fatal("could not isolate member-facing agent card")
-	}
-	card := html[cardStart : cardStart+cardEnd]
-	for _, forbidden := range []string{`Start preview`, `Hire with approval`, `Create private agent`} {
-		if strings.Contains(card, forbidden) {
-			t.Fatalf("member-facing team surface retained workforce control %q", forbidden)
-		}
-	}
+	return string(source)
+}
+
+func TestFrontendRetiredMarketplaceTeamAndNetworkSurfacesAreRemoved(t *testing.T) {
+	html := strideContractedShell(t)
 	for _, forbidden := range []string{
-		`tenantId=`,
-		`orgId=`,
-		`Mary · Marketing Agent`,
-	} {
-		if strings.Contains(html, forbidden) {
-			t.Fatalf("agent team surface embeds forbidden activation/demo path %q", forbidden)
-		}
-	}
-}
-
-func TestFrontendAgentTeamUsesTextNodesForRuntimeRecords(t *testing.T) {
-	source, err := os.ReadFile("index.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(source)
-	start := strings.Index(html, "function strideAgentCard")
-	if start < 0 {
-		t.Fatal("could not isolate agent card renderer")
-	}
-	end := strings.Index(html[start:], "async function strideTeamJSON")
-	if end < 0 {
-		t.Fatal("could not isolate agent card renderer")
-	}
-	renderer := html[start : start+end]
-	if strings.Contains(renderer, "innerHTML") {
-		t.Fatal("agent card renderer must not interpolate runtime records into HTML")
-	}
-	if !strings.Contains(renderer, "textContent") || !strings.Contains(renderer, "createElement") {
-		t.Fatal("agent card renderer must build escaped DOM text nodes")
-	}
-}
-
-func TestFrontendAgentTeamSurfacesRichReadOnlyProfiles(t *testing.T) {
-	source, err := os.ReadFile("index.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(source)
-	for _, want := range []string{
+		`id="workToolMenu"`,
+		`id="teamTool"`,
+		`id="strideW2Surface"`,
+		`id="strideMarketplacePanel"`,
 		`id="strideAgentDetail"`,
-		`Details`,
-		`Best used for`,
-		`Personality`,
-		`Skills`,
-		`Access`,
-		`Memory`,
-		`Sample outcomes`,
-		`Identity and provenance`,
-		`Responsibilities`,
-		`Identity and authority`,
-		`Open private chat`,
-		`future administrator surface`,
-		`strideMarketplaceCanManage = false`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("rich agent details are missing %q", want)
-		}
-	}
-	detailStart := strings.Index(html, "function openStrideAgentDetail(record, kind)")
-	if detailStart < 0 {
-		t.Fatal("could not isolate read-only agent detail")
-	}
-	detailEnd := strings.Index(html[detailStart:], "strideAgentDetailClose?.addEventListener")
-	if detailEnd < 0 {
-		t.Fatal("could not isolate read-only agent detail")
-	}
-	detail := html[detailStart : detailStart+detailEnd]
-	for _, forbidden := range []string{`appendStrideMarketplaceControls`, `appendStrideRosterControls`, `Propose update`, `Pause coworker`, `Offboard coworker`} {
-		if strings.Contains(detail, forbidden) {
-			t.Fatalf("read-only agent detail retained control %q", forbidden)
-		}
-	}
-}
-
-func TestFrontendMemberSurfaceDoesNotExposePrivateAgentAuthoring(t *testing.T) {
-	source, err := os.ReadFile("index.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(source)
-	for _, forbidden := range []string{`id="stridePrivateAgentCreate"`, `Create private agent`} {
-		if strings.Contains(html, forbidden) {
-			t.Fatalf("member-facing surface exposes private agent authoring %q", forbidden)
-		}
-	}
-}
-
-func TestFrontendAgentExportReceiptNamesEveryExcludedPrivateClass(t *testing.T) {
-	source, err := os.ReadFile("index.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(source)
-	for _, want := range []string{
-		`tenant data: excluded`,
-		`credentials: excluded`,
-		`memory: excluded`,
-		`assignments: excluded`,
-		`private evidence: excluded`,
-		`historicalAttributionHash`,
-		`provider execution fenced:`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("clean export receipt is missing %q", want)
-		}
-	}
-}
-
-func TestFrontendSuggestedWorkRequiresAnExplicitProjectDestination(t *testing.T) {
-	source, err := os.ReadFile("index.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	html := string(source)
-	for _, want := range []string{
+		`id="stridePrivateAgentCreate"`,
 		`id="strideProjectPicker"`,
-		`Choose project`,
-		`thread.visibility === 'public'`,
-		`thread.table !== true`,
-		`title !== 'team'`,
-		`title !== 'general'`,
-		`body: { revision, mode: 'existing', threadId: thread.id }`,
-		`body: { revision, mode: 'new', title: threadTitle }`,
+		`data-tool="team"`,
+		`/api/stride/v1/marketplace`,
+		`/api/stride/v1/roster`,
+		`Start preview`,
+		`Hire with approval`,
+		`Create private agent`,
+		`Curated marketplace`,
+		`Work Search is not yet available`,
 	} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("explicit project chooser is missing %q", want)
+		if strings.Contains(html, forbidden) {
+			t.Errorf("retired customer-shell concept remains: %q", forbidden)
 		}
 	}
-	if strings.Contains(html, `Use source thread`) {
-		t.Fatal("suggested work may not silently bind to its source conversation")
+}
+
+func TestFrontendRetiredRoutesConvergeWithoutLoadingProjectionData(t *testing.T) {
+	html := strideContractedShell(t)
+	start := strings.Index(html, `const retiredNetworkPath =`)
+	if start < 0 {
+		t.Fatal("retired route compatibility redirect is missing")
+	}
+	end := strings.Index(html[start:], `})()`)
+	if end < 0 {
+		t.Fatal("could not isolate retired route compatibility redirect")
+	}
+	redirect := html[start : start+end]
+	for _, marker := range []string{
+		`path === '/me'`,
+		`path === '/work-search'`,
+		`path === '/work-record'`,
+		`path === '/team'`,
+		`path === '/people'`,
+		`path === '/org/people'`,
+		`path === '/org/requests'`,
+		`path === '/org/contributions'`,
+		`path === '/marketplace'`,
+		`path === '/network'`,
+		`path.startsWith('/network/')`,
+		`path === '/tools'`,
+		`path === '/agents'`,
+		`const destination = retiredWorkPath(path) ? 'Work' : 'Home'`,
+		`history.replaceState(`,
+		`selectPD1Destination(destination, { push: false`,
+	} {
+		if !strings.Contains(redirect, marker) {
+			t.Errorf("retired route contract missing %q", marker)
+		}
+	}
+	for _, forbidden := range []string{"fetch(", "strideTeamJSON", "loadStrideTeamSurface", "openStrideContributionSurface"} {
+		if strings.Contains(redirect, forbidden) {
+			t.Errorf("retired route redirect loads or mounts projection state: %q", forbidden)
+		}
+	}
+}
+
+func TestFrontendGovernedAgentMentionsRemainAddressable(t *testing.T) {
+	html := strideContractedShell(t)
+	for _, marker := range []string{
+		`function mentionRosterCandidates()`,
+		`desktopChatMentionCandidates.forEach(candidate =>`,
+		`if (!desktopChatParticipantDirectoryLoaded) void ensureDesktopChatParticipantDirectory()`,
+		`kind === 'agent'`,
+		`roleTitle || 'Specialist'`,
+		`const privateTarget = directAgent || 'Scout'`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("governed agent mention addressability missing %q", marker)
+		}
 	}
 }

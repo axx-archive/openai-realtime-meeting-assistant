@@ -701,6 +701,7 @@ func strideE10AgenticLabMeetingFixtureScript() string {
 
 func configureStrideE10AgenticLabEnv(t *testing.T) string {
 	t.Helper()
+	t.Setenv(strideLegacyRosterMutationEnv, "true")
 	for _, key := range []string{
 		"OPENAI_API_KEY", "OPENAI_REALTIME_API_KEY", "OPENAI_TRANSCRIPTION_API_KEY",
 		"ANTHROPIC_API_KEY", "FISCAL_API_KEY", "FISCAL_AI_API_KEY",

@@ -466,7 +466,8 @@ func (app *kanbanBoardApp) startAcceptedPublicScoutWork(
 
 	rootCard.Thread = &scoutChatThreadRef{ID: launched.ID, Mode: launched.Mode, ProcessID: launched.Artifact.Metadata["processId"], Query: launched.Query, Status: launched.Status, ArtifactID: launched.Artifact.ID,
 		OutputFamily: firstNonEmptyString(scoutChatOutputFamilyForArtifact(launched.Artifact), scoutChatOutputFamilyForMode(launched.Mode)),
-		ProjectID:    launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"]}
+		ProjectID:    launched.Artifact.Metadata["projectWorkId"], ProjectTitle: launched.Artifact.Metadata["projectWorkTitle"],
+		WorkRunRequired: strideWorkRunOutputKind(launched) != ""}
 	rootCard.Text = firstNonEmptyString(strings.TrimSpace(label), "Work") + " in progress"
 	if studioProjectKindForProcessID(launched.Artifact.Metadata["processId"]) != "" {
 		rootCard.Text = studioProjectLaunchCopy(launched.Artifact.Metadata["processId"], firstNonEmptyString(strings.TrimSpace(label), "Work"))
@@ -481,6 +482,7 @@ func (app *kanbanBoardApp) startAcceptedPublicScoutWork(
 			rootCard.Thread = scoutChatThreadRefForAgent(launched, delegatedProfile, scoutParticipantName)
 		}
 	}
+	rootCard.Thread.WorkRunRequired = strideWorkRunOutputKind(launched) != ""
 	saved, assistantMessage, err := app.upsertAcceptedPublicWorkCard(user.Email, thread.ID, rootCard)
 	if err != nil {
 		return nil, fmt.Errorf("work reserved but its channel projection needs reconciliation: %w", err)
@@ -572,6 +574,13 @@ func (app *kanbanBoardApp) activateAcceptedPublicConversationWork(thread scoutAg
 		app.failAcceptedPublicConversationWorkPermanently(thread, err)
 		return thread, err
 	}
+	// The accepted source, reserved artifact, and visible root card are durable
+	// at this point. Establish the replayable customer activity ledger before
+	// provider activation; retries append no duplicate events.
+	if err := app.ensureSTRIDEPublicWorkRun(thread); err != nil {
+		app.forgetOpenAIToolActiveRun(current.ID)
+		return thread, fmt.Errorf("public conversation work activity is unavailable: %w", err)
+	}
 	if strings.TrimSpace(current.Metadata["worker"]) == agentThreadWorkerOpenAI {
 		prepared, err := app.preparePublicConversationProviderRequest(thread)
 		if err != nil {
@@ -600,6 +609,9 @@ func (app *kanbanBoardApp) activateAcceptedPublicConversationWork(thread scoutAg
 	broadcastSignedInKanbanEvent("memory", nil)
 	broadcastAssistantEvent("action", assistantToolLabel(thread.Mode)+" thread launched", agentThreadBroadcastMetadata("launch_agent_thread", thread.ID, thread.Status, "listening"))
 	startAgentThreadAsync(app, thread)
+	// Shadow cognition is strictly additive. Schedule only after the legacy
+	// provider path has been launched, and never wait for or surface its result.
+	app.launchSTRIDELeadShadowAsync(thread)
 	return thread, nil
 }
 

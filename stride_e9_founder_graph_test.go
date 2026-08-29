@@ -95,6 +95,7 @@ type e9FounderChatResponse struct {
 }
 
 func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
+	t.Setenv(strideLegacyRosterMutationEnv, "true")
 	for _, key := range []string{
 		"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "FISCAL_API_KEY", "FISCAL_AI_API_KEY",
 		"OPENAI_REALTIME_API_KEY", "OPENAI_TRANSCRIPTION_API_KEY",
@@ -122,6 +123,7 @@ func TestE9DeterministicFounderGraphThroughProductEndpoints(t *testing.T) {
 	t.Setenv("STRIDE_RUNTIME_SNAPSHOT_MAC_KEY", base64.StdEncoding.EncodeToString(macKey))
 	t.Setenv("STRIDE_LOCAL_PRODUCT_PREVIEW_ENABLED", "true")
 	t.Setenv("STRIDE_MEETING_SPECIALIST_CONTROL_ENABLED", "true")
+	t.Setenv(legacyMeetingSpecialistCustomerMutationsEnvironment, "true")
 	activationPath := filepath.Join(dir, "meeting-specialist-control.json")
 	t.Setenv(meetingSpecialistControlActivationEnv, activationPath)
 	e9WriteFounderSpecialistActivation(t, activationPath, STRIDESnapshotMACAuthority{KeyID: "e9_founder_graph_key", Key: macKey}, 1000)

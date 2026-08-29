@@ -1137,6 +1137,9 @@ func (app *kanbanBoardApp) renameAssistantFileForUser(ctx context.Context, user 
 		if !changed && strings.TrimSpace(entry.Metadata["name"]) != name {
 			return assistantFileRecord{}, errFileSaveNotFound
 		}
+		if err := app.publishDriveFileSourceEpisode(updated); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
+			log.Errorf("SourceEpisode Drive rename publication unavailable: %v", err)
+		}
 		row = fileRecordFromEntry(updated)
 	}
 	_, assignments := sharedFileFolderStore().snapshot()
@@ -1208,9 +1211,14 @@ func (app *kanbanBoardApp) deleteAssistantFileForUser(ctx context.Context, user 
 		err = app.deleteChatAttachmentFromDrive(user, fileID)
 	default:
 		var deleted bool
-		_, deleted, err = app.memory.deleteEntryByID(fileID)
+		var deletedEntry meetingMemoryEntry
+		deletedEntry, deleted, err = app.memory.deleteEntryByID(fileID)
 		if err == nil && !deleted {
 			err = errFileSaveNotFound
+		} else if err == nil {
+			if publishErr := app.tombstoneDriveFileSourceEpisode(deletedEntry, time.Now().UTC()); publishErr != nil && !errors.Is(publishErr, ErrSourceEpisodeUnavailable) {
+				log.Errorf("SourceEpisode Drive deletion publication unavailable: %v", publishErr)
+			}
 		}
 	}
 	if err != nil {
@@ -1409,6 +1417,9 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := kanbanApp.publishDriveFileSourceEpisode(entry); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
+		log.Errorf("SourceEpisode Drive upload publication unavailable: %v", err)
+	}
 
 	row := fileRecordFromEntry(entry)
 	if _, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
@@ -1588,6 +1599,9 @@ func (app *kanbanBoardApp) saveChatAttachmentToFilesBound(ctx context.Context, u
 			}
 			return assistantFileRecord{}, err
 		}
+	}
+	if err := app.publishDriveFileSourceEpisode(entry); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
+		log.Errorf("SourceEpisode promoted Drive publication unavailable: %v", err)
 	}
 	row := fileRecordFromEntry(entry)
 	if principal != nil {

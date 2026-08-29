@@ -102,71 +102,17 @@ func TestIndexTitleIsStride(t *testing.T) {
 	}
 }
 
-// The hidden legacy palette may retain its fixture fields, but the final shim
-// must discard them and re-enter natural-language routing.
-func TestPalettePackagePickerWired(t *testing.T) {
+func TestPalettePackagePickerIsRetired(t *testing.T) {
 	raw, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatalf("read index.html: %v", err)
 	}
 	html := string(raw)
 
-	// The picker builder exists and sources options from the packages list.
-	builder := functionBody(html, "function paletteBuildPackageField()")
-	if builder == "" {
-		t.Fatal("index.html missing paletteBuildPackageField")
-	}
-	for _, want := range []string{"palette__pkg-select", "populatePalettePackageOptions", "loadPackages()"} {
-		if !strings.Contains(builder, want) {
-			t.Errorf("paletteBuildPackageField missing %q", want)
+	for _, retired := range []string{"function paletteBuildPackageField", "function paletteShowForm", "function paletteRunForm", "function paletteSelectTool", "function runGoalPipeline"} {
+		if strings.Contains(html, retired) {
+			t.Errorf("retired client palette branch remains: %q", retired)
 		}
-	}
-
-	// The options come from the real packages list, standalone first.
-	populate := functionBody(html, "function populatePalettePackageOptions(select, preferredId)")
-	if populate == "" {
-		t.Fatal("index.html missing populatePalettePackageOptions")
-	}
-	for _, want := range []string{"packagesData", "standalone"} {
-		if !strings.Contains(populate, want) {
-			t.Errorf("populatePalettePackageOptions missing %q", want)
-		}
-	}
-
-	// The form actually mounts the picker.
-	form := functionBody(html, "function paletteShowForm(tool)")
-	if form == "" {
-		t.Fatal("index.html missing paletteShowForm")
-	}
-	if !strings.Contains(form, "paletteBuildPackageField()") {
-		t.Error("paletteShowForm must mount the package picker")
-	}
-	if !strings.Contains(form, "paletteRunForm(tool, fieldEls, pkgField.select)") {
-		t.Error("paletteShowForm's Run must pass the picked package to paletteRunForm")
-	}
-
-	// The form-run path forwards the picked package.
-	runForm := functionBody(html, "function paletteRunForm(tool, fieldEls, packageSelect)")
-	if runForm == "" {
-		t.Fatal("index.html missing paletteRunForm with a packageSelect param")
-	}
-	if !strings.Contains(runForm, "package: pkg") {
-		t.Error("paletteRunForm must forward the picked package to runGoalPipeline")
-	}
-
-	// The quick-run (⌘↵ / no-required-field) path defaults to the open package.
-	sel := functionBody(html, "function paletteSelectTool(tool, options)")
-	if sel == "" {
-		t.Fatal("index.html missing paletteSelectTool")
-	}
-	if !strings.Contains(sel, "package: paletteDefaultPackageId()") {
-		t.Error("paletteSelectTool quick-run must link to the default package")
-	}
-
-	// The compatibility shim cannot transmit the package or call a launch door.
-	pipeline := functionBody(html, "async function runGoalPipeline(spec)")
-	if !strings.Contains(pipeline, "sendScoutChat(objective)") || strings.Contains(pipeline, "spec.package") || strings.Contains(pipeline, "/assistant/goal") {
-		t.Error("runGoalPipeline must discard legacy package selection and re-enter conversation")
 	}
 }
 

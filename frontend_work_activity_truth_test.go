@@ -24,7 +24,9 @@ func TestDesktopWorkActivityNeverInventsProgress(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"const message = activeMessage",
+		"const workRunUnavailable = ref?.workRunRequired === true && !workRun",
+		"const replayedActivity = workRun ? workRun.activity : []",
+		"Activity is repairing from durable history. Provider-local status is hidden.",
 		"data-research-preview",
 		"data-research-provenance",
 		"compactArtifactPreview(String(artifact?.text || ''))",

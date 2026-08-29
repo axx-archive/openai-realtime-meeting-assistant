@@ -42,6 +42,7 @@ import {
 const digest = char => char.repeat(64)
 const execFileAsync = promisify(execFile)
 const releaseToolPath = fileURLToPath(new URL('./bonfire-release.mjs', import.meta.url))
+const dequalificationBridgePath = fileURLToPath(new URL('./private-realtime-dequalification-bridge.mjs', import.meta.url))
 const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 const releaseCommit = '1'.repeat(40)
 const configPaths = [
@@ -50,7 +51,7 @@ const configPaths = [
   'deploy/digitalocean/bonfire-render-runner-v1.apparmor',
   'deploy/digitalocean/bonfire-render-runner-v1.seccomp.json',
   'deploy/digitalocean/release-build-inputs.json', 'deploy/digitalocean/release-scope-policy.json',
-  'scripts/bonfire-release.mjs'
+  'scripts/bonfire-release.mjs', 'scripts/private-realtime-dequalification-bridge.mjs'
 ]
 const sidecarRefs = {
   canonicalPostgres: `postgres@sha256:${digest('a')}`,
@@ -510,6 +511,7 @@ async function fixtureFiles() {
     'deploy/digitalocean/stride-e10-w4-deployment-policy.json': `${JSON.stringify(w4CanaryPolicy, null, 2)}\n`,
     'deploy/digitalocean/release-scope-policy.json': `${JSON.stringify(policy, null, 2)}\n`,
     'scripts/bonfire-release.mjs': await readFile(releaseToolPath, 'utf8'),
+    'scripts/private-realtime-dequalification-bridge.mjs': await readFile(dequalificationBridgePath, 'utf8'),
     'stride-site/secret.txt': 'not a release input\n', 'data/kanban-board.json': '{}\n',
     'docs/evidence/e10/provider.jsonl': '{"untrusted":true}\n', 'mobile/App.tsx': 'unrelated\n',
     'main_test.go': 'package main\n'

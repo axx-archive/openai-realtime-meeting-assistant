@@ -383,6 +383,7 @@ func TestSTRIDEProjectDestinationAuthorityBindsTitleMembershipAndArchive(t *test
 
 func TestSTRIDEMarketplaceHireReplayCreatesOneDeterministicDirectThread(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv(strideLegacyRosterMutationEnv, "true")
 	app := newIsolatedKanbanBoardApp(t)
 	if app.strideRuntime != nil {
 		_ = app.strideRuntime.Close()

@@ -203,6 +203,13 @@ func chatAgentExplicitWorkAction(text string, targetHandles []string) string {
 		handle[value] = true
 	}
 	for index, word := range words {
+		if word == "create" || word == "prepare" || word == "build" || word == "design" || word == "make" {
+			for _, object := range words[index+1:] {
+				if object == "presentation" || object == "deck" || object == "slides" {
+					return word
+				}
+			}
+		}
 		if (word == "dig" || word == "look") && index+1 < len(words) && words[index+1] == "into" {
 			return word + " into"
 		}
@@ -259,7 +266,8 @@ func chatAgentWorkRequestIsBounded(text string, files []scoutChatFileAttachment,
 	}
 	objectWords := map[string]bool{
 		"article": true, "brief": true, "company": true, "competitor": true, "document": true, "industry": true,
-		"link": true, "market": true, "opportunity": true, "page": true, "post": true, "report": true, "source": true, "topic": true,
+		"deck": true, "link": true, "market": true, "opportunity": true, "page": true, "post": true, "presentation": true,
+		"report": true, "slides": true, "source": true, "topic": true,
 	}
 	for _, word := range chatAgentWorkWords(text) {
 		if objectWords[word] {
@@ -296,7 +304,7 @@ func (app *kanbanBoardApp) strideTargetedAgentWorkRequest(thread scoutChatThread
 			return STRIDEProductAgentContextProfile{}, "", false
 		}
 		mode := "research"
-		if !containsSTRIDEID(profile.Capabilities, "deep_research") && (action == "review" || action == "analyze" || action == "analyse") {
+		if containsSTRIDEID(profile.Capabilities, "presentation_deck") || containsSTRIDEID(profile.Capabilities, "design_brief") {
 			mode = "design"
 		}
 		current, ok := app.strideAgentContextForChatWork(profile.AgentID, thread, mode)

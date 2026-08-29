@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,6 +41,53 @@ func TestAuthoritativeRecentMemoryEntryReadsDurableTailNotMemoryCache(t *testing
 	got, found, err = adapter.authoritativeRecentMemoryEntry(entry.ID)
 	if err != nil || !found || got.Text != entry.Text {
 		t.Fatalf("durable replacement was not observed: entry=%+v found=%v err=%v", got, found, err)
+	}
+}
+
+func TestProductionCatchUpOpenSittingNeverTouchesGlobalOrLegacyInventory(t *testing.T) {
+	now := time.Now().UTC()
+	temporal := TemporalQuery{
+		StartUTC: now.Add(-time.Minute), EndUTC: now, Timezone: "UTC", RoomID: "room-live", SittingID: "sitting-live",
+		AdmissionAnchorID: "anchor-live", CaptureSequenceCutoff: 42, SettleUntil: now,
+		Interpretation: TemporalBeforeAdmission, InterpretationNote: "live admission must remain O(delta)",
+	}
+	primary := &testBrainInventory{pages: map[string]BrainSourceInventoryPage{}}
+	legacy := &testBrainInventory{pages: map[string]BrainSourceInventoryPage{}}
+	body := &testBrainBodyReader{}
+	purge := adapterBrainPurgeGeneration(0)
+	limits := BrainPromptLimits{MaxSourceChunkBytes: 128, MaxPromptBytes: 1024, MaxFoldInputs: 4, MaxFoldOutputBytes: 128}
+	globalPlanner := BrainRetrievalPlanner{Inventory: primary, Bodies: body, Kernel: AuthorizationKernel{Store: &MemoryACLStore{}}, Purge: purge, PromptLimits: limits}
+	legacyPlanner := BrainRetrievalPlanner{Inventory: legacy, Bodies: body, Kernel: AuthorizationKernel{Store: &MemoryACLStore{}}, Purge: purge, PromptLimits: limits}
+	empty := emptyLiveBrainSourceAdapter{now: func() time.Time { return now }}
+	livePlanner := BrainRetrievalPlanner{Inventory: empty, Bodies: empty, Kernel: AuthorizationKernel{Store: &MemoryACLStore{}}, Purge: purge, PromptLimits: limits}
+	resolver := &productionCatchUpResolver{Planner: globalPlanner, LegacyPlanner: &legacyPlanner, LivePlanner: &livePlanner, LiveSitting: func(roomID, sittingID string) bool {
+		return roomID == "room-live" && sittingID == "sitting-live"
+	}}
+	result, err := resolver.ResolveCatchUp(context.Background(), BrainRetrievalRequest{
+		Principal: ACLPrincipal{TenantID: "tenant-live", Kind: ACLPrincipalUser, ID: "person-live", TeamIDs: []string{"organization"}},
+		Query:     "catch me up", Temporal: temporal,
+	})
+	if err != nil || len(result.Sources) != 0 || result.Snapshot.Validate() != nil {
+		t.Fatalf("live empty result=%+v err=%v", result, err)
+	}
+	primary.mu.Lock()
+	primaryCalls := primary.calls
+	primary.mu.Unlock()
+	legacy.mu.Lock()
+	legacyCalls := legacy.calls
+	legacy.mu.Unlock()
+	if primaryCalls != 0 || legacyCalls != 0 {
+		t.Fatalf("live admission touched global inventories: primary=%d legacy=%d", primaryCalls, legacyCalls)
+	}
+	// The invariant is corpus-size independent: these unrelated rows represent
+	// the 5k+ lifetime corpus that the pre-fix adapter would have reopened.
+	unrelated := make([]meetingMemoryEntry, 5000)
+	unrelatedBody := strings.Repeat("x", 16<<10)
+	for index := range unrelated {
+		unrelated[index] = meetingMemoryEntry{ID: fmt.Sprintf("unrelated-%04d", index), Kind: meetingMemoryKindTranscript, Text: unrelatedBody}
+	}
+	if logicalBytes := len(unrelated) * len(unrelatedBody); logicalBytes < 74<<20 {
+		t.Fatalf("unrelated corpus fixture=%d bytes, want 74MB equivalent", logicalBytes)
 	}
 }
 

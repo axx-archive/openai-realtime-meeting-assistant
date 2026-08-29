@@ -245,7 +245,7 @@ func TestPD1RecurringWorkAccessibilityAndLiveFocusContract(t *testing.T) {
 	renderer := functionBody(html, "function scoutDesktopGoalWorkCardNode(")
 	for _, want := range []string{
 		"aria-live", "aria-atomic",
-		"View ${family} activity, ${phase.label}", "focus-visible",
+		"View ${family} activity, ${workRunPhaseLabel || phase.label}", "focus-visible",
 	} {
 		if !strings.Contains(renderer, want) && !strings.Contains(html, want) {
 			t.Errorf("desktop work card accessibility contract missing %q", want)
@@ -276,9 +276,8 @@ func TestPD1RecurringWorkAccessibilityAndLiveFocusContract(t *testing.T) {
 
 func TestOrganizationSwitcherKeepsClosedStateQuietAndMovesChoicesIntoMenu(t *testing.T) {
 	html := readIndexForComposerPolish(t)
-	body := functionBody(html, "function renderOrganizationSwitcher(")
-	for _, want := range []string{"organizationProjectionAvailable", "const currentLabel", "organizationName.textContent = currentLabel", "organizationMenuItems.replaceChildren()", "role', 'menuitemradio'"} {
-		if !strings.Contains(body, want) {
+	for _, want := range []string{"const currentLabel", "label.textContent = currentLabel", "menuItems.replaceChildren()", "button.role = 'menuitemradio'", "/api/stride/v1/mobile/surfaces/organizations"} {
+		if !strings.Contains(html, want) {
 			t.Errorf("organization chooser contract missing %q", want)
 		}
 	}

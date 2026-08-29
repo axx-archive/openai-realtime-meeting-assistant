@@ -518,6 +518,12 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 		}
 		runtime.markFailure(fmt.Errorf("canonical legacy source recovery degraded: %w", err))
 	}
+	// Prime the rolling digest while startup still owns the process and before
+	// any WebRTC room can admit media. The first live transcript append must be
+	// O(delta), not the operation that hashes a mature lifetime JSONL corpus.
+	if err := runtime.warmAppendDigestCache(meetingMemoryPath()); err != nil {
+		return nil, fmt.Errorf("prime meeting-memory append digest: %w", err)
+	}
 	// A missing/corrupt/mismatched checkpoint is not trusted. Boot continues
 	// into the full importer/PG parity reconciliation below and rewrites it.
 	_, _ = runtime.loadReconcileCheckpoint()
@@ -621,6 +627,16 @@ func initializeCanonicalRuntime(ctx context.Context) (*CanonicalRuntime, error) 
 	configureProductionBrainProjectionRuntime(runtime)
 	canonicalStartupProgress(mode, "serving_gate", started, "complete")
 	return runtime, nil
+}
+
+func (runtime *CanonicalRuntime) warmAppendDigestCache(path string) error {
+	if runtime == nil || runtime.mode == CanonicalModeOff {
+		return nil
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	_, err := runtime.appendDigestStateLocked(path)
+	return err
 }
 
 func recoverJournaledLegacyLifecycleSources() error {

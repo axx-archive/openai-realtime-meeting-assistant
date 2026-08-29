@@ -6,86 +6,67 @@ import (
 	"testing"
 )
 
-func TestFrontendMeetingSpecialistsUsesRealControlRouteAndHonestDisclosure(t *testing.T) {
+func TestFrontendMeetingAgentSurfaceExposesOnlyScout(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(source)
 	for _, want := range []string{
-		`id="roomMoreSpecialists"`,
 		`id="roomScoutQuickAction"`,
 		`roomScoutVoiceAvailability = { enabled: false, reason: 'quality_gate_pending' }`,
-		`function roomVoiceAgentControlsAvailable()`,
-		`roomMoreSpecialistsButton.hidden = Boolean(guestMode) || !roomVoiceAgentControlsAvailable()`,
-		`void loadMeetingSpecialists()`,
+		`function loadRoomScoutVoiceAvailability()`,
 		`roomScoutQuickActionButton.hidden = Boolean(guestMode) || !roomScoutVoiceAvailability.enabled`,
-		`if (roomScoutVoiceAvailability.enabled) rows.push(`,
-		`id="meetingSpecialistsPanel"`,
 		`/api/rooms/agents/scout`,
-		`/api/stride/v1/meeting-specialists`,
-		`data-room-scout-action=`,
-		`Invite Scout`,
-		`Dismiss Scout`,
 		`Add Scout to this meeting`,
-		`data-specialist-action="request"`,
-		`data-specialist-action="approved"`,
-		`data-specialist-action="declined"`,
-		`data-specialist-action="dismissed"`,
-		`Employee agents still require approval for the exact request`,
-		`Meeting transcription remains independent`,
-		`Provider voice remains visibly fenced`,
-		`Voice joining stays off until provider qualification is complete`,
-		`meetingSpecialistContextLabel(invitation.contextClasses)`,
-		`meetingSpecialistAudienceLabel(invitation.audience)`,
-		`meetingSpecialistLimitsLabel(invitation.hardLimits)`,
-		`Approved context and limits`,
-		`Hard limits`,
+		`Remove Scout from this meeting`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("meeting specialist surface is missing %q", want)
+			t.Fatalf("Scout meeting surface is missing %q", want)
 		}
 	}
 	for _, forbidden := range []string{
-		`Mary · Marketing Agent`,
-		`providerSessionStarted: true`,
-		`data-specialist-action="join"`,
+		`id="meetingSpecialistsPanel"`,
+		`/api/stride/v1/meeting-specialists`,
+		`data-specialist-action=`,
+		`function requestMeetingSpecialist`,
+		`function resolveMeetingSpecialist`,
+		`Scout and specialist participants`,
+		`Agent team`,
 	} {
 		if strings.Contains(html, forbidden) {
-			t.Fatalf("meeting specialist surface embeds forbidden claim %q", forbidden)
+			t.Fatalf("arbitrary fourth-agent addressability remains in the customer shell: %q", forbidden)
 		}
 	}
 }
 
-func TestFrontendMeetingSpecialistsEscapesEveryRuntimeInterpolation(t *testing.T) {
+func TestFrontendWorkHasNoStandaloneLegacyDesignOrGrillSurface(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(source)
-	start := strings.Index(html, "function renderMeetingSpecialists")
-	end := strings.Index(html, "async function meetingSpecialistFetch")
-	if start < 0 || end <= start {
-		t.Fatal("could not isolate meeting specialist renderer")
-	}
-	renderer := html[start:end]
-	for _, interpolation := range []string{
-		"escapeHtml(scout?.name || 'Scout')",
-		"escapeHtml(scoutState)",
-		"escapeHtml(invitation.displayName || invitation.agentId",
-		"escapeHtml(meetingSpecialistStatusLabel(invitation.status))",
-		"escapeHtml(invitation.id)",
-		"escapeHtml(purpose)",
-		"escapeHtml(stateCopy)",
-		"escapeHtml(contextLabel)",
-		"escapeHtml(audienceLabel)",
-		"escapeHtml(expectedLabel)",
-		"escapeHtml(limitsLabel)",
-		"escapeHtml(candidate.displayName || candidate.agentId)",
-		"escapeHtml(candidate.agentId)",
+	for _, forbidden := range []string{
+		`id="designTool"`,
+		`id="grillTool"`,
+		`data-tool="design"`,
+		`data-tool="grill"`,
+		`data-agent-tool="design"`,
+		`data-agent-tool="grill"`,
+		`data-agent-tool-form="design"`,
+		`data-agent-tool-form="grill"`,
+		`function renderOfficeAgentWorkforce`,
+		`function openToolPalette`,
+		`/assistant/tools`,
+		`research, design, grill, and plans land here`,
 	} {
-		if !strings.Contains(renderer, interpolation) {
-			t.Fatalf("runtime interpolation %q is not escaped", interpolation)
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("dead standalone Work tool surface remains: %q", forbidden)
+		}
+	}
+	for _, want := range []string{`id="researchTool"`, `Presentations and research stay organized`, `research and presentations land here as durable outputs.`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("canonical Work surface is missing %q", want)
 		}
 	}
 }
@@ -184,16 +165,16 @@ func TestFrontendAudioPresenceAlwaysWinsParticipantTileLayoutCascade(t *testing.
 	}
 }
 
-func TestFrontendDeclaresMeetingSpecialistBusyGuardBeforeBootstrapProjection(t *testing.T) {
+func TestFrontendDeclaresRoomScoutBusyGuardBeforeBootstrapProjection(t *testing.T) {
 	source, err := os.ReadFile("index.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	html := string(source)
-	declaration := strings.Index(html, "let meetingSpecialistsBusy = false")
-	bootstrapUse := strings.Index(html, "meetingSpecialistsBusy || !appShell.classList.contains('is-in-room')")
+	declaration := strings.Index(html, "let roomScoutMutationBusy = false")
+	bootstrapUse := strings.Index(html, "roomScoutMutationBusy || !appShell.classList.contains('is-in-room')")
 	if declaration < 0 || bootstrapUse < 0 || declaration >= bootstrapUse {
-		t.Fatal("meetingSpecialistsBusy must be initialized before authenticated room projection can read it")
+		t.Fatal("roomScoutMutationBusy must be initialized before authenticated room projection can read it")
 	}
 }
 

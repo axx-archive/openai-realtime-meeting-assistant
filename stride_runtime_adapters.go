@@ -41,7 +41,16 @@ func (app *kanbanBoardApp) replaySTRIDETeamChatProjection() {
 }
 
 func (app *kanbanBoardApp) observeSTRIDETeamChatMessage(thread scoutChatThreadRecord, message scoutChatMessageRecord, eventType, actorEmail string) {
-	if app == nil || scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
+	if app == nil {
+		return
+	}
+	// SourceEpisode publication is post-commit and covers both public channels
+	// and owner-only Scout conversations. It stays independent of the optional
+	// legacy STRIDE shadow runtime below.
+	if err := app.publishCommittedConversationSourceEpisode(thread, message, eventType); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
+		log.Errorf("SourceEpisode conversation publication unavailable: %v", err)
+	}
+	if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic {
 		return
 	}
 	// Continuity is the fail-closed conversational projection, not a child of

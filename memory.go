@@ -410,6 +410,13 @@ type meetingMemoryStore struct {
 	path    string
 	entries []meetingMemoryEntry
 	seen    map[string]struct{}
+	// entryIndexByID provides O(1) exact-row mutation for the current segment
+	// and finalization outputs; live corrections must not walk lifetime history.
+	entryIndexByID map[string]int
+	// sourceEpisodeLeases isolate publication from mutations of that exact
+	// closed sitting without serializing a successor sitting or live media.
+	sourceEpisodeLeaseMu sync.Mutex
+	sourceEpisodeLeases  map[string]*sync.RWMutex
 	// transcriptFenceHook runs before a transcript mutation is published. It
 	// durably reopens any ended meeting receipt first, so a receipt-store failure
 	// fails the transcript write closed instead of accepting source under stale
@@ -422,6 +429,12 @@ type meetingMemoryStore struct {
 	transcriptDeleteFenceHook      func(meetingMemoryEntry) error
 	transcriptCommitHook           func(meetingMemoryEntry)
 	finalizationOutputMutationHook func(meetingMemoryEntry)
+	sourceEpisodeMutationHook      func(meetingMemoryEntry)
+	// workArtifactMutationHook runs only after an OS artifact create/update is
+	// durably visible and after store.mu is released. It lets the canonical
+	// SourceEpisode shadow follow every native writer without putting ledger
+	// fsync under the memory or live-media lock.
+	workArtifactMutationHook func(meetingMemoryEntry)
 	// includeRetainedTranscripts is set only on the bounded, ACL-filtered
 	// Meeting Record projection. The primary store never enables it, so prompt,
 	// search, archive, and client snapshot lanes remain summary-first.
@@ -534,6 +547,8 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	store := &meetingMemoryStore{
 		path:                     path,
 		seen:                     map[string]struct{}{},
+		entryIndexByID:           map[string]int{},
+		sourceEpisodeLeases:      map[string]*sync.RWMutex{},
 		artifactIndexByID:        map[string]int{},
 		scoutChatIndexByID:       map[string]int{},
 		meetingEntryIndexes:      map[string][]int{},
@@ -611,6 +626,51 @@ func newMeetingMemoryStore(path string) (*meetingMemoryStore, error) {
 	return store, nil
 }
 
+func (store *meetingMemoryStore) sourceEpisodeLease(sittingID string) *sync.RWMutex {
+	sittingID = strings.TrimSpace(sittingID)
+	store.sourceEpisodeLeaseMu.Lock()
+	defer store.sourceEpisodeLeaseMu.Unlock()
+	if store.sourceEpisodeLeases == nil {
+		store.sourceEpisodeLeases = map[string]*sync.RWMutex{}
+	}
+	lease := store.sourceEpisodeLeases[sittingID]
+	if lease == nil {
+		lease = &sync.RWMutex{}
+		store.sourceEpisodeLeases[sittingID] = lease
+	}
+	return lease
+}
+
+// sourceEpisodeSittingForEntry is a probe only. The caller revalidates the
+// row after acquiring the sitting lease, so a concurrent delete cannot turn
+// this into authorization or stale content.
+func (store *meetingMemoryStore) sourceEpisodeSittingForEntry(kind, id string, metadataUpdates map[string]string) (string, bool) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	index, found := store.entryIndexByID[strings.TrimSpace(id)]
+	if !found || index < 0 || index >= len(store.entries) {
+		return "", false
+	}
+	entry := cloneMemoryEntry(store.entries[index])
+	if kind != "" && entry.Kind != kind {
+		return "", false
+	}
+	if entry.Metadata == nil {
+		entry.Metadata = map[string]string{}
+	}
+	for key, value := range metadataUpdates {
+		entry.Metadata[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	if entry.Kind != meetingMemoryKindTranscript && !meetingFinalizationOutputEntry(entry) {
+		return "", false
+	}
+	sittingID := strings.TrimSpace(entry.Metadata["meetingId"])
+	return sittingID, sittingID != ""
+}
+
 func loadMeetingMemoryEntries(path string) ([]meetingMemoryEntry, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -677,6 +737,7 @@ func (store *meetingMemoryStore) reloadVisibleMemoryGenerationLocked() error {
 
 func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
 	store.artifactIndexes = nil
+	store.entryIndexByID = map[string]int{}
 	store.artifactIndexByID = map[string]int{}
 	store.studioArtifactIndexes = nil
 	store.studioArtifactIndexByID = map[string]int{}
@@ -695,6 +756,12 @@ func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
 }
 
 func (store *meetingMemoryStore) indexMeetingEntryLocked(index int, entry meetingMemoryEntry) {
+	if strings.TrimSpace(entry.ID) != "" {
+		if store.entryIndexByID == nil {
+			store.entryIndexByID = map[string]int{}
+		}
+		store.entryIndexByID[entry.ID] = index
+	}
 	if entry.Kind == meetingMemoryKindOSArtifact && strings.TrimSpace(entry.ID) != "" {
 		if store.artifactIndexByID == nil {
 			store.artifactIndexByID = map[string]int{}
@@ -1232,7 +1299,11 @@ func (store *meetingMemoryStore) appendOSArtifact(id string, text string, metada
 		}
 	}
 	metadata[artifactContentDigestMetadataKey] = artifactCapabilityDigest(meetingMemoryEntry{ID: id, Kind: meetingMemoryKindOSArtifact, Text: text, Metadata: metadata})
-	return store.appendEntry(meetingMemoryKindOSArtifact, id, text, metadata)
+	entry, appended, err := store.appendEntry(meetingMemoryKindOSArtifact, id, text, metadata)
+	if err == nil && appended && store.workArtifactMutationHook != nil {
+		store.workArtifactMutationHook(cloneMemoryEntry(entry))
+	}
+	return entry, appended, err
 }
 
 func (store *meetingMemoryStore) appendScoutChatThread(id string, text string, metadata map[string]string) (meetingMemoryEntry, bool, error) {
@@ -1336,7 +1407,7 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderToolPreimag
 	return store.updateOSArtifactWithMetadataExpected(&expected, nil, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), strings.TrimSpace(expectedStoreGeneration), id, title, text, updatedBy, metadataUpdates)
 }
 
-func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedMetadata map[string]string, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedMetadata map[string]string, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (result meetingMemoryEntry, changed bool, resultErr error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -1350,7 +1421,12 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 	}
 
 	store.mu.Lock()
-	defer store.mu.Unlock()
+	defer func() {
+		store.mu.Unlock()
+		if resultErr == nil && changed && result.Kind == meetingMemoryKindOSArtifact && store.workArtifactMutationHook != nil {
+			store.workArtifactMutationHook(cloneMemoryEntry(result))
+		}
+	}()
 	if expectedStoreGeneration != "" {
 		currentGeneration, err := openAIToolProductStoreGenerationLocked(store)
 		if err != nil || currentGeneration != expectedStoreGeneration {
@@ -1409,7 +1485,7 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 	}
 	nextUpdatedBy := strings.TrimSpace(updatedBy)
 	contentChanged := entry.Text != text || entry.Metadata["title"] != nextTitle
-	changed := contentChanged
+	changed = contentChanged
 	normalizedMetadataUpdates := make(map[string]string, len(metadataUpdates))
 	for key, value := range metadataUpdates {
 		key = strings.TrimSpace(key)
@@ -1719,16 +1795,18 @@ func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string,
 	if text == "" {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory entry text is required")
 	}
+	if sittingID, fenced := store.sourceEpisodeSittingForEntry(kind, id, metadataUpdates); fenced {
+		lease := store.sourceEpisodeLease(sittingID)
+		lease.RLock()
+		defer lease.RUnlock()
+	}
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	index := -1
-	for candidateIndex, entry := range store.entries {
-		if entry.ID == id && entry.Kind == kind {
-			index = candidateIndex
-			break
-		}
+	if candidate, found := store.entryIndexByID[id]; found && candidate >= 0 && candidate < len(store.entries) && store.entries[candidate].Kind == kind {
+		index = candidate
 	}
 	if index < 0 {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory entry not found")
@@ -1896,12 +1974,33 @@ func (store *meetingMemoryStore) reserveTranscriptCapture(occurredStart time.Tim
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	sequence, err := nextDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+	sequence, err := nextDurableCaptureSequence(store.path, store.maxPersistedCaptureSequenceLocked())
 	if err != nil {
 		return nil, fmt.Errorf("reserve transcript capture sequence: %w", err)
 	}
 	stamp := &transcriptCaptureStamp{CaptureSequence: sequence, CapturedAt: time.Now().UTC(), OccurredStart: occurredStart.UTC()}
 	return stamp, nil
+}
+
+// maxPersistedCaptureSequenceLocked returns the process-local high-water that
+// rebuildMeetingEntryIndexesLocked derives once at boot and maintains for each
+// admitted transcript. Transcript capture must never rescan the lifetime
+// memory ledger merely to seed its separately durable sequence counter.
+// Caller must hold store.mu.
+func (store *meetingMemoryStore) maxPersistedCaptureSequenceLocked() uint64 {
+	if store == nil {
+		return 0
+	}
+	if store.indexedEntryCount != len(store.entries) {
+		// Direct test fixtures and recovery replacements may install an entire
+		// generation at once. Rebuild once at that boundary; ordinary appends
+		// keep the index current in indexMeetingEntryLocked.
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	if count := len(store.transcriptCaptureSequences); count > 0 {
+		return store.transcriptCaptureSequences[count-1]
+	}
+	return 0
 }
 
 func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string, kind string, id string, text string, metadata map[string]string, expectedMeetingID string, capture *transcriptCaptureStamp) (meetingMemoryEntry, bool, error) {
@@ -1926,6 +2025,25 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 	}
 
 	roomID = normalizeRoomID(roomID)
+	leaseSittingID := ""
+	if kind == meetingMemoryKindTranscript {
+		expectedMeetingID = strings.TrimSpace(expectedMeetingID)
+		if expectedMeetingID == "" {
+			expectedMeetingID = store.ensureMeetingID(roomID)
+		}
+		leaseSittingID = expectedMeetingID
+	} else if meetingFinalizationOutputEntry(entry) {
+		// A finalization retry may append a replacement Brain/digest under a
+		// new entry ID. Serialize that exact closed sitting with publication,
+		// just as update/delete do, without touching another sitting's live
+		// capture path.
+		leaseSittingID = strings.TrimSpace(entry.Metadata["meetingId"])
+	}
+	if leaseSittingID != "" {
+		lease := store.sourceEpisodeLease(leaseSittingID)
+		lease.RLock()
+		defer lease.RUnlock()
+	}
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -1957,13 +2075,13 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 		if capture != nil {
 			sequence, capturedAt = capture.CaptureSequence, capture.CapturedAt.UTC()
 			occurredStart, occurredEnd = capture.OccurredStart.UTC(), capture.OccurredEnd.UTC()
-			highWater, sequenceErr := currentDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+			highWater, sequenceErr := currentDurableCaptureSequence(store.path, store.maxPersistedCaptureSequenceLocked())
 			if sequence == 0 || capturedAt.IsZero() || occurredStart.IsZero() || occurredEnd.IsZero() || occurredEnd.Before(occurredStart) || sequenceErr != nil || highWater < sequence {
 				return meetingMemoryEntry{}, false, fmt.Errorf("invalid reserved transcript capture")
 			}
 		} else {
 			var sequenceErr error
-			sequence, sequenceErr = nextDurableCaptureSequence(store.path, maxPersistedCaptureSequence(store.entries))
+			sequence, sequenceErr = nextDurableCaptureSequence(store.path, store.maxPersistedCaptureSequenceLocked())
 			if sequenceErr != nil {
 				return meetingMemoryEntry{}, false, fmt.Errorf("persist transcript capture sequence: %w", sequenceErr)
 			}
@@ -2029,6 +2147,9 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 	store.seen[entry.ID] = struct{}{}
 	if kind == meetingMemoryKindTranscript && store.transcriptCommitHook != nil {
 		store.transcriptCommitHook(cloneMemoryEntry(entry))
+	}
+	if meetingFinalizationOutputEntry(entry) && store.sourceEpisodeMutationHook != nil {
+		store.sourceEpisodeMutationHook(cloneMemoryEntry(entry))
 	}
 
 	return entry, true, nil
@@ -2564,10 +2685,12 @@ func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meeti
 		}
 		return meetingMemoryEntry{}, false
 	}
-
-	for index := len(store.entries) - 1; index >= 0; index-- {
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	if index, found := store.entryIndexByID[id]; found && index >= 0 && index < len(store.entries) {
 		entry := store.entries[index]
-		if entry.ID == id && entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
+		if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
 			return cloneMemoryEntry(entry), true
 		}
 	}
@@ -3446,16 +3569,18 @@ func (store *meetingMemoryStore) deleteEntryByID(id string, authorize ...func(me
 	if id == "" {
 		return meetingMemoryEntry{}, false, fmt.Errorf("entry id is required")
 	}
+	if sittingID, fenced := store.sourceEpisodeSittingForEntry("", id, nil); fenced {
+		lease := store.sourceEpisodeLease(sittingID)
+		lease.RLock()
+		defer lease.RUnlock()
+	}
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
 	index := -1
-	for candidate := len(store.entries) - 1; candidate >= 0; candidate-- {
-		if store.entries[candidate].ID == id {
-			index = candidate
-			break
-		}
+	if candidate, found := store.entryIndexByID[id]; found && candidate >= 0 && candidate < len(store.entries) {
+		index = candidate
 	}
 	if index < 0 {
 		return meetingMemoryEntry{}, false, nil

@@ -220,6 +220,28 @@ func TestCanonicalRuntimeAppendDigestReadsLargeSourceOnlyOnce(t *testing.T) {
 	}
 }
 
+func TestCanonicalRuntimePrimesMeetingAppendDigestBeforeLiveCapture(t *testing.T) {
+	dir := canonicalRuntimeTestEnv(t, "shadow")
+	path := filepath.Join(dir, "meeting-memory.jsonl")
+	seed := []byte(`{"id":"seed","kind":"transcript","text":"preboot source","createdAt":"2026-08-24T12:00:00Z","metadata":{"meetingId":"old-meeting","roomId":"office","captureSequence":"1"}}` + "\n")
+	if err := os.WriteFile(path, seed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := initializeCanonicalRuntime(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads := runtime.appendDigestReads; reads != 1 {
+		t.Fatalf("startup append digest reads=%d, want exactly 1", reads)
+	}
+	if err := appendFileDurably(path, []byte(`{"id":"live","kind":"transcript","text":"live delta","createdAt":"2026-08-24T12:01:00Z"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reads := runtime.appendDigestReads; reads != 1 {
+		t.Fatalf("first live append rescanned lifetime source: reads=%d", reads)
+	}
+}
+
 func TestCanonicalRuntimeAppendDigestInvalidatesOnExternalRewriteAndFailedMutation(t *testing.T) {
 	dir := canonicalRuntimeTestEnv(t, "shadow")
 	runtime, err := initializeCanonicalRuntime(context.Background())

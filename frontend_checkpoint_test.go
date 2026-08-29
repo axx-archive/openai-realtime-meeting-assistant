@@ -223,27 +223,12 @@ func TestIndexProcessStageDetailLines(t *testing.T) {
 
 // 3. PALETTE — the fifth "Processes" group renders additively: a new glyph
 // keyed by the group id, the four lifecycle glyphs untouched.
-func TestIndexPaletteProcessesGroupGlyph(t *testing.T) {
+func TestIndexPaletteProcessesGroupGlyphIsRetired(t *testing.T) {
 	html := readIndexForCheckpoint(t)
-	body := functionBody(html, "function paletteGroupGlyph(group)")
-	if body == "" {
-		t.Fatal("could not extract paletteGroupGlyph body")
-	}
-	// the fifth key is present and additive
-	if !strings.Contains(body, "processes: '<rect") {
-		t.Error("paletteGroupGlyph missing the additive 'processes' group glyph")
-	}
-	// the four lifecycle groups stay in the map unchanged
-	for _, want := range []string{"ideate:", "package:", "market:", "portfolio:"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("paletteGroupGlyph lost an existing lifecycle group glyph %q", want)
+	for _, retired := range []string{"function paletteGroupGlyph", "function paletteRenderList", "assistantToolsCache", "'/assistant/tools'"} {
+		if strings.Contains(html, retired) {
+			t.Errorf("retired customer palette taxonomy remains: %q", retired)
 		}
-	}
-	// the palette renders groups straight off the payload (the fifth group
-	// carried by GET /assistant/tools is already iterated, not hard-coded)
-	renderBody := functionBody(html, "function paletteRenderList()")
-	if !strings.Contains(renderBody, "for (const group of (assistantToolsCache || []))") {
-		t.Error("paletteRenderList must iterate every payload group so the fifth renders additively")
 	}
 }
 

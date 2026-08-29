@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -325,6 +326,9 @@ func (app *kanbanBoardApp) deleteOSArtifactAndEmit(id string) (meetingMemoryEntr
 	removed, projection, deleted, err := app.memory.deleteOSArtifactWithProjection(id)
 	if err != nil || !deleted {
 		return removed, nil, deleted, err
+	}
+	if tombstoneErr := app.tombstoneWorkArtifactSourceEpisode(removed, time.Now().UTC()); tombstoneErr != nil && !errors.Is(tombstoneErr, ErrSourceEpisodeUnavailable) {
+		log.Errorf("SourceEpisode Work artifact deletion publication unavailable: %v", tombstoneErr)
 	}
 	acknowledgements, err := emitOSArtifactDeletionEvent(app, projection)
 	return removed, acknowledgements, true, err

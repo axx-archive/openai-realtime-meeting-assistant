@@ -425,6 +425,60 @@ blocked. Do not strand rollback by advancing to another generation. First use
 the receipt-bound rollback above, then activate a newly reviewed successor from
 the unqualified retained release with a fresh target patch transaction.
 
+### One-time qualified-legacy dequalification bridge
+
+Use this only when all of the following are simultaneously true: the exact
+active release and ledger verify; the base env and running application both
+contain one canonical `PRIVATE_REALTIME_VOICE_QUALIFIED=true`; no committed
+qualification receipt exists; every room and shared Realtime lane is idle; and
+an already-built, distinct unqualified bootstrap release is ready to activate.
+It is a one-time recovery from missing historical lineage, not an ordinary
+release mechanism.
+
+The reviewed `private-realtime-dequalification-bridge.mjs` operator takes the
+same global release lock as activation. It verifies the retained active release,
+writes an exact-byte root-private backup and durable journal, stops ingress,
+allows existing native lease watchdogs to close, changes only the canonical
+qualification value from `true` to `false`, recreates the same exact active
+application image, verifies it privately and publicly at the same ledger
+generation, and emits a digest-only root-private receipt. A failure restores
+the exact qualified env and same active release; an interruption retains the
+lock and journal for the explicit `recover` command.
+
+Run the operator only from a sealed, built exact candidate whose source receipt
+was prepared from the reviewed commit. Do not copy the script by itself, run an
+unsealed working-tree copy, or use it to activate the candidate:
+
+```bash
+active_sha=<exact-current-active-commit>
+previous_sha=<exact-current-previous-commit>
+bridge_release_sha=<built-reviewed-candidate-containing-the-bridge>
+
+node "/opt/meetingassist-releases/$bridge_release_sha/sealed-candidate/scripts/private-realtime-dequalification-bridge.mjs" dequalify \
+  --active-release-dir "/opt/meetingassist-releases/$active_sha" \
+  --previous-release-dir "/opt/meetingassist-releases/$previous_sha" \
+  --base-env /opt/meetingassist/deploy/digitalocean/.env \
+  --backup-dir /opt/meetingassist-backups \
+  --health-url https://thebonfire.xyz/healthz \
+  --ready-url https://thebonfire.xyz/readyz
+```
+
+Record the emitted receipt path without printing its contents. If the process
+is interrupted and the global release lock remains, use the same sealed bridge
+binary and supply only its fixed private paths:
+
+```bash
+node "/opt/meetingassist-releases/$bridge_release_sha/sealed-candidate/scripts/private-realtime-dequalification-bridge.mjs" recover \
+  --base-env /opt/meetingassist/deploy/digitalocean/.env \
+  --backup-dir /opt/meetingassist-backups
+```
+
+After a successful bridge, ordinary-activate the already-built bootstrap from
+the still-active retained tool. Verify its unqualified env and exact release.
+Then activate the distinct final successor with the normal transactional
+`false` to `true` qualification arguments. Keep the bridge backup/receipt, the
+qualification receipt, both rollback releases, and all bound images.
+
 If the prior directory or immutable image ID is absent, rollback is blocked; do
 not rebuild an old tag and call it the prior image. The active-release ledger
 must also bind `release_dir` as its exact active release and `prior_dir` as its

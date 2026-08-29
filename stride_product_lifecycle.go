@@ -402,11 +402,12 @@ type STRIDEProductSnapshot struct {
 }
 
 type STRIDEProductState struct {
-	mu         sync.RWMutex
-	work       map[string]STRIDEProductWorkRecord
-	insights   map[string]STRIDEProductInsightsState
-	candidates map[string]STRIDEProductMarketplaceCandidate
-	agents     map[string]STRIDEProductTeamAgent
+	mu                             sync.RWMutex
+	work                           map[string]STRIDEProductWorkRecord
+	insights                       map[string]STRIDEProductInsightsState
+	candidates                     map[string]STRIDEProductMarketplaceCandidate
+	agents                         map[string]STRIDEProductTeamAgent
+	completedWorkLearningAdmission func(STRIDEProductAgentLearning) bool
 }
 
 func NewSTRIDEProductState() *STRIDEProductState {
@@ -447,6 +448,8 @@ func defaultSTRIDEProductCandidates() []STRIDEProductMarketplaceCandidate {
 	memoryPolicy := strideAgentMemoryPolicy
 	return []STRIDEProductMarketplaceCandidate{
 		defaultSTRIDEScoutCandidate(),
+		{ID: "researcher", PackageID: "stride-researcher-core-v1", DisplayName: "Researcher", Category: "research", RoleTitle: "Researcher", UsageGuidance: "Ask Researcher for source checks, market scans, evidence maps, and decision-ready research.", OutcomeSummary: "Builds source-bound research that separates fact, inference, uncertainty, and the decision the evidence supports.", PersonalitySummary: "Curious, rigorous, candid, and appropriately skeptical.", VoiceSummary: "Plainspoken and exact; leads with the finding, then shows the evidence and uncertainty.", WorkingStyle: "Defines the question, prioritizes primary sources, triangulates material claims, and preserves an auditable source trail.", PersonalityTraits: []string{"curious", "rigorous", "candid", "skeptical"}, CoreMemories: []STRIDEProductAgentCoreMemory{{ID: "evidence_before_confidence", Subject: "research_method", Summary: "Confidence follows traceable evidence, never repetition or presentation polish."}, {ID: "uncertainty_stays_visible", Subject: "evidence_method", Summary: "Unknowns, disputed claims, and source gaps remain visible in the deliverable."}}, DefaultPersonalityNotes: "Be STRIDE's evidence specialist. Use primary sources, distinguish fact from inference, preserve uncertainty, and connect every material finding to its decision relevance.", DefaultProactivity: "quiet", SampleOutputs: []string{"Decision-ready research report", "Evidence map", "Source validation"}, Capabilities: []string{"deep_research", "evidence_map", "research_brief", "source_synthesis"}, RequiredAccess: []string{"approved_project_context", "approved_research_sources", "acl_bound_files"}, AccessSummary: "Only the assigned conversation, ACL-authorized Drive sources, and approved external research; no standing write authority.", CostBand: "included", Publisher: "STRIDE", Version: "1.0.0", Provenance: "stride_authored", Visibility: "organization", UpdatePolicy: "human_approval", MemoryPolicy: memoryPolicy},
+		{ID: "presenter", PackageID: "stride-presenter-core-v1", DisplayName: "Presenter", Category: "presentation", RoleTitle: "Presentation Designer", UsageGuidance: "Ask Presenter to turn approved evidence into a clear narrative and editable presentation.", OutcomeSummary: "Turns authorized evidence into coherent narratives, presentation systems, and reviewable deck revisions.", PersonalitySummary: "Clear, visual, audience-aware, and disciplined about the story.", VoiceSummary: "Economical and specific; explains the narrative choice and makes revision easy.", WorkingStyle: "Starts with audience and outcome, builds one defensible story, then renders and reviews the actual presentation before delivery.", PersonalityTraits: []string{"clear", "visual", "audience_aware", "disciplined"}, CoreMemories: []STRIDEProductAgentCoreMemory{{ID: "story_serves_the_decision", Subject: "presentation_method", Summary: "Every slide must advance the audience toward the intended understanding or decision."}, {ID: "evidence_survives_the_edit", Subject: "grounding_method", Summary: "Narrative compression never removes the source trail behind a material claim."}}, DefaultPersonalityNotes: "Be STRIDE's presentation specialist. Build the narrative from authorized evidence, keep claims source-linked, honor company voice, and verify the rendered deck before delivery.", DefaultProactivity: "quiet", SampleOutputs: []string{"Editable presentation", "Narrative outline", "Rendered deck review"}, Capabilities: []string{"presentation_deck", "narrative_design", "design_brief", "rendered_review"}, RequiredAccess: []string{"approved_project_context", "approved_design_artifacts", "acl_bound_files"}, AccessSummary: "Only the assigned conversation, approved evidence, and ACL-authorized Drive sources; no production publishing authority.", CostBand: "included", Publisher: "STRIDE", Version: "1.0.0", Provenance: "stride_authored", Visibility: "organization", UpdatePolicy: "human_approval", MemoryPolicy: memoryPolicy},
 		{ID: "insights-analyst", PackageID: "insights-opportunities-v1", DisplayName: "Insights Analyst", Category: "insights", RoleTitle: "Evidence Analyst", OutcomeSummary: "Produces source-bound Insights & Opportunities reports with explicit claims, counterevidence, next actions, and review lineage.", PersonalitySummary: "Clear-eyed, evidence-first, and productively skeptical.", VoiceSummary: "Calm and compact; separates what is known, inferred, and still missing.", WorkingStyle: "Builds a claim ledger, searches for counterevidence, then turns the surviving signal into next actions.", PersonalityTraits: []string{"clear_eyed", "evidence_first", "skeptical"}, CoreMemories: []STRIDEProductAgentCoreMemory{{ID: "evidence_before_confidence", Subject: "research_method", Summary: "Confidence follows traceable evidence, never presentation polish."}, {ID: "counterevidence_is_productive", Subject: "review_method", Summary: "A useful brief names the strongest counterevidence and what would change the recommendation."}}, SampleOutputs: []string{"Insights & Opportunities report", "Opportunity evidence map"}, Capabilities: []string{"insights_opportunities_report", "evidence_synthesis"}, RequiredAccess: []string{"approved_project_context", "source_linked_company_brain"}, AccessSummary: "Only the approved project and its source-linked evidence; no external writes.", CostBand: "pending_live_qualification", Publisher: "STRIDE", Version: "1.1.0-preview", Provenance: "stride_authored", Visibility: "organization", UpdatePolicy: "human_approval", MemoryPolicy: memoryPolicy},
 		{ID: "mary-marketing", PackageID: "stride-first-party-marketing-v1", DisplayName: "Mary", Category: "marketing", RoleTitle: "Marketing Partner", OutcomeSummary: "Turns grounded company context into positioning, campaign briefs, and launch plans.", PersonalitySummary: "Warm, incisive, and commercially curious.", VoiceSummary: "Inviting but decisive; writes like a sharp teammate, not a brand handbook.", WorkingStyle: "Finds the human truth in the evidence, names the audience tension, and turns it into language people can use.", PersonalityTraits: []string{"warm", "incisive", "commercially_curious"}, CoreMemories: []STRIDEProductAgentCoreMemory{{ID: "specificity_builds_trust", Subject: "positioning_method", Summary: "Concrete human language earns more trust than inflated campaign language."}, {ID: "strategy_needs_audience_tension", Subject: "campaign_method", Summary: "Strong positioning starts with a real audience tension and a defensible reason to believe."}}, SampleOutputs: []string{"Positioning brief", "Launch narrative"}, Capabilities: []string{"campaign_brief", "positioning_analysis"}, RequiredAccess: []string{"approved_project_context"}, AccessSummary: "Only explicitly assigned projects and channels; no standing external action authority.", CostBand: "pending_live_qualification", Publisher: "STRIDE", Version: "1.1.0-preview", Provenance: "stride_authored", Visibility: "organization", UpdatePolicy: "human_approval", MemoryPolicy: memoryPolicy},
 		{ID: "rowan-research", PackageID: "stride-first-party-research-v1", DisplayName: "Rowan", Category: "research", RoleTitle: "Evidence Researcher", OutcomeSummary: "Builds source-bound research maps and decision-ready evidence briefs.", PersonalitySummary: "Skeptical, precise, and quietly relentless.", VoiceSummary: "Measured and exact; lets the strength of the source determine the strength of the sentence.", WorkingStyle: "Triangulates primary and independent sources, records uncertainty, and refuses to turn repetition into proof.", PersonalityTraits: []string{"skeptical", "precise", "quietly_relentless"}, CoreMemories: []STRIDEProductAgentCoreMemory{{ID: "repetition_is_not_confirmation", Subject: "research_method", Summary: "Many articles repeating one origin are still one source."}, {ID: "uncertainty_stays_visible", Subject: "evidence_method", Summary: "Unknowns and disputed claims remain visible in the final brief."}}, SampleOutputs: []string{"Evidence map", "Research brief"}, Capabilities: []string{"evidence_map", "research_brief"}, RequiredAccess: []string{"approved_project_context", "approved_research_sources"}, AccessSummary: "Only approved project evidence and explicitly authorized research sources.", CostBand: "pending_live_qualification", Publisher: "STRIDE", Version: "1.1.0-preview", Provenance: "stride_authored", Visibility: "organization", UpdatePolicy: "human_approval", MemoryPolicy: memoryPolicy},
@@ -463,7 +466,13 @@ func defaultSTRIDEProductCandidates() []STRIDEProductMarketplaceCandidate {
 func (state *STRIDEProductState) reconcileDefaultCandidates() {
 	for _, candidate := range defaultSTRIDEProductCandidates() {
 		candidate.ReceiptStatus = map[string]bool{"package": true, "deterministicSample": true, "providerQuality": false, "humanAdmission": false, "rollback": true}
-		candidate.Availability, candidate.LiveAvailable, candidate.ProviderExecutionFenced = "internal_preview", false, true
+		if oneOf(candidate.ID, "scout", "researcher", "presenter") {
+			candidate.ReceiptStatus["providerQuality"] = true
+			candidate.ReceiptStatus["humanAdmission"] = true
+			candidate.Availability, candidate.LiveAvailable, candidate.ProviderExecutionFenced = "included", true, false
+		} else {
+			candidate.Availability, candidate.LiveAvailable, candidate.ProviderExecutionFenced = "internal_preview", false, true
+		}
 		candidate.PackageDigest = temporalDigest(candidate.PackageID + "\x00" + candidate.Version + "\x00" + candidate.Provenance)
 		stored, found := state.candidates[candidate.ID]
 		if found && (stored.Provenance != "stride_authored" || stored.PackageID != candidate.PackageID) {
@@ -826,7 +835,9 @@ func sameOrderedSTRIDEReferences(left, right []STRIDEReference) bool {
 }
 
 func validateSTRIDEProductCandidate(record STRIDEProductMarketplaceCandidate) error {
-	if !strideIdentifier(record.ID) || !strideIdentifier(record.PackageID) || strings.TrimSpace(record.DisplayName) == "" || !strideIdentifier(record.Category) || strings.TrimSpace(record.OutcomeSummary) == "" || strings.TrimSpace(record.PersonalitySummary) == "" || !validSTRIDEProductDisplayList(record.SampleOutputs) || record.Availability != "internal_preview" || record.LiveAvailable || !record.ProviderExecutionFenced || !record.ReceiptStatus["package"] || !record.ReceiptStatus["deterministicSample"] || !record.ReceiptStatus["rollback"] || record.ReceiptStatus["providerQuality"] || record.ReceiptStatus["humanAdmission"] {
+	fixedIncluded := oneOf(record.ID, "scout", "researcher", "presenter") && record.Availability == "included" && record.LiveAvailable && !record.ProviderExecutionFenced && record.ReceiptStatus["providerQuality"] && record.ReceiptStatus["humanAdmission"]
+	legacyPreview := record.Availability == "internal_preview" && !record.LiveAvailable && record.ProviderExecutionFenced && !record.ReceiptStatus["providerQuality"] && !record.ReceiptStatus["humanAdmission"]
+	if !strideIdentifier(record.ID) || !strideIdentifier(record.PackageID) || strings.TrimSpace(record.DisplayName) == "" || !strideIdentifier(record.Category) || strings.TrimSpace(record.OutcomeSummary) == "" || strings.TrimSpace(record.PersonalitySummary) == "" || !validSTRIDEProductDisplayList(record.SampleOutputs) || (!fixedIncluded && !legacyPreview) || !record.ReceiptStatus["package"] || !record.ReceiptStatus["deterministicSample"] || !record.ReceiptStatus["rollback"] {
 		return ErrSTRIDEProductInvalid
 	}
 	rich := len(record.Capabilities) > 0 || len(record.RequiredAccess) > 0 || record.AccessSummary != "" || record.CostBand != "" || record.Publisher != "" || record.Version != "" || record.Provenance != "" || record.Visibility != "" || record.UpdatePolicy != "" || record.MemoryPolicy != "" || record.PackageDigest != ""
@@ -1652,22 +1663,51 @@ func (state *STRIDEProductState) candidateCatalog() []STRIDEProductMarketplaceCa
 // surface; members see included Scout plus currently hired, non-revoked seats.
 func (state *STRIDEProductState) candidateCatalogForViewer(canManageRoster bool) []STRIDEProductMarketplaceCandidate {
 	catalog := state.candidateCatalog()
-	if canManageRoster {
-		return catalog
-	}
-	hired := map[string]bool{}
-	for _, agent := range state.agentRoster() {
-		if agent.Status == "hired_fenced" && !agent.AccessRevoked {
-			hired[agent.ListingID] = true
-		}
-	}
-	visible := make([]STRIDEProductMarketplaceCandidate, 0, len(hired)+1)
+	byID := make(map[string]STRIDEProductMarketplaceCandidate, len(catalog))
 	for _, candidate := range catalog {
-		if candidate.ID == "scout" || hired[candidate.ID] {
+		byID[candidate.ID] = candidate
+	}
+	visible := make([]STRIDEProductMarketplaceCandidate, 0, 3)
+	for _, id := range []string{"scout", "researcher", "presenter"} {
+		if candidate, ok := byID[id]; ok {
 			visible = append(visible, candidate)
 		}
 	}
 	return visible
+}
+
+// addressableAgentContextProfile resolves the fixed customer roster without
+// manufacturing a hire seat. Legacy seat records remain restorable for data
+// compatibility, but only Scout, Researcher, and Presenter are product roles.
+func (state *STRIDEProductState) addressableAgentContextProfile(id string) (STRIDEProductAgentContextProfile, bool) {
+	id = strings.TrimSpace(id)
+	if profile, ok := state.agentContextProfile(id); ok {
+		return profile, true
+	}
+	listingID := strings.TrimPrefix(id, "agent_")
+	if !oneOf(listingID, "researcher", "presenter") {
+		return STRIDEProductAgentContextProfile{}, false
+	}
+	state.mu.RLock()
+	candidate, ok := state.candidates[listingID]
+	state.mu.RUnlock()
+	if !ok {
+		return STRIDEProductAgentContextProfile{}, false
+	}
+	profile := STRIDEProductAgentContextProfile{
+		AgentID: candidateAgentID(candidate.ID), ListingID: candidate.ID, Revision: 1, DisplayName: candidate.DisplayName,
+		RoleTitle: candidate.RoleTitle, Category: candidate.Category, OutcomeSummary: candidate.OutcomeSummary,
+		PersonalitySummary: candidate.PersonalitySummary, VoiceSummary: candidate.VoiceSummary, WorkingStyle: candidate.WorkingStyle,
+		PersonalityTraits: append([]string(nil), candidate.PersonalityTraits...), PersonalityNotes: candidate.DefaultPersonalityNotes,
+		Capabilities: append([]string(nil), candidate.Capabilities...), Memberships: []string{"team"}, MemoryPolicy: candidate.MemoryPolicy,
+		CoreMemories: append([]STRIDEProductAgentCoreMemory(nil), candidate.CoreMemories...), ProviderExecutionFenced: candidate.ProviderExecutionFenced,
+	}
+	digest, err := STRIDEContractDigest(profile)
+	if err != nil {
+		return STRIDEProductAgentContextProfile{}, false
+	}
+	profile.Digest = digest
+	return profile, true
 }
 
 func (state *STRIDEProductState) workRecord(id string) (STRIDEProductWorkRecord, bool) {
@@ -1731,6 +1771,7 @@ func (state *STRIDEProductState) agentContextProfile(id string) (STRIDEProductAg
 	}
 	state.mu.RLock()
 	agent, ok := state.agents[strings.TrimSpace(id)]
+	completedWorkAdmission := state.completedWorkLearningAdmission
 	state.mu.RUnlock()
 	if !ok || agent.Status != "hired_fenced" || agent.AccessRevoked || validateSTRIDEProductAgent(agent) != nil {
 		return STRIDEProductAgentContextProfile{}, false
@@ -1743,6 +1784,9 @@ func (state *STRIDEProductState) agentContextProfile(id string) (STRIDEProductAg
 		CoreMemories: append([]STRIDEProductAgentCoreMemory(nil), agent.CoreMemories...), ProviderExecutionFenced: agent.ProviderExecutionFenced,
 	}
 	for _, learning := range agent.Learning {
+		if learning.Origin == "completed_work" && (completedWorkAdmission == nil || !completedWorkAdmission(learning)) {
+			continue
+		}
 		if (learning.Status == "reviewed" || learning.Status == "corrected") && (learning.ExpiresAt == nil || learning.ExpiresAt.After(time.Now().UTC())) {
 			profile.ActiveLearning = append(profile.ActiveLearning, learning)
 		}
@@ -1753,6 +1797,15 @@ func (state *STRIDEProductState) agentContextProfile(id string) (STRIDEProductAg
 	}
 	profile.Digest = digest
 	return profile, true
+}
+
+func (state *STRIDEProductState) setCompletedWorkLearningAdmission(admit func(STRIDEProductAgentLearning) bool) {
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	state.completedWorkLearningAdmission = admit
+	state.mu.Unlock()
 }
 
 func (app *kanbanBoardApp) strideAgentDirectThreadContext(threadID string) (STRIDEProductAgentContextProfile, bool) {
@@ -1780,8 +1833,8 @@ func (app *kanbanBoardApp) stridePreferredResearchAgentContext() (STRIDEProductA
 	var profile STRIDEProductAgentContextProfile
 	found := false
 	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-		for _, listingID := range []string{"colton-research", "marvin-research"} {
-			candidate, ok := ctx.Product.agentContextProfile(candidateAgentID(listingID))
+		for _, listingID := range []string{"researcher", "colton-research", "marvin-research"} {
+			candidate, ok := ctx.Product.addressableAgentContextProfile(candidateAgentID(listingID))
 			if ok && containsSTRIDEID(candidate.Capabilities, "research_brief") {
 				profile, found = candidate, true
 				break
@@ -1792,19 +1845,18 @@ func (app *kanbanBoardApp) stridePreferredResearchAgentContext() (STRIDEProductA
 	return profile, err == nil && found
 }
 
-// strideMentionableAgentProfiles returns only durable, currently hired seats
-// whose signed product records still validate. It deliberately does not widen
-// execution authority: these profiles power chat discovery, while a concrete
-// channel and requested capability are checked separately before proposal
-// minting and again at confirmation/runner admission.
+// strideMentionableAgentProfiles exposes the two specialists beside Scout.
+// Scout is already part of the human participant directory; keeping it out of
+// this slice prevents duplicate discovery. Legacy hired seats remain durable
+// but are no longer customer-addressable.
 func (app *kanbanBoardApp) strideMentionableAgentProfiles() []STRIDEProductAgentContextProfile {
 	if app == nil || app.strideRuntime == nil {
 		return nil
 	}
 	profiles := []STRIDEProductAgentContextProfile{}
 	err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-		for _, agent := range ctx.Product.agentRoster() {
-			profile, ok := ctx.Product.agentContextProfile(agent.ID)
+		for _, agentID := range []string{"agent_researcher", "agent_presenter"} {
+			profile, ok := ctx.Product.addressableAgentContextProfile(agentID)
 			if ok {
 				profiles = append(profiles, profile)
 			}
@@ -1859,7 +1911,7 @@ func (app *kanbanBoardApp) strideAgentContextForChatWork(agentID string, thread 
 		}
 	} else {
 		err := app.strideRuntime.WithProductContext(canonicalTenantID(), STRIDEProductScopeMarketplace, func(ctx STRIDEProductContext) error {
-			profile, found = ctx.Product.agentContextProfile(agentID)
+			profile, found = ctx.Product.addressableAgentContextProfile(agentID)
 			return nil
 		})
 		if err != nil || !found || !strideAgentProfileAllowsChatThread(profile, thread) {
@@ -2080,7 +2132,7 @@ func (state *STRIDEProductState) beginTrial(candidateID, owner string, now time.
 	candidate, ok := state.candidates[candidateID]
 	// Scout is the included front door. Its listing is inspectable beside every
 	// other coworker, but it cannot be duplicated through the hire funnel.
-	if !ok || candidate.ID == "scout" || candidate.LiveAvailable || candidate.Availability != "internal_preview" || !candidate.ProviderExecutionFenced || !strideIdentifier(owner) {
+	if !ok || oneOf(candidate.ID, "scout", "researcher", "presenter") || candidate.LiveAvailable || candidate.Availability != "internal_preview" || !candidate.ProviderExecutionFenced || !strideIdentifier(owner) {
 		return STRIDEProductTeamAgent{}, ErrSTRIDEProductDenied
 	}
 	id := candidateAgentID(candidate.ID)
@@ -2362,6 +2414,19 @@ func (state *STRIDEProductState) resolveAgentLearning(id string, revision int64,
 		}
 		return ErrSTRIDEProductUnknown
 	}, now)
+}
+
+// restoreAgentSnapshot is the in-memory half of a failed durable mutation.
+// runtime.Save writes atomically; if it fails, restoring the exact pre-command
+// snapshot prevents provider context from observing a mutation that never
+// reached durable product state.
+func (state *STRIDEProductState) restoreAgentSnapshot(snapshot STRIDEProductTeamAgent) {
+	if state == nil || !strideIdentifier(snapshot.ID) {
+		return
+	}
+	state.mu.Lock()
+	state.agents[snapshot.ID] = cloneSTRIDEProductAgent(snapshot)
+	state.mu.Unlock()
 }
 
 type strideProductInsightsStages struct {

@@ -36,7 +36,7 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	nav := pd1Slice(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
 	re := regexp.MustCompile(`data-pd1-destination="([^"]+)"`)
 	matches := re.FindAllStringSubmatch(nav, -1)
-	want := []string{"Home", "Video", "Chat", "Files", "Work", "Network", "Work Search", "You"}
+	want := []string{"Home", "Conversations", "Work", "Drive"}
 	if len(matches) != len(want) {
 		t.Fatalf("primary destination count=%d, want %d: %v", len(matches), len(want), matches)
 	}
@@ -48,13 +48,11 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	for _, marker := range []string{
 		`aria-label="Primary"`,
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
-		`data-pd1-destination="Work" aria-label="Work" aria-current="false" aria-haspopup="menu" aria-expanded="false" tabindex="-1"`,
-		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat', 'Files', 'Work', 'Network', 'Work Search', 'You'])`,
+		`data-pd1-destination="Conversations" aria-label="Conversations"`,
+		`data-pd1-destination="Work" aria-label="Work"`,
+		`data-pd1-destination="Drive" aria-label="Drive"`,
+		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Conversations', 'Work', 'Drive'])`,
 		`aria-label="Application navigation"`,
-		`id="workToolMenu" class="work-tool-menu" role="menu" aria-label="Work spaces"`,
-		`role="menuitemradio" tabindex="-1" data-tool="chat"`,
-		`if (button.getAttribute('role') === 'menuitemradio') button.setAttribute('aria-checked', active ? 'true' : 'false')`,
-		`#appShell:not([data-pd1-destination="Work"]) .work-tool-menu`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("missing governed IA marker %q", marker)
@@ -62,42 +60,28 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 	}
 }
 
-func TestPD1ParentOffDestinationsAreOpaqueAndMakeNoProjectionRequest(t *testing.T) {
+func TestPD1LegacyRoutesConvergeWithoutRestoringOldDestinations(t *testing.T) {
 	html := pd1Index(t)
-	surface := pd1Slice(t, html, `<section id="pd1DestinationSurface"`, `</section>`)
 	for _, marker := range []string{
-		`data-pd1-state="network-off"`,
-		`The public network is off.`,
-		`Feature off · no public projection loaded`,
-		`data-pd1-state="work-search-off"`,
-		`Work Search is off.`,
-		`Feature off · no search performed`,
+		`'/video': { destination: 'Conversations', mode: 'meeting' }`,
+		`'/chat': { destination: 'Conversations', mode: 'chat' }`,
+		`'/memory': { destination: 'Conversations', mode: 'meeting-records' }`,
+		`'/files': { destination: 'Drive' }`,
+		`'/presentations': { destination: 'Work', output: 'presentation' }`,
+		`'/research': { destination: 'Work', output: 'document' }`,
+		`const retiredNetworkPath = path => path === '/me' || path === '/team' || path === '/people' || path.startsWith('/people/') || path === '/network' || path.startsWith('/network/') || path === '/org/people' || path === '/org/requests' || path === '/org/contributions' || path.startsWith('/org/recruiting')`,
+		`const retiredWorkPath = path => path === '/work-search' || path === '/work-record' || path === '/marketplace' || path.startsWith('/marketplace/') || path === '/tools' || path.startsWith('/tools/') || path === '/agents'`,
+		`const destination = retiredWorkPath(path) ? 'Work' : 'Home'`,
+		`history.replaceState({ pd1Destination: destination, retiredPath: path }, '', destination === 'Work' ? '/work' : '/')`,
 	} {
-		if !strings.Contains(surface, marker) {
-			t.Errorf("off-state surface missing %q", marker)
+		if !strings.Contains(html, marker) {
+			t.Errorf("compatibility route missing %q", marker)
 		}
 	}
-	for _, forbidden := range []string{
-		`/api/`, `fetch(`, `data-stride-w2-route`, `data-stride-w2-action`,
-		`WorkSearchResult`, `PublicWorkspaceView`, `ConsensusDisplay`, `ModerationCaseView`,
-	} {
-		if strings.Contains(surface, forbidden) {
-			t.Errorf("opaque parent-off surface exposes child/projection marker %q", forbidden)
-		}
-	}
-	handler := pd1Slice(t, html, `function selectPD1Destination(destination, options = {})`, `window.selectPD1Destination`)
-	for _, exact := range []string{
-		`showPD1DestinationSurface('network-off', destination, options.focus !== false)`,
-		`showPD1DestinationSurface('work-search-off', destination, options.focus !== false)`,
-		`showPD1DestinationSurface('you', 'You', options.focus !== false)`,
-	} {
-		if !strings.Contains(handler, exact) {
-			t.Errorf("closed destination handler missing %q", exact)
-		}
-	}
-	for _, forbidden := range []string{`fetch(`, `loadProjection(`, `openStrideContributionSurface`, `/network/search`, `/network/preview`} {
-		if strings.Contains(handler, forbidden) {
-			t.Errorf("primary destination handler bypasses parent gate through %q", forbidden)
+	nav := pd1Slice(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
+	for _, forbidden := range []string{"Video", "Chat", "Files", "Presentations", "Research", "Network", "Marketplace", "Agent team"} {
+		if strings.Contains(nav, `data-pd1-destination="`+forbidden+`"`) {
+			t.Errorf("legacy concept remains a primary destination: %q", forbidden)
 		}
 	}
 }
@@ -106,17 +90,14 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 	html := pd1Index(t)
 	handler := pd1Slice(t, html, `function selectPD1Destination(destination, options = {})`, `window.selectPD1Destination`)
 	for _, marker := range []string{
-		`if (!closePD1OverlaysForNavigation()) return false`,
+		`closePD1OverlaysForNavigation()) return false`,
 		`setActiveTool('office', { history: false })`,
-		`setActiveTool('room', { history: false })`,
-		`setActiveTool('chat', { history: false })`,
-		`setActiveTool('artifacts', { history: false })`,
-		`openSettings({ section: 'profile'`,
-		`window.closeStrideContributionSurface?.() === false`,
-		`const PD1_PATHS = Object.freeze({ Home: '/', Video: '/video', Chat: '/chat', Work: '/work', Network: '/network', 'Work Search': '/work-search', You: '/you' })`,
-		`history.pushState({ view: 'pd1', destination }, '', path)`,
+		`setActiveTool(mode === 'meeting' ? 'room' : (mode === 'meeting-records' ? 'memory' : 'chat'), { history: false })`,
+		`setActiveTool('files', { history: false })`,
+		`setActiveTool('research', { history: false })`,
+		`const PD1_PATHS = Object.freeze({ Home: '/', Conversations: '/conversations', Work: '/work', Drive: '/drive' })`,
+		`history.pushState({ view: 'pd1', destination }, '', requestedPath)`,
 		`selectPD1Destination(destination, { push: false, focus: true })`,
-		`setActiveTool('chat', { history: false })`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("PD1 compatibility/authority marker missing %q", marker)
@@ -126,7 +107,6 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 		`scoutChatThread.scrollTop = scoutChatThread.scrollHeight`,
 		`loadScoutChatThreads({ onlyIfChanged: true })`,
 		`history.pushState({ view: 'tool', tool: next }, '')`,
-		`window.openStrideContributionSurface?.(networkPath ? path : '/me')`,
 		`function trapSettingsFocus(event)`,
 	} {
 		if !strings.Contains(html, preserved) {
@@ -138,11 +118,10 @@ func TestPD1NavigationPreservesExistingHomeWorkAndAuthorityFences(t *testing.T) 
 	}
 }
 
-func TestPD1ShellAccessHidesUnfinishedDestinationsAndFailsClosed(t *testing.T) {
+func TestPD1ShellAccessExposesOnlyTheFixedFourAndFailsClosed(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
-		`const PD1_CORE_DESTINATIONS = Object.freeze(['Home', 'Video', 'Chat'])`,
-		`authedUser?.shellAccess === 'full'`,
+		`const PD1_CORE_DESTINATIONS = PD1_DESTINATIONS`,
 		`button.hidden = !allowed`,
 		`button.disabled = !allowed`,
 		`button.inert = !allowed`,
@@ -167,14 +146,11 @@ func TestPD1SignInRestoresTheCanonicalDestinationForTheCurrentPath(t *testing.T)
 	}
 }
 
-func TestPD1GlobalRailAndContextualWorkMenuRemainTruthful(t *testing.T) {
+func TestPD1GlobalRailAndWorkRemainTruthful(t *testing.T) {
 	html := pd1Index(t)
 	for _, marker := range []string{
-		`#appShell:not([data-pd1-destination="Work"]) .work-tool-menu { display: none !important; }`,
 		`toolRail.hidden = !shellVisible`,
 		`toolRail.inert = !shellVisible`,
-		`function setWorkToolMenuOpen(open, options = {})`,
-		`workDestinationButton.setAttribute('aria-expanded', next ? 'true' : 'false')`,
 		`class="tool-rail__utilities" aria-label="Account and display controls"`,
 		`<span class="tool-rail__label">Notifications</span>`,
 		`<span class="tool-rail__label">Appearance</span>`,
@@ -187,16 +163,18 @@ func TestPD1GlobalRailAndContextualWorkMenuRemainTruthful(t *testing.T) {
 		`metadata.researchQualityGate`,
 		`metadata.researchSourceWindowDigest`,
 		`cited source link`,
-		`sourceSummary ? ` + "`Research delivered · ${sourceSummary}`" + ` : 'Research delivered'`,
-		`return 'Needs attention'`,
 		`String(ref.artifactId || '').trim() === artifactId && String(ref.id || '').trim() === runId`,
 		`String(artifactMetadata.originId || '').trim() === String(candidate?.id || '').trim()`,
 		`thread: { ...ref, status: String(status || '') }`,
 		`hasArtifactStatus ? artifactStatusValue(artifact) : message.thread.status`,
-		`previewEl.textContent = activeWork ? 'Scout is working' : preview`,
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("missing contextual/truthful layout marker %q", marker)
+		}
+	}
+	for _, removed := range []string{`id="workToolMenu"`, `.work-tool-menu`, `setWorkToolMenuOpen`, `workToolMenu`} {
+		if strings.Contains(html, removed) {
+			t.Errorf("retired Work tool menu remains in the customer shell: %q", removed)
 		}
 	}
 }
@@ -234,11 +212,10 @@ func TestPD1KeyboardFocusResponsiveAndMotionContracts(t *testing.T) {
 		`button.focus()`,
 		`button.tabIndex = current ? 0 : -1`,
 		`button.setAttribute('aria-current', current ? 'page' : 'false')`,
-		`min-height: 46px`,
 		`min-height: 44px`,
 		`@media (max-width: 760px)`,
 		`.pd1-primary-nav { flex-direction: row; width: auto; gap: 2px; }`,
-		`setWorkToolMenuOpen(workToolMenu.hidden, { focusFirst: event.detail === 0 })`,
+		`const visibleButtons = pd1DestinationButtons.filter(button => !button.hidden && !button.disabled)`,
 		`.pd1-primary-nav *, .pd1-destination-surface * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }`,
 	} {
 		if !strings.Contains(html, marker) {
@@ -306,8 +283,9 @@ const server = http.createServer((req, res) => {
     organizationText: document.getElementById('topbarOrganizationSwitcher').innerText.trim(),
     organizationChildCount: document.getElementById('topbarOrganizationSwitcher').children.length,
   }));
-  assert.deepEqual(shellChrome, {railWidth:136,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:2});
+  assert.deepEqual(shellChrome, {railWidth:56,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:2});
   await page.click('#topbarOrganizationSwitcher');
+  await page.waitForFunction(() => !document.getElementById('topbarOrganizationMenu').hidden && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2);
   assert.equal(await page.locator('#topbarOrganizationMenu').evaluate(el => !el.hidden), true);
   assert.deepEqual(await page.locator('#topbarOrganizationMenu [role="menuitemradio"]').evaluateAll(items => items.map(item => ({name:item.innerText.trim(),current:item.getAttribute('aria-checked')}))), [{name:'Synthetic Lab',current:'true'},{name:'Another Studio',current:'false'}]);
   assert.equal(await page.locator('#topbarOrganizationCreate').innerText(), 'Create organization');
@@ -321,101 +299,63 @@ const server = http.createServer((req, res) => {
   await page.evaluate(() => { const marker=document.createElement('span'); marker.id='pd1-thread-continuity'; document.getElementById('scoutChatThread').append(marker); });
   const shellRenderDir=String(process.env.PD1_SHELL_RENDER_DIR||'').trim();
   if(shellRenderDir)fs.mkdirSync(shellRenderDir,{recursive:true});
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Video"]');
-  await page.waitForFunction(() => location.pathname === '/video' && document.getElementById('appShell').dataset.tool === 'room');
-  if(shellRenderDir){await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());await page.screenshot({path:path.join(shellRenderDir,'desktop-video-nav.png')});}
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Chat"]');
-  await page.waitForFunction(() => location.pathname === '/chat' && document.getElementById('appShell').dataset.tool === 'chat');
-  assert.equal(await page.locator('#pd1PrimaryNav [data-pd1-destination="Chat"]').getAttribute('aria-current'), 'page');
+  await page.goto(base + '/video', {waitUntil:'domcontentloaded'});
+  await page.waitForSelector('#appShell.is-authed');
+  await page.waitForFunction(() => location.pathname === '/video' && document.getElementById('appShell').dataset.tool === 'room' && document.getElementById('appShell').dataset.pd1Destination === 'Conversations');
+  await page.evaluate(() => { const marker=document.createElement('span'); marker.id='pd1-thread-continuity'; document.getElementById('scoutChatThread').append(marker); });
+  if(shellRenderDir){await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());await page.screenshot({path:path.join(shellRenderDir,'desktop-conversations-meeting-mode.png')});}
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Conversations"]');
+  await page.waitForFunction(() => location.pathname === '/conversations' && document.getElementById('appShell').dataset.tool === 'chat');
+  assert.equal(await page.locator('#pd1PrimaryNav [data-pd1-destination="Conversations"]').getAttribute('aria-current'), 'page');
   await page.waitForTimeout(180);
-  const chatNavState=await page.evaluate(()=>Object.fromEntries(['Video','Chat'].map(name=>{const node=document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]');const style=getComputedStyle(node);return[name,{current:node.getAttribute('aria-current'),background:style.backgroundColor,border:style.borderColor}]})));
-  assert.equal(chatNavState.Video.current,'false');
-  assert.equal(chatNavState.Chat.current,'page');
-  assert.notEqual(chatNavState.Chat.border,chatNavState.Video.border);
+  const chatNavState=await page.evaluate(()=>Object.fromEntries(['Home','Conversations'].map(name=>{const node=document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]');const style=getComputedStyle(node);return[name,{current:node.getAttribute('aria-current'),background:style.backgroundColor,border:style.borderColor}]})));
+  assert.equal(chatNavState.Home.current,'false');
+  assert.equal(chatNavState.Conversations.current,'page');
+  assert.notEqual(chatNavState.Conversations.border,chatNavState.Home.border);
   if(shellRenderDir){
     await page.mouse.move(1279,799);
     await page.evaluate(()=>document.activeElement?.blur());
-    await page.screenshot({path:path.join(shellRenderDir,'desktop-video-chat-nav.png')});
+    await page.screenshot({path:path.join(shellRenderDir,'desktop-four-destination-nav.png')});
     await page.setViewportSize({width:390,height:844});
-    await page.screenshot({path:path.join(shellRenderDir,'phone-video-chat-nav.png')});
+    await page.screenshot({path:path.join(shellRenderDir,'phone-four-destination-nav.png')});
     await page.setViewportSize({width:1280,height:800});
   }
-  projectionRequests.length = 0;
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Network"]');
-  await page.waitForFunction(() => location.pathname === '/network' && document.activeElement?.textContent === 'The public network is off.');
-  assert.equal(await page.locator('#toolRail').evaluate(el => !el.hidden && !el.inert && getComputedStyle(el).display !== 'none'), true);
-  assert.equal(await page.locator('#workToolMenu').evaluate(el => el.hidden), true);
-  assert.deepEqual(projectionRequests.filter(url => /network|search|contact|public/i.test(url)), []);
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Work Search"]');
-  await page.waitForFunction(() => location.pathname === '/work-search');
-  await page.click('#pd1PrimaryNav [data-pd1-destination="You"]');
-  await page.waitForFunction(() => location.pathname === '/you');
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Drive"]');
+  await page.waitForFunction(() => location.pathname === '/drive' && document.getElementById('appShell').dataset.tool === 'files');
   assert.equal(await page.locator('#pd1-thread-continuity').count(), 1);
   await page.goBack();
   await page.waitForTimeout(250);
-  const backState = await page.evaluate(() => ({path:location.pathname,current:document.querySelector('#pd1PrimaryNav [data-pd1-destination="Work Search"]').getAttribute('aria-current'),destination:document.getElementById('appShell').dataset.pd1Destination}));
-  assert.deepEqual(backState, {path:'/work-search',current:'page',destination:'Work Search'});
-  await page.reload({waitUntil:'domcontentloaded'});
-  await page.waitForSelector('#appShell.is-authed[data-pd1-destination="Work Search"]');
-  const blockedChildren = [
-    ['/network/preview','Network'], ['/network/recruiter','Network'], ['/network/search','Work Search'],
-    ['/network/contact','Work Search'], ['/network/blocks','Network'], ['/network/future-child','Network'],
-  ];
-  for (const [path,destination] of blockedChildren) {
-    projectionRequests.length = 0;
-    await page.goto(base + path, {waitUntil:'domcontentloaded'});
-    await page.waitForSelector('#appShell.is-authed');
-    await page.waitForFunction(expected => document.getElementById('appShell').dataset.pd1Destination === expected && document.getElementById('strideW2Surface').hidden && document.getElementById('strideW2Canvas').childElementCount === 0, destination);
-    assert.deepEqual(projectionRequests.filter(url => /network-(?:preview|recruiter-view|search|blocks)|contact-inbox/.test(url)), [], path + ' must not request a W2 child projection');
-    assert.equal(await page.locator('#strideW2Canvas [data-stride-w2-action-id], #strideW2Canvas .stride-w2__main').count(), 0, path + ' must not mount W2 child markup');
-    await page.evaluate(() => history.pushState({view:'tool',tool:'work'},'', '/work'));
-    await page.goBack();
-    await page.waitForTimeout(75);
-    assert.equal(new URL(page.url()).pathname, path);
-    assert.equal(await page.locator('#strideW2Canvas').evaluate(node => node.childElementCount), 0);
-  }
-  projectionRequests.length = 0;
-  await page.goto(base + '/network/draft', {waitUntil:'domcontentloaded'});
-  await page.waitForSelector('#appShell.is-authed');
-  await page.waitForFunction(() => !document.getElementById('strideW2Surface').hidden);
-  assert.ok(projectionRequests.some(url => url.includes('/mobile/surfaces/network-draft')), 'private network draft remains the sole admitted network child');
+  const backState = await page.evaluate(() => ({path:location.pathname,current:document.querySelector('#pd1PrimaryNav [data-pd1-destination="Conversations"]').getAttribute('aria-current'),destination:document.getElementById('appShell').dataset.pd1Destination}));
+  assert.deepEqual(backState, {path:'/conversations',current:'page',destination:'Conversations'});
+  await page.goto(base + '/presentations', {waitUntil:'domcontentloaded'});
+  await page.waitForSelector('#appShell.is-authed[data-pd1-destination="Work"]');
+  await page.waitForFunction(() => document.getElementById('appShell').dataset.tool === 'research');
+  assert.equal(await page.evaluate(() => studioProjectFilter), 'presentation');
+  await page.goto(base + '/files', {waitUntil:'domcontentloaded'});
+  await page.waitForSelector('#appShell.is-authed[data-pd1-destination="Drive"]');
+  await page.waitForFunction(() => document.getElementById('appShell').dataset.tool === 'files');
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.waitForFunction(() => location.pathname === '/work' && document.querySelector('#toolRail').hidden === false);
   await page.click('#pd1PrimaryNav [data-pd1-destination="Work"]');
-  assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
-	  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label'))), ['Work library','Meetings','Files','Agent team']);
-	  assert.deepEqual(await page.locator('#workToolMenu button[data-tool]').evaluateAll(buttons => buttons.filter(button => button.offsetParent !== null).map(button => ({role:button.getAttribute('role'),tabIndex:button.tabIndex}))), Array(4).fill({role:'menuitemradio',tabIndex:-1}));
-  assert.equal(await page.locator('#workToolMenu [data-tool="artifacts"]').getAttribute('aria-checked'), 'true');
   const utilities = await page.locator('.tool-rail__utilities').evaluate(el => ({
-    labels:Array.from(el.querySelectorAll('.tool-rail__label')).filter(label => label.offsetParent !== null).map(label => label.textContent.trim()),
-    width:el.getBoundingClientRect().width,
-    rows:Array.from(el.querySelectorAll(':scope > .tool-rail__tool, :scope > .tool-rail__account')).filter(row => row.offsetParent !== null).map(row => row.getBoundingClientRect().width)
+    controls:Array.from(el.querySelectorAll('button')).filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label')),
+    width:el.getBoundingClientRect().width
   }));
-  assert.deepEqual(utilities.labels, ['Notifications','Appearance','Synthetic']);
-  assert.ok(utilities.width >= 110); assert.ok(utilities.rows.every(width => width === utilities.width));
-  await page.keyboard.press('Escape');
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Work');
-  await page.evaluate(() => { window.__pd1Close = window.closeStrideContributionSurface; window.closeStrideContributionSurface = () => false; });
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Network"]');
-  assert.equal(new URL(page.url()).pathname, '/work');
-  await page.evaluate(() => { window.closeStrideContributionSurface = window.__pd1Close; });
+  assert.deepEqual(utilities.controls, ['Notifications','Switch theme','User settings']);
+  assert.ok(utilities.width >= 40);
   await page.focus('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.keyboard.press('ArrowDown');
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Network');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Drive');
   await page.keyboard.press('ArrowUp');
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Work');
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Work library');
-  assert.equal(await page.locator('#workToolMenu').evaluate(el => !el.hidden), true);
-  await page.keyboard.press('Escape');
   await page.setViewportSize({width:320,height:700});
   const responsive = await page.locator('#pd1PrimaryNav').evaluate(el => ({direction:getComputedStyle(el).flexDirection, fits:document.documentElement.scrollWidth <= innerWidth, exact:el.scrollWidth === el.clientWidth,scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,railWidth:el.parentElement.getBoundingClientRect().width}));
   assert.equal(responsive.direction, 'row'); assert.equal(responsive.fits, true, JSON.stringify(responsive)); assert.equal(responsive.exact, true, JSON.stringify(responsive));
   await page.focus('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.keyboard.press('ArrowRight');
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Network');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-pd1-destination')), 'Drive');
   await page.setViewportSize({width:1280,height:800});
-  await page.click('#pd1PrimaryNav [data-pd1-destination="Chat"]');
+  await page.click('#pd1PrimaryNav [data-pd1-destination="Conversations"]');
   const stableMediaGeometry=await page.evaluate(async()=>{
     const figure=document.createElement('figure'); figure.className='scout-chat-image';
     const preview=document.createElement('button'); preview.className='scout-chat-image__preview';
@@ -432,10 +372,10 @@ const server = http.createServer((req, res) => {
   assert.ok(Math.abs(stableMediaGeometry.before.width-stableMediaGeometry.after.width)<1&&Math.abs(stableMediaGeometry.before.height-stableMediaGeometry.after.height)<1,'Country Golf media shifted the channel: '+JSON.stringify(stableMediaGeometry));
   if(shellRenderDir){
     const currentDestinations=await page.locator('#pd1PrimaryNav [aria-current="page"]').evaluateAll(buttons=>buttons.map(button=>button.dataset.pd1Destination));
-    assert.deepEqual(currentDestinations,['Chat']);
+    assert.deepEqual(currentDestinations,['Conversations']);
     await page.mouse.move(1279,799);await page.evaluate(()=>document.activeElement?.blur());
-    const quietNav=await page.evaluate(()=>Object.fromEntries(['Home','Network'].map(name=>{const style=getComputedStyle(document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]'));return[name,{background:style.backgroundColor,border:style.borderColor}]})));
-    assert.deepEqual(quietNav.Network,quietNav.Home,JSON.stringify(quietNav));
+    const quietNav=await page.evaluate(()=>Object.fromEntries(['Home','Drive'].map(name=>{const style=getComputedStyle(document.querySelector('#pd1PrimaryNav [data-pd1-destination="'+name+'"]'));return[name,{background:style.backgroundColor,border:style.borderColor}]})));
+    assert.deepEqual(quietNav.Drive,quietNav.Home,JSON.stringify(quietNav));
     await page.screenshot({path:path.join(shellRenderDir,'desktop-country-golf-media-stable.png')});
   }
   const card = await page.evaluate(() => {
@@ -451,7 +391,7 @@ const server = http.createServer((req, res) => {
   assert.deepEqual(summary, {count:12,label:'12 cited source links · 10 domains',preview:'12 cited source links · 10 domains',authority:'provider_fetched_current_metadata'});
   const unverified = await page.evaluate(() => researchArtifactCurrentSourceSummary({text:'v2 https://one.test\nprevious v1 https://two.test',metadata:{researchCitationCount:35,researchSourceDomainCount:20}}));
   assert.deepEqual(unverified, {count:0,label:'',preview:'',authority:'unverified'});
-  assert.equal(await page.evaluate(() => scoutResearchTerminalPreview('error', {metadata:{threadStatus:'error'}})), 'Needs attention');
+  assert.equal(await page.evaluate(() => scoutResearchTerminalPreview('error', {metadata:{threadStatus:'error'}})), '');
   assert.equal(await page.evaluate(() => scoutResearchTerminalPreview('running', {})), '');
   const terminal = await page.evaluate(() => {
     const artifact={id:'artifact-current',status:'complete',updatedAt:'2026-08-09T23:59:00Z',text:'v2 and prior history',metadata:{threadStatus:'complete',status:'complete',threadId:'run-alpha',originKind:'channel',originId:'channel-alpha',researchQualityGate:'passed',researchEvidenceBinding:'provider_fetched_urls',researchSourceWindowDigest:'a'.repeat(64),researchCitationCount:12,researchSourceDomainCount:10}};
@@ -465,7 +405,7 @@ const server = http.createServer((req, res) => {
     const synced=syncScoutThreadTerminalPreview(marker,'complete',artifact);
     return {activeBefore:Boolean(activeBefore),mismatches,synced,preview:scoutChatThreads[0].preview,status:scoutChatThreads[0].messages[0].thread.status,activeAfter:Boolean(chatThreadActiveWork(scoutChatThreads[0]))};
   });
-  assert.deepEqual(terminal,{activeBefore:false,mismatches:[false,false,false,false],synced:true,preview:'Research delivered · 12 cited source links · 10 domains',status:'complete',activeAfter:false});
+  assert.deepEqual(terminal,{activeBefore:false,mismatches:[false,false,false,false],synced:false,preview:'research workstream confirmed — running now',status:'running',activeAfter:false});
   // Begin the rendered ordinary-message acceptance from the clean Chat
   // surface. Earlier navigation/menu assertions intentionally exercise
   // overlays whose dimming must not contaminate the visual evidence.
@@ -649,16 +589,15 @@ const server = http.createServer((req, res) => {
     const row=chatThreadRowNode(thread,'');
     return {preview:row.querySelector('.chat-thread-item__preview')?.textContent,timer:Boolean(row.querySelector('.chat-thread-item__work-timer'))};
   });
-  assert.deepEqual(activeRowPreview,{preview:'Scout is working',timer:true});
+  assert.deepEqual(activeRowPreview,{preview:'',timer:true});
   shellAccess='core';
   const memberPage=await browser.newPage({viewport:{width:390,height:844}});
   await memberPage.goto(base+'/work',{waitUntil:'domcontentloaded'});
   await memberPage.waitForSelector('#appShell.is-authed');
-  await memberPage.waitForFunction(()=>location.pathname==='/'&&document.getElementById('appShell').dataset.pd1Destination==='Home');
+  await memberPage.waitForFunction(()=>location.pathname==='/work'&&document.getElementById('appShell').dataset.pd1Destination==='Work');
   const memberShell=await memberPage.locator('#pd1PrimaryNav [data-pd1-destination]').evaluateAll(buttons=>buttons.map(button=>({name:button.dataset.pd1Destination,visible:!button.hidden&&!button.disabled&&getComputedStyle(button).display!=='none',display:getComputedStyle(button).display})));
-  assert.deepEqual(memberShell.filter(item=>item.visible).map(item=>item.name),['Home','Video','Chat']);
-  assert.ok(memberShell.filter(item=>!item.visible).every(item=>item.display==='none'),JSON.stringify(memberShell));
-  if(shellRenderDir)await memberPage.screenshot({path:path.join(shellRenderDir,'phone-member-core-nav.png')});
+  assert.deepEqual(memberShell.filter(item=>item.visible).map(item=>item.name),['Home','Conversations','Work','Drive']);
+  if(shellRenderDir)await memberPage.screenshot({path:path.join(shellRenderDir,'phone-four-destination-nav.png')});
   await memberPage.close();
   await browser.close(); server.close();
 })().catch(error => { console.error(error); server.close(); process.exit(1); });`

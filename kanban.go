@@ -283,15 +283,39 @@ type kanbanBoardApp struct {
 	// modify-write. Memory deletion holds memory.mu before entering this lock;
 	// archive refresh therefore snapshots memory before taking it and validates
 	// the finalization revision again under the archive lock.
-	meetingArchiveMu           sync.Mutex
-	cards                      []kanbanCard
-	nextCreatedIndex           int
-	updatedAt                  time.Time
-	handledCalls               map[string]struct{}
-	memory                     *meetingMemoryStore
-	meetingFinalizationRunMu   sync.Mutex
-	meetingFinalizationRunning map[string]struct{}
-	meetingFinalizationAgain   map[string]bool
+	meetingArchiveMu sync.Mutex
+	cards            []kanbanCard
+	nextCreatedIndex int
+	updatedAt        time.Time
+	handledCalls     map[string]struct{}
+	memory           *meetingMemoryStore
+	// workRuns is the durable customer-visible research/presentation activity
+	// ledger. It is initialized with the application lifecycle, never from a
+	// live meeting/media callback.
+	workRuns    *STRIDEWorkRunRepository
+	workRunsErr error
+	// strideLeadShadow is an optional, default-off Responses benchmark runner.
+	// It never replaces the legacy worker or publishes customer artifacts.
+	strideLeadShadow           *STRIDELeadShadowRuntime
+	strideLeadShadowErr        error
+	strideLeadShadowRetrySweep bool
+	strideLeadShadowRetryAgain bool
+	// learningAudits is the governed candidate/evaluation/ratification ledger.
+	// Completed work cannot become active provider context without this chain.
+	learningAudits    *STRIDELearningAuditRepository
+	learningAuditsErr error
+	// sourceEpisodes is replayed once during app construction, before any room
+	// admission. Post-close publication is O(delta) and never reopens the
+	// lifetime ledger on a finalization callback.
+	sourceEpisodes                *FileSourceEpisodeLedger
+	postgresMeetingSourceEpisodes *PostgresMeetingSourceEpisodeStore
+	sourceEpisodesErr             error
+	sourceEpisodeRegistry         *SourceEpisodeRuntimeRegistry
+	sourceEpisodeRetrySweep       bool
+	sourceEpisodeRetryAgain       bool
+	meetingFinalizationRunMu      sync.Mutex
+	meetingFinalizationRunning    map[string]struct{}
+	meetingFinalizationAgain      map[string]bool
 	// Fresh live closes/late transcript fences always drain ahead of the boot
 	// backlog. At most two workers run, and only one may consume backlog work,
 	// reserving capacity for a current sitting without unleashing unbounded
@@ -652,11 +676,42 @@ func newKanbanBoardApp() *kanbanBoardApp {
 		boardLifecycleErr:    boardLifecycleRecoveryErr,
 		scoutInvocation:      NewSTRIDEScoutInvocationMachine(20 * time.Second),
 	}
+	app.workRuns, app.workRunsErr = NewSTRIDEWorkRunRepository(strideWorkRunPath())
+	if app.workRunsErr != nil {
+		log.Errorf("STRIDE WorkRun activity disabled: %v", app.workRunsErr)
+	} else if err := app.reconcileSTRIDEWorkRunTerminalGaps(); err != nil {
+		log.Errorf("STRIDE WorkRun terminal reconciliation incomplete: %v", err)
+	}
+	app.strideLeadShadow, app.strideLeadShadowErr = newSTRIDELeadShadowRuntimeFromEnvironment(app.workRuns)
+	if app.strideLeadShadowErr != nil {
+		log.Errorf("STRIDE lead shadow disabled: %v", app.strideLeadShadowErr)
+	} else if app.strideLeadShadow != nil {
+		app.strideLeadShadow.Idle = app.strideLeadShadowIdleAdmission
+	}
+	app.learningAudits, app.learningAuditsErr = NewSTRIDELearningAuditRepository(strideLearningAuditPath())
+	if app.learningAuditsErr != nil {
+		log.Errorf("STRIDE governed learning disabled: %v", app.learningAuditsErr)
+	}
+	app.sourceEpisodes, app.sourceEpisodesErr = OpenFileSourceEpisodeLedger(postCloseMeetingSourceEpisodeLedgerPath())
+	if app.sourceEpisodesErr != nil {
+		log.Errorf("SourceEpisode publication disabled: %v", app.sourceEpisodesErr)
+	} else if app.sourceEpisodeRegistry, err = initializeSourceEpisodeNativeRuntime(app); err != nil {
+		app.sourceEpisodesErr = err
+		log.Errorf("SourceEpisode native runtime disabled: %v", err)
+	} else if err = registerMeetingSourceEpisodeRuntime(app, app.sourceEpisodeRegistry); err != nil {
+		app.sourceEpisodesErr = err
+		log.Errorf("Meeting SourceEpisode runtime disabled: %v", err)
+	}
+	if runtime := currentCanonicalRuntime(); runtime != nil && runtime.postgres != nil {
+		app.postgresMeetingSourceEpisodes = NewPostgresMeetingSourceEpisodeStore(runtime.postgres)
+	}
+	app.installCompletedWorkLearningAdmission()
 	if app.memory != nil {
 		app.memory.transcriptFenceHook = app.prepareTranscriptFinalizationFence
 		app.memory.transcriptDeleteFenceHook = app.prepareTranscriptDeletionFinalizationFence
 		app.memory.transcriptCommitHook = app.handleDurableTranscriptCommit
 		app.memory.finalizationOutputMutationHook = app.handleMeetingFinalizationOutputMutation
+		app.memory.sourceEpisodeMutationHook = app.handleMeetingSourceEpisodeOutputAppend
 	}
 	if err := app.initializeAttachmentSourceStore(); err != nil {
 		app.attachmentSourceStoreErr = err
@@ -710,6 +765,7 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	app.reconcileMeetingRecordsAtBoot()
 	app.replaySTRIDETeamChatProjection()
 	app.reconcileConversationContinuityAtStartup()
+	app.reconcileSTRIDELeadShadowAtBoot()
 
 	return app
 }
