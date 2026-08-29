@@ -26,8 +26,15 @@ func TestDesktopTikTokPreviewUsesPortraitSameOriginMediaCard(t *testing.T) {
 		"desktop-chat-link-preview__brand",
 		"desktop-chat-link-preview__play",
 		"imageURL.startsWith('/assistant/link-preview/image?')",
-		"image.loading = 'lazy'",
-		"image.decoding = 'async'",
+		// Previously pinned image.loading = 'lazy' / image.decoding = 'async'.
+		// Native lazy-loading never fires for images appended into the chat
+		// scroller — measured on production 2026-08-29, all 15 lazy images in a
+		// hydrated thread stayed at naturalWidth 0, two of them inside the
+		// viewport — so every preview rendered blank. bfChatImage is the shared
+		// chat-media path that assigns the same-origin proxy URL and sets
+		// decoding = 'async'. The same-origin and metadata-only guarantees below
+		// are unchanged.
+		"bfChatImage(image, imageURL)",
 	} {
 		if !strings.Contains(renderer, want) {
 			t.Errorf("TikTok renderer missing %q", want)

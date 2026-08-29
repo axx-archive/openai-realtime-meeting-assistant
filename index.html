@@ -9267,6 +9267,125 @@
       .agent-tool__inner.studio-projects {
         width: min(1480px, 100%);
       }
+      /* Installed apps — the Work tab's launcher row. Sits between the
+         header and the library so the studios are visible before any work
+         exists. Auto-fitting columns keep it a single row on desktop and a
+         stacked list on phones without a breakpoint of its own. */
+      .studio-apps {
+        margin: var(--sp-5) 0 var(--sp-4);
+      }
+
+      .studio-apps__title {
+        margin: 0 0 var(--sp-3);
+        color: var(--text-3);
+        font: var(--type-caption-medium);
+        letter-spacing: var(--track-text);
+        text-transform: lowercase;
+      }
+
+      .studio-apps__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: var(--sp-3);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .studio-app {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        min-height: 64px;
+        padding: var(--sp-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-lg);
+        background: var(--surface-2);
+        transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
+      }
+
+      .studio-app:hover {
+        border-color: var(--line-2);
+        background: var(--surface-3, var(--surface-2));
+      }
+
+      .studio-app__icon {
+        display: grid;
+        flex: none;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: var(--r-md);
+        background: var(--surface-1);
+        color: var(--text-2);
+      }
+
+      .studio-app__body {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .studio-app__name {
+        color: var(--text-1);
+        font: var(--type-body-medium);
+      }
+
+      .studio-app__meta {
+        overflow: hidden;
+        color: var(--text-3);
+        font: var(--type-caption);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .studio-app__actions {
+        display: flex;
+        flex: none;
+        gap: var(--sp-2);
+      }
+
+      .studio-app__action {
+        min-height: 32px;
+        padding: 0 var(--sp-3);
+        border: 1px solid var(--line-1);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        font: var(--type-caption-medium);
+        cursor: pointer;
+        transition: border-color 160ms var(--ease-out), color 160ms var(--ease-out);
+      }
+
+      .studio-app__action:hover {
+        border-color: var(--line-2);
+        color: var(--text-1);
+      }
+
+      .studio-app__action--primary {
+        border-color: transparent;
+        background: var(--text-1);
+        color: var(--surface-1);
+      }
+
+      /* Phones get the full 44px target and a wrapping action row. */
+      @media (max-width: 640px) {
+        .studio-app {
+          flex-wrap: wrap;
+        }
+
+        .studio-app__actions {
+          flex: 1 0 100%;
+        }
+
+        .studio-app__action {
+          flex: 1 1 auto;
+          min-height: 44px;
+        }
+      }
+
       .studio-projects__head {
         display: flex;
         align-items: end;
@@ -14777,8 +14896,29 @@
         border-radius: var(--r-md);
         overflow: hidden;
       }
+      /* Real documents carry comparison tables, and a markdown table takes its
+         natural width: measured on production 2026-08-29, a seven-column table
+         rendered 965px wide inside the 636px text column and hung 329px past
+         the sheet — 531px at a 430px viewport — with overflow-x visible on both
+         the paper and the rich area and no page scroll, so those columns were
+         painted outside the page and could not be reached at all.
+
+         Wrapping the cell text brings that table back inside the column
+         (965 -> 636). The table itself then carries the scroller for the case
+         wrapping cannot solve — enough columns to hit the 90px floor, where a
+         twelve-column table still measured 1082px. The scroller deliberately
+         lives on the table and NOT on .document-editor__paper: overflow-x on
+         the paper computes overflow-y to auto as well, which moves the
+         document's vertical scroll off .document-editor__workspace and traps it
+         inside the 620px sheet. */
+      .document-editor__rich table {
+        display: block;
+        max-width: 100%;
+        overflow-x: auto;
+      }
       .document-editor__rich th,
       .document-editor__rich td {
+        overflow-wrap: anywhere;
         min-width: 90px;
         padding: 9px 10px;
         border-right: 1px solid var(--line-1);
@@ -26296,6 +26436,29 @@
         min-width: 260px;
       }
 
+      /* Packed gallery. The seats above are sized by width alone, which
+         ignores how tall the stage actually is: measured on production
+         2026-08-29 at a 1224x660 stage, three and four people were handed
+         395x247 tiles where 518x324 fitted (72% less area), and from seven
+         people up the rows overflowed the stack so one to three participants
+         sat below a scroll fold in a live call. updateRoomGalleryPacking picks
+         the column count that maximises tile area for the real stage box and
+         publishes --seat-w/--seat-h; it deliberately withholds data-packed on
+         the mobile hero+filmstrip layout and whenever the seats would fall
+         below a legible width, so those paths keep their own rules. */
+      .hearth-stage[data-packed="on"][data-room-layout="grid"] .hearth-seats {
+        align-content: center;
+        overflow: hidden;
+      }
+
+      .hearth-stage[data-packed="on"][data-room-layout="grid"] .hearth-seat {
+        width: var(--seat-w);
+        height: var(--seat-h);
+        min-width: 0;
+        max-width: none;
+        aspect-ratio: auto;
+      }
+
       .hearth-stage[data-room-layout="pinned"] .hearth-seat {
         width: 100%;
         height: 100%;
@@ -35147,6 +35310,45 @@
               </div>
               <button id="studioNewWithScout" class="btn btn--primary" type="button">New with Scout</button>
             </header>
+            <!-- Installed apps. The native studios were only reachable by
+                 opening a finished artifact, so "start a deck" and "open the
+                 deck I saved" had no home on the workstation surface. Start
+                 routes through the same Scout brief that actually creates
+                 work today (startStudioProjectWithScout); Open filters the
+                 library, and Drive opens the file-backed copies. -->
+            <section class="studio-apps" aria-labelledby="studioAppsTitle">
+              <h3 id="studioAppsTitle" class="studio-apps__title">Installed apps</h3>
+              <ul class="studio-apps__grid">
+                <li class="studio-app" data-studio-app="presentation">
+                  <span class="studio-app__icon" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="12" rx="2"></rect><path d="M8 20h8"></path><path d="M12 16v4"></path></svg>
+                  </span>
+                  <span class="studio-app__body">
+                    <span class="studio-app__name">Presentation</span>
+                    <span class="studio-app__meta">Deck Studio &middot; slides, notes, export</span>
+                  </span>
+                  <span class="studio-app__actions">
+                    <button type="button" class="studio-app__action studio-app__action--primary" data-studio-app-kind="presentation" data-studio-app-action="new">New</button>
+                    <button type="button" class="studio-app__action" data-studio-app-kind="presentation" data-studio-app-action="open">Open</button>
+                    <button type="button" class="studio-app__action" data-studio-app-kind="presentation" data-studio-app-action="drive">Drive</button>
+                  </span>
+                </li>
+                <li class="studio-app" data-studio-app="document">
+                  <span class="studio-app__icon" aria-hidden="true">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>
+                  </span>
+                  <span class="studio-app__body">
+                    <span class="studio-app__name">Document</span>
+                    <span class="studio-app__meta">Document Studio &middot; rich text, markdown, export</span>
+                  </span>
+                  <span class="studio-app__actions">
+                    <button type="button" class="studio-app__action studio-app__action--primary" data-studio-app-kind="document" data-studio-app-action="new">New</button>
+                    <button type="button" class="studio-app__action" data-studio-app-kind="document" data-studio-app-action="open">Open</button>
+                    <button type="button" class="studio-app__action" data-studio-app-kind="document" data-studio-app-action="drive">Drive</button>
+                  </span>
+                </li>
+              </ul>
+            </section>
             <div id="studioProjectsWorkspace" class="studio-projects__workspace">
               <aside class="studio-projects__library" aria-label="Studio projects">
                 <label class="studio-projects__search" aria-label="Search work">
@@ -42430,6 +42632,31 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return empty
       }
 
+      /* Work rows and headlines carry whatever text created the project, and
+         that is almost always the brief Scout was handed — a four-line
+         "Create a private, editable three-slide presentation titled …" reads as
+         a prompt log rather than a workstation. Derive a short display name;
+         the stored title is untouched, the full brief stays in the tooltip, and
+         Rename still edits the real thing. Short, human titles pass through
+         unchanged. */
+      const STUDIO_TITLE_MAX = 68
+
+      function studioProjectDisplayTitle(project) {
+        const raw = String(project?.title || '').trim()
+        if (!raw) return 'Untitled work'
+        // a name the brief states outright wins over any truncation
+        const named = raw.match(/(?:titled|called|named)\s+["\u201c']([^"\u201d']{2,80})["\u201d']/i)
+        if (named) return named[1].trim()
+        if (raw.length <= STUDIO_TITLE_MAX) return raw.replace(/[:\s]+$/, '')
+        // "Package Ember Analytics: a dashboard that…" -> the part before the colon.
+        // Sentence splitting is deliberately avoided: "U.S. creator-economy"
+        // would truncate to "Research the current U.S".
+        const colon = raw.indexOf(':')
+        if (colon > 0 && colon <= STUDIO_TITLE_MAX) return raw.slice(0, colon).trim()
+        const clipped = raw.slice(0, STUDIO_TITLE_MAX).replace(/\s+\S*$/, '').replace(/[,;:\s]+$/, '')
+        return `${clipped || raw.slice(0, STUDIO_TITLE_MAX)}\u2026`
+      }
+
       function studioProjectRowNode(project) {
         const row = bfEl('button', 'studio-project-row')
         row.type = 'button'
@@ -42439,7 +42666,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         row.appendChild(studioProjectIcon(project.kind))
         const copy = bfEl('span', 'studio-project-row__copy')
         copy.append(
-          bfEl('span', 'studio-project-row__title', project.title || 'Untitled work'),
+          bfEl('span', 'studio-project-row__title', studioProjectDisplayTitle(project)),
           bfEl('span', 'studio-project-row__meta', `${studioProjectStatusLabel(project.status)} · ${studioProjectKindLabel(project.kind)}`)
         )
         const edge = bfEl('span', 'studio-project-row__copy')
@@ -42448,6 +42675,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           bfEl('span', 'studio-project-row__time', studioProjectRelativeTime(project.updatedAt))
         )
         row.append(copy, edge)
+        row.title = String(project.title || '').trim()
         row.addEventListener('click', () => selectStudioProject(project.id))
         return row
       }
@@ -42782,7 +43010,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const head = bfEl('header', 'studio-project-detail__head')
         head.appendChild(bfEl('p', 'studio-project-detail__eyebrow', studioProjectKindLabel(project.kind)))
         const titleRow = bfEl('div', 'studio-project-detail__title-row')
-        titleRow.appendChild(bfEl('h3', 'studio-project-detail__title', project.title || 'Untitled work'))
+        const detailTitle = bfEl('h3', 'studio-project-detail__title', studioProjectDisplayTitle(project))
+        detailTitle.title = String(project.title || '').trim()
+        titleRow.appendChild(detailTitle)
         const status = bfEl('span', 'studio-project-status')
         status.dataset.status = String(project.status || 'running')
         status.append(bfEl('span', 'studio-project-status__dot'), document.createTextNode(studioProjectStatusLabel(project.status)))
@@ -43011,6 +43241,30 @@ Wrap the entire export in one code block. After the code block, say whether the 
         renderStudioProjects()
       })
       studioNewWithScout?.addEventListener('click', startStudioProjectWithScout)
+
+      /* Installed-apps launcher. New reuses the Scout brief that is how work
+         is actually created today — neither studio has a blank-create path
+         (/artifacts/document is GET/PATCH only and the copy endpoints require
+         a source artifact), so seeding the brief is the honest wiring rather
+         than a button that opens an editor which cannot save. Open filters the
+         library in place; Drive hands off to the file-backed copies. */
+      document.querySelectorAll('[data-studio-app-action]').forEach(button => {
+        button.addEventListener('click', () => {
+          const kind = button.dataset.studioAppKind === 'document' ? 'document' : 'presentation'
+          const action = button.dataset.studioAppAction
+          if (action === 'new') {
+            studioProjectFilter = kind
+            void startStudioProjectWithScout()
+            return
+          }
+          if (action === 'drive') {
+            selectPD1Destination('Drive')
+            return
+          }
+          studioProjectFilter = kind
+          renderStudioProjects()
+        })
+      })
 
       /* ---------- tool routing (glass & ink shell) ----------
          data-tool on #appShell names the active tool. It coexists with the
@@ -55556,7 +55810,81 @@ Wrap the entire export in one code block. After the code block, say whether the 
           : count <= 4
           ? 'quad'
           : 'crowded'
+        updateRoomGalleryPacking(count)
         window.requestAnimationFrame(updateMobileRoomStageMetrics)
+      }
+
+      /* Choose the column count that maximises seat area for the stage box.
+         Every candidate is checked against both axes, so the winner always
+         fits without scrolling — nobody in a call is pushed below a fold.
+
+         Everything it needs is declared inside the function on purpose.
+         updateRoomGridMetrics is called during boot, far above this point in
+         the script, so module-level const/let read from here would land in the
+         temporal dead zone and throw before the room ever renders. */
+      function updateRoomGalleryPacking(count) {
+        const seatAspect = 16 / 10
+        const seatGap = 12
+        const seatMinWidth = 132
+        // The mobile stage is a deliberate hero + 104px filmstrip, so packing
+        // stays off there and on the short-landscape touch layout that shares
+        // the same media query.
+        const mobileStage = typeof window.matchMedia === 'function'
+          && window.matchMedia('(max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse)').matches
+        const seats = Number(count)
+        if (!Number.isFinite(seats) || seats < 1 || mobileStage || currentRoomLayout() !== 'grid') {
+          hearthStage.removeAttribute('data-packed')
+          return
+        }
+        // clientWidth/Height include padding, and the gallery carries a
+        // padding-right; packing against them overshoots the content box by a
+        // couple of pixels, which is enough to wrap the last seat onto a new
+        // row and hide it. Measure the content box and keep a 1px safety
+        // margin against sub-pixel rounding.
+        const stackStyle = getComputedStyle(videoStack)
+        const width = videoStack.clientWidth
+          - parseFloat(stackStyle.paddingLeft || '0')
+          - parseFloat(stackStyle.paddingRight || '0')
+          - 1
+        const height = videoStack.clientHeight
+          - parseFloat(stackStyle.paddingTop || '0')
+          - parseFloat(stackStyle.paddingBottom || '0')
+          - 1
+        if (!(width > 0) || !(height > 0)) {
+          hearthStage.removeAttribute('data-packed')
+          return
+        }
+        let best = null
+        for (let cols = 1; cols <= seats; cols += 1) {
+          const rows = Math.ceil(seats / cols)
+          const cellWidth = (width - seatGap * (cols - 1)) / cols
+          const cellHeight = (height - seatGap * (rows - 1)) / rows
+          if (cellWidth <= 0 || cellHeight <= 0) continue
+          const seatHeight = Math.min(cellHeight, cellWidth / seatAspect)
+          const seatWidth = seatHeight * seatAspect
+          if (seatWidth <= 0) continue
+          const area = seatWidth * seatHeight
+          if (!best || area > best.area) best = { area, width: seatWidth, height: seatHeight }
+        }
+        /* Below the legibility floor a packed grid is worse than scrolling,
+           so hand the stage back to the width-based gallery. */
+        if (!best || best.width < seatMinWidth) {
+          hearthStage.removeAttribute('data-packed')
+          return
+        }
+        hearthStage.style.setProperty('--seat-w', `${Math.floor(best.width)}px`)
+        hearthStage.style.setProperty('--seat-h', `${Math.floor(best.height)}px`)
+        hearthStage.dataset.packed = 'on'
+      }
+
+      function repackRoomGallery() {
+        updateRoomGalleryPacking(Number(hearthStage.dataset.participantCount || 0))
+      }
+
+      // Resizing the stage (window, rail, screen-share transitions) changes the
+      // winning column count, and covers breakpoint crossings too.
+      if (typeof ResizeObserver === 'function') {
+        new ResizeObserver(repackRoomGallery).observe(videoStack)
       }
 
       function updateMobileRoomStageMetrics() {
@@ -61035,6 +61363,30 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (cls) node.className = cls
         if (text !== undefined && text !== null) node.textContent = String(text)
         return node
+      }
+
+      /* Chat media loads eagerly, on purpose.
+
+         loading="lazy" is measurably broken for chat media: on production
+         2026-08-29 all 15 lazy images in a hydrated thread sat at
+         naturalWidth 0 — including two inside the visible viewport — while the
+         one non-lazy image in the same thread loaded fine. A preview scrolled
+         to dead centre still never loaded; flipping the same node to eager
+         loaded it instantly. Images appended while the thread is hidden or mid
+         skeleton-swap get deferred by the browser and never re-evaluated.
+
+         An IntersectionObserver was tried instead and rejected: deferring the
+         src assignment means a late preview no longer expands the thread, which
+         breaks the dense-fixture scroll-anchoring contract
+         (TestChatColdIndexRendersImmediatelyAndHydratesSelectedThreadAtIPadWidth).
+         Assigning src immediately keeps that timing intact. A real thread
+         carries on the order of a dozen images, so the bandwidth this gives up
+         is small next to every one of them currently rendering blank. */
+      function bfChatImage(img, src) {
+        const url = String(src || '')
+        img.decoding = 'async'
+        if (url) img.src = url
+        return img
       }
 
       function bfTimeAgo(iso) {
@@ -74249,10 +74601,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (imageURL.startsWith('/assistant/link-preview/image?')) {
 	            const avatar = document.createElement('img')
 	            avatar.className = 'desktop-chat-link-preview__media desktop-chat-link-preview__post-avatar'
-	            avatar.src = imageURL
 	            avatar.alt = ''
-	            avatar.loading = 'lazy'
-	            avatar.decoding = 'async'
+	            bfChatImage(avatar, imageURL)
 	            avatar.addEventListener('error', () => avatar.replaceWith(avatarFallback))
 	            postHeader.appendChild(avatar)
 	          } else {
@@ -74292,10 +74642,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (imageURL.startsWith('/assistant/link-preview/image?')) {
 	          const image = document.createElement('img')
 	          image.className = 'desktop-chat-link-preview__media'
-	          image.src = imageURL
 	          image.alt = preview?.title ? `${preview.title} preview` : `${domain} preview`
-	          image.loading = 'lazy'
-	          image.decoding = 'async'
+	          bfChatImage(image, imageURL)
 	          image.addEventListener('error', () => image.replaceWith(bfEl('span', 'desktop-chat-link-preview__skeleton')))
 	          if (isTikTok || isYouTube || isInstagram) {
 	            const visual = bfEl('span', 'desktop-chat-link-preview__visual')
@@ -74917,9 +75265,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const imageAsset = assets.find(asset => asset.kind === 'image' && asset.mime.startsWith('image/'))
 	          const image = document.createElement('img')
 	          image.className = 'scout-chat-structured-result__image'
-	          image.src = artifactBlobUrl(imageAsset)
 	          image.alt = title
-	          image.loading = 'lazy'
+	          bfChatImage(image, artifactBlobUrl(imageAsset))
 	          preview.appendChild(image)
 	        } else if (type === 'pdf') {
 	          const pdf = document.createElement('embed')
@@ -77101,9 +77448,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		            frame.setAttribute('aria-label', `Expand ${file.name || (mime === 'image/gif' ? 'GIF' : 'image')}`)
 	            const img = document.createElement('img')
 	            img.className = 'scout-chat-file__thumb'
-	            img.src = blobHref
 	            img.alt = file.name || 'image attachment'
-	            img.loading = 'lazy'
+	            bfChatImage(img, blobHref)
 	            frame.addEventListener('click', () => openScoutChatImagePreview(blobHref, img.alt))
 	            frame.append(img, bfEl('span', 'scout-chat-image__expand', 'expand'))
 	            wrap.appendChild(frame)
@@ -84812,6 +85158,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const label = document.createElement('span')
           label.className = 'file-tile__name-label'
           label.textContent = name
+          // the clamp ellipsises anything past two lines, so carry the whole
+          // name in a tooltip — long deliverable titles are otherwise
+          // unrecoverable from the grid
+          label.title = name
           return label
         }
         if (file?.origin === 'deliverable' && file?.artifactId) {
