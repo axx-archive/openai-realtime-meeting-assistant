@@ -392,7 +392,10 @@ func TestMultiRoomAcceptanceFlow(t *testing.T) {
 	if len(legacy) != 1 || legacy[0].ID != "legacy-office-ts" {
 		t.Fatalf("legacy office recall = %+v, want the pre-room entry intact", legacy)
 	}
-	if resumed := app.memory.currentMeetingID(officeRoomID); resumed != "" && resumed != "meeting-legacy-office" {
+	// The member socket opened an ordinary office sitting in step 5, so the
+	// current office id is expected to advance beyond the seeded historical
+	// record. Isolation means it must never reuse the guest room's sitting.
+	if resumed := app.memory.currentMeetingID(officeRoomID); resumed == record.ID {
 		t.Fatalf("the guest sitting contaminated the office meeting id: %q", resumed)
 	}
 }

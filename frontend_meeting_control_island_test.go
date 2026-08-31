@@ -103,7 +103,7 @@ const server=http.createServer((req,res)=>{
  const page=await browser.newPage({viewport:{width:1440,height:900}});
  await page.goto(base+'/video',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
- await page.waitForFunction(()=>{const shell=document.getElementById('appShell');return shell?.dataset.tool==='room'&&shell?.dataset.pd1Destination==='Conversations'});
+ await page.waitForFunction(()=>{const shell=document.getElementById('appShell');return shell?.dataset.tool==='room'&&shell?.dataset.pd1Destination==='Video'});
  await page.waitForLoadState('networkidle');
  await page.waitForTimeout(400);
  await page.evaluate(()=>{for(let timer=1;timer<50000;timer++){clearTimeout(timer);clearInterval(timer)}});

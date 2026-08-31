@@ -1,0 +1,46 @@
+STRIDE native media local QA — build 19
+
+This is the same STRIDE Mac app, not a separate product. Build 19 keeps the
+build 18 shell and web experience, and adds an opt-in native meeting media path
+inside that app.
+
+Install
+
+1. Verify the SHA-256 supplied with the DMG:
+   shasum -a 256 STRIDE-1.0.dmg
+2. Open the DMG and drag STRIDE.app to Applications. It replaces an older
+   STRIDE.app because the bundle identifier is unchanged.
+3. Open STRIDE from Applications. This local QA build is not notarized for
+   public distribution. If Gatekeeper blocks the first launch, use Finder's
+   Open action and approve it, or use Privacy & Security > Open Anyway.
+4. Grant microphone and camera access when macOS asks. Grant Screen Recording
+   only when testing screen share.
+
+Two-person meeting check
+
+1. Both testers open build 19 and sign in normally.
+2. Before joining, choose Native Media (Local QA). Media ownership cannot be
+   changed during a call; leave first if you need to use WebKit fallback.
+3. Join the same room and confirm exactly two seats, one local capture owner per
+   Mac, two-way audio, two-way video, mute/camera sync, and clean seat removal
+   after leaving.
+4. Repeat once with the WebKit media path as the A/B baseline. Do not treat a
+   listening preference alone as proof of improved quality.
+5. If native initialization fails before joining, leave Native Media disabled
+   and use the existing WebKit path. Do not switch media owners mid-call.
+
+Useful recovery checks
+
+- Remove and reconnect a USB, wired, or Bluetooth input while joined.
+- Sleep and wake one Mac.
+- Interrupt and restore the network.
+- Deny a permission, leave, correct it in System Settings, and rejoin.
+
+Do not save raw audio/video, room or participant names, device names, SDP, ICE
+candidates, IP addresses, tokens, or account data in QA evidence. Report only
+sanitized timings, aggregate metrics, pass/fail outcomes, and screenshots with
+identifying content removed.
+
+This build is for named local QA testers. Developer ID signing, notarization,
+stapling, a signed Sparkle feed, and public privacy review remain separate
+distribution gates.

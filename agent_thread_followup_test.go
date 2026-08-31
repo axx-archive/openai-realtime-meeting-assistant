@@ -1182,6 +1182,13 @@ func TestFollowUpOnGoalDeliverableResumesGoalWithFeedback(t *testing.T) {
 	}
 	kanbanApp.runGoalThread(thread.Artifact.ID)
 	parked := waitForGoalStage(t, kanbanApp, thread.Artifact.ID, goalStateApproval)
+	// The approval projection is persisted before the folding child releases the
+	// goal mutex. Join that exact drive before exercising the request-path
+	// TryLock: a genuinely parked goal is idle, while racing the tail of its
+	// terminal fold would only test scheduler timing.
+	goalLock := goalEngineLock(thread.Artifact.ID)
+	goalLock.Lock()
+	goalLock.Unlock()
 	parent, _ := kanbanApp.osArtifactByID(thread.Artifact.ID)
 	writer := parked.subtaskByID("w1")
 	if writer == nil || writer.ArtifactID == "" {

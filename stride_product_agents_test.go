@@ -339,8 +339,15 @@ func TestCompletedCoworkerWorkProposesProvenanceBoundLearningBeforeActivation(t 
 		t.Fatalf("approved learning=%#v err=%v", hired.Learning, err)
 	}
 	profile, ok := state.agentContextProfile(hired.ID)
+	if !ok || len(profile.ActiveLearning) != 0 {
+		t.Fatalf("human approval bypassed the separate completed-work admission gate: %#v ok=%v", profile.ActiveLearning, ok)
+	}
+	state.setCompletedWorkLearningAdmission(func(learning STRIDEProductAgentLearning) bool {
+		return learning.ID == pending.ID && learning.ArtifactID == pending.ArtifactID && learning.RunID == pending.RunID
+	})
+	profile, ok = state.agentContextProfile(hired.ID)
 	if !ok || len(profile.ActiveLearning) != 1 || profile.ActiveLearning[0].ArtifactID != pending.ArtifactID {
-		t.Fatalf("approved learning missing from active context: %#v ok=%v", profile.ActiveLearning, ok)
+		t.Fatalf("provenance-admitted learning missing from active context: %#v ok=%v", profile.ActiveLearning, ok)
 	}
 	snapshot, err := state.Snapshot()
 	if err != nil {

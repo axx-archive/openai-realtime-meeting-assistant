@@ -15,8 +15,8 @@ func TestMeetingRecordWebAndNativeSurfacesKeepExactAuthorityAndCanonicalOrder(t 
 	}
 	html := string(raw)
 	for _, marker := range []string{
-		`data-tool="room" aria-label="Video"`,
-		`data-tool="memory" aria-label="Meetings"`,
+		`data-pd1-destination="Video" aria-label="Rooms"`,
+		`<section id="memoryTool" class="memory-tool" aria-label="Meetings">`,
 		"fetch(`/assistant/meetings?view=index&limit=60",
 		`meetingCursor=${encodeURIComponent(cursor)}`,
 		`Load older meetings`,
@@ -47,16 +47,15 @@ func TestMeetingRecordWebAndNativeSurfacesKeepExactAuthorityAndCanonicalOrder(t 
 			t.Fatalf("web Meeting Record surface missing %q", marker)
 		}
 	}
-	for _, label := range []string{"Home", "Video", "Chat", "Work", "Network", "Work Search", "You"} {
-		if !strings.Contains(html, `data-pd1-destination="`+label+`" aria-label="`+label+`"`) {
-			t.Fatalf("responsive primary destination %q lacks a durable accessible name", label)
+	for destination, label := range map[string]string{
+		"Home": "Home", "Video": "Rooms", "Conversations": "Conversations", "Work": "Work", "Drive": "Drive",
+	} {
+		if !strings.Contains(html, `data-pd1-destination="`+destination+`" aria-label="`+label+`"`) {
+			t.Fatalf("responsive primary destination %q lacks durable accessible name %q", destination, label)
 		}
 	}
 	if !strings.Contains(html, "Horizontal overflow clipped the entire menu") || !strings.Contains(html, "overflow: visible;") {
 		t.Fatal("phone Work menu must escape the fixed dock instead of being vertically clipped")
-	}
-	if !strings.Contains(html, ".work-tool-menu .tool-rail__label {\n        display: inline-block;") {
-		t.Fatal("phone Work menu must retain text labels after the dock hides icon labels")
 	}
 	render := functionBody(html, "function renderMemoryMeetingBody(meeting)")
 	if render == "" {

@@ -1236,6 +1236,7 @@ func main() {
 	http.HandleFunc("/archives/", meetingArchiveHandler)
 	http.HandleFunc("/participants", participantsHandler)
 	http.HandleFunc("/client-config", clientConfigHandler)
+	http.HandleFunc("/native/discovery", nativeClientDiscoveryHandler)
 	http.HandleFunc("/native/config", nativeClientConfigHandler)
 	// Multi-room W1: room registry + guest capability surface (rooms.go).
 	http.HandleFunc("/rooms", roomsHandler)
@@ -2416,6 +2417,37 @@ func nativeClientConfigHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}); err != nil {
 		log.Errorf("Failed to encode native client config: %v", err)
+	}
+}
+
+// nativeClientDiscoveryHandler exposes only the versioned, identity-free
+// bootstrap contract needed by a signed-out native client to locate the login
+// and room endpoints. The authenticated /native/config endpoint remains the
+// only surface that returns the member roster.
+func nativeClientDiscoveryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"protocolVersion": nativeClientProtocolV1,
+		"auth": map[string]any{
+			"mode":       "cookie",
+			"loginPath":  "/auth/login",
+			"mePath":     "/auth/me",
+			"logoutPath": "/auth/logout",
+		},
+		"room": map[string]any{
+			"clientConfigPath": "/client-config",
+			"websocketPath":    "/websocket",
+			"participants":     []any{},
+			"maxParticipants":  configuredMeetingRoomCapacity(),
+		},
+	}); err != nil {
+		log.Errorf("Failed to encode native discovery: %v", err)
 	}
 }
 
@@ -3734,7 +3766,7 @@ func addTrackForEndpointGeneration(roomID string, mediaGeneration uint64, t *web
 
 	codec := t.Codec()
 	log.Infof("room_track_added participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
-		canonicalRoomParticipantName(participantName), sessionID, t.Kind(), trackLocal.ID(), t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), totalTracks, audioTracks, videoTracks)
+		mediaLogPrincipal(participantName), sessionID, t.Kind(), trackLocal.ID(), t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), totalTracks, audioTracks, videoTracks)
 
 	return trackLocal, nil
 }
@@ -3809,6 +3841,15 @@ func mediaIDPart(value string, fallback string) string {
 	return strings.Join(strings.Fields(value), "_")
 }
 
+// mediaLogPrincipal deliberately avoids putting display names, email-derived
+// identities, or other account information into signaling and media evidence.
+func mediaLogPrincipal(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return "redacted"
+}
+
 func sameParticipantName(a string, b string) bool {
 	a = canonicalRoomParticipantName(a)
 	b = canonicalRoomParticipantName(b)
@@ -3831,7 +3872,7 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	defer func() {
 		listLock.Unlock()
 		log.Infof("room_track_removed participant=%s session=%s kind=%s track_id=%s total_tracks=%d audio_tracks=%d video_tracks=%d",
-			participantName, sessionID, t.Kind(), t.ID(), totalTracks, audioTracks, videoTracks)
+			mediaLogPrincipal(participantName), sessionID, t.Kind(), t.ID(), totalTracks, audioTracks, videoTracks)
 		if generationBound {
 			requestRoomMediaCommandForGeneration(roomID, mediaGeneration, roomMediaCommandTrack)
 		} else {
@@ -4177,7 +4218,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 	}
 	fmt.Printf(
 		"Client media quality participant=%q session=%s platform=%s clientVersion=%s safari=%v laggy=%v viewport=%dx%d visual=%dx%d orientation=%s/%d mobile=%v roomLayout=%s stageMode=%s boardExpanded=%v screenShare=%s attachmentRevision=%d auxTargets=%d constrained=%v audioMode=%s audioProfile=%s voiceFocus=%v processor=%s workletHealth=%s rnnoiseReady=%v sampleRate=%d frameSize=%d vfGain=%.3f vfSuppressionDb=%.1f vfBias=%.4f vfSpeech=%.2f localAudio=%s/%v localVideo=%s/%v cameraDeviceType=%s centerStageSupported=%v centerStageEnabled=%v centerStageActive=%v wideUprightSupported=%v wideUprightEnabled=%v framingDynamic=%dx%d framingReason=%s wideUprightReason=%s centerStageReason=%s webRTCCameraGuard=%v/%d/%s outAudioKbps=%.0f outVideoKbps=%.0f outAudioPackets=%d outVideoFrames=%d outVideo=%dx%d outVideoFps=%.1f targetVideoKbps=%.0f videoLimit=%s rttMs=%.0f inboundVideoJitterMs=%.0f inboundAudioJitterMs=%.0f inboundVideoLossPct=%.1f inboundAudioLossPct=%.1f localCandidate=%s remoteCandidate=%s protocol=%s network=%s remoteVideo=%d remoteAudio=%d remoteAudioLevel=%.5f remoteAudible=%d playbackElement=%d playbackWebAudio=%d playbackNone=%d audioCtx=%s missingVideo=%d missingAudio=%d duplicateVideo=%d duplicateAudio=%d placeholderVideo=%d placeholderAudio=%d stalledVideo=%d pendingAudio=%d%s\n",
-		participantName,
+		mediaLogPrincipal(participantName),
 		sessionID,
 		stringFromPayload(client, "platform"),
 		stringFromPayload(client, "version"),
@@ -4193,7 +4234,7 @@ func logClientMediaQualityReport(rawData string, participantName string, session
 		stringFromPayload(render, "roomLayout"),
 		stringFromPayload(render, "stageMode"),
 		boolFromPayload(render, "boardExpanded"),
-		stringFromPayload(render, "activeScreenShareParticipant"),
+		mediaLogPrincipal(stringFromPayload(render, "activeScreenShareParticipant")),
 		int(floatFromPayload(render, "attachmentRevision")),
 		arrayLenFromPayload(render, "auxiliaryTargets"),
 		boolFromPayload(video, "constrained"),
@@ -4276,17 +4317,17 @@ func logClientMediaErrorReport(rawData string, participantName string, sessionID
 	audio := mapFromPayload(payload, "audio")
 	errPayload := mapFromPayload(payload, "error")
 	fmt.Printf(
-		"Client media error participant=%q session=%s safari=%v stage=%s audioMode=%s processor=%s errorName=%s constraint=%s attempts=%d message=%q\n",
-		participantName,
+		"Client media error participant=%q session=%s safari=%v stage=%s audioMode=%s processor=%s errorName=%s constraint_present=%v attempts=%d message_present=%v\n",
+		mediaLogPrincipal(participantName),
 		sessionID,
 		boolFromPayload(browser, "safari"),
 		stringFromPayload(payload, "stage"),
 		stringFromPayload(audio, "mode"),
 		stringFromPayload(audio, "processor"),
 		stringFromPayload(errPayload, "name"),
-		stringFromPayload(errPayload, "constraint"),
+		stringFromPayload(errPayload, "constraint") != "",
 		arrayLenFromPayload(errPayload, "attempts"),
-		stringFromPayload(errPayload, "message"),
+		stringFromPayload(errPayload, "message") != "",
 	)
 }
 
@@ -4604,7 +4645,7 @@ func finalizeParticipantAdmissionRetirements(retired []participantSessionRetirem
 		}
 	}
 	for roomID, retirement := range retiredOtherRooms {
-		log.Infof("room_seat_evicted participant=%s from=%s joined=%s", retirement.name, roomID, joinedRoomID)
+		log.Infof("room_seat_evicted participant=%s from=%s joined=%s", mediaLogPrincipal(retirement.name), roomID, joinedRoomID)
 		broadcastRoomKanbanEvent(roomID, "participant_left", map[string]any{
 			"name":   retirement.name,
 			"roomId": roomID,
@@ -4959,7 +5000,7 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 						return true
 					}
 				case negotiationActionClose:
-					log.Errorf("Negotiation stuck >%s for participant=%s session=%s; closing peer connection so the client can reconnect", negotiationCloseAfter, peer.participantName, peer.sessionID)
+					log.Errorf("Negotiation stuck >%s for participant=%s session=%s; closing peer connection so the client can reconnect", negotiationCloseAfter, mediaLogPrincipal(peer.participantName), peer.sessionID)
 					stuckPeerConnection := peer.peerConnection
 					stuckWebsocket := peer.websocket
 					go func() {
@@ -5031,7 +5072,7 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 				if currentTrack != trackLocal {
 					if senderTrackReplacementCompatible(currentTrack, trackLocal) {
 						if err := sender.ReplaceTrack(trackLocal); err == nil {
-							log.Infof("room_sender_track_rebound track_id=%s participant=%s session=%s", trackID, peer.participantName, peer.sessionID)
+							log.Infof("room_sender_track_rebound track_id=%s participant=%s session=%s", trackID, mediaLogPrincipal(peer.participantName), peer.sessionID)
 							continue
 						} else {
 							log.Errorf("Failed to replace republished sender track=%s in place; renegotiating: %v", trackID, err)
@@ -5138,7 +5179,7 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 
 			totalTracks, audioTracks, videoTracks := forwardedTrackCountsLocked()
 			log.Infof("room_signal_offer participant=%s session=%s offer_id=%s revision=%d restart=%t forced_offer=%t desired_tracks=%d sender_tracks=%d receiver_tracks=%d total_tracks=%d audio_tracks=%d video_tracks=%d signaling_state=%s",
-				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, forceRestart, forceOffer, desiredTrackCount, countPeerSenders(peer.peerConnection), countPeerReceivers(peer.peerConnection), totalTracks, audioTracks, videoTracks, peer.peerConnection.SignalingState())
+				mediaLogPrincipal(peer.participantName), peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, forceRestart, forceOffer, desiredTrackCount, countPeerSenders(peer.peerConnection), countPeerReceivers(peer.peerConnection), totalTracks, audioTracks, videoTracks, peer.peerConnection.SignalingState())
 
 			if peer.signal != nil {
 				signal := peer.signal
@@ -5166,8 +5207,8 @@ func signalPeerConnectionsForRoom(roomID string, mediaGeneration uint64, enforce
 				return true
 			}
 
-			log.Infof("room_signal_offer_payload participant=%s session=%s offer_id=%s revision=%d sdp_bytes=%d",
-				peer.participantName, peer.sessionID, offerMetadata.OfferID, offerMetadata.Revision, len(offer.SDP))
+			log.Infof("room_signal_offer_payload revision=%d sdp_bytes=%d",
+				offerMetadata.Revision, len(offer.SDP))
 
 			writer := peer.websocket
 			currentPeerConnection := peer.peerConnection
@@ -5244,7 +5285,7 @@ func resendPendingOffer(peer *peerConnectionState) {
 	if metadata.empty() {
 		metadata = startPendingOfferMetadata(peer)
 	}
-	log.Infof("Negotiation stuck >%s for participant=%s session=%s offer_id=%s revision=%d; re-sending pending offer", negotiationResendAfter, peer.participantName, peer.sessionID, metadata.OfferID, metadata.Revision)
+	log.Infof("Negotiation stuck >%s for participant=%s session=%s offer_id=%s revision=%d; re-sending pending offer", negotiationResendAfter, mediaLogPrincipal(peer.participantName), peer.sessionID, metadata.OfferID, metadata.Revision)
 	if err := peer.websocket.WriteJSON(&websocketMessage{
 		Event:    "offer",
 		Data:     string(offerString),
@@ -5619,15 +5660,15 @@ func sweepPublisherSilence() {
 		switch obs.action {
 		case publisherSilenceOnset:
 			log.Infof("room_publisher_silent participant=%s session=%s kind=%s track_id=%s silent_ms=%d repeat=0",
-				w.participant, w.session, w.kind.String(), w.sourceKey, obs.silentMs)
+				mediaLogPrincipal(w.participant), w.session, w.kind.String(), w.sourceKey, obs.silentMs)
 			w.nudgeIfVideo()
 		case publisherSilenceOngoing:
 			log.Infof("room_publisher_silent participant=%s session=%s kind=%s track_id=%s silent_ms=%d repeat=%d",
-				w.participant, w.session, w.kind.String(), w.sourceKey, obs.silentMs, obs.repeat)
+				mediaLogPrincipal(w.participant), w.session, w.kind.String(), w.sourceKey, obs.silentMs, obs.repeat)
 			w.nudgeIfVideo()
 		case publisherSilenceRecovered:
 			log.Infof("room_publisher_recovered participant=%s session=%s kind=%s track_id=%s silent_ms=%d",
-				w.participant, w.session, w.kind.String(), w.sourceKey, obs.silentMs)
+				mediaLogPrincipal(w.participant), w.session, w.kind.String(), w.sourceKey, obs.silentMs)
 		case publisherSilenceNone:
 		}
 	}
@@ -5777,7 +5818,7 @@ func forwardedTrackSSRC(forwardedTrackID string) (uint32, bool) {
 // this is the server-side counterpart signal: after a fix attempt (server-side
 // TURN relay candidates) it tells us whether mobile sessions now select a
 // relay pair, a srflx pair, or still nothing at all.
-func logSelectedCandidatePair(peerConnection *webrtc.PeerConnection, participantName string, sessionID string) {
+func logSelectedCandidatePair(peerConnection *webrtc.PeerConnection) {
 	if peerConnection == nil {
 		return
 	}
@@ -5795,13 +5836,13 @@ func logSelectedCandidatePair(peerConnection *webrtc.PeerConnection, participant
 	}
 	pair, err := iceTransport.GetSelectedCandidatePair()
 	if err != nil || pair == nil || pair.Local == nil || pair.Remote == nil {
-		log.Infof("ice_selected_pair participant=%s session=%s pair=none error=%v", participantName, sessionID, err)
+		log.Infof("ice_selected_pair pair=none")
 		return
 	}
-	log.Infof("ice_selected_pair participant=%s session=%s local_type=%s local_protocol=%s local=%s:%d remote_type=%s remote_protocol=%s remote=%s:%d",
-		participantName, sessionID,
-		pair.Local.Typ, pair.Local.Protocol, pair.Local.Address, pair.Local.Port,
-		pair.Remote.Typ, pair.Remote.Protocol, pair.Remote.Address, pair.Remote.Port)
+	// Candidate types and protocols are sufficient to diagnose relay behavior.
+	// Never emit endpoint addresses, ports, participant names, or session IDs.
+	log.Infof("ice_selected_pair local_type=%s local_protocol=%s remote_type=%s remote_protocol=%s",
+		pair.Local.Typ, pair.Local.Protocol, pair.Remote.Typ, pair.Remote.Protocol)
 }
 
 // Handle incoming websockets.
@@ -6163,7 +6204,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				return
 			}
 
-			log.Infof("Send candidate to client: %s", candidateString)
+			// Raw ICE candidates can contain private network addresses and must never
+			// enter application logs or QA evidence. The candidate itself still travels
+			// over the authenticated signaling channel below.
+			log.Infof("Sending ICE candidate to client")
 
 			if writeErr := c.WriteJSON(&websocketMessage{
 				Event: "candidate",
@@ -6212,12 +6256,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			trackMediaGeneration := participantMediaGeneration.Load()
 			trackAdmission := participantAdmission.Load()
 			if !trackAdmission.isCurrent() {
-				log.Infof("room_ontrack_stale_session participant=%s session=%s room=%s", trackParticipantName, trackParticipantSessionID, connRoomID)
+				log.Infof("room_ontrack_stale_session participant=%s session=%s room=%s", mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, connRoomID)
 				return
 			}
 			mediaActor := roomMediaActorForGeneration(connRoomID, trackMediaGeneration)
 			if mediaActor == nil {
-				log.Infof("room_ontrack_stale_sitting participant=%s session=%s room=%s gen=%d", trackParticipantName, trackParticipantSessionID, connRoomID, trackMediaGeneration)
+				log.Infof("room_ontrack_stale_sitting participant=%s session=%s room=%s gen=%d", mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, connRoomID, trackMediaGeneration)
 				return
 			}
 			forwardedTrackID := forwardedRemoteTrackID(t)
@@ -6227,7 +6271,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			stripExtensionIDs := transportScopedRTPExtensionIDs(receiver)
 			codec := t.Codec()
 			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
-				trackParticipantName, trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
+				mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
 			// Create a track to fan out our incoming media to all browser peers
 			// of THIS room only (trackRooms + acceptsTrack, multi-room W3).
 			trackLocal, err := addTrackForEndpointGeneration(connRoomID, trackMediaGeneration, t, trackParticipantName, trackParticipantSessionID, trackParticipantEndpointID)
@@ -6237,7 +6281,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			if !trackAdmission.isCurrent() {
 				removeTrack(trackLocal)
-				log.Infof("room_ontrack_retired_after_add participant=%s session=%s room=%s", trackParticipantName, trackParticipantSessionID, connRoomID)
+				log.Infof("room_ontrack_retired_after_add participant=%s session=%s room=%s", mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, connRoomID)
 				return
 			}
 			published := false
@@ -6295,7 +6339,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			payloadBytesForwarded := 0
 			defer func() {
 				log.Infof("room_ontrack_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s stream_id=%s packets=%d payload_bytes=%d duration=%s",
-					trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), packetsForwarded, payloadBytesForwarded, time.Since(onTrackStartedAt).Round(time.Millisecond))
+					mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), packetsForwarded, payloadBytesForwarded, time.Since(onTrackStartedAt).Round(time.Millisecond))
 			}()
 
 			for {
@@ -6305,7 +6349,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				packet, _, err := t.ReadRTP()
 				if err != nil {
 					log.Infof("room_ontrack_read_end participant=%s session=%s kind=%s track_id=%s source_track_id=%s packets=%d error=%v",
-						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
+						mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packetsForwarded, err)
 					return
 				}
 				// The admission lease is pointer-stable and retired atomically by
@@ -6328,7 +6372,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				if !announcedRTPDetails {
 					announcedRTPDetails = true
 					log.Infof("room_ontrack_first_rtp participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d marker=%t payload_type=%d payload_bytes=%d extension_profile=0x%x extension_ids=%s",
-						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.Marker, packet.PayloadType, len(packet.Payload), packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()))
+						mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.Marker, packet.PayloadType, len(packet.Payload), packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()))
 				}
 
 				// Direct room media is the primary lane. Forward before any optional
@@ -6336,7 +6380,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// overloaded intelligence lane cannot hold the call behind it.
 				if err = forwardPublisherRTP(trackLocal, packet, stripExtensionIDs); err != nil {
 					log.Errorf("room_ontrack_write_failed participant=%s session=%s kind=%s track_id=%s source_track_id=%s sequence=%d payload_type=%d extension_profile=0x%x extension_ids=%s packets=%d error=%v",
-						trackParticipantName, trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
+						mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, t.Kind(), forwardedTrackID, t.ID(), packet.SequenceNumber, packet.PayloadType, packet.ExtensionProfile, rtpExtensionIDSummary(packet.GetExtensionIDs()), packetsForwarded, err)
 					return
 				}
 				packetsForwarded++
@@ -6407,7 +6451,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					return // recovered on its own during the grace window
 				}
 				totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
-				log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
+				log.Infof("ICE still disconnected after grace; restarting ICE for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", mediaLogPrincipal(currentParticipantName()), participantSessionID, totalTracks, audioTracks, videoTracks)
 				signalPeerConnectionICE(pc)
 			})
 		}
@@ -6420,7 +6464,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				scheduleICERecovery()
 			case is == webrtc.ICEConnectionStateConnected || is == webrtc.ICEConnectionStateCompleted:
 				cancelICERecovery()
-				logSelectedCandidatePair(pc, currentParticipantName(), participantSessionID)
+				logSelectedCandidatePair(pc)
 			}
 		})
 
@@ -6441,11 +6485,11 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		_, raw, err := c.ReadTenantMessage(r.Context())
 		if err != nil {
 			if isWebsocketReadTimeout(err) {
-				log.Infof("room_ws_read_timeout participant=%s session=%s timeout=%s; cleaning up half-open session", currentParticipantName(), participantSessionID, websocketReadTimeout)
+				log.Infof("room_ws_read_timeout participant=%s session=%s timeout=%s; cleaning up half-open session", mediaLogPrincipal(currentParticipantName()), participantSessionID, websocketReadTimeout)
 			} else if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
-				log.Errorf("room_ws_unexpected_close participant=%s session=%s room=%s error=%v", currentParticipantName(), participantSessionID, connRoomID, err)
+				log.Errorf("room_ws_unexpected_close participant=%s session=%s room=%s error=%v", mediaLogPrincipal(currentParticipantName()), participantSessionID, connRoomID, err)
 			} else {
-				log.Infof("room_ws_closed participant=%s session=%s room=%s error=%v", currentParticipantName(), participantSessionID, connRoomID, err)
+				log.Infof("room_ws_closed participant=%s session=%s room=%s error=%v", mediaLogPrincipal(currentParticipantName()), participantSessionID, connRoomID, err)
 			}
 
 			return
@@ -6870,7 +6914,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					memberRepairDropsSuppressed++
 					if repairNow.Sub(memberRepairDropLogAt) >= memberMediaRepairLogInterval {
 						log.Infof("member_media_repair_rate_limited session=%s room=%s participant=%s reason=%q dropped=%d",
-							participantSessionID, connRoomID, currentParticipantName(), reason, memberRepairDropsSuppressed)
+							participantSessionID, connRoomID, mediaLogPrincipal(currentParticipantName()), reason, memberRepairDropsSuppressed)
 						memberRepairDropLogAt = repairNow
 						memberRepairDropsSuppressed = 0
 					}
@@ -6878,7 +6922,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				}
 				if repairNow.Sub(memberRepairLogAt) >= memberMediaRepairLogInterval {
 					log.Infof("member_media_repair session=%s room=%s participant=%s reason=%q suppressed=%d",
-						participantSessionID, connRoomID, currentParticipantName(), reason, memberRepairLogsSuppressed)
+						participantSessionID, connRoomID, mediaLogPrincipal(currentParticipantName()), reason, memberRepairLogsSuppressed)
 					memberRepairLogAt = repairNow
 					memberRepairLogsSuppressed = 0
 				} else {
@@ -6887,7 +6931,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			if refreshRequest.renegotiateUplink {
 				if markPeerConnectionForceOffer(peerConnection, participantMediaGeneration.Load()) {
-					log.Infof("native_uplink_offer_queued session=%s room=%s participant=%s", participantSessionID, connRoomID, currentParticipantName())
+					log.Infof("native_uplink_offer_queued session=%s room=%s participant=%s", participantSessionID, connRoomID, mediaLogPrincipal(currentParticipantName()))
 				}
 			}
 			sendParticipantTrackSnapshots(c, connRoomID, currentParticipantName())
@@ -6898,12 +6942,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			candidate := webrtc.ICECandidateInit{}
 			if err := json.Unmarshal([]byte(message.Data), &candidate); err != nil {
-				log.Errorf("Failed to unmarshal json to candidate: %v", err)
+				log.Errorf("Rejected malformed ICE candidate payload")
 
 				return
 			}
 
-			log.Infof("Got candidate: %v", candidate)
+			// Do not log the candidate payload: it can expose private network
+			// addresses and is explicitly excluded from sanitized media evidence.
+			log.Infof("Received ICE candidate from client")
 
 			if remoteICECandidateShouldQueue(candidate, peerConnection.RemoteDescription()) {
 				queued, evicted := pendingRemoteCandidates.enqueue(candidate)
@@ -6919,7 +6965,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 
 			if err := peerConnection.AddICECandidate(candidate); err != nil {
-				log.Errorf("Failed to add ICE candidate: %v", err)
+				log.Errorf("Failed to apply ICE candidate")
 			}
 		case "answer":
 			if peerConnection == nil {
@@ -6935,13 +6981,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			answerMetadata := signalingMetadataFromMessage(*message)
 			pendingMetadata := currentPendingOfferMetadata(peerConnection)
 			if ignore, reason := shouldIgnoreAnswerForPendingOffer(answerMetadata, pendingMetadata); ignore {
-				log.Infof("room_signal_answer_stale participant=%s session=%s reason=%q answer_offer_id=%s answer_revision=%d pending_offer_id=%s pending_revision=%d signaling_state=%s",
-					currentParticipantName(), participantSessionID, reason, answerMetadata.OfferID, answerMetadata.Revision, pendingMetadata.OfferID, pendingMetadata.Revision, peerConnection.SignalingState())
+				log.Infof("room_signal_answer_stale reason=%q answer_revision=%d pending_revision=%d signaling_state=%s",
+					reason, answerMetadata.Revision, pendingMetadata.Revision, peerConnection.SignalingState())
 				continue
 			}
 
-			log.Infof("room_signal_answer participant=%s session=%s answer_offer_id=%s answer_revision=%d pending_offer_id=%s pending_revision=%d signaling_state=%s sdp_bytes=%d",
-				currentParticipantName(), participantSessionID, answerMetadata.OfferID, answerMetadata.Revision, pendingMetadata.OfferID, pendingMetadata.Revision, peerConnection.SignalingState(), len(answer.SDP))
+			log.Infof("room_signal_answer answer_revision=%d pending_revision=%d signaling_state=%s sdp_bytes=%d",
+				answerMetadata.Revision, pendingMetadata.Revision, peerConnection.SignalingState(), len(answer.SDP))
 
 			if err := peerConnection.SetRemoteDescription(answer); err != nil {
 				// A failed answer must not kill the websocket session. The
@@ -6951,17 +6997,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// session alive; the negotiation watchdog recovers any peer
 				// that is genuinely stuck.
 				if peerConnection.SignalingState() == webrtc.SignalingStateStable {
-					log.Infof("Dropping stray answer in stable signaling state (likely a duplicate after an offer resend): %v", err)
+					log.Infof("Dropping stray answer in stable signaling state (likely a duplicate after an offer resend)")
 				} else {
-					log.Errorf("Failed to set remote description: %v", err)
+					log.Errorf("Failed to set remote description")
 				}
 
 				continue
 			}
 			if !completePendingOfferIfMatching(peerConnection, pendingMetadata) {
 				currentPending := currentPendingOfferMetadata(peerConnection)
-				log.Infof("room_signal_answer_superseded participant=%s session=%s answered_offer_id=%s answered_revision=%d current_offer_id=%s current_revision=%d",
-					currentParticipantName(), participantSessionID, pendingMetadata.OfferID, pendingMetadata.Revision, currentPending.OfferID, currentPending.Revision)
+				log.Infof("room_signal_answer_superseded answered_revision=%d current_revision=%d",
+					pendingMetadata.Revision, currentPending.Revision)
 			}
 			matchingCandidates, discardedCandidates := pendingRemoteCandidates.takeMatching(peerConnection.RemoteDescription())
 			if discardedCandidates > 0 {
@@ -6969,7 +7015,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			for _, candidate := range matchingCandidates {
 				if err := peerConnection.AddICECandidate(candidate); err != nil {
-					log.Errorf("Failed to add queued ICE candidate: %v", err)
+					log.Errorf("Failed to apply queued ICE candidate")
 				}
 			}
 			requestRoomMediaCommandForGeneration(connRoomID, participantMediaGeneration.Load(), roomMediaCommandSignal)
@@ -6993,8 +7039,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			if !iceRestartAllowed {
 				iceRestartDropsSuppressed++
 				if iceRestartNow.Sub(iceRestartDropLogAt) >= memberMediaRepairLogInterval {
-					log.Infof("restart_ice_rate_limited session=%s room=%s participant=%s dropped=%d",
-						participantSessionID, connRoomID, currentParticipantName(), iceRestartDropsSuppressed)
+					log.Infof("restart_ice_rate_limited dropped=%d", iceRestartDropsSuppressed)
 					iceRestartDropLogAt = iceRestartNow
 					iceRestartDropsSuppressed = 0
 				}
@@ -7002,9 +7047,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			totalTracks, audioTracks, videoTracks := snapshotForwardedTrackCounts()
 			if signalPeerConnectionICE(peerConnection) {
-				log.Infof("Client requested ICE restart for participant=%s session=%s total_tracks=%d audio_tracks=%d video_tracks=%d", currentParticipantName(), participantSessionID, totalTracks, audioTracks, videoTracks)
+				log.Infof("Client requested ICE restart total_tracks=%d audio_tracks=%d video_tracks=%d", totalTracks, audioTracks, videoTracks)
 			} else {
-				log.Infof("Client ICE restart coalesced for participant=%s session=%s", currentParticipantName(), participantSessionID)
+				log.Infof("Client ICE restart coalesced")
 			}
 		case "select_layer":
 			if !participantAccepted || !mediaJoined {
@@ -7022,7 +7067,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			// forwarded layer adds/removes senders, so we let signalPeerConnections
 			// reconcile which layer this subscriber receives.
 			if setSubscriberLayerTier(participantSessionID, tier) {
-				log.Infof("Participant=%s session=%s selected simulcast layer tier=%s", currentParticipantName(), participantSessionID, tier)
+				log.Infof("Participant=%s session=%s selected simulcast layer tier=%s", mediaLogPrincipal(currentParticipantName()), participantSessionID, tier)
 				requestRoomMediaCommandForGeneration(connRoomID, participantMediaGeneration.Load(), roomMediaCommandSignal)
 			}
 		case "assistant_query":
@@ -7502,7 +7547,7 @@ func startRoomWebsocketHeartbeat(c *threadSafeWriter, participantName func() str
 		// read loop), so a truly-gone tab goes stale and the idle-end sweep can
 		// finalize the empty sitting.
 		if err := c.Conn.SetReadDeadline(time.Now().Add(websocketReadTimeout)); err != nil {
-			log.Errorf("room_ws_pong_deadline_failed participant=%s session=%s error=%v", participantName(), sessionID, err)
+			log.Errorf("room_ws_pong_deadline_failed participant=%s session=%s error=%v", mediaLogPrincipal(participantName()), sessionID, err)
 			return err
 		}
 		return nil
@@ -7517,7 +7562,7 @@ func startRoomWebsocketHeartbeat(c *threadSafeWriter, participantName func() str
 			select {
 			case <-ticker.C:
 				if err := c.WriteControl(websocket.PingMessage, []byte("room"), time.Now().Add(websocketWriteTimeout)); err != nil {
-					log.Infof("room_ws_heartbeat_failed participant=%s session=%s error=%v", participantName(), sessionID, err)
+					log.Infof("room_ws_heartbeat_failed participant=%s session=%s error=%v", mediaLogPrincipal(participantName()), sessionID, err)
 					_ = c.Close()
 					return
 				}

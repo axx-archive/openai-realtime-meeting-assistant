@@ -27,8 +27,8 @@ const dictation=fs.readFileSync(path.join(path.dirname(process.env.PROJECT_WORK_
 const digest='a'.repeat(64);
 const artifactId='artifact-project-research';
 const dispositionRef={tenantId:'bonfire',artifactId,contentRevision:3,contentDigest:digest,aclVersion:1,audienceDigest:'b'.repeat(64)};
-const artifact={id:artifactId,kind:'os_artifact',text:'# Creator evidence brief\n\nEvidence-grounded final report with exact current sources.',createdAt:'2026-08-13T18:00:00Z',metadata:{source:'scout_thread',mode:'research',status:'complete',threadStatus:'complete',goalStatus:'complete',threadVersion:'2',threadId:'run-project-research',threadQuery:'Research the durable creator-economy evidence',title:'Creator evidence brief',agentName:'Scout',progressPercent:'100',projectWorkId:'project-research',projectWorkTitle:'Research Project',originKind:'private_thread',originId:'thread-project-research',requestedBy:'synthetic@example.test',visibility:'private'}};
-const work={id:'work-project-research',kind:'thread',role:'scout',text:'Research delivered.',createdAt:'2026-08-13T18:01:00Z',intentOutcome:'start_private_work',thread:{id:'run-project-research',mode:'research',query:'Research the durable creator-economy evidence',status:'complete',artifactId,agentName:'Scout',progressPercent:100,projectId:'project-research',projectTitle:'Research Project'}};
+const artifact={id:artifactId,kind:'os_artifact',text:'# Creator evidence brief\n\nEvidence-grounded final report with exact current sources.',createdAt:'2026-08-13T18:00:00Z',metadata:{source:'scout_thread',mode:'research',status:'complete',threadStatus:'complete',goalStatus:'complete',threadVersion:'2',threadId:'run-project-research',threadQuery:'Research the durable creator-economy evidence',title:'Creator evidence brief',agentName:'Scout',progressPercent:'100',artifactVersion:'3',contentDigest:digest,projectWorkId:'project-research',projectWorkTitle:'Research Project',originKind:'private_thread',originId:'thread-project-research',requestedBy:'synthetic@example.test',visibility:'private'}};
+const work={id:'work-project-research',kind:'thread',role:'scout',text:'Research delivered.',createdAt:'2026-08-13T18:01:00Z',intentOutcome:'start_private_work',thread:{id:'run-project-research',mode:'research',query:'Research the durable creator-economy evidence',status:'complete',artifactId,agentName:'Scout',progressPercent:100,projectId:'project-research',projectTitle:'Research Project',resultArtifactId:artifactId,resultArtifactType:'markdown',resultArtifactVersion:3,resultArtifactDigest:digest,resultTitle:'Creator evidence brief',resultQualityState:'admitted',resultCanEdit:true,resultCanPresent:false,resultCanExport:true}};
 const thread={id:'thread-project-research',title:'Project Research',visibility:'private',ownerEmail:'synthetic@example.test',updatedAt:'2026-08-13T18:01:00Z',messagesLoaded:true,messages:[work]};
 let saveBodies=[];
 let correctionBodies=[];
@@ -67,7 +67,7 @@ const server=http.createServer((req,res)=>{
  await card.waitFor();
  assert.match(await card.getAttribute('aria-label'),/Project: Research Project/);
  assert.equal(await card.locator('.scout-chat-work-card__project').textContent(),'Project · Research Project');
- await card.getByRole('button',{name:/View Research activity/}).click();
+ await card.getByRole('button',{name:/View Document activity/}).click();
  await page.waitForFunction(()=>!document.getElementById('chatContextRail').hidden);
  assert.equal(await page.locator('#chatContextRail').getByRole('button',{name:'Open',exact:true}).isVisible(),true);
  const save=page.locator('#chatContextRail').getByRole('button',{name:'Save to Drive'});

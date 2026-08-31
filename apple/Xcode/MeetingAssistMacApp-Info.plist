@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>MeetingAssist</string>
+	<string>STRIDE</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -18,22 +18,31 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>co.thebonfire.meetingassist</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>meetingassist</string>
-			</array>
-		</dict>
-	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSCameraUsageDescription</key>
-	<string>MeetingAssist uses the camera when you join a video room.</string>
+	<string>STRIDE uses the camera when you join a video room.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>MeetingAssist uses the microphone when you join a video room.</string>
+	<string>STRIDE uses the microphone when you join a video room.</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>SUAllowsAutomaticUpdates</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$(STRIDE_UPDATE_FEED_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(STRIDE_SPARKLE_PUBLIC_ED_KEY)</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
+	<key>SUSendProfileInfo</key>
+	<false/>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
 </dict>
 </plist>

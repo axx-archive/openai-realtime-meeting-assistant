@@ -68,13 +68,13 @@ const count=kind=>requests.filter(request=>request.kind===kind).length;
   assert.ok(desktopGeometry.scrollWidth<=desktopGeometry.viewport.width,JSON.stringify(desktopGeometry));
   await deckEditor.getByRole('button',{name:'Close Deck Studio'}).click();
   await deckEditor.waitFor({state:'detached'});
-  await desktop.waitForFunction(()=>location.pathname==='/files');
-  assert.equal(new URL(desktop.url()).pathname,'/files');
-  assert.equal(await desktop.locator('#appShell').getAttribute('data-pd1-destination'),'Files');
+  await desktop.waitForFunction(()=>location.pathname==='/drive');
+  assert.equal(new URL(desktop.url()).pathname,'/drive');
+  assert.equal(await desktop.locator('#appShell').getAttribute('data-pd1-destination'),'Drive');
   assert.equal(await desktop.locator('#appShell').getAttribute('data-tool'),'files');
 
   // Phone present links keep the stage and every direct control inside the
-  // viewport, then return to Files when the presentation closes.
+  // viewport, then return to Drive when the presentation closes.
   const phone=await browser.newPage({viewport:{width:390,height:844}});
   await phone.goto(origin+'/studio/deck/'+deckId+'?mode=present',{waitUntil:'domcontentloaded'});
   const presenter=phone.locator('.deck-presenter');
@@ -88,8 +88,8 @@ const count=kind=>requests.filter(request=>request.kind===kind).length;
   assert.ok(phoneGeometry.scrollWidth<=phoneGeometry.viewport.width,JSON.stringify(phoneGeometry));
   await presenter.getByRole('button',{name:'Close',exact:true}).click();
   await presenter.waitFor({state:'detached'});
-  await phone.waitForFunction(()=>location.pathname==='/files');
-  assert.equal(await phone.locator('#appShell').getAttribute('data-pd1-destination'),'Files');
+  await phone.waitForFunction(()=>location.pathname==='/drive');
+  assert.equal(await phone.locator('#appShell').getAttribute('data-pd1-destination'),'Drive');
 
   // iPad document links open the editable native paper at a usable width.
   const ipad=await browser.newPage({viewport:{width:1024,height:768}});
@@ -107,8 +107,8 @@ const count=kind=>requests.filter(request=>request.kind===kind).length;
   assert.ok(ipadGeometry.scrollWidth<=ipadGeometry.viewport.width,JSON.stringify(ipadGeometry));
   await documentEditor.getByRole('button',{name:'Close Document Studio'}).click();
   await documentEditor.waitFor({state:'detached'});
-  await ipad.waitForFunction(()=>location.pathname==='/files');
-  assert.equal(await ipad.locator('#appShell').getAttribute('data-pd1-destination'),'Files');
+  await ipad.waitForFunction(()=>location.pathname==='/drive');
+  assert.equal(await ipad.locator('#appShell').getAttribute('data-pd1-destination'),'Drive');
 
   // Inside the iOS shell, Studio closes through one exact, versioned bridge
   // message. The web document is removed, but navigation stays on the Studio

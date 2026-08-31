@@ -1850,8 +1850,13 @@ func TestManualArchiveEmailCompletionCannotRestoreConcurrentlyDeletedTranscript(
 			t.Fatal("slow email completion restored a transcript already deleted by its author")
 		}
 	}
-	if archive.Meeting == nil || archive.Meeting.Finalization == nil || archive.Meeting.Finalization.State == meetingFinalizationFinalized {
-		t.Fatalf("archive did not preserve latest closing truth after deletion: %+v", archive.Meeting)
+	latest, found := app.meetings.recordByID(archive.MeetingID)
+	if !found || archive.Meeting == nil || archive.Meeting.Finalization == nil || latest.Finalization == nil ||
+		archive.Meeting.Finalization.State != latest.Finalization.State ||
+		!archive.Meeting.Finalization.Source.equal(latest.Finalization.Source) ||
+		archive.Meeting.Finalization.ObservedRevision != latest.Finalization.ObservedRevision ||
+		archive.Meeting.Finalization.Source.TranscriptCount != 0 || archive.Meeting.Finalization.Source.TranscriptID != "" {
+		t.Fatalf("archive did not preserve the latest deletion-safe finalization truth: archive=%+v latest=%+v", archive.Meeting, latest)
 	}
 }
 

@@ -852,7 +852,7 @@ func TestAcceptedPublicPackagingStudioHasVisibleReservationBeforeGoalStarts(t *t
 	if work.Mode != "goal" || work.Artifact.Metadata["processId"] != packagingStudioProcessID {
 		t.Fatalf("packaging work=%+v metadata=%v", work, work.Artifact.Metadata)
 	}
-	if answer.ReplyTo != nil || answer.Thread == nil || answer.Thread.ID != work.ID || !strings.Contains(answer.Text, "progress") {
+	if answer.ReplyTo != nil || answer.Thread == nil || answer.Thread.ID != work.ID || answer.Text != studioProjectLaunchCopy(packagingStudioProcessID, "Presentation Studio") {
 		t.Fatalf("deck root card=%+v", answer)
 	}
 	plan, ok := decodeGoalPlan(work.Artifact.Metadata["goalPlan"])

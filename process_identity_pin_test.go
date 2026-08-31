@@ -265,7 +265,9 @@ func TestPersistedMidRunProcessDriftBlocksWithoutDispatchFallback(t *testing.T) 
 
 func TestLegacyProcessIDOnlyPlanFailsClosed(t *testing.T) {
 	plan := &goalPlan{ProcessID: processProbeDefinition().ID, routeVerified: true}
-	if _, err := resolvePinnedProcessDefinition(plan); err == nil || !strings.Contains(err.Error(), "incomplete") {
+	if _, err := resolvePinnedProcessDefinition(plan); err == nil ||
+		!strings.Contains(err.Error(), "identity no longer matches") ||
+		!strings.Contains(err.Error(), "relaunch or explicitly migrate") {
 		t.Fatalf("legacy process-id-only plan regained runtime authority: %v", err)
 	}
 }

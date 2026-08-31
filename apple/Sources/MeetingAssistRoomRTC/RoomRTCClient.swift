@@ -15,6 +15,444 @@ import CoreGraphics
 
 public typealias LocalICECandidateHandler = @Sendable (RTCIceCandidatePayload) async -> Void
 public typealias RemoteVideoTrackHandler = @Sendable (NativeRemoteVideoTrack) async -> Void
+public typealias NativeMediaRuntimeStateHandler = @Sendable (NativeMediaRuntimeSnapshot) async -> Void
+
+public enum NativeScreenShareRuntimeEvent: String, Equatable, Sendable {
+    case capturePaused
+    case captureStopped
+    case captureError
+}
+
+public typealias NativeScreenShareRuntimeStateHandler = @Sendable (NativeScreenShareRuntimeEvent) async -> Void
+
+public enum NativeMediaDeviceKind: String, Equatable, Sendable {
+    case audioInput
+    case audioOutput
+    case camera
+}
+
+/// Device names are display-only. This type deliberately is not Codable so a
+/// runtime inventory cannot be accidentally promoted into media evidence.
+public struct NativeMediaDevice: Equatable, Sendable {
+    public var id: String
+    public var uiDisplayName: String
+    public var kind: NativeMediaDeviceKind
+    public var isDefault: Bool
+    public var isSelected: Bool
+
+    public init(
+        id: String,
+        uiDisplayName: String,
+        kind: NativeMediaDeviceKind,
+        isDefault: Bool = false,
+        isSelected: Bool = false
+    ) {
+        self.id = id
+        self.uiDisplayName = uiDisplayName
+        self.kind = kind
+        self.isDefault = isDefault
+        self.isSelected = isSelected
+    }
+}
+
+public struct NativeMediaDeviceInventory: Equatable, Sendable {
+    public var audioInputs: [NativeMediaDevice]
+    public var audioOutputs: [NativeMediaDevice]
+    public var cameras: [NativeMediaDevice]
+
+    public init(
+        audioInputs: [NativeMediaDevice] = [],
+        audioOutputs: [NativeMediaDevice] = [],
+        cameras: [NativeMediaDevice] = []
+    ) {
+        self.audioInputs = audioInputs
+        self.audioOutputs = audioOutputs
+        self.cameras = cameras
+    }
+}
+
+public enum NativeAudioProcessingMode: String, Codable, Equatable, Sendable {
+    case automatic
+    case platform
+    case software
+    case unknown
+}
+
+public enum NativeAudioProcessingImplementation: String, Codable, Equatable, Sendable {
+    case unknown
+    case disabled
+    case software
+    case platform
+    case softwareAndPlatform
+}
+
+public enum NativeAudioProcessingRequestResult: String, Codable, Equatable, Sendable {
+    case notRequested
+    case applied
+    case stored
+    case rejectedRemoteTrack
+    case rejectedInvalidCombination
+    case rejectedPlatformUnavailable
+    case applyFailed
+    case unknownFailure
+
+    public var succeeded: Bool {
+        self == .applied || self == .stored
+    }
+}
+
+public struct NativeAudioProcessingRequest: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var mode: NativeAudioProcessingMode
+
+    public init(enabled: Bool, mode: NativeAudioProcessingMode) {
+        self.enabled = enabled
+        self.mode = mode
+    }
+}
+
+public struct NativeAudioProcessingComponentSnapshot: Codable, Equatable, Sendable {
+    public var requested: NativeAudioProcessingRequest?
+    public var softwareResolved: Bool
+    public var softwareActive: Bool
+    public var platformAvailable: Bool
+    public var platformResolved: Bool
+    public var platformActive: Bool
+    public var effective: NativeAudioProcessingImplementation
+
+    public init(
+        requested: NativeAudioProcessingRequest? = nil,
+        softwareResolved: Bool = false,
+        softwareActive: Bool = false,
+        platformAvailable: Bool = false,
+        platformResolved: Bool = false,
+        platformActive: Bool = false,
+        effective: NativeAudioProcessingImplementation = .unknown
+    ) {
+        self.requested = requested
+        self.softwareResolved = softwareResolved
+        self.softwareActive = softwareActive
+        self.platformAvailable = platformAvailable
+        self.platformResolved = platformResolved
+        self.platformActive = platformActive
+        self.effective = effective
+    }
+}
+
+public struct NativePlatformVoiceProcessingSnapshot: Codable, Equatable, Sendable {
+    public var enabledRequested: Bool
+    public var enabledActive: Bool
+    public var bypassedRequested: Bool
+    public var bypassedActive: Bool
+    public var automaticGainControlRequested: Bool
+    public var automaticGainControlActive: Bool
+
+    public init(
+        enabledRequested: Bool = false,
+        enabledActive: Bool = false,
+        bypassedRequested: Bool = false,
+        bypassedActive: Bool = false,
+        automaticGainControlRequested: Bool = false,
+        automaticGainControlActive: Bool = false
+    ) {
+        self.enabledRequested = enabledRequested
+        self.enabledActive = enabledActive
+        self.bypassedRequested = bypassedRequested
+        self.bypassedActive = bypassedActive
+        self.automaticGainControlRequested = automaticGainControlRequested
+        self.automaticGainControlActive = automaticGainControlActive
+    }
+}
+
+public struct NativeAudioProcessingSnapshot: Codable, Equatable, Sendable {
+    public var requestResult: NativeAudioProcessingRequestResult
+    public var hasAudioProcessingModule: Bool
+    public var echoCancellation: NativeAudioProcessingComponentSnapshot
+    public var noiseSuppression: NativeAudioProcessingComponentSnapshot
+    public var automaticGainControl: NativeAudioProcessingComponentSnapshot
+    public var highPassFilter: NativeAudioProcessingComponentSnapshot
+    public var platformVoiceProcessing: NativePlatformVoiceProcessingSnapshot
+
+    public init(
+        requestResult: NativeAudioProcessingRequestResult = .notRequested,
+        hasAudioProcessingModule: Bool = false,
+        echoCancellation: NativeAudioProcessingComponentSnapshot = .init(),
+        noiseSuppression: NativeAudioProcessingComponentSnapshot = .init(),
+        automaticGainControl: NativeAudioProcessingComponentSnapshot = .init(),
+        highPassFilter: NativeAudioProcessingComponentSnapshot = .init(),
+        platformVoiceProcessing: NativePlatformVoiceProcessingSnapshot = .init()
+    ) {
+        self.requestResult = requestResult
+        self.hasAudioProcessingModule = hasAudioProcessingModule
+        self.echoCancellation = echoCancellation
+        self.noiseSuppression = noiseSuppression
+        self.automaticGainControl = automaticGainControl
+        self.highPassFilter = highPassFilter
+        self.platformVoiceProcessing = platformVoiceProcessing
+    }
+}
+
+public enum NativeMediaDegradation: String, Codable, Equatable, Sendable {
+    case audioProcessingRequestFailed
+    case requestedAudioProcessingInactive
+    case platformAudioProcessingFellBackToSoftware
+    case platformAudioProcessingUnavailableUsingSoftware
+    case selectedAudioInputRemovedUsingDefault
+    case selectedAudioOutputRemovedUsingDefault
+    case audioDeviceRecoveryFailed
+    case selectedCameraRemovedUsingDefault
+    case cameraRecoveryFailed
+    case captureStopTimedOut
+}
+
+/// Processing state is evidence-safe; device inventory is UI-only and is not
+/// Codable because it contains user-visible device names.
+public struct NativeMediaRuntimeSnapshot: Equatable, Sendable {
+    public var devices: NativeMediaDeviceInventory
+    public var audioProcessing: NativeAudioProcessingSnapshot
+    public var degradations: [NativeMediaDegradation]
+
+    public init(
+        devices: NativeMediaDeviceInventory = .init(),
+        audioProcessing: NativeAudioProcessingSnapshot = .init(),
+        degradations: [NativeMediaDegradation] = []
+    ) {
+        self.devices = devices
+        self.audioProcessing = audioProcessing
+        self.degradations = degradations
+    }
+}
+
+public enum NativeOfferLayoutFailure: String, Codable, Equatable, Sendable {
+    case malformedMediaSection
+    case missingMediaID
+    case duplicateMediaID
+    case missingAudioPublisherUplink
+    case ambiguousAudioPublisherUplink
+    case missingVideoPublisherUplink
+    case ambiguousVideoPublisherUplink
+    case missingH264PacketizationModeOne
+    case missingH264RTX
+    case transceiverMappingMismatch
+    case transceiverDirectionRejected
+    case codecPreferenceRejected
+}
+
+internal enum NativeOfferedMediaKind: String, Equatable {
+    case audio
+    case video
+}
+
+internal enum NativeOfferedMediaDirection: String, Equatable {
+    case sendReceive = "sendrecv"
+    case sendOnly = "sendonly"
+    case receiveOnly = "recvonly"
+    case inactive
+
+    var remoteReceives: Bool {
+        self == .sendReceive || self == .receiveOnly
+    }
+}
+
+internal struct NativePublisherUplinkLayout: Equatable {
+    var audioMID: String
+    var videoMID: String
+    var preferredH264PayloadTypes: [Int]
+    var preferredRTXPayloadTypes: [Int]
+
+    static func parse(_ sdp: String) throws -> NativePublisherUplinkLayout {
+        let normalized = sdp.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var sessionDirection: NativeOfferedMediaDirection = .sendReceive
+        var sections: [NativeOfferedMediaSection] = []
+        var current: NativeOfferedMediaSection?
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("m=") {
+                if let current { sections.append(current) }
+                let fields = line.dropFirst(2).split(separator: " ").map(String.init)
+                guard fields.count >= 4,
+                      let kind = NativeOfferedMediaKind(rawValue: fields[0]) else {
+                    current = nil
+                    continue
+                }
+                guard Int(fields[1]) != nil else {
+                    throw RoomRTCError.invalidOfferLayout(.malformedMediaSection)
+                }
+                current = NativeOfferedMediaSection(
+                    kind: kind,
+                    rejected: fields[1] == "0",
+                    mid: nil,
+                    direction: sessionDirection,
+                    payloadTypes: fields.dropFirst(3).compactMap(Int.init),
+                    codecNames: [:],
+                    formatParameters: [:]
+                )
+                continue
+            }
+
+            if let direction = Self.direction(from: line) {
+                if current == nil {
+                    sessionDirection = direction
+                } else {
+                    current?.direction = direction
+                }
+                continue
+            }
+            guard current != nil else { continue }
+            if line.hasPrefix("a=mid:") {
+                current?.mid = String(line.dropFirst("a=mid:".count))
+            } else if line.hasPrefix("a=rtpmap:") {
+                let value = line.dropFirst("a=rtpmap:".count)
+                let fields = value.split(separator: " ", maxSplits: 1).map(String.init)
+                if fields.count == 2, let payloadType = Int(fields[0]) {
+                    current?.codecNames[payloadType] = fields[1].split(separator: "/").first.map(String.init)?.lowercased()
+                }
+            } else if line.hasPrefix("a=fmtp:") {
+                let value = line.dropFirst("a=fmtp:".count)
+                let fields = value.split(separator: " ", maxSplits: 1).map(String.init)
+                if fields.count == 2, let payloadType = Int(fields[0]) {
+                    current?.formatParameters[payloadType] = Self.parseFormatParameters(fields[1])
+                }
+            }
+        }
+        if let current { sections.append(current) }
+
+        let activeSections = sections.filter { !$0.rejected }
+        for section in activeSections where section.mid?.isEmpty != false {
+            throw RoomRTCError.invalidOfferLayout(.missingMediaID)
+        }
+        let mids = activeSections.compactMap(\.mid)
+        guard Set(mids).count == mids.count else {
+            throw RoomRTCError.invalidOfferLayout(.duplicateMediaID)
+        }
+
+        let audioUplinks = activeSections.filter { $0.kind == .audio && $0.direction.remoteReceives }
+        guard !audioUplinks.isEmpty else {
+            throw RoomRTCError.invalidOfferLayout(.missingAudioPublisherUplink)
+        }
+        guard audioUplinks.count == 1 else {
+            throw RoomRTCError.invalidOfferLayout(.ambiguousAudioPublisherUplink)
+        }
+        let videoUplinks = activeSections.filter { $0.kind == .video && $0.direction.remoteReceives }
+        guard !videoUplinks.isEmpty else {
+            throw RoomRTCError.invalidOfferLayout(.missingVideoPublisherUplink)
+        }
+        guard videoUplinks.count == 1 else {
+            throw RoomRTCError.invalidOfferLayout(.ambiguousVideoPublisherUplink)
+        }
+
+        let video = videoUplinks[0]
+        let h264 = video.payloadTypes.filter { payloadType in
+            video.codecNames[payloadType] == "h264"
+                && video.formatParameters[payloadType]?["packetization-mode"] == "1"
+        }
+        guard !h264.isEmpty else {
+            throw RoomRTCError.invalidOfferLayout(.missingH264PacketizationModeOne)
+        }
+        let h264Set = Set(h264.map(String.init))
+        let rtx = video.payloadTypes.filter { payloadType in
+            video.codecNames[payloadType] == "rtx"
+                && video.formatParameters[payloadType].flatMap { $0["apt"] }.map(h264Set.contains) == true
+        }
+        guard !rtx.isEmpty else {
+            throw RoomRTCError.invalidOfferLayout(.missingH264RTX)
+        }
+
+        return NativePublisherUplinkLayout(
+            audioMID: audioUplinks[0].mid!,
+            videoMID: video.mid!,
+            preferredH264PayloadTypes: h264,
+            preferredRTXPayloadTypes: rtx
+        )
+    }
+
+    private static func direction(from line: String) -> NativeOfferedMediaDirection? {
+        guard line.hasPrefix("a=") else { return nil }
+        return NativeOfferedMediaDirection(rawValue: String(line.dropFirst(2)))
+    }
+
+    private static func parseFormatParameters(_ value: String) -> [String: String] {
+        var parameters: [String: String] = [:]
+        for item in value.split(separator: ";") {
+            let pair = item.split(separator: "=", maxSplits: 1).map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            guard pair.count == 2, !pair[0].isEmpty else { continue }
+            parameters[pair[0]] = pair[1]
+        }
+        return parameters
+    }
+}
+
+private struct NativeOfferedMediaSection {
+    var kind: NativeOfferedMediaKind
+    var rejected: Bool
+    var mid: String?
+    var direction: NativeOfferedMediaDirection
+    var payloadTypes: [Int]
+    var codecNames: [Int: String]
+    var formatParameters: [Int: [String: String]]
+}
+
+#if canImport(LiveKitWebRTC)
+private struct NativeAudioProcessingRequestedConfiguration {
+    var echoCancellation: NativeAudioProcessingRequest
+    var noiseSuppression: NativeAudioProcessingRequest
+    var automaticGainControl: NativeAudioProcessingRequest
+    var highPassFilter: NativeAudioProcessingRequest
+}
+#endif
+
+internal struct NativeVideoCodecDescriptor: Equatable {
+    var name: String
+    var payloadType: Int?
+    var parameters: [String: String]
+}
+
+internal enum NativeVideoCodecPreference {
+    static func orderedIndices(_ codecs: [NativeVideoCodecDescriptor]) throws -> [Int] {
+        let preferredH264 = codecs.indices.filter { index in
+            codecs[index].name.caseInsensitiveCompare("H264") == .orderedSame
+                && codecs[index].parameters["packetization-mode"] == "1"
+        }
+        guard !preferredH264.isEmpty else {
+            throw RoomRTCError.invalidOfferLayout(.missingH264PacketizationModeOne)
+        }
+        let payloadTypes = Set(preferredH264.compactMap { codecs[$0].payloadType }.map(String.init))
+        let allRTX = codecs.indices.filter {
+            codecs[$0].name.caseInsensitiveCompare("rtx") == .orderedSame
+        }
+        let matchingRTX = allRTX.filter {
+            codecs[$0].name.caseInsensitiveCompare("rtx") == .orderedSame
+                && codecs[$0].parameters["apt"].map(payloadTypes.contains) == true
+        }
+        // Some WebRTC builds expose RTX capabilities without stable preferred
+        // payload types. In that case the remote offer remains the authority
+        // for apt pairing; retain all RTX capabilities immediately after H264.
+        let preferredRTX = matchingRTX.isEmpty ? allRTX : matchingRTX
+        guard !preferredRTX.isEmpty else {
+            throw RoomRTCError.invalidOfferLayout(.missingH264RTX)
+        }
+        var preferred: [Int] = []
+        for h264Index in preferredH264 {
+            preferred.append(h264Index)
+            guard let payloadType = codecs[h264Index].payloadType else { continue }
+            preferred.append(contentsOf: preferredRTX.filter {
+                codecs[$0].parameters["apt"] == String(payloadType)
+            })
+        }
+        return preferred + codecs.indices.filter { !preferred.contains($0) }
+    }
+}
+
+internal enum NativeDeviceSelectionRecovery {
+    static func needsDefaultRecovery(selectedID: String?, availableIDs: [String]) -> Bool {
+        guard let selectedID else { return false }
+        return !availableIDs.contains(selectedID)
+    }
+}
 
 public struct NativeMediaQualityCandidatePair: Codable, Equatable, Sendable {
     public var `protocol`: String
@@ -1100,7 +1538,12 @@ public protocol RoomRTCClient: AnyObject, Sendable {
     func configure(_ config: ClientRTCConfig) async throws
     func setLocalCandidateHandler(_ handler: LocalICECandidateHandler?) async
     func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async
+    func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async
+    func setScreenShareRuntimeStateHandler(_ handler: NativeScreenShareRuntimeStateHandler?) async
     func prepareLocalMedia(audio: Bool, video: Bool) async throws
+    func selectAudioInput(id: String?) async throws
+    func selectAudioOutput(id: String?) async throws
+    func selectCamera(id: String?) async throws
     func setLocalAudioEnabled(_ enabled: Bool) async
     func setLocalVideoEnabled(_ enabled: Bool) async
     func setScreenShareEnabled(_ enabled: Bool) async throws
@@ -1108,13 +1551,121 @@ public protocol RoomRTCClient: AnyObject, Sendable {
     func addRemoteCandidate(_ json: String) async throws
     func restartICE() async
     func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot
+    func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot
     func leave() async
 }
 
+public extension RoomRTCClient {
+    func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async {}
+
+    func setScreenShareRuntimeStateHandler(_ handler: NativeScreenShareRuntimeStateHandler?) async {}
+
+    func selectAudioInput(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    func selectAudioOutput(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    func selectCamera(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot {
+        NativeMediaRuntimeSnapshot()
+    }
+}
+
+internal struct NativeCaptureStopState: Equatable, Sendable {
+    private(set) var hasUnresolvedStop = false
+
+    @discardableResult
+    mutating func record(completed: Bool) -> Bool {
+        if !completed {
+            hasUnresolvedStop = true
+        }
+        return completed && !hasUnresolvedStop
+    }
+}
+
+internal enum NativeStartedCaptureDisposition: Equatable, Sendable {
+    case installed
+    case staleCaptureStopped
+    case staleCaptureStopTimedOut
+}
+
+internal func resolveStartedCapture<Capture>(
+    _ capture: Capture,
+    installIfCurrent: () -> Bool,
+    stopStaleCapture: (Capture) async -> Bool
+) async -> NativeStartedCaptureDisposition {
+    if installIfCurrent() {
+        return .installed
+    }
+    return await stopStaleCapture(capture)
+        ? .staleCaptureStopped
+        : .staleCaptureStopTimedOut
+}
+
 #if canImport(LiveKitWebRTC)
+public struct NativeMediaPermissionAuthorizer: Sendable {
+    public var microphone: @Sendable () async -> Bool
+    public var camera: @Sendable () async -> Bool
+
+    public init(
+        microphone: @escaping @Sendable () async -> Bool,
+        camera: @escaping @Sendable () async -> Bool
+    ) {
+        self.microphone = microphone
+        self.camera = camera
+    }
+
+    public static let system = NativeMediaPermissionAuthorizer(
+        microphone: { await authorizationGranted(for: .audio) },
+        camera: { await authorizationGranted(for: .video) }
+    )
+
+    public static let allowingAllForTesting = NativeMediaPermissionAuthorizer(
+        microphone: { true },
+        camera: { true }
+    )
+
+    private static func authorizationGranted(for mediaType: AVMediaType) async -> Bool {
+        await withCheckedContinuation { continuation in
+            Task { @MainActor in
+                switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+                case .authorized:
+                    continuation.resume(returning: true)
+                case .denied, .restricted:
+                    continuation.resume(returning: false)
+                case .notDetermined:
+                    AVCaptureDevice.requestAccess(for: mediaType) { granted in
+                        continuation.resume(returning: granted)
+                    }
+                @unknown default:
+                    continuation.resume(returning: false)
+                }
+            }
+        }
+    }
+}
+
+private struct NativeRTCDetachedResources {
+    var epoch: UInt64
+    var peerConnection: LKRTCPeerConnection?
+    var cameraCapturer: LKRTCCameraVideoCapturer?
+    #if os(macOS)
+    var desktopCapturer: LKRTCDesktopCapturer?
+    var desktopStartGate: NativeRTCContinuationGate<Void>?
+    #endif
+}
+
 public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Sendable {
     private let factory: LKRTCPeerConnectionFactory
+    private let permissionAuthorizer: NativeMediaPermissionAuthorizer
     private let lock = NSLock()
+    private let captureInvocationLock = NSLock()
     private let decoder = JSONDecoder()
     private var _lifecycle: RoomLifecycleState = .signedOut
     private var peerConnection: LKRTCPeerConnection?
@@ -1127,39 +1678,126 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     private var screenVideoSource: LKRTCVideoSource?
     private var screenVideoTrack: LKRTCVideoTrack?
     private var desktopCapturer: LKRTCDesktopCapturer?
-    private let screenShareTrackSwitch: NativeScreenShareTrackSwitch
+    private var desktopCaptureStartGate: NativeRTCContinuationGate<Void>?
+    private var desktopCaptureStarted = false
     #endif
     private var localCandidateHandler: LocalICECandidateHandler?
     private var remoteVideoTrackHandler: RemoteVideoTrackHandler?
+    private var mediaRuntimeStateHandler: NativeMediaRuntimeStateHandler?
+    private var screenShareRuntimeStateHandler: NativeScreenShareRuntimeStateHandler?
     private var remoteVideoTracks: [String: NativeRemoteVideoTrack] = [:]
+    private var audioProcessingRequestResult: NativeAudioProcessingRequestResult = .notRequested
+    private var requestedAudioProcessing: NativeAudioProcessingRequestedConfiguration?
+    private var selectedAudioInputID: String?
+    private var selectedAudioOutputID: String?
+    private var selectedCameraID: String?
+    private var activeCameraID: String?
+    private var runtimeDegradations: Set<NativeMediaDegradation> = []
+    private var captureStopState = NativeCaptureStopState()
+    private var cameraNotificationTokens: [NSObjectProtocol] = []
+    private var operationEpoch: UInt64 = 0
 
     public var lifecycle: RoomLifecycleState {
         lock.withLock { _lifecycle }
     }
 
-    public override init() {
+    public init(permissionAuthorizer: NativeMediaPermissionAuthorizer = .system) {
         _ = LKRTCInitializeSSL()
+        self.permissionAuthorizer = permissionAuthorizer
         self.factory = LKRTCPeerConnectionFactory(
             encoderFactory: LKRTCDefaultVideoEncoderFactory(),
             decoderFactory: LKRTCDefaultVideoDecoderFactory()
         )
-        #if os(macOS)
-        self.screenShareTrackSwitch = NativeScreenShareTrackSwitch()
-        #endif
         super.init()
+        factory.audioDeviceModule.observer = self
+        let center = NotificationCenter.default
+        cameraNotificationTokens = [
+            center.addObserver(
+                forName: AVCaptureDevice.wasConnectedNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] _ in
+                self?.publishMediaRuntimeState()
+            },
+            center.addObserver(
+                forName: AVCaptureDevice.wasDisconnectedNotification,
+                object: nil,
+                queue: nil
+            ) { [weak self] notification in
+                guard let self, let device = notification.object as? AVCaptureDevice else { return }
+                let removedID = device.uniqueID
+                Task { await self.recoverCameraIfNeeded(removedID: removedID) }
+            }
+        ]
+    }
+
+    deinit {
+        factory.audioDeviceModule.observer = nil
+        for token in cameraNotificationTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
     public func configure(_ config: ClientRTCConfig) async throws {
-        let existingCapturer = lock.withLock { cameraCapturer }
-        if let existingCapturer {
-            await stopCapture(existingCapturer)
+        try ensureCaptureStopResolved()
+        let detached = lock.withLock { () -> NativeRTCDetachedResources in
+            let epoch = advanceOperationEpochLocked()
+            #if os(macOS)
+            let resources = NativeRTCDetachedResources(
+                epoch: epoch,
+                peerConnection: peerConnection,
+                cameraCapturer: cameraCapturer,
+                desktopCapturer: desktopCapturer,
+                desktopStartGate: desktopCaptureStartGate
+            )
+            #else
+            let resources = NativeRTCDetachedResources(
+                epoch: epoch,
+                peerConnection: peerConnection,
+                cameraCapturer: cameraCapturer
+            )
+            #endif
+            peerConnection = nil
+            localAudioTrack = nil
+            localVideoTrack = nil
+            localVideoSource = nil
+            cameraCapturer = nil
+            localVideoSender = nil
+            audioProcessingRequestResult = .notRequested
+            requestedAudioProcessing = nil
+            activeCameraID = nil
+            runtimeDegradations.removeAll()
+            #if os(macOS)
+            screenVideoSource = nil
+            screenVideoTrack = nil
+            desktopCapturer = nil
+            desktopCaptureStartGate = nil
+            desktopCaptureStarted = false
+            #endif
+            remoteVideoTracks.removeAll()
+            _lifecycle = .signedOut
+            return resources
+        }
+        detached.peerConnection?.close()
+        #if os(macOS)
+        detached.desktopStartGate?.resume(throwing: RoomRTCError.operationCancelled)
+        #endif
+
+        if let existingCapturer = detached.cameraCapturer {
+            guard recordCaptureStopResult(await stopCapture(existingCapturer)) else {
+                throw RoomRTCError.peerOperationTimedOut("camera_stop_capture_before_configure")
+            }
+            try ensureOperationCurrent(detached.epoch)
         }
         #if os(macOS)
-        let existingDesktopCapturer: LKRTCDesktopCapturer? = lock.withLock { self.desktopCapturer }
-        if let existingDesktopCapturer {
-            await stopDesktopCapture(existingDesktopCapturer)
+        if let existingDesktopCapturer = detached.desktopCapturer {
+            guard recordCaptureStopResult(await stopDesktopCapture(existingDesktopCapturer)) else {
+                throw RoomRTCError.peerOperationTimedOut("desktop_stop_capture_before_configure")
+            }
+            try ensureOperationCurrent(detached.epoch)
         }
         #endif
+        try ensureOperationCurrent(detached.epoch)
 
         let rtcConfiguration = LKRTCConfiguration()
         rtcConfiguration.iceServers = Self.iceServers(from: config.rtcConfiguration)
@@ -1181,21 +1819,15 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             throw RoomRTCError.peerConnectionCreationFailed
         }
 
-        lock.withLock {
-            peerConnection?.close()
+        let installed = lock.withLock { () -> Bool in
+            guard operationEpoch == detached.epoch, peerConnection == nil else { return false }
             peerConnection = connection
-            localAudioTrack = nil
-            localVideoTrack = nil
-            localVideoSource = nil
-            cameraCapturer = nil
-            localVideoSender = nil
-            #if os(macOS)
-            screenVideoSource = nil
-            screenVideoTrack = nil
-            desktopCapturer = nil
-            #endif
-            remoteVideoTracks.removeAll()
             _lifecycle = .authenticated
+            return true
+        }
+        guard installed else {
+            connection.close()
+            throw RoomRTCError.operationCancelled
         }
     }
 
@@ -1216,24 +1848,144 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         }
     }
 
+    public func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async {
+        lock.withLock {
+            mediaRuntimeStateHandler = handler
+        }
+        if let handler {
+            await handler(await mediaRuntimeSnapshot())
+        }
+    }
+
+    public func setScreenShareRuntimeStateHandler(
+        _ handler: NativeScreenShareRuntimeStateHandler?
+    ) async {
+        lock.withLock {
+            screenShareRuntimeStateHandler = handler
+        }
+    }
+
     public func prepareLocalMedia(audio: Bool, video: Bool) async throws {
-        guard let connection = lock.withLock({ peerConnection }) else {
+        try ensureCaptureStopResolved()
+        guard let operation = lock.withLock({ () -> (UInt64, LKRTCPeerConnection)? in
+            guard let peerConnection else { return nil }
+            return (operationEpoch, peerConnection)
+        }) else {
             throw RoomRTCError.peerConnectionNotConfigured
         }
 
         if audio {
+            let microphoneGranted = try await permissionGranted(
+                operation: "microphone_permission",
+                request: permissionAuthorizer.microphone
+            )
+            try ensureOperationCurrent(operation.0, connection: operation.1)
+            guard microphoneGranted else {
+                throw RoomRTCError.microphonePermissionDenied
+            }
             let track = factory.audioTrack(withTrackId: "meetingassist-audio-0")
-            _ = connection.add(track, streamIds: ["meetingassist-native"])
-            lock.withLock {
+            let options = LKRTCAudioProcessingOptions.communication()
+            let result = track.setAudioProcessingOptions(options)
+            let requestResult = Self.audioProcessingRequestResult(result.code)
+            let installed = lock.withLock { () -> Bool in
+                guard operationEpoch == operation.0, peerConnection === operation.1 else {
+                    return false
+                }
                 localAudioTrack = track
+                audioProcessingRequestResult = requestResult
+                requestedAudioProcessing = Self.requestedConfiguration(options)
+                if !requestResult.succeeded {
+                    runtimeDegradations.insert(.audioProcessingRequestFailed)
+                }
+                return true
+            }
+            guard installed else { throw RoomRTCError.operationCancelled }
+            guard result.isSuccess else {
+                throw RoomRTCError.audioProcessingRequestFailed(requestResult)
             }
         }
 
         if video {
-            try await prepareLocalVideo(on: connection)
+            let cameraGranted = try await permissionGranted(
+                operation: "camera_permission",
+                request: permissionAuthorizer.camera
+            )
+            try ensureOperationCurrent(operation.0, connection: operation.1)
+            guard cameraGranted else {
+                throw RoomRTCError.cameraPermissionDenied
+            }
+            try await prepareLocalVideo(epoch: operation.0, connection: operation.1)
         }
 
-        setLifecycle(.preparingMedia)
+        try ensureOperationCurrent(operation.0, connection: operation.1)
+        setLifecycle(.preparingMedia, epoch: operation.0, connection: operation.1)
+        publishMediaRuntimeState()
+    }
+
+    private func permissionGranted(
+        operation: String,
+        request: @escaping @Sendable () async -> Bool
+    ) async throws -> Bool {
+        let gate = NativePermissionContinuationGate(operation: operation)
+        return try await withCheckedThrowingContinuation { continuation in
+            gate.install(continuation)
+            Task {
+                gate.resume(returning: await request())
+            }
+            gate.failAfterDeadline(nanoseconds: 15_000_000_000)
+        }
+    }
+
+    public func selectAudioInput(id: String?) async throws {
+        let module = factory.audioDeviceModule
+        let device = try Self.audioDevice(id: id, in: module.inputDevices, kind: .audioInput)
+        guard module.trySetInputDevice(device) else {
+            throw RoomRTCError.mediaDeviceSelectionFailed(.audioInput)
+        }
+        lock.withLock {
+            selectedAudioInputID = id
+            runtimeDegradations.remove(.selectedAudioInputRemovedUsingDefault)
+        }
+        publishMediaRuntimeState()
+    }
+
+    public func selectAudioOutput(id: String?) async throws {
+        let module = factory.audioDeviceModule
+        let device = try Self.audioDevice(id: id, in: module.outputDevices, kind: .audioOutput)
+        guard module.trySetOutputDevice(device) else {
+            throw RoomRTCError.mediaDeviceSelectionFailed(.audioOutput)
+        }
+        lock.withLock {
+            selectedAudioOutputID = id
+            runtimeDegradations.remove(.selectedAudioOutputRemovedUsingDefault)
+        }
+        publishMediaRuntimeState()
+    }
+
+    public func selectCamera(id: String?) async throws {
+        try ensureCaptureStopResolved()
+        let device = try Self.cameraDevice(id: id)
+        let captureState = lock.withLock { (operationEpoch, peerConnection, cameraCapturer, activeCameraID) }
+        lock.withLock {
+            selectedCameraID = id
+            runtimeDegradations.remove(.selectedCameraRemovedUsingDefault)
+            runtimeDegradations.remove(.cameraRecoveryFailed)
+        }
+        guard let connection = captureState.1, let capturer = captureState.2 else {
+            publishMediaRuntimeState()
+            return
+        }
+        guard captureState.3 != device.uniqueID else {
+            publishMediaRuntimeState()
+            return
+        }
+        try await switchCameraCapture(
+            capturer,
+            to: device,
+            epoch: captureState.0,
+            connection: connection
+        )
+        publishMediaRuntimeState()
     }
 
     public func setLocalAudioEnabled(_ enabled: Bool) async {
@@ -1253,7 +2005,7 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         if enabled {
             try await startScreenShare()
         } else {
-            await stopScreenShare()
+            try await stopScreenShare()
         }
         #else
         if enabled {
@@ -1263,23 +2015,44 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     }
 
     public func handleOffer(_ sdp: String) async throws -> String {
-        guard let connection = lock.withLock({ peerConnection }) else {
+        guard let operation = lock.withLock({ () -> (UInt64, LKRTCPeerConnection)? in
+            guard let peerConnection else { return nil }
+            return (operationEpoch, peerConnection)
+        }) else {
             throw RoomRTCError.peerConnectionNotConfigured
         }
+        let (epoch, connection) = operation
 
-        setLifecycle(.negotiating)
+        let layout = try NativePublisherUplinkLayout.parse(sdp)
+        try ensureOperationCurrent(epoch, connection: connection)
+        setLifecycle(.negotiating, epoch: epoch, connection: connection)
         let offer = LKRTCSessionDescription(type: .offer, sdp: sdp)
         try await setRemoteDescription(offer, on: connection)
+        try ensureOperationCurrent(epoch, connection: connection)
+        do {
+            try bindPreparedTracks(to: layout, on: connection, epoch: epoch)
+        } catch {
+            connection.close()
+            throw error
+        }
+        try ensureOperationCurrent(epoch, connection: connection)
         let answer = try await answer(on: connection)
+        try ensureOperationCurrent(epoch, connection: connection)
         try await setLocalDescription(answer, on: connection)
-        setLifecycle(.connected)
+        try ensureOperationCurrent(epoch, connection: connection)
+        setLifecycle(.connected, epoch: epoch, connection: connection)
+        publishMediaRuntimeState()
         return answer.sdp
     }
 
     public func addRemoteCandidate(_ json: String) async throws {
-        guard let connection = lock.withLock({ peerConnection }) else {
+        guard let operation = lock.withLock({ () -> (UInt64, LKRTCPeerConnection)? in
+            guard let peerConnection else { return nil }
+            return (operationEpoch, peerConnection)
+        }) else {
             throw RoomRTCError.peerConnectionNotConfigured
         }
+        let (epoch, connection) = operation
 
         let payload = try decoder.decode(RTCIceCandidatePayload.self, from: Data(json.utf8))
         let candidate = LKRTCIceCandidate(
@@ -1288,63 +2061,165 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
             sdpMid: payload.sdpMid
         )
         try await add(candidate, to: connection)
+        try ensureOperationCurrent(epoch, connection: connection)
     }
 
     public func restartICE() async {
-        let connection = lock.withLock { peerConnection }
-        connection?.restartIce()
-        setLifecycle(.reconnecting)
+        guard let operation = lock.withLock({ () -> (UInt64, LKRTCPeerConnection)? in
+            guard let peerConnection else { return nil }
+            return (operationEpoch, peerConnection)
+        }) else { return }
+        operation.1.restartIce()
+        setLifecycle(.reconnecting, epoch: operation.0, connection: operation.1)
     }
 
     public func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot {
-        guard let connection = lock.withLock({ peerConnection }) else {
+        guard let operation = lock.withLock({ () -> (UInt64, LKRTCPeerConnection)? in
+            guard let peerConnection else { return nil }
+            return (operationEpoch, peerConnection)
+        }) else {
             throw RoomRTCError.peerConnectionNotConfigured
         }
+        let (epoch, connection) = operation
 
-        let report = await withCheckedContinuation { (continuation: CheckedContinuation<LKRTCStatisticsReport, Never>) in
+        let report = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<LKRTCStatisticsReport, Error>) in
+            let gate = NativeRTCContinuationGate(continuation)
+            gate.failAfterDeadline(operation: "get_statistics")
             connection.statistics { report in
-                continuation.resume(returning: report)
+                gate.resume(returning: report)
             }
         }
+        try ensureOperationCurrent(epoch, connection: connection)
         return Self.mediaQualitySnapshot(from: Self.statisticsEntries(from: report))
     }
 
-    public func leave() async {
-        let capturer = lock.withLock { cameraCapturer }
-        if let capturer {
-            await stopCapture(capturer)
+    public func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot {
+        recoverRemovedAudioDevicesIfNeeded()
+        let processing = Self.audioProcessingSnapshot(
+            state: factory.audioProcessingState,
+            platformState: factory.audioDeviceModule.platformAudioProcessingState,
+            requestResult: lock.withLock { audioProcessingRequestResult },
+            requested: lock.withLock { requestedAudioProcessing }
+        )
+        let devices = deviceInventory()
+        var degradations = lock.withLock { runtimeDegradations }
+        let isConnected = lifecycle == .connected
+        if isConnected, lock.withLock({ localAudioTrack != nil }) {
+            let requestedComponents = [
+                processing.echoCancellation,
+                processing.noiseSuppression,
+                processing.automaticGainControl,
+                processing.highPassFilter
+            ].filter { $0.requested?.enabled == true }
+            if requestedComponents.contains(where: { $0.effective == .unknown || $0.effective == .disabled }) {
+                degradations.insert(.requestedAudioProcessingInactive)
+            }
+            if requestedComponents.contains(where: { $0.platformAvailable && $0.effective == .software }) {
+                degradations.insert(.platformAudioProcessingFellBackToSoftware)
+            }
+            if requestedComponents.contains(where: {
+                $0.requested?.mode == .automatic
+                    && !$0.platformAvailable
+                    && $0.effective == .software
+            }) {
+                degradations.insert(.platformAudioProcessingUnavailableUsingSoftware)
+            }
         }
-        #if os(macOS)
-        let existingDesktopCapturer: LKRTCDesktopCapturer? = lock.withLock { self.desktopCapturer }
-        if let existingDesktopCapturer {
-            await stopDesktopCapture(existingDesktopCapturer)
-        }
-        #endif
+        return NativeMediaRuntimeSnapshot(
+            devices: devices,
+            audioProcessing: processing,
+            degradations: degradations.sorted { $0.rawValue < $1.rawValue }
+        )
+    }
 
-        lock.withLock {
-            peerConnection?.close()
+    public func leave() async {
+        // Revoke transport and detach every logical media reference before
+        // awaiting device-service callbacks. A wedged camera service can delay
+        // cleanup only until the bounded stop deadline; it cannot retain a peer,
+        // a sender, or room ownership.
+        let detached = lock.withLock { () -> NativeRTCDetachedResources in
+            let epoch = advanceOperationEpochLocked()
+            #if os(macOS)
+            let resources = NativeRTCDetachedResources(
+                epoch: epoch,
+                peerConnection: peerConnection,
+                cameraCapturer: cameraCapturer,
+                desktopCapturer: desktopCapturer,
+                desktopStartGate: desktopCaptureStartGate
+            )
+            #else
+            let resources = NativeRTCDetachedResources(
+                epoch: epoch,
+                peerConnection: peerConnection,
+                cameraCapturer: cameraCapturer
+            )
+            #endif
             peerConnection = nil
             localAudioTrack = nil
             localVideoTrack = nil
             localVideoSource = nil
             cameraCapturer = nil
             localVideoSender = nil
+            activeCameraID = nil
+            requestedAudioProcessing = nil
             #if os(macOS)
             screenVideoSource = nil
             screenVideoTrack = nil
             desktopCapturer = nil
+            desktopCaptureStartGate = nil
+            desktopCaptureStarted = false
             #endif
             localCandidateHandler = nil
             remoteVideoTrackHandler = nil
+            mediaRuntimeStateHandler = nil
+            screenShareRuntimeStateHandler = nil
             remoteVideoTracks.removeAll()
             _lifecycle = .leaving
+            return resources
+        }
+        // WebRTC may synchronously invoke delegate callbacks from close(). Those
+        // callbacks also take this client's lock, so close only after the peer has
+        // been logically revoked and the lock has been released.
+        detached.peerConnection?.close()
+        #if os(macOS)
+        detached.desktopStartGate?.resume(throwing: RoomRTCError.operationCancelled)
+        #endif
+
+        if let capturer = detached.cameraCapturer {
+            recordCaptureStopResult(await stopCapture(capturer))
+        }
+        #if os(macOS)
+        if let existingDesktopCapturer = detached.desktopCapturer {
+            recordCaptureStopResult(await stopDesktopCapture(existingDesktopCapturer))
+        }
+        #endif
+    }
+
+    private func ensureCaptureStopResolved() throws {
+        guard !lock.withLock({ captureStopState.hasUnresolvedStop }) else {
+            throw RoomRTCError.peerOperationTimedOut("capture_stop_unresolved_restart_required")
         }
     }
 
-    private func prepareLocalVideo(on connection: LKRTCPeerConnection) async throws {
-        guard let device = Self.preferredCameraDevice() else {
-            throw RoomRTCError.cameraUnavailable
+    @discardableResult
+    private func recordCaptureStopResult(_ completed: Bool) -> Bool {
+        lock.withLock {
+            let accepted = captureStopState.record(completed: completed)
+            if !accepted {
+                runtimeDegradations.insert(.captureStopTimedOut)
+            }
+            return accepted
         }
+    }
+
+    private func prepareLocalVideo(
+        epoch: UInt64,
+        connection: LKRTCPeerConnection
+    ) async throws {
+        try ensureCaptureStopResolved()
+        try ensureOperationCurrent(epoch, connection: connection)
+        let requestedCameraID = lock.withLock { selectedCameraID }
+        let device = try Self.cameraDevice(id: requestedCameraID)
         guard let format = Self.preferredFormat(for: device) else {
             throw RoomRTCError.cameraFormatUnavailable
         }
@@ -1355,85 +2230,349 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         let track = factory.videoTrack(with: source, trackId: "meetingassist-video-0")
 
         let fps = Self.preferredFPS(for: format)
-        try await startCapture(capturer, device: device, format: format, fps: fps)
-        guard let sender = connection.add(track, streamIds: ["meetingassist-native"]) else {
-            await stopCapture(capturer)
-            throw RoomRTCError.trackPublicationFailed("video")
+        do {
+            try await startCapture(
+                capturer,
+                device: device,
+                format: format,
+                fps: fps,
+                epoch: epoch,
+                connection: connection
+            )
+        } catch {
+            guard recordCaptureStopResult(await stopCapture(capturer)) else {
+                throw RoomRTCError.peerOperationTimedOut("camera_stop_capture_after_start_failure")
+            }
+            throw error
         }
 
+        let disposition = await resolveStartedCapture(
+            capturer,
+            installIfCurrent: {
+                lock.withLock {
+                    guard operationEpoch == epoch, peerConnection === connection else {
+                        return false
+                    }
+                    localVideoSource = source
+                    localVideoTrack = track
+                    cameraCapturer = capturer
+                    activeCameraID = device.uniqueID
+                    return true
+                }
+            },
+            stopStaleCapture: { [self] staleCapturer in
+                await stopCapture(staleCapturer)
+            }
+        )
+        switch disposition {
+        case .installed:
+            return
+        case .staleCaptureStopped:
+            _ = recordCaptureStopResult(true)
+            throw RoomRTCError.operationCancelled
+        case .staleCaptureStopTimedOut:
+            _ = recordCaptureStopResult(false)
+            throw RoomRTCError.peerOperationTimedOut("camera_stop_stale_capture")
+        }
+    }
+
+    private func bindPreparedTracks(
+        to layout: NativePublisherUplinkLayout,
+        on connection: LKRTCPeerConnection,
+        epoch: UInt64
+    ) throws {
+        try ensureOperationCurrent(epoch, connection: connection)
+        let tracks = lock.withLock { (localAudioTrack, localVideoTrack) }
+        let audio = try publisherTransceiver(
+            mid: layout.audioMID,
+            kind: .audio,
+            on: connection
+        )
+        let video = try publisherTransceiver(
+            mid: layout.videoMID,
+            kind: .video,
+            on: connection
+        )
+
+        try setPublisherTrack(tracks.0, on: audio)
+        try ensureOperationCurrent(epoch, connection: connection)
+        try preferH264WithRTX(on: video)
+        try ensureOperationCurrent(epoch, connection: connection)
+        try setPublisherTrack(tracks.1, on: video)
+        let installed = lock.withLock { () -> Bool in
+            guard operationEpoch == epoch, peerConnection === connection else { return false }
+            localVideoSender = tracks.1 == nil ? nil : video.sender
+            return true
+        }
+        guard installed else { throw RoomRTCError.operationCancelled }
+    }
+
+    private func publisherTransceiver(
+        mid: String,
+        kind: NativeOfferedMediaKind,
+        on connection: LKRTCPeerConnection
+    ) throws -> LKRTCRtpTransceiver {
+        let matches = connection.transceivers.filter { transceiver in
+            guard transceiver.mid == mid else { return false }
+            switch kind {
+            case .audio:
+                return transceiver.mediaType == .audio
+            case .video:
+                return transceiver.mediaType == .video
+            }
+        }
+        guard matches.count == 1 else {
+            throw RoomRTCError.invalidOfferLayout(.transceiverMappingMismatch)
+        }
+        return matches[0]
+    }
+
+    private func setPublisherTrack(
+        _ track: LKRTCMediaStreamTrack?,
+        on transceiver: LKRTCRtpTransceiver
+    ) throws {
+        transceiver.sender.track = track
+        transceiver.sender.streamIds = track == nil ? [] : ["meetingassist-native"]
+        var directionError: NSError?
+        transceiver.setDirection(track == nil ? .inactive : .sendOnly, error: &directionError)
+        if directionError != nil {
+            transceiver.sender.track = nil
+            transceiver.sender.streamIds = []
+            throw RoomRTCError.invalidOfferLayout(.transceiverDirectionRejected)
+        }
+    }
+
+    private func preferH264WithRTX(on transceiver: LKRTCRtpTransceiver) throws {
+        let capabilities = factory.rtpSenderCapabilities(forKind: kLKRTCMediaStreamTrackKindVideo)
+        let codecs = capabilities.codecs
+        let descriptors = codecs.map { codec in
+            NativeVideoCodecDescriptor(
+                name: codec.name,
+                payloadType: codec.preferredPayloadType?.intValue,
+                parameters: codec.parameters
+            )
+        }
+        let ordered = try NativeVideoCodecPreference.orderedIndices(descriptors).map { codecs[$0] }
+        do {
+            try transceiver.setCodecPreferences(ordered, error: ())
+        } catch {
+            throw RoomRTCError.invalidOfferLayout(.codecPreferenceRejected)
+        }
+    }
+
+    private func switchCameraCapture(
+        _ capturer: LKRTCCameraVideoCapturer,
+        to device: AVCaptureDevice,
+        epoch: UInt64,
+        connection: LKRTCPeerConnection
+    ) async throws {
+        try ensureCaptureStopResolved()
+        try ensureOperationCurrent(epoch, connection: connection)
+        guard let format = Self.preferredFormat(for: device) else {
+            throw RoomRTCError.cameraFormatUnavailable
+        }
+        guard recordCaptureStopResult(await stopCapture(capturer)) else {
+            throw RoomRTCError.peerOperationTimedOut("camera_stop_capture")
+        }
+        try ensureOperationCurrent(epoch, connection: connection)
+        do {
+            try await startCapture(
+                capturer,
+                device: device,
+                format: format,
+                fps: Self.preferredFPS(for: format),
+                epoch: epoch,
+                connection: connection
+            )
+        } catch {
+            guard recordCaptureStopResult(await stopCapture(capturer)) else {
+                throw RoomRTCError.peerOperationTimedOut("camera_stop_capture_after_switch_failure")
+            }
+            throw error
+        }
+        let installed = lock.withLock { () -> Bool in
+            guard operationEpoch == epoch,
+                  peerConnection === connection,
+                  cameraCapturer === capturer else { return false }
+            activeCameraID = device.uniqueID
+            return true
+        }
+        guard installed else {
+            guard recordCaptureStopResult(await stopCapture(capturer)) else {
+                throw RoomRTCError.peerOperationTimedOut("camera_stop_stale_switch_capture")
+            }
+            throw RoomRTCError.operationCancelled
+        }
+    }
+
+    private func recoverCameraIfNeeded(removedID: String) async {
+        let state = lock.withLock {
+            (operationEpoch, peerConnection, activeCameraID, selectedCameraID, cameraCapturer)
+        }
+        guard state.2 == removedID || state.3 == removedID else {
+            publishMediaRuntimeState()
+            return
+        }
         lock.withLock {
-            localVideoSource = source
-            localVideoTrack = track
-            cameraCapturer = capturer
-            localVideoSender = sender
+            selectedCameraID = nil
+            activeCameraID = nil
+        }
+        guard let connection = state.1, let capturer = state.4 else {
+            _ = lock.withLock {
+                runtimeDegradations.insert(.selectedCameraRemovedUsingDefault)
+            }
+            publishMediaRuntimeState()
+            return
+        }
+        guard
+              let replacement = Self.preferredCameraDevice(excluding: removedID) else {
+            _ = lock.withLock { runtimeDegradations.insert(.cameraRecoveryFailed) }
+            publishMediaRuntimeState()
+            return
+        }
+        do {
+            try await switchCameraCapture(
+                capturer,
+                to: replacement,
+                epoch: state.0,
+                connection: connection
+            )
+            try ensureOperationCurrent(state.0, connection: connection)
+            _ = lock.withLock {
+                runtimeDegradations.insert(.selectedCameraRemovedUsingDefault)
+            }
+        } catch RoomRTCError.operationCancelled {
+            return
+        } catch {
+            lock.withLock {
+                guard operationEpoch == state.0, peerConnection === connection else { return }
+                runtimeDegradations.insert(.cameraRecoveryFailed)
+            }
+        }
+        if isOperationCurrent(state.0, connection: connection) {
+            publishMediaRuntimeState()
         }
     }
 
     #if os(macOS)
     private func startScreenShare() async throws {
-        guard let sender = lock.withLock({ localVideoSender }) else {
+        try ensureCaptureStopResolved()
+        guard let operation = lock.withLock({ () -> (UInt64, LKRTCPeerConnection, LKRTCRtpSender)? in
+            guard let peerConnection, let localVideoSender else { return nil }
+            return (operationEpoch, peerConnection, localVideoSender)
+        }) else {
             throw RoomRTCError.screenShareUnavailable
         }
+        let (epoch, connection, sender) = operation
         if lock.withLock({ desktopCapturer != nil }) {
             return
         }
 
-        let bundle = try screenShareTrackSwitch.start(
-            makeScreenTrack: { [factory] () -> NativeDesktopScreenShareBundle in
-                let source = factory.videoSource()
-                source.adaptOutputFormat(toWidth: 1920, height: 1080, fps: 15)
-                let capturer = LKRTCDesktopCapturer(defaultScreen: self, capture: source)
-                let track = factory.videoTrack(with: source, trackId: "meetingassist-screen-0")
-                track.isEnabled = true
-                return NativeDesktopScreenShareBundle(source: source, capturer: capturer, track: track)
-            },
-            installScreenTrack: { bundle in
-                sender.track = bundle.track
-            },
-            startCapture: { bundle in
-                bundle.capturer.startCapture(withFPS: 15)
-            }
-        )
+        guard Self.screenCaptureAccessGranted() else {
+            throw RoomRTCError.screenCapturePermissionDenied
+        }
+        let source = factory.videoSource()
+        source.adaptOutputFormat(toWidth: 1920, height: 1080, fps: 15)
+        let capturer = LKRTCDesktopCapturer(defaultScreen: self, capture: source)
+        let track = factory.videoTrack(with: source, trackId: "meetingassist-screen-0")
+        track.isEnabled = true
 
-        lock.withLock {
-            screenVideoSource = bundle.source
-            screenVideoTrack = bundle.track
-            desktopCapturer = bundle.capturer
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let gate = NativeRTCContinuationGate(continuation)
+                let installed = lock.withLock { () -> Bool in
+                    guard operationEpoch == epoch,
+                          peerConnection === connection,
+                          localVideoSender === sender,
+                          desktopCapturer == nil else { return false }
+                    sender.track = track
+                    screenVideoSource = source
+                    screenVideoTrack = track
+                    desktopCapturer = capturer
+                    desktopCaptureStartGate = gate
+                    desktopCaptureStarted = false
+                    return true
+                }
+                guard installed else {
+                    gate.resume(throwing: RoomRTCError.operationCancelled)
+                    return
+                }
+                gate.failAfterDeadline(operation: "desktop_start_capture")
+                captureInvocationLock.lock()
+                let shouldStart = isOperationCurrent(epoch, connection: connection)
+                    && lock.withLock { desktopCapturer === capturer }
+                if shouldStart {
+                    capturer.startCapture(withFPS: 15)
+                }
+                captureInvocationLock.unlock()
+                if !shouldStart {
+                    gate.resume(throwing: RoomRTCError.operationCancelled)
+                }
+            }
+            try ensureOperationCurrent(epoch, connection: connection)
+            guard lock.withLock({ desktopCapturer === capturer }) else {
+                throw RoomRTCError.operationCancelled
+            }
+        } catch {
+            let shouldStop = lock.withLock { () -> Bool in
+                guard desktopCapturer === capturer else { return false }
+                sender.track = localVideoTrack
+                screenVideoSource = nil
+                screenVideoTrack = nil
+                desktopCapturer = nil
+                desktopCaptureStartGate = nil
+                desktopCaptureStarted = false
+                return true
+            }
+            if shouldStop,
+               !recordCaptureStopResult(await stopDesktopCapture(capturer)) {
+                throw RoomRTCError.peerOperationTimedOut("desktop_stop_capture_after_start_failure")
+            }
+            throw error
         }
     }
 
-    private func stopScreenShare() async {
-        let state = lock.withLock {
-            (
-                sender: localVideoSender,
-                cameraTrack: localVideoTrack,
-                capturer: desktopCapturer
+    private func stopScreenShare() async throws {
+        try ensureCaptureStopResolved()
+        let state = lock.withLock { () -> (
+            epoch: UInt64,
+            connection: LKRTCPeerConnection?,
+            capturer: LKRTCDesktopCapturer?,
+            startGate: NativeRTCContinuationGate<Void>?
+        ) in
+            localVideoSender?.track = localVideoTrack
+            let value = (
+                epoch: operationEpoch,
+                connection: peerConnection,
+                capturer: desktopCapturer,
+                startGate: desktopCaptureStartGate
             )
-        }
-
-        await screenShareTrackSwitch.stop(
-            cameraTrack: state.cameraTrack,
-            capturer: state.capturer,
-            restoreCameraTrack: { cameraTrack in
-                state.sender?.track = cameraTrack
-            },
-            stopCapture: { capturer in
-                await stopDesktopCapture(capturer)
-            }
-        )
-
-        lock.withLock {
             screenVideoSource = nil
             screenVideoTrack = nil
             desktopCapturer = nil
+            desktopCaptureStartGate = nil
+            desktopCaptureStarted = false
+            return value
+        }
+        state.startGate?.resume(throwing: RoomRTCError.screenShareUnavailable)
+        if let capturer = state.capturer,
+           !recordCaptureStopResult(await stopDesktopCapture(capturer)) {
+            throw RoomRTCError.peerOperationTimedOut("desktop_stop_capture")
+        }
+        if let connection = state.connection {
+            try ensureOperationCurrent(state.epoch, connection: connection)
         }
     }
 
-    private func stopDesktopCapture(_ capturer: LKRTCDesktopCapturer) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+    private func stopDesktopCapture(_ capturer: LKRTCDesktopCapturer) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let gate = NativeRTCStopContinuationGate(continuation)
+            gate.failAfterDeadline()
+            captureInvocationLock.lock()
             capturer.stopCapture {
-                continuation.resume()
+                gate.resume(returning: true)
             }
+            captureInvocationLock.unlock()
         }
     }
 
@@ -1452,24 +2591,40 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         _ capturer: LKRTCCameraVideoCapturer,
         device: AVCaptureDevice,
         format: AVCaptureDevice.Format,
-        fps: Int
+        fps: Int,
+        epoch: UInt64,
+        connection: LKRTCPeerConnection
     ) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            capturer.startCapture(with: device, format: format, fps: fps) { error in
-                if let error {
-                    continuation.resume(throwing: RoomRTCError.cameraCaptureFailed(error.localizedDescription))
-                } else {
-                    continuation.resume(returning: ())
+            let gate = NativeRTCContinuationGate(continuation)
+            gate.failAfterDeadline(operation: "camera_start_capture")
+            captureInvocationLock.lock()
+            let shouldStart = isOperationCurrent(epoch, connection: connection)
+            if shouldStart {
+                capturer.startCapture(with: device, format: format, fps: fps) { error in
+                    if let error {
+                        gate.resume(throwing: RoomRTCError.cameraCaptureFailed(error.localizedDescription))
+                    } else {
+                        gate.resume(returning: ())
+                    }
                 }
+            }
+            captureInvocationLock.unlock()
+            if !shouldStart {
+                gate.resume(throwing: RoomRTCError.operationCancelled)
             }
         }
     }
 
-    private func stopCapture(_ capturer: LKRTCCameraVideoCapturer) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+    private func stopCapture(_ capturer: LKRTCCameraVideoCapturer) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let gate = NativeRTCStopContinuationGate(continuation)
+            gate.failAfterDeadline()
+            captureInvocationLock.lock()
             capturer.stopCapture {
-                continuation.resume()
+                gate.resume(returning: true)
             }
+            captureInvocationLock.unlock()
         }
     }
 
@@ -1483,13 +2638,15 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         )
 
         return try await withCheckedThrowingContinuation { continuation in
+            let gate = NativeRTCContinuationGate(continuation)
+            gate.failAfterDeadline(operation: "create_answer")
             connection.answer(for: constraints) { description, error in
                 if let error {
-                    continuation.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
+                    gate.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
                 } else if let description {
-                    continuation.resume(returning: description)
+                    gate.resume(returning: description)
                 } else {
-                    continuation.resume(throwing: RoomRTCError.missingSessionDescription)
+                    gate.resume(throwing: RoomRTCError.missingSessionDescription)
                 }
             }
         }
@@ -1497,11 +2654,13 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
 
     private func setRemoteDescription(_ description: LKRTCSessionDescription, on connection: LKRTCPeerConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let gate = NativeRTCContinuationGate(continuation)
+            gate.failAfterDeadline(operation: "set_remote_description")
             connection.setRemoteDescription(description) { error in
                 if let error {
-                    continuation.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
+                    gate.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
                 } else {
-                    continuation.resume(returning: ())
+                    gate.resume(returning: ())
                 }
             }
         }
@@ -1509,11 +2668,13 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
 
     private func setLocalDescription(_ description: LKRTCSessionDescription, on connection: LKRTCPeerConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let gate = NativeRTCContinuationGate(continuation)
+            gate.failAfterDeadline(operation: "set_local_description")
             connection.setLocalDescription(description) { error in
                 if let error {
-                    continuation.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
+                    gate.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
                 } else {
-                    continuation.resume(returning: ())
+                    gate.resume(returning: ())
                 }
             }
         }
@@ -1521,19 +2682,58 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
 
     private func add(_ candidate: LKRTCIceCandidate, to connection: LKRTCPeerConnection) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let gate = NativeRTCContinuationGate(continuation)
+            gate.failAfterDeadline(operation: "add_ice_candidate")
             connection.add(candidate) { error in
                 if let error {
-                    continuation.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
+                    gate.resume(throwing: RoomRTCError.webRTCOperationFailed(error.localizedDescription))
                 } else {
-                    continuation.resume(returning: ())
+                    gate.resume(returning: ())
                 }
             }
         }
     }
 
-    private func setLifecycle(_ state: RoomLifecycleState) {
+    @discardableResult
+    private func setLifecycle(
+        _ state: RoomLifecycleState,
+        epoch: UInt64,
+        connection: LKRTCPeerConnection
+    ) -> Bool {
         lock.withLock {
+            guard operationEpoch == epoch, peerConnection === connection else { return false }
             _lifecycle = state
+            return true
+        }
+    }
+
+    private func advanceOperationEpochLocked() -> UInt64 {
+        operationEpoch &+= 1
+        if operationEpoch == 0 {
+            operationEpoch = 1
+        }
+        return operationEpoch
+    }
+
+    private func isOperationCurrent(
+        _ epoch: UInt64,
+        connection: LKRTCPeerConnection? = nil
+    ) -> Bool {
+        lock.withLock {
+            guard operationEpoch == epoch else { return false }
+            if let connection {
+                return peerConnection === connection
+            }
+            return true
+        }
+    }
+
+    private func ensureOperationCurrent(
+        _ epoch: UInt64,
+        connection: LKRTCPeerConnection? = nil
+    ) throws {
+        guard isOperationCurrent(epoch, connection: connection) else {
+            throw RoomRTCError.operationCancelled
         }
     }
 
@@ -1691,8 +2891,231 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
         return nil
     }
 
-    private static func preferredCameraDevice() -> AVCaptureDevice? {
-        let devices = LKRTCCameraVideoCapturer.captureDevices()
+    private func recoverRemovedAudioDevicesIfNeeded() {
+        let module = factory.audioDeviceModule
+        let selections = lock.withLock { (selectedAudioInputID, selectedAudioOutputID) }
+        if NativeDeviceSelectionRecovery.needsDefaultRecovery(
+            selectedID: selections.0,
+            availableIDs: module.inputDevices.map(\.deviceId)
+        ) {
+            lock.withLock { selectedAudioInputID = nil }
+            let recovered = module.trySetInputDevice(nil)
+            _ = lock.withLock {
+                if recovered {
+                    runtimeDegradations.insert(.selectedAudioInputRemovedUsingDefault)
+                } else {
+                    runtimeDegradations.insert(.audioDeviceRecoveryFailed)
+                }
+            }
+        }
+        if NativeDeviceSelectionRecovery.needsDefaultRecovery(
+            selectedID: selections.1,
+            availableIDs: module.outputDevices.map(\.deviceId)
+        ) {
+            lock.withLock { selectedAudioOutputID = nil }
+            let recovered = module.trySetOutputDevice(nil)
+            _ = lock.withLock {
+                if recovered {
+                    runtimeDegradations.insert(.selectedAudioOutputRemovedUsingDefault)
+                } else {
+                    runtimeDegradations.insert(.audioDeviceRecoveryFailed)
+                }
+            }
+        }
+    }
+
+    private func deviceInventory() -> NativeMediaDeviceInventory {
+        let module = factory.audioDeviceModule
+        let activeInputID = module.inputDevice.deviceId
+        let activeOutputID = module.outputDevice.deviceId
+        let selectedCameraID = lock.withLock {
+            activeCameraID ?? self.selectedCameraID
+        }
+        let defaultCameraID = Self.preferredCameraDevice()?.uniqueID
+        return NativeMediaDeviceInventory(
+            audioInputs: module.inputDevices.map { device in
+                NativeMediaDevice(
+                    id: device.deviceId,
+                    uiDisplayName: device.name,
+                    kind: .audioInput,
+                    isDefault: device.isDefault,
+                    isSelected: device.deviceId == activeInputID
+                )
+            },
+            audioOutputs: module.outputDevices.map { device in
+                NativeMediaDevice(
+                    id: device.deviceId,
+                    uiDisplayName: device.name,
+                    kind: .audioOutput,
+                    isDefault: device.isDefault,
+                    isSelected: device.deviceId == activeOutputID
+                )
+            },
+            cameras: LKRTCCameraVideoCapturer.captureDevices().map { device in
+                NativeMediaDevice(
+                    id: device.uniqueID,
+                    uiDisplayName: device.localizedName,
+                    kind: .camera,
+                    isDefault: device.uniqueID == defaultCameraID,
+                    isSelected: device.uniqueID == selectedCameraID
+                )
+            }
+        )
+    }
+
+    private func publishMediaRuntimeState() {
+        let handler = lock.withLock { mediaRuntimeStateHandler }
+        guard let handler else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await handler(await self.mediaRuntimeSnapshot())
+        }
+    }
+
+    private static func audioDevice(
+        id: String?,
+        in devices: [LKRTCIODevice],
+        kind: NativeMediaDeviceKind
+    ) throws -> LKRTCIODevice? {
+        guard let id else { return nil }
+        guard let device = devices.first(where: { $0.deviceId == id }) else {
+            throw RoomRTCError.mediaDeviceUnavailable(kind)
+        }
+        return device
+    }
+
+    private static func cameraDevice(id: String?) throws -> AVCaptureDevice {
+        if let id {
+            guard let device = LKRTCCameraVideoCapturer.captureDevices().first(where: { $0.uniqueID == id }) else {
+                throw RoomRTCError.mediaDeviceUnavailable(.camera)
+            }
+            return device
+        }
+        guard let device = preferredCameraDevice() else {
+            throw RoomRTCError.cameraUnavailable
+        }
+        return device
+    }
+
+    private static func audioProcessingRequestResult(
+        _ code: LKRTCAudioProcessingOptionsResultCode
+    ) -> NativeAudioProcessingRequestResult {
+        switch code {
+        case .applied: .applied
+        case .stored: .stored
+        case .rejectedRemoteTrack: .rejectedRemoteTrack
+        case .rejectedInvalidCombination: .rejectedInvalidCombination
+        case .rejectedPlatformUnavailable: .rejectedPlatformUnavailable
+        case .applyFailed: .applyFailed
+        @unknown default: .unknownFailure
+        }
+    }
+
+    private static func audioProcessingSnapshot(
+        state: LKRTCAudioProcessingState,
+        platformState: LKRTCPlatformAudioProcessingState,
+        requestResult: NativeAudioProcessingRequestResult,
+        requested: NativeAudioProcessingRequestedConfiguration?
+    ) -> NativeAudioProcessingSnapshot {
+        NativeAudioProcessingSnapshot(
+            requestResult: requestResult,
+            hasAudioProcessingModule: state.hasAudioProcessingModule,
+            echoCancellation: audioProcessingComponent(
+                state.echoCancellation,
+                requestedFallback: requested?.echoCancellation
+            ),
+            noiseSuppression: audioProcessingComponent(
+                state.noiseSuppression,
+                requestedFallback: requested?.noiseSuppression
+            ),
+            automaticGainControl: audioProcessingComponent(
+                state.autoGainControl,
+                requestedFallback: requested?.automaticGainControl
+            ),
+            highPassFilter: audioProcessingComponent(
+                state.highPassFilter,
+                requestedFallback: requested?.highPassFilter
+            ),
+            platformVoiceProcessing: NativePlatformVoiceProcessingSnapshot(
+                enabledRequested: platformState.isVoiceProcessingEnabledRequested,
+                enabledActive: platformState.isVoiceProcessingEnabledActive,
+                bypassedRequested: platformState.isVoiceProcessingBypassedRequested,
+                bypassedActive: platformState.isVoiceProcessingBypassedActive,
+                automaticGainControlRequested: platformState.isVoiceProcessingAGCEnabledRequested,
+                automaticGainControlActive: platformState.isVoiceProcessingAGCEnabledActive
+            )
+        )
+    }
+
+    private static func audioProcessingComponent(
+        _ state: LKRTCAudioProcessingComponentState,
+        requestedFallback: NativeAudioProcessingRequest?
+    ) -> NativeAudioProcessingComponentSnapshot {
+        NativeAudioProcessingComponentSnapshot(
+            requested: state.requested.map {
+                NativeAudioProcessingRequest(
+                    enabled: $0.isEnabled,
+                    mode: audioProcessingMode($0.mode)
+                )
+            } ?? requestedFallback,
+            softwareResolved: state.isSoftwareResolved,
+            softwareActive: state.isSoftwareActive,
+            platformAvailable: state.isPlatformAvailable,
+            platformResolved: state.isPlatformResolved,
+            platformActive: state.isPlatformActive,
+            effective: audioProcessingImplementation(state.effective)
+        )
+    }
+
+    private static func requestedConfiguration(
+        _ options: LKRTCAudioProcessingOptions
+    ) -> NativeAudioProcessingRequestedConfiguration {
+        NativeAudioProcessingRequestedConfiguration(
+            echoCancellation: NativeAudioProcessingRequest(
+                enabled: options.echoCancellation,
+                mode: audioProcessingMode(options.echoCancellationMode)
+            ),
+            noiseSuppression: NativeAudioProcessingRequest(
+                enabled: options.noiseSuppression,
+                mode: audioProcessingMode(options.noiseSuppressionMode)
+            ),
+            automaticGainControl: NativeAudioProcessingRequest(
+                enabled: options.autoGainControl,
+                mode: audioProcessingMode(options.autoGainControlMode)
+            ),
+            highPassFilter: NativeAudioProcessingRequest(
+                enabled: options.highPassFilter,
+                mode: audioProcessingMode(options.highPassFilterMode)
+            )
+        )
+    }
+
+    private static func audioProcessingMode(
+        _ mode: LKRTCAudioProcessingMode
+    ) -> NativeAudioProcessingMode {
+        switch mode {
+        case .automatic: .automatic
+        case .platform: .platform
+        case .software: .software
+        @unknown default: .unknown
+        }
+    }
+
+    private static func audioProcessingImplementation(
+        _ implementation: LKRTCAudioProcessingImplementation
+    ) -> NativeAudioProcessingImplementation {
+        switch implementation {
+        case .unknown: .unknown
+        case .disabled: .disabled
+        case .software: .software
+        case .platform: .platform
+        case .softwareAndPlatform: .softwareAndPlatform
+        @unknown default: .unknown
+        }
+    }
+
+    private static func preferredCameraDevice(excluding excludedID: String? = nil) -> AVCaptureDevice? {
+        let devices = LKRTCCameraVideoCapturer.captureDevices().filter { $0.uniqueID != excludedID }
         #if os(iOS)
         return devices.first(where: { $0.position == .front }) ?? devices.first
         #else
@@ -1721,6 +3144,74 @@ public final class NativeRoomRTCClient: NSObject, RoomRTCClient, @unchecked Send
     }
 }
 
+extension NativeRoomRTCClient: LKRTCAudioDeviceModuleDelegate {
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        didReceiveSpeechActivityEvent speechActivityEvent: LKRTCSpeechActivityEvent
+    ) {}
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        didCreateEngine engine: AVAudioEngine
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        willEnableEngine engine: AVAudioEngine,
+        isPlayoutEnabled: Bool,
+        isRecordingEnabled: Bool
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        willStartEngine engine: AVAudioEngine,
+        isPlayoutEnabled: Bool,
+        isRecordingEnabled: Bool
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        didStopEngine engine: AVAudioEngine,
+        isPlayoutEnabled: Bool,
+        isRecordingEnabled: Bool
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        didDisableEngine engine: AVAudioEngine,
+        isPlayoutEnabled: Bool,
+        isRecordingEnabled: Bool
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        willReleaseEngine engine: AVAudioEngine
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        engine: AVAudioEngine,
+        configureInputFromSource source: AVAudioNode?,
+        toDestination destination: AVAudioNode,
+        format: AVAudioFormat,
+        context: [AnyHashable: Any]
+    ) -> Int { 0 }
+
+    public func audioDeviceModule(
+        _ audioDeviceModule: LKRTCAudioDeviceModule,
+        engine: AVAudioEngine,
+        configureOutputFromSource source: AVAudioNode,
+        toDestination destination: AVAudioNode?,
+        format: AVAudioFormat,
+        context: [AnyHashable: Any]
+    ) -> Int { 0 }
+
+    public func audioDeviceModuleDidUpdateDevices(_ audioDeviceModule: LKRTCAudioDeviceModule) {
+        recoverRemovedAudioDevicesIfNeeded()
+        publishMediaRuntimeState()
+    }
+}
+
 extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
     public func peerConnection(_ peerConnection: LKRTCPeerConnection, didChange stateChanged: LKRTCSignalingState) {}
 
@@ -1735,7 +3226,9 @@ extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
     public func peerConnection(_ peerConnection: LKRTCPeerConnection, didChange newState: LKRTCIceGatheringState) {}
 
     public func peerConnection(_ peerConnection: LKRTCPeerConnection, didGenerate candidate: LKRTCIceCandidate) {
-        let handler = lock.withLock { localCandidateHandler }
+        let handler = lock.withLock {
+            self.peerConnection === peerConnection ? localCandidateHandler : nil
+        }
         let payload = RTCIceCandidatePayload(
             candidate: candidate.sdp,
             sdpMid: candidate.sdpMid,
@@ -1743,7 +3236,9 @@ extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
         )
 
         guard let handler else { return }
-        Task {
+        Task { [weak self] in
+            guard let self,
+                  self.lock.withLock({ self.peerConnection === peerConnection }) else { return }
             await handler(payload)
         }
     }
@@ -1762,13 +3257,16 @@ extension NativeRoomRTCClient: LKRTCPeerConnectionDelegate {
             track: videoTrack,
             streamIds: mediaStreams.map(\.streamId)
         )
-        let handler = lock.withLock {
+        let handler = lock.withLock { () -> RemoteVideoTrackHandler? in
+            guard self.peerConnection === peerConnection else { return nil }
             remoteVideoTracks[remoteTrack.id] = remoteTrack
             return remoteVideoTrackHandler
         }
 
         guard let handler else { return }
-        Task {
+        Task { [weak self] in
+            guard let self,
+                  self.lock.withLock({ self.peerConnection === peerConnection }) else { return }
             await handler(remoteTrack)
         }
     }
@@ -1817,13 +3315,63 @@ internal struct NativeScreenShareTrackSwitch {
 }
 
 extension NativeRoomRTCClient: LKRTCDesktopCapturerDelegate {
-    public func didSourceCaptureStart(_ capturer: LKRTCDesktopCapturer) {}
+    public func didSourceCaptureStart(_ capturer: LKRTCDesktopCapturer) {
+        let gate = lock.withLock { () -> NativeRTCContinuationGate<Void>? in
+            guard desktopCapturer === capturer else { return nil }
+            desktopCaptureStarted = true
+            let value = desktopCaptureStartGate
+            desktopCaptureStartGate = nil
+            return value
+        }
+        gate?.resume(returning: ())
+    }
 
-    public func didSourceCapturePaused(_ capturer: LKRTCDesktopCapturer) {}
+    public func didSourceCapturePaused(_ capturer: LKRTCDesktopCapturer) {
+        handleUnexpectedDesktopCaptureEnd(capturer, event: .capturePaused)
+    }
 
-    public func didSourceCaptureStop(_ capturer: LKRTCDesktopCapturer) {}
+    public func didSourceCaptureStop(_ capturer: LKRTCDesktopCapturer) {
+        handleUnexpectedDesktopCaptureEnd(capturer, event: .captureStopped)
+    }
 
-    public func didSourceCaptureError(_ capturer: LKRTCDesktopCapturer) {}
+    public func didSourceCaptureError(_ capturer: LKRTCDesktopCapturer) {
+        handleUnexpectedDesktopCaptureEnd(capturer, event: .captureError)
+    }
+
+    private func handleUnexpectedDesktopCaptureEnd(
+        _ capturer: LKRTCDesktopCapturer,
+        event: NativeScreenShareRuntimeEvent
+    ) {
+        let state = lock.withLock { () -> (
+            gate: NativeRTCContinuationGate<Void>?,
+            handler: NativeScreenShareRuntimeStateHandler?,
+            wasActive: Bool
+        )? in
+            guard desktopCapturer === capturer else { return nil }
+            localVideoSender?.track = localVideoTrack
+            let value = (
+                gate: desktopCaptureStartGate,
+                handler: screenShareRuntimeStateHandler,
+                wasActive: desktopCaptureStarted
+            )
+            screenVideoSource = nil
+            screenVideoTrack = nil
+            desktopCapturer = nil
+            desktopCaptureStartGate = nil
+            desktopCaptureStarted = false
+            return value
+        }
+        guard let state else { return }
+        state.gate?.resume(throwing: RoomRTCError.screenShareUnavailable)
+        Task { [weak self] in
+            if state.wasActive {
+                await state.handler?(event)
+            }
+            if event == .capturePaused, let self {
+                self.recordCaptureStopResult(await self.stopDesktopCapture(capturer))
+            }
+        }
+    }
 }
 #endif
 #else
@@ -1840,7 +3388,21 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     public func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {}
 
+    public func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async {}
+
     public func prepareLocalMedia(audio: Bool, video: Bool) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    public func selectAudioInput(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    public func selectAudioOutput(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    public func selectCamera(id: String?) async throws {
         throw RoomRTCError.webRTCUnavailable
     }
 
@@ -1870,6 +3432,12 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         throw RoomRTCError.webRTCUnavailable
     }
 
+    public func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot {
+        NativeMediaRuntimeSnapshot(
+            degradations: [.audioProcessingRequestFailed]
+        )
+    }
+
     public func leave() async {
         lifecycle = .leaving
     }
@@ -1877,17 +3445,140 @@ public final class NativeRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 #endif
 
 public enum RoomRTCError: Error, Equatable {
+    case cameraPermissionDenied
     case cameraCaptureFailed(String)
     case cameraFormatUnavailable
     case cameraUnavailable
     case missingSessionDescription
+    case microphonePermissionDenied
+    case operationCancelled
     case peerConnectionCreationFailed
     case peerConnectionNotConfigured
+    case peerOperationTimedOut(String)
+    case permissionRequestTimedOut(String)
     case screenCapturePermissionDenied
     case screenShareUnavailable
     case trackPublicationFailed(String)
     case webRTCOperationFailed(String)
     case webRTCUnavailable
+}
+
+private final class NativePermissionContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let operation: String
+    private var continuation: CheckedContinuation<Bool, Error>?
+
+    init(operation: String) {
+        self.operation = operation
+    }
+
+    func install(_ continuation: CheckedContinuation<Bool, Error>) {
+        lock.withLock {
+            self.continuation = continuation
+        }
+    }
+
+    func resume(returning value: Bool) {
+        take()?.resume(returning: value)
+    }
+
+    func failAfterDeadline(nanoseconds: UInt64) {
+        Task.detached { [weak self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard let self else { return }
+            self.take()?.resume(
+                throwing: RoomRTCError.permissionRequestTimedOut(self.operation)
+            )
+        }
+    }
+
+    private func take() -> CheckedContinuation<Bool, Error>? {
+        lock.withLock {
+            let value = continuation
+            continuation = nil
+            return value
+        }
+    }
+}
+
+internal final class NativeRTCContinuationGate<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+
+    init(_ continuation: CheckedContinuation<Value, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(returning value: Value) {
+        take()?.resume(returning: value)
+    }
+
+    func resume(throwing error: Error) {
+        take()?.resume(throwing: error)
+    }
+
+    func failAfterDeadline(operation: String, nanoseconds: UInt64 = 8_000_000_000) {
+        Task.detached { [self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            resume(throwing: RoomRTCError.peerOperationTimedOut(operation))
+        }
+    }
+
+    private func take() -> CheckedContinuation<Value, Error>? {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = continuation
+        continuation = nil
+        return value
+    }
+}
+
+internal final class NativeRTCStopContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(returning value: Bool) {
+        take()?.resume(returning: value)
+    }
+
+    func failAfterDeadline(nanoseconds: UInt64 = 5_000_000_000) {
+        Task.detached { [self] in
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            resume(returning: false)
+        }
+    }
+
+    private func take() -> CheckedContinuation<Bool, Never>? {
+        lock.withLock {
+            let value = continuation
+            continuation = nil
+            return value
+        }
+    }
+}
+
+public extension RoomRTCError {
+    static func audioProcessingRequestFailed(
+        _ result: NativeAudioProcessingRequestResult
+    ) -> RoomRTCError {
+        .webRTCOperationFailed("native audio processing request failed: \(result.rawValue)")
+    }
+
+    static func invalidOfferLayout(_ failure: NativeOfferLayoutFailure) -> RoomRTCError {
+        .webRTCOperationFailed("invalid native publisher offer: \(failure.rawValue)")
+    }
+
+    static func mediaDeviceSelectionFailed(_ kind: NativeMediaDeviceKind) -> RoomRTCError {
+        .webRTCOperationFailed("native \(kind.rawValue) selection failed")
+    }
+
+    static func mediaDeviceUnavailable(_ kind: NativeMediaDeviceKind) -> RoomRTCError {
+        .webRTCOperationFailed("native \(kind.rawValue) device unavailable")
+    }
 }
 
 public enum WebRTCLinkStatus {

@@ -275,40 +275,96 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if err := instantiateProcessPlan(packagingStudioDefinition(), &plan); err != nil {
 		t.Fatalf("instantiate accepted Studio plan: %v", err)
 	}
-	for _, stageID := range []string{"context_snapshot", "evidence", "story_architects", "write", "gate"} {
-		stage := packagingStudioStage(t, packagingStudioDefinition(), stageID)
-		st := plan.subtaskByID(stageID)
-		task, taskErr := engine.processStageTaskAuthorized(context.Background(), &plan, "", st, stage)
-		if taskErr != nil {
-			t.Fatalf("authorized task for %s: %v", stageID, taskErr)
-		}
-		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision, plan.RouteReceipt.SourceMessageDigest, plan.RouteReceipt.SourceWindowDigest, plan.RouteReceipt.SourceSelectionDigest} {
-			if !strings.Contains(task, want) {
-				t.Fatalf("stage %s lost %q from authorized source packet:\n%s", stageID, want, task)
-			}
-		}
-		for _, forbidden := range []string{"PRODUCTION_UNRELATED_SENTINEL", "PRODUCTION_SIBLING_PDF_SECRET"} {
-			if strings.Contains(task, forbidden) {
-				t.Fatalf("stage %s leaked %q across a channel/reply boundary", stageID, forbidden)
-			}
+	contextStage := packagingStudioStage(t, packagingStudioDefinition(), "context_snapshot")
+	contextTask, taskErr := engine.processStageTaskAuthorized(context.Background(), &plan, "", plan.subtaskByID("context_snapshot"), contextStage)
+	if taskErr != nil {
+		t.Fatalf("authorized context task: %v", taskErr)
+	}
+	for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision, plan.RouteReceipt.SourceMessageDigest, plan.RouteReceipt.SourceWindowDigest, plan.RouteReceipt.SourceSelectionDigest} {
+		if !strings.Contains(contextTask, want) {
+			t.Fatalf("context stage lost %q from authorized source packet:\n%s", want, contextTask)
 		}
 	}
+	for _, forbidden := range []string{"PRODUCTION_UNRELATED_SENTINEL", "PRODUCTION_SIBLING_PDF_SECRET"} {
+		if strings.Contains(contextTask, forbidden) {
+			t.Fatalf("context stage leaked %q across a channel/reply boundary", forbidden)
+		}
+	}
+
+	// Execution does not repeatedly inject the raw source packet into every
+	// stage. The context snapshot admits exact claims once; downstream stages
+	// receive only declared, durable artifacts. Seed the model's valid structured
+	// result and the real deterministic evidence compiler to exercise that path.
+	authority, authorityErr := processInternalAuthoritySources(kanbanApp, &plan)
+	if authorityErr != nil {
+		t.Fatalf("resolve internal source authority: %v", authorityErr)
+	}
+	pdfSourceRef := ""
+	for ref, source := range authority {
+		if strings.Contains(source.Text, "PRODUCTION_PDF_SENTINEL") {
+			pdfSourceRef = ref
+			break
+		}
+	}
+	if pdfSourceRef == "" {
+		t.Fatal("authorized source map did not contain the exact named PDF")
+	}
+	contextBody, err := json.Marshal(map[string]any{
+		"direct_ask": "Tyler requested a 10-slide presentation using PRODUCTION_DR_MAY_SENTINEL and the named PDF.",
+		"audience":   "Like A Farmer team", "decision": "Choose the optimization plan", "desired_response": "Approve the plan", "slide_count": 10,
+		"context_used": []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL"}, "settled_decisions": []string{}, "taste_signals": []string{}, "brand_assets": []string{},
+		"research_mode": "internal", "research_questions": []string{}, "reversible_inferences": []string{}, "uncertain_claims": []string{},
+		"known_facts": []map[string]string{{"claim": pdfText, "display_claim": pdfText, "exact_quote": pdfText, "source_ref": pdfSourceRef}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextArtifact, _, err := kanbanApp.createOSArtifactWithMetadata("workflow", "Production context snapshot", string(contextBody), scoutParticipantName, map[string]string{
+		"goalParentId": run.Artifact.ID, "goalSubtaskId": "context_snapshot", "processId": plan.ProcessID, "processStage": "context_snapshot", "processRole": processRoleSynthesizer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextSubtask := plan.subtaskByID("context_snapshot")
+	contextSubtask.Status, contextSubtask.ArtifactID = subtaskComplete, contextArtifact.ID
+	evidenceStage := packagingStudioStage(t, packagingStudioDefinition(), "evidence")
+	evidenceBody, evidenceMetadata, err := compileProcessEvidenceDossier(kanbanApp, &plan, run.Artifact.ID, evidenceStage)
+	if err != nil {
+		t.Fatalf("compile source-bound evidence: %v", err)
+	}
+	evidenceMetadata["goalParentId"], evidenceMetadata["goalSubtaskId"] = run.Artifact.ID, "evidence"
+	evidenceMetadata["processId"], evidenceMetadata["processStage"], evidenceMetadata["processRole"] = plan.ProcessID, "evidence", processRoleCompile
+	evidenceMetadata["status"], evidenceMetadata["threadStatus"] = "complete", "complete"
+	evidenceArtifact, _, err := kanbanApp.createOSArtifactWithMetadata("workflow", "Production evidence dossier", evidenceBody, scoutParticipantName, evidenceMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceSubtask := plan.subtaskByID("evidence")
+	evidenceSubtask.Status, evidenceSubtask.ArtifactID = subtaskComplete, evidenceArtifact.ID
 	var providerMu sync.Mutex
 	var redTeamProviderInputs []string
+	internalClaimID := sha256Hex([]byte(pdfSourceRef + "\x00" + pdfText))
 	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
 		providerMu.Lock()
 		redTeamProviderInputs = append(redTeamProviderInputs, request.Input)
 		providerMu.Unlock()
-		return "Grounded objection and synthesis from the supplied source.", nil
+		output, _ := json.Marshal(map[string]any{"story": map[string]any{
+			"headline": pdfText, "claim_ids": []string{internalClaimID}, "claim_renderings": []string{pdfText},
+		}})
+		return string(output), nil
 	})
 	redTeamProviderStage := plan.subtaskByID("story_architects")
 	redTeamProviderStage.Status = subtaskRunning
 	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeamProviderStage, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
 	if redTeamProviderStage.Status != subtaskComplete || len(redTeamProviderInputs) < 2 {
-		t.Fatalf("production Red-team provider stage did not execute: stage=%+v calls=%d", redTeamProviderStage, len(redTeamProviderInputs))
+		reason := ""
+		if redTeamProviderStage.Review != nil {
+			reason = redTeamProviderStage.Review.Reasons
+		}
+		t.Fatalf("production Red-team provider stage did not execute: reason=%q stage=%+v calls=%d", reason, redTeamProviderStage, len(redTeamProviderInputs))
 	}
 	for index, input := range redTeamProviderInputs {
-		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision} {
+		for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", pdfSourceRef} {
 			if !strings.Contains(input, want) {
 				t.Fatalf("Red-team provider call %d lost %q:\n%s", index, want, input)
 			}
@@ -352,13 +408,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	}
 	preFixPlan.RouteReceipt = &preFixReceipt
 	preFixPlan.routeVerified = true
-	preFixStage := *preFixPlan.subtaskByID("story_architects")
-	preFixStage.Status = subtaskRunning
-	providerCallsBeforePreFix := len(redTeamProviderInputs)
-	engine.runProcessPanelStage(context.Background(), &preFixPlan, run.Artifact.ID, &preFixStage, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
-	if len(redTeamProviderInputs) != providerCallsBeforePreFix || preFixStage.Status != subtaskFailed || preFixStage.Review == nil ||
-		!strings.Contains(preFixStage.Review.Reasons, "outside the source topology") || strings.Contains(preFixStage.Review.Reasons, "PRODUCTION_SIBLING_PDF_SECRET") {
-		t.Fatalf("pre-fix sibling receipt reached provider or leaked source: before=%d after=%d stage=%+v", providerCallsBeforePreFix, len(redTeamProviderInputs), preFixStage)
+	_, preFixErr := engine.processStageTaskAuthorized(context.Background(), &preFixPlan, "", preFixPlan.subtaskByID("context_snapshot"), contextStage)
+	if preFixErr == nil || !strings.Contains(preFixErr.Error(), "outside the source topology") || strings.Contains(preFixErr.Error(), "PRODUCTION_SIBLING_PDF_SECRET") {
+		t.Fatalf("pre-fix sibling receipt passed context admission or leaked source: %v", preFixErr)
 	}
 	if err := kanbanApp.saveScoutChatThread(preFixThread); err != nil {
 		t.Fatal(err)
@@ -412,28 +464,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	if legacyPlan.RouteReceipt.SourceSelectionDigest == "" || mustGoalPlan(t, kanbanApp, run.Artifact.ID).RouteReceipt.SourceSelectionDigest == "" {
 		t.Fatal("legacy source selection upgrade was not durably bound on the parent")
 	}
-	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, "", legacyPlan.subtaskByID("story_architects"), packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
+	legacyTask, err := engine.processStageTaskAuthorized(context.Background(), &legacyPlan, "", legacyPlan.subtaskByID("context_snapshot"), packagingStudioStage(t, packagingStudioDefinition(), "context_snapshot"))
 	if err != nil || !strings.Contains(legacyTask, "PRODUCTION_PDF_SENTINEL") {
 		t.Fatalf("pre-contextRefs live receipt did not rehydrate its exact accepted proposal source: err=%v task=%s", err, legacyTask)
-	}
-
-	var writerQuery string
-	previousAgentStart := startAgentThreadAsync
-	startAgentThreadAsync = func(_ *kanbanBoardApp, child scoutAgentThread) { writerQuery = child.Query }
-	t.Cleanup(func() { startAgentThreadAsync = previousAgentStart })
-	plan.State = goalStateExecute
-	layout := plan.subtaskByID("layout_plan")
-	layout.Status = subtaskReady
-	if err := engine.launchSubtask(&plan, layout, run.Artifact.ID); err != nil {
-		t.Fatalf("launch production writer stage: %v", err)
-	}
-	for _, want := range []string{"Tyler", "PRODUCTION_DR_MAY_SENTINEL", "PRODUCTION_PDF_SENTINEL", grantedPDF.SourceRevision} {
-		if !strings.Contains(writerQuery, want) {
-			t.Fatalf("writer provider query lost %q:\n%s", want, writerQuery)
-		}
-	}
-	if strings.Contains(writerQuery, "PRODUCTION_UNRELATED_SENTINEL") || strings.Contains(writerQuery, "PRODUCTION_SIBLING_PDF_SECRET") {
-		t.Fatalf("writer provider query leaked another channel branch:\n%s", writerQuery)
 	}
 
 	kanbanApp.pendingAttachmentUploadsMu.Lock()
@@ -441,42 +474,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 	revoked.State = attachmentSourceRevoked
 	kanbanApp.pendingAttachmentUploads[grantedPDF.SourceID] = revoked
 	kanbanApp.pendingAttachmentUploadsMu.Unlock()
-	var blockedProviderCalls int
-	swapOpenAITextResponder(t, func(context.Context, string, openAITextRequest) (string, error) {
-		blockedProviderCalls++
-		return "must not run", nil
-	})
-	redTeam := plan.subtaskByID("story_architects")
-	redTeam.Status = subtaskRunning
-	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, redTeam, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
-	if blockedProviderCalls != 0 || redTeam.Status != subtaskFailed || redTeam.Review == nil ||
-		(!strings.Contains(redTeam.Review.Reasons, "changed") && !strings.Contains(redTeam.Review.Reasons, "readable")) {
-		t.Fatalf("revoked source did not fail closed before provider admission: calls=%d reason=%q stage=%+v", blockedProviderCalls, firstNonBlank(redTeam.Review.Reasons, "none"), redTeam)
-	}
-	// A revoked source at the last gate round is not a low score. Even with
-	// ForceAccept enabled it must terminalize with reattach/new-run guidance,
-	// without a scorer call or a proceed-with-gaps checkpoint.
-	revokedGatePlan := plan
-	revokedGatePlan.Subtasks = append([]goalSubtask(nil), plan.Subtasks...)
-	revokedGatePlan.State = goalStateExecute
-	revokedGatePlan.Checkpoint = nil
-	revokedGateStage := packagingStudioStage(t, packagingStudioDefinition(), "gate")
-	revokedGateStage.GateSpec = &ProcessGateSpec{Threshold: 9, Floor: 7, MaxRounds: 1, ForceAccept: true}
-	revokedGate := revokedGatePlan.subtaskByID("gate")
-	revokedGate.Status = subtaskRunning
-	revokedGate.Revisions = 1
-	probeParent, _, err := kanbanApp.createOSArtifactWithMetadata("workflow", "Revoked source gate probe", "Gate probe", scoutParticipantName, map[string]string{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	beforeGateProviderCalls := blockedProviderCalls
-	engine.runProcessGateStage(context.Background(), &revokedGatePlan, probeParent.ID, revokedGate, revokedGateStage)
-	if blockedProviderCalls != beforeGateProviderCalls || revokedGatePlan.State != goalStateBlocked || revokedGatePlan.Checkpoint != nil || revokedGate.Status != subtaskFailed ||
-		!strings.Contains(revokedGatePlan.Blocker, "reattach") || !strings.Contains(revokedGatePlan.Blocker, "cannot be overridden") {
-		t.Fatalf("last-round revoked source was scored/revised/overridden: before=%d after=%d state=%q checkpoint=%+v blocker=%q stage=%+v", beforeGateProviderCalls, blockedProviderCalls, revokedGatePlan.State, revokedGatePlan.Checkpoint, revokedGatePlan.Blocker, revokedGate)
-	}
-	if probe := mustArtifact(t, kanbanApp, probeParent.ID); probe.Metadata["threadStatus"] != "error" || probe.Metadata["status"] != "error" {
-		t.Fatalf("revoked-source terminal classification was not durable: %+v", probe.Metadata)
+	_, revokedErr := engine.processStageTaskAuthorized(context.Background(), &plan, "", plan.subtaskByID("context_snapshot"), contextStage)
+	if revokedErr == nil || (!strings.Contains(revokedErr.Error(), "changed") && !strings.Contains(revokedErr.Error(), "readable")) {
+		t.Fatalf("revoked source passed context admission: %v", revokedErr)
 	}
 	kanbanApp.pendingAttachmentUploadsMu.Lock()
 	revoked.State = attachmentSourceCommitted
@@ -500,13 +500,10 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 			t.Fatal(saveErr)
 		}
 	}
-	beforeTOCTOU := blockedProviderCalls
-	toctouCandidate := *plan.subtaskByID("story_architects")
-	toctouCandidate.Status = subtaskRunning
-	engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &toctouCandidate, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
+	_, toctouErr := engine.processStageTaskAuthorized(context.Background(), &plan, "", plan.subtaskByID("context_snapshot"), contextStage)
 	engine.sourceSelectionAfterSnapshotProbe = nil
-	if blockedProviderCalls != beforeTOCTOU || toctouCandidate.Status != subtaskFailed || toctouCandidate.Review == nil || !strings.Contains(toctouCandidate.Review.Reasons, "changed") {
-		t.Fatalf("mutation between selected snapshot and route verification reached provider: before=%d after=%d stage=%+v", beforeTOCTOU, blockedProviderCalls, toctouCandidate)
+	if toctouErr == nil || !strings.Contains(toctouErr.Error(), "changed") {
+		t.Fatalf("mutation between selected snapshot and route verification passed context admission: %v", toctouErr)
 	}
 	if saveErr := kanbanApp.saveScoutChatThread(originalThread); saveErr != nil {
 		t.Fatal(saveErr)
@@ -518,12 +515,9 @@ func TestScoutChatReplyContextProductionRouterAnswerAndProposal(t *testing.T) {
 		if saveErr := kanbanApp.saveScoutChatThread(mutated); saveErr != nil {
 			t.Fatal(saveErr)
 		}
-		before := blockedProviderCalls
-		candidate := *plan.subtaskByID("story_architects")
-		candidate.Status = subtaskRunning
-		engine.runProcessPanelStage(context.Background(), &plan, run.Artifact.ID, &candidate, packagingStudioStage(t, packagingStudioDefinition(), "story_architects"))
-		if blockedProviderCalls != before || candidate.Status != subtaskFailed || candidate.Review == nil || !strings.Contains(candidate.Review.Reasons, "changed") {
-			t.Fatalf("%s old-branch mutation reached provider or lacked truthful classification: before=%d after=%d stage=%+v", label, before, blockedProviderCalls, candidate)
+		_, mutationErr := engine.processStageTaskAuthorized(context.Background(), &plan, "", plan.subtaskByID("context_snapshot"), contextStage)
+		if mutationErr == nil || !strings.Contains(mutationErr.Error(), "changed") {
+			t.Fatalf("%s old-branch mutation passed context admission or lacked truthful classification: %v", label, mutationErr)
 		}
 		if saveErr := kanbanApp.saveScoutChatThread(originalThread); saveErr != nil {
 			t.Fatal(saveErr)

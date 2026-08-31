@@ -4,6 +4,11 @@ Date created: 2026-06-24
 Primary plan: `/Users/ajhart/Downloads/PLAN.md`
 Branch: `main`
 
+> Current security contract (2026-08-31): signed-out clients use identity-free
+> `GET /native/discovery`; authenticated `GET /native/config` is the only
+> roster surface. Older wave entries below describe the historical combined
+> endpoint and are not current implementation guidance.
+
 ## Goal
 
 Implement native Apple clients as first-class peers on the existing

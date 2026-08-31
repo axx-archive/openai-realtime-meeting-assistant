@@ -81,24 +81,30 @@ targets:
     settings:
       base:
         CODE_SIGN_ENTITLEMENTS: Xcode/MeetingAssistMacApp.entitlements
-        CURRENT_PROJECT_VERSION: 15
+        CURRENT_PROJECT_VERSION: 19
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: 1.0
         PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.mac
-        PRODUCT_NAME: MeetingAssist
+        PRODUCT_NAME: STRIDE
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Xcode/MeetingAssistMacApp-Info.plist
       properties:
-        CFBundleDisplayName: MeetingAssist
+        CFBundleDisplayName: STRIDE
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        CFBundleURLTypes:
-          - CFBundleURLName: co.thebonfire.meetingassist
-            CFBundleURLSchemes:
-              - meetingassist
-        NSCameraUsageDescription: MeetingAssist uses the camera when you join a video room.
-        NSMicrophoneUsageDescription: MeetingAssist uses the microphone when you join a video room.
+        NSCameraUsageDescription: STRIDE uses the camera when you join a video room.
+        NSMicrophoneUsageDescription: STRIDE uses the microphone when you join a video room.
+        LSApplicationCategoryType: public.app-category.productivity
+        NSHighResolutionCapable: true
+        SUFeedURL: $(STRIDE_UPDATE_FEED_URL)
+        SUPublicEDKey: $(STRIDE_SPARKLE_PUBLIC_ED_KEY)
+        SUEnableAutomaticChecks: true
+        SUAllowsAutomaticUpdates: true
+        SUScheduledCheckInterval: 21600
+        SUSendProfileInfo: false
+        SUVerifyUpdateBeforeExtraction: true
+        SURequireSignedFeed: true
   MeetingAssistMacAppTests:
     type: bundle.unit-test
     platform: macOS
@@ -107,8 +113,6 @@ targets:
     dependencies:
       - package: MeetingAssistApple
         product: MeetingAssistMac
-      - package: MeetingAssistApple
-        product: MeetingAssistCore
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

@@ -39,8 +39,10 @@ func TestIndexRouterConfirmationCardContract(t *testing.T) {
 		"scout-proposal-card__summary",
 		"scout-proposal-card__authority",
 		"scout-proposal-card__weight",
-		// editable pre-filled fields reuse the internal form-card styling
-		"input.value = String((proposal.fields || {})[field.key] || '')",
+		// Build 18 retired per-tool field reconstruction: one server-owned
+		// natural-language objective is the editable trust surface.
+		"const objectiveInput = document.createElement('textarea')",
+		"objectiveInput.value = String(proposal.objective || '')",
 		// approval posts the edited objective to the persisted proposal route
 		"postScoutProposalAction('accepted', proposal, message, { objective",
 		// the escape hatch: Tier 0 + dismissal signal

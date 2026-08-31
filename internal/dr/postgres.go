@@ -24,7 +24,9 @@ var tenantBearingTables = []string{
 	"purge_ledger", "retention_state", "revision_bodies", "stride_contract_revisions",
 	"stride_conversation_derived_edges", "stride_conversation_events",
 	"stride_conversation_projection_checkpoints", "stride_registry_revisions",
-	"stride_source_derived_edges", "stride_artifact_discard_confirmations",
+	"stride_source_derived_edges", "stride_source_episode_heads", "stride_source_episode_revisions",
+	"stride_source_episode_sources", "stride_source_episode_tenant_fences", "stride_source_episode_tombstones",
+	"stride_artifact_discard_confirmations",
 	"stride_artifact_disposition_receipts", "stride_artifact_disposition_states",
 	"stride_ambient_projection_checkpoints", "stride_ambient_projection_events",
 	"stride_ambient_projection_node_edges", "stride_ambient_projection_node_states",
@@ -85,7 +87,9 @@ var canonicalTables = []string{
 	"stride_project_chat_reply_media_authority_receipts", "stride_project_chat_reply_media_dependencies",
 	"stride_rich_message_part_revisions", "stride_rich_message_parts_current",
 	"stride_mymind_sources", "stride_person_principals", "stride_registry_revisions",
-	"stride_source_derived_edges", "stride_workspace_memberships",
+	"stride_source_derived_edges", "stride_source_episode_heads", "stride_source_episode_revisions",
+	"stride_source_episode_sources", "stride_source_episode_tenant_fences", "stride_source_episode_tombstones",
+	"stride_workspace_memberships",
 }
 
 type DatabaseState struct {

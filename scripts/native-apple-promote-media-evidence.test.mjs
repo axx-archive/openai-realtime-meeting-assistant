@@ -79,11 +79,6 @@ function qaSnapshot(platform, overrides = {}) {
       target: "MeetingAssistAppleApp",
       device: { kind: "ipad", model: "iPad physical", os: "iPadOS 26.5", physical: true },
     },
-    mac: {
-      clientPlatform: "macos",
-      target: "MeetingAssistMacApp",
-      device: { kind: "mac", model: "MacBookPro18,3", os: "macOS 26.5", physical: true },
-    },
   }[platform];
   const snapshotRunId = overrides.runId ?? "";
   const snapshotRoomId = overrides.roomId ?? "";
@@ -229,6 +224,19 @@ const duplicatePromotion = promote([
 assert.equal(duplicatePromotion.status, 1);
 assert.match(duplicatePromotion.output.error, /already passed/);
 
+const macPlatformRejected = promote([
+  "--proofpack-dir",
+  created.output.proofpackDir,
+  "--platform",
+  "mac",
+  "--input",
+  iphoneSnapshotPath,
+  "--confirm-physical-device",
+  "--confirm-same-room",
+]);
+assert.equal(macPlatformRejected.status, 1);
+assert.match(macPlatformRejected.output.error, /iphone or ipad/);
+
 const missingConfirm = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
@@ -274,12 +282,12 @@ const falseAssertionRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--platform",
-  "mac",
+  "ipad",
   "--input",
   writeSnapshot(
     fixture.dir,
-    "mac-false-assertion.json",
-    boundSnapshot("mac", {
+    "ipad-false-assertion.json",
+    boundSnapshot("ipad", {
       mediaAssertions: { remoteVideoRendered: false },
       assertionEvidence: { remoteVideoRendered: { source: "nativeRemoteVideoRenderer+inboundVideoDecoded", value: 0, passed: false } },
       counters: { inboundVideoDecoded: 0 },
@@ -295,9 +303,9 @@ const missingRendererRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--platform",
-  "mac",
+  "ipad",
   "--input",
-  writeSnapshot(fixture.dir, "mac-missing-renderer.json", boundSnapshot("mac", { renderer: null })),
+  writeSnapshot(fixture.dir, "ipad-missing-renderer.json", boundSnapshot("ipad", { renderer: null })),
   "--confirm-physical-device",
   "--confirm-same-room",
 ]);
@@ -308,9 +316,9 @@ const wrongBuildRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--platform",
-  "mac",
+  "ipad",
   "--input",
-  writeSnapshot(fixture.dir, "mac-wrong-build.json", boundSnapshot("mac", { app: { build: "14" } })),
+  writeSnapshot(fixture.dir, "ipad-wrong-build.json", boundSnapshot("ipad", { app: { build: "14" } })),
   "--confirm-physical-device",
   "--confirm-same-room",
 ]);
@@ -321,12 +329,12 @@ const unsafeRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--platform",
-  "mac",
+  "ipad",
   "--input",
   writeSnapshot(
     fixture.dir,
-    "mac-unsafe.json",
-    boundSnapshot("mac", {
+    "ipad-unsafe.json",
+    boundSnapshot("ipad", {
       diagnostics: {
         rawSdp: "v=0\r\na=candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host\r\n",
       },
@@ -342,9 +350,9 @@ const mismatchedRunRejected = promote([
   "--proofpack-dir",
   created.output.proofpackDir,
   "--platform",
-  "mac",
+  "ipad",
   "--input",
-  writeSnapshot(fixture.dir, "mac-wrong-run.json", boundSnapshot("mac", { runId: "native-apple-other-run" })),
+  writeSnapshot(fixture.dir, "ipad-wrong-run.json", boundSnapshot("ipad", { runId: "native-apple-other-run" })),
   "--confirm-physical-device",
   "--confirm-same-room",
 ]);
@@ -353,4 +361,4 @@ assert.match(mismatchedRunRejected.output.error, /runId/);
 
 rmSync(fixture.dir, { recursive: true, force: true });
 
-console.log("native-apple-promote-media-evidence: 10 checks passed");
+console.log("native-apple-promote-media-evidence: 11 checks passed");

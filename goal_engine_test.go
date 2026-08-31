@@ -1934,15 +1934,19 @@ func TestGoalReviewAndGateReadFullArtifactBody(t *testing.T) {
 	// A child runner that writes a REAL per-subtask artifact body, mirroring
 	// installFakeChildRunner but with controlled text.
 	bodies := map[string]string{"st-1": alphaBody, "st-2": betaBody}
+	var folds sync.WaitGroup
 	originalChild := startAgentThreadAsync
 	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	t.Cleanup(folds.Wait)
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
 		if parent == "" {
 			return
 		}
+		folds.Add(1)
 		go func() {
+			defer folds.Done()
 			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", bodies[sub], "tester", map[string]string{
 				"threadStatus": "complete",
 				"status":       "complete",
@@ -1960,6 +1964,7 @@ func TestGoalReviewAndGateReadFullArtifactBody(t *testing.T) {
 	}
 	app.runGoalThread(thread.Artifact.ID)
 	waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	folds.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2255,8 +2260,10 @@ func TestGoalRequeueCarriesProtectListIntoRevisionPrompt(t *testing.T) {
 	// A child runner that records every launch's query — the requeue prompt is
 	// the thing under test.
 	var queries []string
+	var folds sync.WaitGroup
 	originalChild := startAgentThreadAsync
 	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	t.Cleanup(folds.Wait)
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
@@ -2266,7 +2273,9 @@ func TestGoalRequeueCarriesProtectListIntoRevisionPrompt(t *testing.T) {
 		mu.Lock()
 		queries = append(queries, thread.Query)
 		mu.Unlock()
+		folds.Add(1)
 		go func() {
+			defer folds.Done()
 			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", "draft body", "tester", map[string]string{
 				"threadStatus": "complete",
 				"status":       "complete",
@@ -2284,6 +2293,7 @@ func TestGoalRequeueCarriesProtectListIntoRevisionPrompt(t *testing.T) {
 	}
 	app.runGoalThread(thread.Artifact.ID)
 	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	folds.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -2520,8 +2530,10 @@ func TestGoalLawSweepEmDashShortCircuitsThenCleanCopyReachesReviewer(t *testing.
 	// Attempt 1 emits the em-dashed draft; the revision emits the clean one.
 	attempts := 0
 	var queries []string
+	var folds sync.WaitGroup
 	originalChild := startAgentThreadAsync
 	t.Cleanup(func() { startAgentThreadAsync = originalChild })
+	t.Cleanup(folds.Wait)
 	startAgentThreadAsync = func(app *kanbanBoardApp, thread scoutAgentThread) {
 		meta := thread.Artifact.Metadata
 		parent, sub := meta["goalParentId"], meta["goalSubtaskId"]
@@ -2536,7 +2548,9 @@ func TestGoalLawSweepEmDashShortCircuitsThenCleanCopyReachesReviewer(t *testing.
 			body = clean
 		}
 		mu.Unlock()
+		folds.Add(1)
 		go func() {
+			defer folds.Done()
 			child, _, err := app.updateOSArtifactWithMetadata(thread.Artifact.ID, "", body, "tester", map[string]string{
 				"threadStatus": "complete",
 				"status":       "complete",
@@ -2554,6 +2568,7 @@ func TestGoalLawSweepEmDashShortCircuitsThenCleanCopyReachesReviewer(t *testing.
 	}
 	app.runGoalThread(thread.Artifact.ID)
 	plan := waitForGoalStage(t, app, thread.Artifact.ID, goalStateVerified)
+	folds.Wait()
 
 	mu.Lock()
 	defer mu.Unlock()

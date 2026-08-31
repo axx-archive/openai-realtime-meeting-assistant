@@ -23,18 +23,13 @@ const platformConfig = {
     clientPlatform: "ipados",
     artifactName: "ipad-media.json",
   },
-  mac: {
-    target: "MeetingAssistMacApp",
-    clientPlatform: "macos",
-    artifactName: "mac-media.json",
-  },
 };
 
 function usage() {
   return [
     "Usage:",
     "  node scripts/native-apple-promote-media-evidence.mjs --proofpack-dir path",
-    "    --platform iphone|ipad|mac --input path --confirm-physical-device",
+    "    --platform iphone|ipad --input path --confirm-physical-device",
     "    --confirm-same-room [--apple-dir apple] [--promoted-at iso] [--force]",
     "",
     "Promotes one app-copied native_device_media QA snapshot into the matching",
@@ -389,7 +384,7 @@ function promotedArtifact(snapshot, draft, platform, promotedAt, inputPath) {
 function promote(args) {
   const platform = args.platform;
   if (!platformConfig[platform]) {
-    throw new Error("--platform must be one of iphone, ipad, or mac.");
+    throw new Error("--platform must be one of iphone or ipad.");
   }
   if (!args.proofpackDir) {
     throw new Error("--proofpack-dir is required.");

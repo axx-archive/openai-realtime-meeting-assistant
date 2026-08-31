@@ -22,7 +22,8 @@ let package = Package(
         .library(name: "MeetingAssistDesign", targets: ["MeetingAssistDesign"])
     ],
     dependencies: [
-        .package(url: "https://github.com/livekit/webrtc-xcframework.git", exact: "144.7559.10")
+        .package(url: "https://github.com/livekit/webrtc-xcframework.git", exact: "144.7559.10"),
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", exact: "2.9.6")
     ],
     targets: [
         .target(name: "MeetingAssistCore"),
@@ -83,8 +84,8 @@ let package = Package(
                 "MeetingAssistMedia",
                 "MeetingAssistRoom",
                 "MeetingAssistRoomUI",
-                "MeetingAssistScout",
-                "MeetingAssistDesign"
+                "MeetingAssistDesign",
+                .product(name: "Sparkle", package: "Sparkle")
             ],
             path: "Apps/MeetingAssistMac"
         ),

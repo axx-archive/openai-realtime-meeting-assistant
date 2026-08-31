@@ -7,9 +7,11 @@ are allowed to claim production call quality.
 
 The native clients speak the existing MeetingAssist room contract:
 
-1. Read `GET /native/config` for roster and endpoint discovery.
+1. Read unauthenticated `GET /native/discovery` for identity-free endpoint
+   discovery; its participant list is intentionally empty.
 2. Sign in with `POST /auth/login` and retain the cookie session.
-3. Read authenticated `GET /client-config` for ICE and protocol metadata.
+3. Read authenticated `GET /native/config` when roster display is needed and
+   authenticated `GET /client-config` for ICE and protocol metadata.
 4. Open `/websocket`, send `participant`, wait for `access_granted`, send
    `media_ready`, then answer server offers.
 
@@ -32,14 +34,22 @@ and `participant_media_state` publication through the existing protocol-first
 RTC adapter. Local ICE candidates gathered by the native peer connection are
 trickled back through the existing top-level `candidate` event.
 
-`MeetingAssistRoomUI` is the first shared native join/control surface. The
-iOS/iPadOS and macOS apps now launch it directly, with room URL entry, roster
-refresh from `/native/config`, participant selection, password entry,
-audio-only or camera join, mute/camera publication, remote video track
-rendering, and leave controls backed by `NativeRoomSessionCoordinator`.
-Native media failures now emit browser-compatible `media_error` diagnostics, and
-server `media_disconnected` events return the UI to a rejoinable state instead
-of failing silently.
+`MeetingAssistRoomUI` remains the shared native join/control surface used by the
+iOS/iPadOS target and the protocol test harness. It includes room discovery,
+sign-in, audio/video join, mute/camera publication, remote video rendering, and
+leave controls backed by `NativeRoomSessionCoordinator`.
+
+The macOS target intentionally has a different product boundary: it is a native
+SwiftUI app shell around the current production workspace at
+`https://thebonfire.xyz/index.html`. SwiftUI owns the unified macOS window,
+sidebar navigation, live organization/theme/status presentation, keyboard
+commands, and accessibility behavior. WebKit owns the feature canvases for
+Home, Rooms, Conversations, Work, and Drive, plus authentication and
+server-driven web updates. A small, versioned, main-frame-only bridge keeps those
+layers in sync; the native layer also owns persistent website data, trusted
+navigation, downloads, media-capture permission, loading, and offline recovery.
+This honest hybrid boundary keeps the Mac app visually native and aligned with
+the current web product instead of duplicating an older native feature set.
 
 ## Xcode Project
 
@@ -52,8 +62,71 @@ xcodegen generate --spec project.yml
 
 `MeetingAssist.xcworkspace` opens the generated `MeetingAssist.xcodeproj`.
 `MeetingAssistAppleApp` is a universal iPhone/iPad app target, and
-`MeetingAssistMacApp` is a native macOS target. Both depend on the local
-SwiftPM package products rather than duplicating app logic.
+`MeetingAssistMacApp` is a native macOS target. Both use local SwiftPM products.
+The Mac target depends on `MeetingAssistMac`, whose package graph intentionally
+includes the shared Room, RoomUI, RoomRTC, and pinned LiveKitWebRTC products for
+the in-app Native media surface.
+
+## macOS DMG
+
+From the repository root, build a Release app, create a drag-to-Applications
+DMG, verify both signatures, and verify the disk image:
+
+```bash
+./scripts/build-macos-dmg.sh
+```
+
+The default is an ad-hoc signed artifact for local installation and QA. Because
+ad-hoc identities have no shared Team ID, this local build disables hardened
+runtime so macOS can load Sparkle's embedded framework. Output lives under
+ignored `artifacts/macos/`. This is a local-QA compromise, not a distribution
+configuration. To package an app already exported with Developer ID signing
+and hardened runtime enabled, pass its path and the DMG signing identity:
+
+```bash
+STRIDE_APP_PATH=/path/to/export/STRIDE.app \
+STRIDE_DMG_SIGN_IDENTITY='Developer ID Application: Company Name (TEAMID)' \
+./scripts/build-macos-dmg.sh
+```
+
+Public direct distribution also requires hardened runtime, a valid Developer ID
+Application certificate, notarization of the final DMG with `notarytool`,
+stapling, and Gatekeeper validation. The local ad-hoc DMG is not a substitute
+for those Apple distribution receipts.
+
+### macOS updates
+
+The hybrid boundary creates two deliberately different update paths:
+
+- Web product changes ship from `thebonfire.xyz` and appear the next time a
+  surface loads; users do not reinstall STRIDE for those changes.
+- Native shell, WebKit bridge, permissions, menus, and bundled dependency
+  changes use Sparkle 2.9.6. Routine releases appear as a quiet update card at
+  the bottom of the native sidebar. Selecting it opens Sparkle's standard
+  release-notes/download/install flow; critical releases retain Sparkle's
+  immediate alert behavior. `Workspace > Check for Updates…` is the manual
+  entry point.
+
+Local and ad-hoc builds intentionally leave the updater disabled. A public
+Developer ID build must provide both values in the ignored
+`Config/Signing.local.xcconfig` (or equivalent CI build settings):
+
+```text
+STRIDE_UPDATE_FEED_URL = https:/$()/thebonfire.xyz/downloads/stride/appcast.xml
+STRIDE_SPARKLE_PUBLIC_ED_KEY = "<BASE64_ED25519_PUBLIC_KEY>"
+```
+
+The empty `$()` is intentional: it prevents xcconfig from treating the URL's
+double slash as a comment while still expanding to a normal HTTPS URL.
+
+Generate the Ed25519 key with Sparkle's `generate_keys`; never place the private
+key in this repository or on the update host. The feed and release notes are
+required to be signed, system-profile submission is disabled, and STRIDE asks
+Sparkle to verify the update archive before extraction. Use monotonically
+increasing `CFBundleVersion` values. For a release, export the hardened-runtime
+app with Developer ID, create the DMG, notarize and staple the final DMG, then
+run Sparkle's `generate_appcast` against that exact final artifact. Upload the
+immutable DMG, deltas, and release notes before publishing the appcast last.
 
 ## Local Gates
 
@@ -198,14 +271,14 @@ name only after replacing placeholders with values from the real run, then let
 the promoter rewrite `evidence/` and `ReleaseEvidence.draft.json`.
 
 The generated `inbox/README.md` includes a non-secret native launch-link
-template:
+template for the iPhone/iPad native app:
 
 ```text
 meetingassist://room?url=https%3A%2F%2Fthebonfire.xyz&name=<participant-name>&runId=<run-id>&roomId=<room-id>
 ```
 
-Open that link on each TestFlight/device-run app, replacing only
-`<participant-name>`. The app pre-fills the room URL, participant, release
+Open that link on each iPhone/iPad TestFlight device, replacing only
+`<participant-name>`. The native app pre-fills the room URL, participant, release
 run ID, and release room ID, but it does not include a password and does not
 auto-join. Passwords, tokens, cookies, signed URLs, TURN credentials, Apple
 account identifiers, Team IDs, provisioning details, certificates, private keys,
@@ -224,7 +297,7 @@ This writes `operator/release-command-plan.json`,
 `operator/release-commands.md`, and the iOS/macOS export option plists under the
 ignored proof-pack directory. The command pack contains the Xcode archive,
 TestFlight export/upload, Developer ID export, notarytool, stapler, Gatekeeper,
-physical iPhone/iPad/Mac media-promotion commands, restrictive-network TURN
+physical iPhone/iPad media-promotion commands, restrictive-network TURN
 promotion, browser/native room-gate promotion, App Store review metadata
 promotion, TestFlight/macOS distribution promotion, local evidence handoff,
 final strict readiness, and an offline operator preflight. It does not run the
@@ -260,11 +333,11 @@ Store Connect login,
 provisioning-profile download, notary profile validity, physical devices, or
 actual review metadata completion/upload/notarization.
 
-The native room UI includes a QA evidence panel that captures a non-secret
+The iPhone/iPad native room UI includes a QA evidence panel that captures a non-secret
 `native_device_media` JSON snapshot from summarized WebRTC stats. Use the
 panel's Save button during a real device run to export the matching proof-pack
-inbox file directly: `iphone-qa_snapshot.json`, `ipad-qa_snapshot.json`, or
-`mac-qa_snapshot.json`. The Copy button remains useful for inspection, but the
+inbox file directly: `iphone-qa_snapshot.json` or `ipad-qa_snapshot.json`.
+The Copy button remains useful for inspection, but the
 saved filenames match the promotion commands. Promote those saved inbox files
 with `scripts/native-apple-promote-media-evidence.mjs`. These snapshots carry
 `claimScope: "qa_snapshot"`, `releaseEligible: false`, and `status: "observed"`
@@ -277,11 +350,11 @@ native app auto-fills app version/build/target plus device kind, hardware
 model, OS version, physical-vs-simulator metadata, renderer frame
 count/dimensions/timestamp, and the proof-pack `runId`/`roomId` from the launch
 link or QA evidence fields; it deliberately does not collect iPhone/iPad device
-names, macOS host names, screenshots, pixels, or raw frames. The media promoter
+names, screenshots, pixels, or raw frames. The media promoter
 now rejects blank or mismatched `runId`/`roomId` even when the operator confirms
 same-room manually.
 Do not promote a snapshot into `ReleaseEvidence.local.json` as passed physical
-proof unless it was captured on the matching physical iPhone, iPad, or Mac for
+proof unless it was captured on the matching physical iPhone or iPad for
 the same run, room, version, and build. Simulator or repo-only snapshots are
 diagnostic artifacts only.
 
@@ -308,11 +381,14 @@ node scripts/native-apple-promote-media-evidence.mjs \
   --confirm-same-room
 ```
 
-Repeat for `ipad` and `mac`. The helper validates that the input is still a
+Repeat for `ipad`. The helper validates that the input is still a
 `qa_snapshot`, came from the expected app version/build and physical platform,
 has connected lifecycle, has all four media assertions backed by counters, and
 does not contain raw media/credential details. It updates only the selected
-device media artifact and `ReleaseEvidence.draft.json`.
+device media artifact and `ReleaseEvidence.draft.json`. The Mac app uses the
+current web meeting canvas in WebKit, so validate its camera, microphone,
+speaker routing, and meeting recovery separately; do not promote it as native
+renderer evidence.
 
 The physical-device inbox observation must have `status: "observed"`,
 `claimScope: "qa_snapshot"`, `releaseEligible: false`, matching `runId` and
@@ -335,7 +411,7 @@ node scripts/native-apple-promote-turn-evidence.mjs \
 ```
 
 The TURN helper requires a same-room native app observation for the current
-version/build, a physical iPhone/iPad/Mac context, selected candidate-pair relay
+version/build, a physical iPhone/iPad context, selected candidate-pair relay
 facts, a sanitized `native-ice-readiness.mjs --require-turn` summary, and no raw
 ICE candidates, TURN URLs, usernames, credentials, IP addresses, or account
 identifiers. It updates only `restrictiveNetworkTurn` and the matching
@@ -477,12 +553,13 @@ node scripts/native-apple-promote-distribution-evidence.mjs \
 ```
 
 Create the accepted, stapled macOS notarization observation with a sanitized
-operator artifact after a real Developer ID export, notary acceptance,
-stapling, and Gatekeeper verification:
+operator artifact after a real Developer ID export, final-DMG signing and
+notary acceptance, DMG stapling, and Gatekeeper verification of both the image
+and mounted app:
 
 ```bash
-export NATIVE_APPLE_MAC_DISTRIBUTION_KIND=zip
-export NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME=MeetingAssistMacApp.zip
+export NATIVE_APPLE_MAC_DISTRIBUTION_KIND=dmg
+export NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME=STRIDE-1.0.dmg
 export NATIVE_APPLE_MAC_DISTRIBUTION_SHA256=<64-character-sha256>
 export NATIVE_APPLE_NOTARY_REQUEST_ID=<notary-request-id>
 export NATIVE_APPLE_GATEKEEPER_SOURCE="Notarized Developer ID"
@@ -506,8 +583,12 @@ current macOS app build, distribution artifact basename and SHA-256, non-secret
 notary request id, Developer ID signing assertions, stapling validation,
 Gatekeeper acceptance, and secret-shaped content. It only writes
 `inbox/notarization-observation.json`; it does not submit to Apple, staple an
-app, run Gatekeeper assessment, promote evidence, or prove end-user macOS
+artifact, run Gatekeeper assessment, promote evidence, or prove end-user macOS
 distribution.
+
+The observation helpers retain the historical `--confirm-stapled-app` flag
+name for schema compatibility; in the current release contract it confirms
+that the exact final DMG was stapled and validated.
 
 Promote the created macOS notarization observation separately:
 
@@ -544,7 +625,7 @@ artifact.
 Evidence must match the current `MARKETING_VERSION` and
 `CURRENT_PROJECT_VERSION`, use one shared `runId` and `roomId`, and include
 artifact references for the underlying proof. Physical-device entries must
-cover iPhone, iPad, and Mac in the same mixed-room run and assert camera,
+cover iPhone and iPad in the same mixed-room run and assert camera,
 microphone, remote-audio, and remote-video success. Restrictive-network TURN
 evidence must be tied to the same run and include a selected relay-candidate
 artifact. Browser/native room-gate evidence must prove the same run has at
@@ -615,10 +696,9 @@ cd apple
 xcodegen generate --spec project.yml
 ```
 
-This checkpoint has a real native WebRTC binary linked, can create the
-audio-only peer connection locally, and now includes native camera publishing
-and remote video renderer plumbing in the app targets. It is not a finished
-release-quality native video client. Browser/native media proof, physical
-iPhone, iPad, and Mac media tests, participant-labeled remote video, signing,
-privacy, and release packaging remain blockers before claiming native call
-quality or stability improvements.
+The iPhone/iPad checkpoint has a real native WebRTC binary linked and includes
+native camera publishing and remote video renderer plumbing. Its native-media
+release claims still require browser/native interop plus physical iPhone and
+iPad proof. The Mac target is instead the WebKit-backed current workspace; its
+release gate is an authenticated rendered workspace/media walkthrough plus the
+Developer ID, privacy, final-DMG notarization, stapling, and Gatekeeper receipts.

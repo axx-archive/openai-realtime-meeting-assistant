@@ -6,8 +6,8 @@ parallel room system.
 
 ## Discovery
 
-Unauthenticated clients may read `GET /native/config` to render the roster and
-discover stable endpoint paths:
+Unauthenticated clients may read `GET /native/discovery` to discover only the
+identity-free bootstrap contract and stable endpoint paths:
 
 - `protocolVersion`: `native-room-v1`
 - `auth.mode`: `cookie`
@@ -16,8 +16,12 @@ discover stable endpoint paths:
 - `auth.logoutPath`: `/auth/logout`
 - `room.clientConfigPath`: `/client-config`
 - `room.websocketPath`: `/websocket`
-- `room.participants`: canonical roster names and emails
+- `room.participants`: always empty before authentication
 - `room.maxParticipants`: current room capacity
+
+`GET /native/config` is authenticated. It returns the same versioned endpoint
+metadata plus the canonical member roster and must never be used as signed-out
+identity discovery.
 
 Authenticated clients read `GET /client-config` before joining media. The
 existing browser field `rtcConfiguration` remains unchanged; native metadata is
@@ -37,10 +41,17 @@ session state.
 
 ## Authentication
 
-Native clients call `POST /auth/login` with the roster `name` and password, then
-retain the `bonfire_session` cookie in the shared URL session cookie store. Room
-identity is always derived from the server-side session; any name sent over the
-websocket is ignored.
+Native clients call `POST /auth/login` with the locally entered member name and
+password, then retain the `bonfire_session` cookie in the shared URL session
+cookie store. After authentication they may read `GET /native/config` to render
+the roster. Room identity is always derived from the server-side session; any
+name sent over the websocket is ignored.
+
+The native Mac login form sends credentials only to HTTPS origins at
+`thebonfire.xyz` or its subdomains, or to explicit HTTP(S) loopback origins for
+local QA. Typed origins and `meetingassist://` launch-link origins use the same
+allowlist; arbitrary HTTPS origins and non-loopback HTTP origins are rejected
+before discovery or login.
 
 ## Websocket Envelope
 
@@ -89,7 +100,7 @@ best-effort and must keep the browser-compatible top-level keys `stage`,
 `video` summaries. Do not include raw ICE candidates, TURN credentials, IP
 addresses, or full WebRTC stats in `media_error`.
 
-Native clients may also export a local `native_device_media` QA evidence
+Native iPhone and iPad clients may also export a local `native_device_media` QA evidence
 snapshot from the same summarized `media_quality` counters. The export is a
 local operator artifact, not a websocket event. It includes only assertion
 booleans, safe RTP counters, remote tile count, renderer-observed remote frame

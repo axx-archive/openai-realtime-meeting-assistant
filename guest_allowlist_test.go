@@ -253,10 +253,30 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/calendar/event.ics":                            {handler: calendarICSHandler, memberGated: true},
 		"/signals/survey":                                {handler: signalSurveyHandler, memberGated: true},
 		"/client-config":                                 {handler: clientConfigHandler, memberGated: true},
-		"/native/config":                                 {handler: nativeClientConfigHandler, memberGated: true},
-		"/rooms":                                         {handler: roomsHandler, memberGated: true},
-		"/rooms/":                                        {handler: roomActionHandler, memberGated: true, path: "/rooms/office/archive"},
-		"/ice-test":                                      {handler: iceTestHandler, memberGated: true},
+		"/native/discovery": {handler: nativeClientDiscoveryHandler, method: http.MethodGet, path: "/native/discovery", allowed: []int{http.StatusOK},
+			check: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				var discovery struct {
+					Room struct {
+						Participants []any `json:"participants"`
+					} `json:"room"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &discovery); err != nil {
+					t.Errorf("native discovery decode: %v", err)
+					return
+				}
+				if len(discovery.Room.Participants) != 0 {
+					t.Errorf("guest native discovery leaked %d roster entries", len(discovery.Room.Participants))
+				}
+				for _, identityMarker := range []string{"@shareability.com", `"email"`, `"name"`} {
+					if strings.Contains(rec.Body.String(), identityMarker) {
+						t.Errorf("guest native discovery leaked identity marker %q", identityMarker)
+					}
+				}
+			}},
+		"/native/config": {handler: nativeClientConfigHandler, memberGated: true},
+		"/rooms":         {handler: roomsHandler, memberGated: true},
+		"/rooms/":        {handler: roomActionHandler, memberGated: true, path: "/rooms/office/archive"},
+		"/ice-test":      {handler: iceTestHandler, memberGated: true},
 	}
 
 	// ---- fail closed in BOTH directions.

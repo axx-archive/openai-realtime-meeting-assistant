@@ -1632,7 +1632,7 @@ func (app *kanbanBoardApp) finalizeCodexRunnerResult(existing meetingMemoryEntry
 			if strideE10TenantCutoverEnabled() {
 				app.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
 			} else {
-				go app.foldGoalChildCompletion(parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
+				foldGoalChildAsync(app, parentID, artifact.Metadata["goalSubtaskId"], artifact, payload.Status)
 			}
 		}
 	}

@@ -2,6 +2,10 @@ import Foundation
 #if os(iOS)
 import AVFoundation
 #endif
+#if os(macOS)
+import AppKit
+import CoreAudio
+#endif
 #if canImport(Network)
 import Network
 #endif
@@ -96,6 +100,7 @@ enum NativeMediaRecoveryReason: String, Sendable {
     case audioInterruptionEnded = "native-audio-interruption-ended"
     case audioRouteChanged = "native-audio-route-change"
     case audioServicesReset = "native-audio-services-reset"
+    case systemWoke = "native-system-woke"
     case networkRecovered = "native-network-recovered"
     case networkChanged = "native-network-change"
 }
@@ -105,6 +110,11 @@ public final class NativeAudioRecoveryMonitor: ObservableObject, @unchecked Send
     private let lock = NSLock()
     private let recoveryPolicy = NativeAudioRecoveryPolicy()
     private var tokens: [NSObjectProtocol] = []
+    #if os(macOS)
+    private let macAudioQueue = DispatchQueue(label: "meetingassist.native.audio-recovery")
+    private var workspaceTokens: [NSObjectProtocol] = []
+    private var audioPropertyListeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+    #endif
 
     public init(center: NotificationCenter = .default) {
         self.center = center
@@ -134,6 +144,48 @@ public final class NativeAudioRecoveryMonitor: ObservableObject, @unchecked Send
         lock.lock()
         tokens = newTokens
         lock.unlock()
+        #elseif os(macOS)
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        let wakeToken = workspaceCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            Task { @MainActor in
+                onRecovery(NativeMediaRecoveryReason.systemWoke.rawValue)
+            }
+        }
+
+        let selectors: [(AudioObjectPropertySelector, NativeMediaRecoveryReason)] = [
+            (kAudioHardwarePropertyServiceRestarted, .audioServicesReset),
+            (kAudioHardwarePropertyDefaultInputDevice, .audioRouteChanged),
+            (kAudioHardwarePropertyDefaultOutputDevice, .audioRouteChanged)
+        ]
+        var listeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
+        for (selector, reason) in selectors {
+            var address = AudioObjectPropertyAddress(
+                mSelector: selector,
+                mScope: kAudioObjectPropertyScopeGlobal,
+                mElement: kAudioObjectPropertyElementMain
+            )
+            let listener: AudioObjectPropertyListenerBlock = { _, _ in
+                Task { @MainActor in
+                    onRecovery(reason.rawValue)
+                }
+            }
+            if AudioObjectAddPropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                macAudioQueue,
+                listener
+            ) == noErr {
+                listeners.append((address, listener))
+            }
+        }
+        lock.lock()
+        workspaceTokens = [wakeToken]
+        audioPropertyListeners = listeners
+        lock.unlock()
         #endif
     }
 
@@ -147,6 +199,31 @@ public final class NativeAudioRecoveryMonitor: ObservableObject, @unchecked Send
         for token in currentTokens {
             center.removeObserver(token)
         }
+
+        #if os(macOS)
+        let currentWorkspaceTokens: [NSObjectProtocol]
+        let currentPropertyListeners: [(AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)]
+        lock.lock()
+        currentWorkspaceTokens = workspaceTokens
+        workspaceTokens = []
+        currentPropertyListeners = audioPropertyListeners
+        audioPropertyListeners = []
+        lock.unlock()
+
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        for token in currentWorkspaceTokens {
+            workspaceCenter.removeObserver(token)
+        }
+        for (storedAddress, listener) in currentPropertyListeners {
+            var address = storedAddress
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                macAudioQueue,
+                listener
+            )
+        }
+        #endif
     }
 
     #if os(iOS)

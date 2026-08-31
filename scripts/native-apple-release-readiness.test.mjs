@@ -238,21 +238,6 @@ function releaseEvidence(overrides = {}) {
           remoteVideoRendered: true,
         },
       },
-      mac: {
-        status: "passed",
-        runId,
-        roomId,
-        device: "MacBook Pro physical",
-        os: "macOS 26.5",
-        testedAt: "2026-06-29T12:20:00Z",
-        artifactRef: "artifacts/native-release-run-20260629-a/mac-media.json",
-        mediaAssertions: {
-          cameraPublished: true,
-          microphonePublished: true,
-          remoteAudioReceived: true,
-          remoteVideoRendered: true,
-        },
-      },
     },
     restrictiveNetworkTurn: {
       status: "passed",
@@ -370,8 +355,8 @@ function promotedPhysicalMediaArtifact(platform, evidence, overrides = {}) {
     app: {
       version: evidence.version,
       build: evidence.build,
-      target: platform === "mac" ? "MeetingAssistMacApp" : "MeetingAssistAppleApp",
-      clientPlatform: platform === "ipad" ? "ipados" : platform === "mac" ? "macos" : "ios",
+      target: "MeetingAssistAppleApp",
+      clientPlatform: platform === "ipad" ? "ipados" : "ios",
       clientVersion: "test",
     },
     device: {
@@ -540,7 +525,7 @@ function promotedRoomInteropArtifact(evidence, overrides = {}) {
     },
     room: {
       participantCount: item.participantCount,
-      clientPlatforms: ["browser", "ios", "ipados", "macos"],
+      clientPlatforms: ["browser", "ios", "ipados"],
       browserNativeMixed: true,
       threePlusParticipants: true,
     },
@@ -568,7 +553,7 @@ function promotedRoomInteropArtifact(evidence, overrides = {}) {
       build: evidence.build,
       testedAt: item.testedAt,
       participantCount: item.participantCount,
-      clientPlatforms: ["browser", "ios", "ipados", "macos"],
+      clientPlatforms: ["browser", "ios", "ipados"],
       browserNativeMixed: true,
       threePlusParticipants: true,
       cleanLeaveParticipantsEmpty: true,
@@ -734,8 +719,8 @@ function promotedNotarizationArtifact(evidence, overrides = {}) {
     runId: evidence.runId,
     checkedAt: item.checkedAt,
     distributionArtifact: {
-      kind: "zip",
-      filename: "MeetingAssistMacApp.zip",
+      kind: "dmg",
+      filename: `STRIDE-${evidence.version}.dmg`,
       sha256: "9cde1a328d7a4e80b3c577f9e0f536b89cde1a328d7a4e80b3c577f9e0f536b8",
     },
     app: {
@@ -808,7 +793,7 @@ function promotedNotarizationArtifact(evidence, overrides = {}) {
 
 function writeEvidenceArtifactFixtures(path, evidence, options = {}) {
   const rootDir = evidenceRootForPath(path);
-  for (const platform of ["iphone", "ipad", "mac"]) {
+  for (const platform of ["iphone", "ipad"]) {
     const ref = evidence.physicalDeviceMedia?.[platform]?.artifactRef;
     if (typeof ref !== "string" || !/^(artifacts\/|evidence\/)/.test(ref) || ref.split("/").includes("..")) {
       continue;
@@ -926,7 +911,7 @@ ${launchSchemeYaml}  MeetingAssistMacApp:
         ENABLE_HARDENED_RUNTIME: YES
         MARKETING_VERSION: 1.0
         PRODUCT_BUNDLE_IDENTIFIER: co.thebonfire.meetingassist.mac
-${launchSchemeYaml}`
+`
   );
   writeFixtureFile(
     resolve(appleDir, "MeetingAssist.xcodeproj", "project.pbxproj"),
@@ -968,7 +953,7 @@ ${launchSchemePlist}  <key>CFBundleVersion</key>
   <string>MeetingAssist uses the microphone when you join a video room.</string>
 </dict>`;
   writePlist(resolve(appleDir, "Xcode", "MeetingAssistAppleApp-Info.plist"), infoBody);
-  writePlist(resolve(appleDir, "Xcode", "MeetingAssistMacApp-Info.plist"), infoBody);
+  writePlist(resolve(appleDir, "Xcode", "MeetingAssistMacApp-Info.plist"), infoBody.replace(launchSchemePlist, ""));
   writePlist(
     resolve(appleDir, "Xcode", "MeetingAssistMacApp.entitlements"),
     `<dict>
@@ -1018,6 +1003,37 @@ assert.equal(readyFixture.status, 0);
 assert.equal(readyFixture.output.ok, true);
 assert.equal(readyFixture.output.readyForDistribution, true);
 assert.deepEqual(readyFixture.output.blockers, []);
+assert.doesNotMatch(
+  readFileSync(resolve(readyFixturePath, "Xcode", "MeetingAssistMacApp-Info.plist"), "utf8"),
+  /meetingassist/
+);
+
+const legacyMacMediaFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(legacyMacMediaFixturePath, "ReleaseEvidence.local.json"), {
+  physicalDeviceMedia: {
+    mac: {
+      status: "passed",
+      runId: "native-release-run-20260629-a",
+      roomId: "release-room-smoke-20260629",
+      device: "MacBook Pro physical",
+      os: "macOS 26.5",
+      testedAt: "2026-06-29T12:20:00Z",
+      artifactRef: "artifacts/native-release-run-20260629-a/mac-media.json",
+      mediaAssertions: {
+        cameraPublished: true,
+        microphonePublished: true,
+        remoteAudioReceived: true,
+        remoteVideoRendered: true,
+      },
+    },
+  },
+});
+const legacyMacMediaFixture = runReadiness(["--apple-dir", legacyMacMediaFixturePath, "--strict"], {
+  DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5"),
+});
+assert.equal(legacyMacMediaFixture.status, 1);
+assert.equal(legacyMacMediaFixture.output.ok, true);
+assert.ok(legacyMacMediaFixture.output.blockers.some((blocker) => blocker.id === "release_evidence_schema"));
 
 const numericTestFlightBuildFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(numericTestFlightBuildFixturePath, "ReleaseEvidence.local.json"), {
@@ -1280,7 +1296,7 @@ assert.equal(
 const staleArtifactBuildFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(staleArtifactBuildFixturePath, "ReleaseEvidence.local.json"), {}, {
   physicalMediaArtifactOverrides: {
-    mac: {
+    ipad: {
       app: { build: "14" },
     },
   },
@@ -1339,7 +1355,7 @@ assert.equal(
 const mismatchedArtifactTimestampFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(mismatchedArtifactTimestampFixturePath, "ReleaseEvidence.local.json"), {}, {
   physicalMediaArtifactOverrides: {
-    mac: {
+    ipad: {
       capturedAt: "2026-06-29T13:20:00Z",
       releaseEvidenceSummary: { testedAt: "2026-06-29T13:20:00Z" },
     },
@@ -1383,7 +1399,7 @@ assert.equal(
 const missingRendererEvidenceFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(missingRendererEvidenceFixturePath, "ReleaseEvidence.local.json"), {}, {
   physicalMediaArtifactOverrides: {
-    mac: {
+    ipad: {
       renderer: null,
     },
   },
@@ -1425,7 +1441,7 @@ assert.equal(
 const unsafeDeviceArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
 writeReleaseEvidenceFixture(resolve(unsafeDeviceArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
   physicalMediaArtifactOverrides: {
-    mac: {
+    ipad: {
       diagnostics: {
         rawSdp: "v=0\r\na=candidate:842163049 1 udp 1677729535 192.168.1.25 56143 typ host\r\n",
         turnCredential: "secret-turn-password",
@@ -1990,6 +2006,24 @@ assert.equal(rejectedNotarizationArtifactFixture.output.ok, true);
 assert.equal(rejectedNotarizationArtifactFixture.output.readyForDistribution, false);
 assert.equal(
   rejectedNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
+  true
+);
+
+const legacyZipNotarizationArtifactFixturePath = makeFixture({ includeIcons: true, includePrivacy: true });
+writeReleaseEvidenceFixture(resolve(legacyZipNotarizationArtifactFixturePath, "ReleaseEvidence.local.json"), {}, {
+  notarizationArtifactOverrides: {
+    distributionArtifact: { kind: "zip", filename: "MeetingAssistMacApp.zip" },
+  },
+});
+const legacyZipNotarizationArtifactFixture = runReadiness(
+  ["--apple-dir", legacyZipNotarizationArtifactFixturePath, "--strict"],
+  { DEVELOPMENT_TEAM: syntheticTeamId("A1", "B2", "C3", "D4", "E5") }
+);
+assert.equal(legacyZipNotarizationArtifactFixture.status, 1);
+assert.equal(legacyZipNotarizationArtifactFixture.output.ok, true);
+assert.equal(legacyZipNotarizationArtifactFixture.output.readyForDistribution, false);
+assert.equal(
+  legacyZipNotarizationArtifactFixture.output.blockers.some((blocker) => blocker.id === "mac_notarization_evidence"),
   true
 );
 

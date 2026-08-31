@@ -8,17 +8,31 @@ import MeetingAssistSignaling
 public protocol NativeRoomAPIProviding: Sendable {
     var baseURL: URL { get }
     func nativeConfig() async throws -> NativeClientConfig
+    func nativeDiscovery() async throws -> NativeClientConfig
     func login(name: String, password: String, path: String) async throws -> Participant
     func clientConfig(path: String) async throws -> ClientRTCConfig
 }
 
 extension MeetingAssistAPIClient: NativeRoomAPIProviding {}
 
+public extension NativeRoomAPIProviding {
+    func nativeDiscovery() async throws -> NativeClientConfig {
+        try await nativeConfig()
+    }
+}
+
 public protocol NativeRoomSignalingTransport: Sendable {
     func connect(to url: URL) async
     func send(event: String, data: String) async throws
+    func send(_ envelope: WebSocketEnvelope) async throws
     func receive() async throws -> WebSocketEnvelope
     func close() async
+}
+
+public extension NativeRoomSignalingTransport {
+    func send(_ envelope: WebSocketEnvelope) async throws {
+        try await send(event: envelope.event, data: envelope.data)
+    }
 }
 
 public struct URLSessionRoomSignalingTransport: NativeRoomSignalingTransport {
@@ -34,6 +48,10 @@ public struct URLSessionRoomSignalingTransport: NativeRoomSignalingTransport {
 
     public func send(event: String, data: String) async throws {
         try await client.send(event: event, data: data)
+    }
+
+    public func send(_ envelope: WebSocketEnvelope) async throws {
+        try await client.send(envelope)
     }
 
     public func receive() async throws -> WebSocketEnvelope {
@@ -52,6 +70,26 @@ public struct NativeRoomClientIdentity: Codable, Equatable, Sendable {
     public init(platform: String, version: String) {
         self.platform = platform
         self.version = version
+    }
+}
+
+public enum NativeRoomEndpointIdentity {
+    public static let storageKey = "meetingassist.native-room.endpoint-id.v1"
+
+    public static func current(defaults: UserDefaults = .standard) -> String {
+        if let stored = defaults.string(forKey: storageKey), isValid(stored) {
+            return stored
+        }
+        let minted = "apple-\(UUID().uuidString)"
+        defaults.set(minted, forKey: storageKey)
+        return minted
+    }
+
+    public static func isValid(_ value: String) -> Bool {
+        guard (8...64).contains(value.count) else { return false }
+        return value.unicodeScalars.allSatisfy { scalar in
+            CharacterSet.alphanumerics.contains(scalar) || scalar == "-" || scalar == "_"
+        }
     }
 }
 
@@ -108,11 +146,15 @@ public actor NativeRoomSessionCoordinator {
     private let rtc: RoomRTCClient
     private let media: MediaSessionCoordinator
     private let clientIdentity: NativeRoomClientIdentity
+    private let endpointID: String
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var pendingRemoteCandidates: [RTCIceCandidatePayload] = []
     private var remoteDescriptionReady = false
     private var receiveTask: Task<Void, Never>?
+    private var heartbeatTask: Task<Void, Never>?
+    private var sessionGeneration: UInt64 = 0
+    private var activeJoinGeneration: UInt64?
     private var remoteVideoTrackInfoHandler: NativeRemoteVideoTrackInfoHandler?
     private var remoteVideoTracksByID: [String: NativeRemoteVideoTrack] = [:]
     private var labelsByTrackID: [String: String] = [:]
@@ -140,6 +182,7 @@ public actor NativeRoomSessionCoordinator {
     private var currentMediaEvidenceSnapshot: NativeMediaEvidenceSnapshot?
     private let mediaEvidenceContextProvider: NativeMediaEvidenceContextProvider
     private let mediaQualityReportIntervalNanoseconds: UInt64
+    private let heartbeatIntervalNanoseconds: UInt64
 
     public init(
         api: NativeRoomAPIProviding,
@@ -147,16 +190,22 @@ public actor NativeRoomSessionCoordinator {
         rtc: RoomRTCClient = NativeRoomRTCClient(),
         media: MediaSessionCoordinator = MediaSessionCoordinator(),
         clientIdentity: NativeRoomClientIdentity,
+        endpointID: String = NativeRoomEndpointIdentity.current(),
         mediaEvidenceContextProvider: @escaping NativeMediaEvidenceContextProvider = { NativeMediaEvidenceCaptureContext() },
-        mediaQualityReportIntervalNanoseconds: UInt64 = 12_000_000_000
+        mediaQualityReportIntervalNanoseconds: UInt64 = 12_000_000_000,
+        heartbeatIntervalNanoseconds: UInt64 = 15_000_000_000
     ) {
         self.api = api
         self.signaling = signaling
         self.rtc = rtc
         self.media = media
         self.clientIdentity = clientIdentity
+        self.endpointID = NativeRoomEndpointIdentity.isValid(endpointID)
+            ? endpointID
+            : NativeRoomEndpointIdentity.current()
         self.mediaEvidenceContextProvider = mediaEvidenceContextProvider
         self.mediaQualityReportIntervalNanoseconds = mediaQualityReportIntervalNanoseconds
+        self.heartbeatIntervalNanoseconds = max(1, heartbeatIntervalNanoseconds)
     }
 
     public func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
@@ -168,104 +217,154 @@ public actor NativeRoomSessionCoordinator {
     }
 
     private func join(name: String, password: String, video: Bool) async throws -> NativeRoomJoinResult {
-        stopReceiveLoop()
-        stopMediaQualityReporting()
-        resetNegotiationState()
-        resetRemoteVideoState()
-        resetRoomState()
-
-        let discovery = try await api.nativeConfig()
-        try validate(discovery)
-        nativeConfig = discovery
-
-        let signedInParticipant = try await api.login(
-            name: name,
-            password: password,
-            path: discovery.auth.loginPath
-        )
-        participant = signedInParticipant
-        lifecycle = .authenticated
-
-        let config = try await api.clientConfig(path: discovery.room.clientConfigPath)
-        clientConfig = config
-
-        let websocketURL = Self.websocketURL(baseURL: api.baseURL, path: discovery.room.websocketPath)
-        await signaling.connect(to: websocketURL)
-        try await sendJSON(event: ClientSignalEvent.participant, payload: ParticipantPayload(client: clientIdentity))
-
-        let admittedName = try await waitForAccessGrant()
-        participant = Participant(name: admittedName, email: signedInParticipant.email)
-        lifecycle = .admitted
+        guard activeJoinGeneration == nil else {
+            throw NativeRoomControlError.joinAlreadyInProgress
+        }
+        let generation = beginSessionGeneration()
+        activeJoinGeneration = generation
 
         do {
-            try await rtc.configure(config)
+            await closeSessionResources(lifecycleAfterClose: .signedOut)
+            try ensureSessionCurrent(generation)
+
+            let discovery = try await api.nativeDiscovery()
+            try ensureSessionCurrent(generation)
+            try validate(discovery)
+            nativeConfig = discovery
+
+            let signedInParticipant = try await api.login(
+                name: name,
+                password: password,
+                path: discovery.auth.loginPath
+            )
+            try ensureSessionCurrent(generation)
+            participant = signedInParticipant
+            lifecycle = .authenticated
+
+            let config = try await api.clientConfig(path: discovery.room.clientConfigPath)
+            try ensureSessionCurrent(generation)
+            clientConfig = config
+
+            let websocketURL = Self.websocketURL(baseURL: api.baseURL, path: discovery.room.websocketPath)
+            await signaling.connect(to: websocketURL)
+            try ensureSessionCurrent(generation)
+            try await sendJSON(
+                event: ClientSignalEvent.participant,
+                payload: ParticipantPayload(endpointId: endpointID, client: clientIdentity)
+            )
+            try ensureSessionCurrent(generation)
+            startHeartbeat(generation: generation)
+
+            let admittedName = try await waitForAccessGrant(generation: generation)
+            try ensureSessionCurrent(generation)
+            participant = Participant(name: admittedName, email: signedInParticipant.email)
+            lifecycle = .admitted
+
+            do {
+                try await rtc.configure(config)
+            } catch {
+                await reportMediaError(stage: "configure_peer_connection", error: error, generation: generation)
+                throw error
+            }
+            try ensureSessionCurrent(generation)
+            await rtc.setLocalCandidateHandler { [weak self] candidate in
+                guard let self else { return }
+                await self.sendLocalCandidate(candidate, generation: generation)
+            }
+            await rtc.setRemoteVideoTrackHandler { [weak self] track in
+                guard let self else { return }
+                await self.handleRemoteVideoTrack(track, generation: generation)
+            }
+            await rtc.setScreenShareRuntimeStateHandler { [weak self] event in
+                guard let self else { return }
+                await self.handleScreenShareRuntimeEvent(event, generation: generation)
+            }
+            try ensureSessionCurrent(generation)
+
+            media.setCameraOff(!video)
+            do {
+                try media.configureVideoChatAudioSession()
+            } catch {
+                await reportMediaError(stage: "configure_audio_session", error: error, generation: generation)
+                throw error
+            }
+            do {
+                try await rtc.prepareLocalMedia(audio: true, video: video)
+            } catch {
+                await reportMediaError(stage: video ? "prepare_camera_media" : "prepare_audio_media", error: error, generation: generation)
+                throw error
+            }
+            try ensureSessionCurrent(generation)
+            lifecycle = .preparingMedia
+
+            try await sendJSON(
+                event: ClientSignalEvent.mediaReady,
+                payload: MediaReadyPayload(client: clientIdentity, media: MediaCapabilities(audio: true, video: video))
+            )
+            try ensureSessionCurrent(generation)
+
+            let answer = try await waitForOfferAndAnswer(generation: generation)
+            try ensureSessionCurrent(generation)
+            try await sendParticipantMediaState()
+            try ensureSessionCurrent(generation)
+            lifecycle = .connected
+            activeJoinGeneration = nil
+            startReceiveLoop(generation: generation)
+            startMediaQualityReporting(generation: generation)
+
+            return NativeRoomJoinResult(
+                participant: participant ?? signedInParticipant,
+                clientConfig: config,
+                websocketURL: websocketURL,
+                answeredOffer: answer
+            )
         } catch {
-            await reportMediaError(stage: "configure_peer_connection", error: error)
+            if isSessionCurrent(generation) {
+                retireSessionGeneration(generation)
+                await closeSessionResources(
+                    lifecycleAfterClose: participant == nil ? .signedOut : .authenticated
+                )
+            }
+            if activeJoinGeneration == generation {
+                activeJoinGeneration = nil
+            }
             throw error
         }
-        await rtc.setLocalCandidateHandler { [weak self] candidate in
-            guard let self else { return }
-            await self.sendLocalCandidate(candidate)
-        }
-        await rtc.setRemoteVideoTrackHandler { [weak self] track in
-            guard let self else { return }
-            await self.handleRemoteVideoTrack(track)
-        }
-
-        media.setCameraOff(!video)
-        do {
-            try media.configureVideoChatAudioSession()
-        } catch {
-            await reportMediaError(stage: "configure_audio_session", error: error)
-            throw error
-        }
-        do {
-            try await rtc.prepareLocalMedia(audio: true, video: video)
-        } catch {
-            await reportMediaError(stage: video ? "prepare_camera_media" : "prepare_audio_media", error: error)
-            throw error
-        }
-        lifecycle = .preparingMedia
-
-        try await sendJSON(
-            event: ClientSignalEvent.mediaReady,
-            payload: MediaReadyPayload(client: clientIdentity, media: MediaCapabilities(audio: true, video: video))
-        )
-
-        let answer = try await waitForOfferAndAnswer()
-        try await sendParticipantMediaState()
-        lifecycle = .connected
-        startReceiveLoop()
-        startMediaQualityReporting()
-
-        return NativeRoomJoinResult(
-            participant: participant ?? signedInParticipant,
-            clientConfig: config,
-            websocketURL: websocketURL,
-            answeredOffer: answer
-        )
     }
 
     public func handleServerEvent(_ envelope: WebSocketEnvelope) async throws {
+        let generation = sessionGeneration == 0 ? nil : sessionGeneration
+        try await handleServerEvent(envelope, generation: generation)
+    }
+
+    private func handleServerEvent(
+        _ envelope: WebSocketEnvelope,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         switch envelope.event {
         case ServerSignalEvent.candidate:
             let candidate = try decode(RTCIceCandidatePayload.self, fromJSONString: envelope.data)
             if remoteDescriptionReady {
                 do {
                     try await rtc.addRemoteCandidate(envelope.data)
+                    try ensureSessionCurrentIfPresent(generation)
                 } catch {
-                    await reportMediaError(stage: "add_remote_candidate", error: error)
+                    try ensureSessionCurrentIfPresent(generation)
+                    await reportMediaError(stage: "add_remote_candidate", error: error, generation: generation)
                     throw error
                 }
             } else {
+                try ensureSessionCurrentIfPresent(generation)
                 pendingRemoteCandidates.append(candidate)
             }
         case ServerSignalEvent.offer:
-            _ = try await answerOffer(envelope)
+            _ = try await answerOffer(envelope, generation: generation)
         case ServerSignalEvent.kanban:
             let event = try kanbanEvent(from: envelope)
             try throwIfTerminalKanbanEvent(event)
-            try await handleKanbanRoomEvent(event)
+            try await handleKanbanRoomEvent(event, generation: generation)
+            try ensureSessionCurrentIfPresent(generation)
             if let grantName = try accessGrantName(from: event) {
                 participant = Participant(name: grantName, email: participant?.email ?? "")
                 lifecycle = .admitted
@@ -339,6 +438,26 @@ public actor NativeRoomSessionCoordinator {
         await handler(currentMediaEvidenceSnapshot)
     }
 
+    public func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async {
+        await rtc.setMediaRuntimeStateHandler(handler)
+    }
+
+    public func selectAudioInput(id: String?) async throws {
+        try await rtc.selectAudioInput(id: id)
+    }
+
+    public func selectAudioOutput(id: String?) async throws {
+        try await rtc.selectAudioOutput(id: id)
+    }
+
+    public func selectCamera(id: String?) async throws {
+        try await rtc.selectCamera(id: id)
+    }
+
+    public func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot {
+        await rtc.mediaRuntimeSnapshot()
+    }
+
     public func setMuted(_ muted: Bool) async {
         media.setMuted(muted)
         await rtc.setLocalAudioEnabled(!muted)
@@ -388,20 +507,122 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func setScreenSharing(_ sharing: Bool) async throws {
+        let generation = sessionGeneration == 0 ? nil : sessionGeneration
         do {
             try await rtc.setScreenShareEnabled(sharing)
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: sharing ? "screen_share_start" : "screen_share_stop", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(
+                stage: sharing ? "screen_share_start" : "screen_share_stop",
+                error: error,
+                generation: generation
+            )
             throw error
         }
         media.setScreenSharing(sharing)
-        if sharing {
-            try await sendParticipantMediaState()
-            try await sendJSON(event: ClientSignalEvent.screenShareStarted, payload: EmptyPayload())
-        } else {
-            try await sendJSON(event: ClientSignalEvent.screenShareStopped, payload: EmptyPayload())
-            try await sendParticipantMediaState()
+
+        do {
+            if sharing {
+                try await sendParticipantMediaState()
+                try ensureSessionCurrentIfPresent(generation)
+                try await sendJSON(event: ClientSignalEvent.screenShareStarted, payload: EmptyPayload())
+                try ensureSessionCurrentIfPresent(generation)
+            } else {
+                try await sendJSON(event: ClientSignalEvent.screenShareStopped, payload: EmptyPayload())
+                try ensureSessionCurrentIfPresent(generation)
+                try await sendParticipantMediaState()
+                try ensureSessionCurrentIfPresent(generation)
+            }
+        } catch {
+            try ensureSessionCurrentIfPresent(generation)
+            if sharing {
+                await rollbackScreenShareStart(generation: generation)
+                try ensureSessionCurrentIfPresent(generation)
+            }
+            await reportMediaError(
+                stage: sharing ? "screen_share_start_signaling" : "screen_share_stop_signaling",
+                error: error,
+                generation: generation
+            )
+            throw error
         }
+    }
+
+    private func rollbackScreenShareStart(generation: UInt64?) async {
+        guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
+        do {
+            try await rtc.setScreenShareEnabled(false)
+        } catch {
+            guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
+            await reportMediaError(
+                stage: "screen_share_start_rollback_capture",
+                error: error,
+                generation: generation
+            )
+        }
+        guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
+        media.setScreenSharing(false)
+        do {
+            try await sendJSON(event: ClientSignalEvent.screenShareStopped, payload: EmptyPayload())
+        } catch {
+            guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
+            await reportMediaError(
+                stage: "screen_share_start_rollback_stop_signal",
+                error: error,
+                generation: generation
+            )
+        }
+        guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
+        do {
+            try await sendParticipantMediaState()
+        } catch {
+            guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
+            await reportMediaError(
+                stage: "screen_share_start_rollback_media_state",
+                error: error,
+                generation: generation
+            )
+        }
+    }
+
+    private func handleScreenShareRuntimeEvent(
+        _ event: NativeScreenShareRuntimeEvent,
+        generation: UInt64
+    ) async {
+        guard isSessionCurrent(generation) else { return }
+        media.setScreenSharing(false)
+        do {
+            try await sendJSON(event: ClientSignalEvent.screenShareStopped, payload: EmptyPayload())
+            try ensureSessionCurrent(generation)
+        } catch {
+            guard isSessionCurrent(generation) else { return }
+            await reportMediaError(
+                stage: "screen_share_runtime_stop_signal",
+                error: error,
+                generation: generation
+            )
+        }
+        guard isSessionCurrent(generation) else { return }
+        do {
+            try await sendParticipantMediaState()
+            try ensureSessionCurrent(generation)
+        } catch {
+            guard isSessionCurrent(generation) else { return }
+            await reportMediaError(
+                stage: "screen_share_runtime_media_state",
+                error: error,
+                generation: generation
+            )
+        }
+        guard isSessionCurrent(generation) else { return }
+        await mediaRecoveryHandler?(
+            NativeMediaRecoveryEvent(
+                stage: "screen_share_ended",
+                message: "Screen sharing stopped unexpectedly. Camera video was restored.",
+                terminal: false
+            )
+        )
     }
 
     public func selectLayer(_ layer: String) async throws {
@@ -409,35 +630,50 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func requestICERestart(reason: String) async throws {
+        let generation = sessionGeneration == 0 ? nil : sessionGeneration
         await rtc.restartICE()
+        try ensureSessionCurrentIfPresent(generation)
         lifecycle = .reconnecting
         do {
             try await sendJSON(event: ClientSignalEvent.restartICE, payload: RestartICEPayload(reason: reason))
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "restart_ice", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "restart_ice", error: error, generation: generation)
             throw error
         }
     }
 
     public func sendMediaQualityReport() async throws {
-        try await publishMediaQualityReport()
+        let generation = sessionGeneration == 0 ? nil : sessionGeneration
+        try await publishMediaQualityReport(generation: generation)
     }
 
     public func captureMediaEvidenceSnapshot() async throws -> NativeMediaEvidenceSnapshot {
+        let generation = sessionGeneration == 0 ? nil : sessionGeneration
         let snapshot: NativeMediaQualitySnapshot
         do {
             snapshot = try await rtc.mediaQualitySnapshot()
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "media_evidence_snapshot", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "media_evidence_snapshot", error: error, generation: generation)
             throw error
         }
-        let evidence = await mediaEvidenceSnapshot(from: snapshot, capturedAt: Self.iso8601String(Date()))
+        let evidence = try await mediaEvidenceSnapshot(
+            from: snapshot,
+            capturedAt: Self.iso8601String(Date()),
+            generation: generation
+        )
+        try ensureSessionCurrentIfPresent(generation)
         currentMediaEvidenceSnapshot = evidence
         await mediaEvidenceHandler?(evidence)
+        try ensureSessionCurrentIfPresent(generation)
         return evidence
     }
 
     public func captureTurnRelayObservation(network: String) async throws -> NativeTurnRelayObservation {
+        let generation = sessionGeneration == 0 ? nil : sessionGeneration
         let trimmedNetwork = network.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let clientConfig else {
             throw RoomRTCError.webRTCOperationFailed("Client RTC config is unavailable.")
@@ -445,13 +681,21 @@ public actor NativeRoomSessionCoordinator {
         let snapshot: NativeMediaQualitySnapshot
         do {
             snapshot = try await rtc.mediaQualitySnapshot()
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "turn_relay_observation", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "turn_relay_observation", error: error, generation: generation)
             throw error
         }
-        let evidence = await mediaEvidenceSnapshot(from: snapshot, capturedAt: Self.iso8601String(Date()))
+        let evidence = try await mediaEvidenceSnapshot(
+            from: snapshot,
+            capturedAt: Self.iso8601String(Date()),
+            generation: generation
+        )
+        try ensureSessionCurrentIfPresent(generation)
         currentMediaEvidenceSnapshot = evidence
         await mediaEvidenceHandler?(evidence)
+        try ensureSessionCurrentIfPresent(generation)
         return try NativeTurnRelayObservation(
             evidence: evidence,
             iceReadiness: NativeICEReadinessSummary(rtcConfiguration: clientConfig.rtcConfiguration),
@@ -460,16 +704,115 @@ public actor NativeRoomSessionCoordinator {
     }
 
     public func leave() async {
+        sessionGeneration &+= 1
+        if sessionGeneration == 0 {
+            sessionGeneration = 1
+        }
+        activeJoinGeneration = nil
+        await closeSessionResources(lifecycleAfterClose: .leaving)
+    }
+
+    private func beginSessionGeneration() -> UInt64 {
+        sessionGeneration &+= 1
+        if sessionGeneration == 0 {
+            sessionGeneration = 1
+        }
+        return sessionGeneration
+    }
+
+    private func isSessionCurrent(_ generation: UInt64) -> Bool {
+        generation != 0 && generation == sessionGeneration
+    }
+
+    private func ensureSessionCurrent(_ generation: UInt64) throws {
+        guard isSessionCurrent(generation) else {
+            throw NativeRoomControlError.sessionCancelled
+        }
+    }
+
+    private func ensureSessionCurrentIfPresent(_ generation: UInt64?) throws {
+        guard let generation else { return }
+        try ensureSessionCurrent(generation)
+    }
+
+    private func retireSessionGeneration(_ generation: UInt64) {
+        guard isSessionCurrent(generation) else { return }
+        sessionGeneration &+= 1
+        if sessionGeneration == 0 {
+            sessionGeneration = 1
+        }
+        if activeJoinGeneration == generation {
+            activeJoinGeneration = nil
+        }
+    }
+
+    private func closeSessionResources(lifecycleAfterClose: RoomLifecycleState) async {
         stopReceiveLoop()
+        stopHeartbeat()
         stopMediaQualityReporting()
+        media.setScreenSharing(false)
         await rtc.setLocalCandidateHandler(nil)
         await rtc.setRemoteVideoTrackHandler(nil)
-        await rtc.leave()
+        await rtc.setScreenShareRuntimeStateHandler(nil)
+        // Free the room seat before any best-effort capture shutdown. The RTC
+        // implementation closes the peer immediately and bounds hardware
+        // callbacks, but signaling ownership must never depend on a device
+        // service returning promptly.
         await signaling.close()
+        await rtc.leave()
         resetNegotiationState()
         resetRemoteVideoState()
         resetRoomState()
-        lifecycle = .leaving
+        lifecycle = lifecycleAfterClose
+    }
+
+    private func closeTerminalSession(
+        generation: UInt64,
+        recovery: NativeMediaRecoveryEvent?
+    ) async {
+        guard isSessionCurrent(generation) else { return }
+        retireSessionGeneration(generation)
+        if let recovery {
+            await mediaRecoveryHandler?(recovery)
+        }
+        await closeSessionResources(lifecycleAfterClose: .reconnecting)
+    }
+
+    private func startHeartbeat(generation: UInt64) {
+        stopHeartbeat()
+        heartbeatTask = Task { [weak self] in
+            await self?.heartbeatLoop(generation: generation)
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
+    private func heartbeatLoop(generation: UInt64) async {
+        while !Task.isCancelled && isSessionCurrent(generation) {
+            do {
+                try await Task.sleep(nanoseconds: heartbeatIntervalNanoseconds)
+                try Task.checkCancellation()
+                try ensureSessionCurrent(generation)
+                try await sendJSON(event: ClientSignalEvent.roomPing, payload: EmptyPayload())
+            } catch is CancellationError {
+                return
+            } catch NativeRoomControlError.sessionCancelled {
+                return
+            } catch {
+                await closeTerminalSession(
+                    generation: generation,
+                    recovery: NativeMediaRecoveryEvent(
+                        stage: "signaling_disconnected",
+                        message: "Room signaling disconnected. Rejoin the room.",
+                        terminal: true
+                    )
+                )
+                return
+            }
+        }
     }
 
     public static func websocketURL(baseURL: URL, path: String) -> URL {
@@ -481,11 +824,12 @@ public actor NativeRoomSessionCoordinator {
         return components.url ?? baseURL
     }
 
-    private func waitForAccessGrant() async throws -> String {
+    private func waitForAccessGrant(generation: UInt64) async throws -> String {
         while true {
             let envelope = try await signaling.receive()
+            try ensureSessionCurrent(generation)
             guard envelope.event == ServerSignalEvent.kanban else {
-                try await handleServerEvent(envelope)
+                try await handleServerEvent(envelope, generation: generation)
                 continue
             }
             let event = try kanbanEvent(from: envelope)
@@ -493,23 +837,29 @@ public actor NativeRoomSessionCoordinator {
             if let grantName = try accessGrantName(from: event) {
                 return grantName
             }
-            try await handleKanbanRoomEvent(event)
+            try await handleKanbanRoomEvent(event, generation: generation)
+            try ensureSessionCurrent(generation)
         }
     }
 
-    private func waitForOfferAndAnswer() async throws -> RTCSessionDescriptionPayload {
+    private func waitForOfferAndAnswer(generation: UInt64) async throws -> RTCSessionDescriptionPayload {
         while true {
             let envelope = try await signaling.receive()
+            try ensureSessionCurrent(generation)
             switch envelope.event {
             case ServerSignalEvent.offer:
-                return try await answerOffer(envelope)
+                return try await answerOffer(envelope, generation: generation)
             default:
-                try await handleServerEvent(envelope)
+                try await handleServerEvent(envelope, generation: generation)
             }
         }
     }
 
-    private func answerOffer(_ envelope: WebSocketEnvelope) async throws -> RTCSessionDescriptionPayload {
+    private func answerOffer(
+        _ envelope: WebSocketEnvelope,
+        generation: UInt64?
+    ) async throws -> RTCSessionDescriptionPayload {
+        try ensureSessionCurrentIfPresent(generation)
         let offer = try decode(RTCSessionDescriptionPayload.self, fromJSONString: envelope.data)
         guard offer.type == "offer" else {
             throw NativeRoomSessionError.unexpectedOfferType(offer.type)
@@ -518,33 +868,46 @@ public actor NativeRoomSessionCoordinator {
         let answerSDP: String
         do {
             answerSDP = try await rtc.handleOffer(offer.sdp)
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "answer_offer", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "answer_offer", error: error, generation: generation)
             throw error
         }
         remoteDescriptionReady = true
         do {
-            try await flushPendingRemoteCandidates()
+            try await flushPendingRemoteCandidates(generation: generation)
         } catch {
-            await reportMediaError(stage: "add_remote_candidate", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "add_remote_candidate", error: error, generation: generation)
             throw error
         }
         let answer = RTCSessionDescriptionPayload(type: "answer", sdp: answerSDP)
         do {
-            try await sendJSON(event: ClientSignalEvent.answer, payload: answer)
+            try ensureSessionCurrentIfPresent(generation)
+            try await sendJSON(
+                event: ClientSignalEvent.answer,
+                payload: answer,
+                offerId: envelope.offerId,
+                revision: envelope.revision
+            )
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "send_answer", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "send_answer", error: error, generation: generation)
             throw error
         }
         return answer
     }
 
-    private func flushPendingRemoteCandidates() async throws {
+    private func flushPendingRemoteCandidates(generation: UInt64?) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         let candidates = pendingRemoteCandidates
         pendingRemoteCandidates.removeAll()
         for candidate in candidates {
             let data = try encoder.encode(candidate)
             try await rtc.addRemoteCandidate(String(decoding: data, as: UTF8.self))
+            try ensureSessionCurrentIfPresent(generation)
         }
     }
 
@@ -594,6 +957,8 @@ public actor NativeRoomSessionCoordinator {
             throw NativeRoomSessionError.accessDenied(event.data.stringValue ?? "Access denied.")
         case "session_replaced":
             throw NativeRoomSessionError.sessionReplaced(event.data.stringValue ?? "This room session was replaced.")
+        case "room_closed":
+            throw NativeRoomControlError.roomClosed(event.data.stringValue ?? "This room was closed.")
         default:
             break
         }
@@ -616,34 +981,61 @@ public actor NativeRoomSessionCoordinator {
         }
     }
 
-    private func sendJSON<T: Encodable>(event: String, payload: T) async throws {
+    private func sendJSON<T: Encodable>(
+        event: String,
+        payload: T,
+        offerId: String? = nil,
+        revision: UInt64? = nil
+    ) async throws {
         let data = try encoder.encode(payload)
-        try await signaling.send(event: event, data: String(decoding: data, as: UTF8.self))
+        try await signaling.send(
+            WebSocketEnvelope(
+                event: event,
+                data: String(decoding: data, as: UTF8.self),
+                offerId: offerId,
+                revision: revision
+            )
+        )
     }
 
-    private func handleKanbanRoomEvent(_ event: RoomEvent<JSONValue>) async throws {
+    private func handleKanbanRoomEvent(
+        _ event: RoomEvent<JSONValue>,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         switch event.event {
         case "participants":
             let snapshot = try decodeKanbanData(RoomSnapshot.self, from: event.data)
             currentRoomSnapshot = snapshot
             await roomSnapshotHandler?(snapshot)
+            try ensureSessionCurrentIfPresent(generation)
         case "board":
             let state = try decodeKanbanData(BoardState.self, from: event.data)
             currentBoardState = state
             await boardStateHandler?(state)
+            try ensureSessionCurrentIfPresent(generation)
         case "undo_available":
             let canUndo = try decodeKanbanData(Bool.self, from: event.data)
             currentCanUndoDelete = canUndo
             await undoAvailabilityHandler?(canUndo)
+            try ensureSessionCurrentIfPresent(generation)
         case "participant_track":
             let metadata = try participantTrackMetadata(from: event.data)
-            await handleParticipantTrack(metadata)
+            try await handleParticipantTrack(metadata, generation: generation)
         case "screen_share_started":
             let payload = try decodeKanbanData(ScreenSharePayload.self, from: event.data)
-            await updateParticipantScreenSharing(name: payload.name, sharing: true)
+            try await updateParticipantScreenSharing(
+                name: payload.name,
+                sharing: true,
+                generation: generation
+            )
         case "screen_share_stopped":
             let payload = try decodeKanbanData(ScreenSharePayload.self, from: event.data)
-            await updateParticipantScreenSharing(name: payload.name, sharing: false)
+            try await updateParticipantScreenSharing(
+                name: payload.name,
+                sharing: false,
+                generation: generation
+            )
         case "media_disconnected":
             let message = event.data.stringValue ?? "Media connection ended. Rejoin the room."
             lifecycle = .reconnecting
@@ -654,19 +1046,21 @@ public actor NativeRoomSessionCoordinator {
                     terminal: true
                 )
             )
+            try ensureSessionCurrentIfPresent(generation)
         case "assistant_event":
             let assistantEvent = try decodeKanbanData(AssistantEvent.self, from: event.data)
-            await appendAssistantEvent(assistantEvent)
+            try await appendAssistantEvent(assistantEvent, generation: generation)
             if let artifact = assistantEvent.artifact {
-                await appendMemoryEntry(artifact)
+                try await appendMemoryEntry(artifact, generation: generation)
             }
         case "memory":
             let entries = try decodeKanbanData([MemoryEntry].self, from: event.data)
             currentMemoryEntries = entries
             await memoryEntriesHandler?(entries)
+            try ensureSessionCurrentIfPresent(generation)
         case "memory_transcript", "memory_brain", "memory_board_update":
             let entry = try decodeKanbanData(MemoryEntry.self, from: event.data)
-            await appendMemoryEntry(entry)
+            try await appendMemoryEntry(entry, generation: generation)
         case "memory_answer":
             let answer = try decodeKanbanData(MemoryAnswerResult.self, from: event.data)
             let entry = MemoryEntry(
@@ -675,47 +1069,58 @@ public actor NativeRoomSessionCoordinator {
                 text: answer.answer,
                 metadata: answer.query.isEmpty ? nil : ["query": answer.query]
             )
-            await appendMemoryEntry(entry)
+            try await appendMemoryEntry(entry, generation: generation)
         case "meeting_archived":
             let archive = try decodeKanbanData(MeetingArchiveResult.self, from: event.data)
             currentMeetingArchive = archive
             await meetingArchiveHandler?(archive)
-            await appendAssistantEvent(
+            try ensureSessionCurrentIfPresent(generation)
+            try await appendAssistantEvent(
                 AssistantEvent(
                     kind: "archive",
                     text: archive.summary,
                     createdAt: archive.archivedAt,
                     downloadURL: archive.downloadURL,
                     artifact: archive.artifact
-                )
+                ),
+                generation: generation
             )
             if let artifact = archive.artifact {
-                await appendMemoryEntry(artifact)
+                try await appendMemoryEntry(artifact, generation: generation)
             }
         case "scout_chat":
             let chatEvent = try decodeKanbanData(ScoutChatEvent.self, from: event.data)
-            await appendScoutChatEvent(chatEvent)
+            try await appendScoutChatEvent(chatEvent, generation: generation)
             if let artifact = chatEvent.artifact {
-                await appendMemoryEntry(artifact)
+                try await appendMemoryEntry(artifact, generation: generation)
             }
             if let artifact = chatEvent.thread?.artifact {
-                await appendMemoryEntry(artifact)
+                try await appendMemoryEntry(artifact, generation: generation)
             }
         default:
             break
         }
     }
 
-    private func appendAssistantEvent(_ event: AssistantEvent) async {
+    private func appendAssistantEvent(
+        _ event: AssistantEvent,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         guard !event.displayText.isEmpty else { return }
         currentAssistantEvents.append(event)
         if currentAssistantEvents.count > 40 {
             currentAssistantEvents.removeFirst(currentAssistantEvents.count - 40)
         }
         await assistantEventsHandler?(currentAssistantEvents)
+        try ensureSessionCurrentIfPresent(generation)
     }
 
-    private func appendMemoryEntry(_ entry: MemoryEntry) async {
+    private func appendMemoryEntry(
+        _ entry: MemoryEntry,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         guard !entry.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if let index = currentMemoryEntries.firstIndex(where: { $0.id == entry.id }) {
             currentMemoryEntries[index] = entry
@@ -726,15 +1131,21 @@ public actor NativeRoomSessionCoordinator {
             }
         }
         await memoryEntriesHandler?(currentMemoryEntries)
+        try ensureSessionCurrentIfPresent(generation)
     }
 
-    private func appendScoutChatEvent(_ event: ScoutChatEvent) async {
+    private func appendScoutChatEvent(
+        _ event: ScoutChatEvent,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         if event.kind == "reset" {
             currentScoutChatEvents.removeAll()
             if !event.displayText.isEmpty {
                 currentScoutChatEvents.append(event)
             }
             await scoutChatEventsHandler?(currentScoutChatEvents)
+            try ensureSessionCurrentIfPresent(generation)
             return
         }
         guard !event.displayText.isEmpty else { return }
@@ -743,12 +1154,13 @@ public actor NativeRoomSessionCoordinator {
             currentScoutChatEvents.removeFirst(currentScoutChatEvents.count - 40)
         }
         await scoutChatEventsHandler?(currentScoutChatEvents)
+        try ensureSessionCurrentIfPresent(generation)
     }
 
-    private func startReceiveLoop() {
+    private func startReceiveLoop(generation: UInt64) {
         stopReceiveLoop()
         receiveTask = Task { [weak self] in
-            await self?.receiveLoop()
+            await self?.receiveLoop(generation: generation)
         }
     }
 
@@ -757,18 +1169,61 @@ public actor NativeRoomSessionCoordinator {
         receiveTask = nil
     }
 
-    private func receiveLoop() async {
-        while !Task.isCancelled {
+    private func receiveLoop(generation: UInt64) async {
+        while !Task.isCancelled && isSessionCurrent(generation) {
             do {
                 let envelope = try await signaling.receive()
-                try await handleServerEvent(envelope)
+                guard isSessionCurrent(generation) else { return }
+                try await handleServerEvent(envelope, generation: generation)
+                try ensureSessionCurrent(generation)
+                if terminalKanbanEvent(in: envelope) == "media_disconnected" {
+                    await closeTerminalSession(
+                        generation: generation,
+                        recovery: nil
+                    )
+                    return
+                }
+            } catch is CancellationError {
+                return
             } catch {
+                guard isSessionCurrent(generation) else { return }
+                await closeTerminalSession(
+                    generation: generation,
+                    recovery: recoveryEvent(for: error)
+                )
                 return
             }
         }
     }
 
-    private func startMediaQualityReporting() {
+    private func terminalKanbanEvent(in envelope: WebSocketEnvelope) -> String? {
+        guard let event = try? kanbanEvent(from: envelope) else { return nil }
+        switch event.event {
+        case "media_disconnected", "room_closed", "session_replaced", "access_denied":
+            return event.event
+        default:
+            return nil
+        }
+    }
+
+    private func recoveryEvent(for error: Error) -> NativeMediaRecoveryEvent {
+        switch error {
+        case NativeRoomSessionError.sessionReplaced(let message):
+            return NativeMediaRecoveryEvent(stage: "session_replaced", message: message, terminal: true)
+        case NativeRoomControlError.roomClosed(let message):
+            return NativeMediaRecoveryEvent(stage: "room_closed", message: message, terminal: true)
+        case NativeRoomSessionError.accessDenied(let message):
+            return NativeMediaRecoveryEvent(stage: "access_denied", message: message, terminal: true)
+        default:
+            return NativeMediaRecoveryEvent(
+                stage: "signaling_disconnected",
+                message: "Room signaling disconnected. Rejoin the room.",
+                terminal: true
+            )
+        }
+    }
+
+    private func startMediaQualityReporting(generation: UInt64) {
         stopMediaQualityReporting()
         let interval = mediaQualityReportIntervalNanoseconds
         mediaQualityTask = Task { [weak self] in
@@ -778,7 +1233,7 @@ public actor NativeRoomSessionCoordinator {
                     if Task.isCancelled {
                         return
                     }
-                    try await self?.publishMediaQualityReport()
+                    try await self?.publishMediaQualityReport(generation: generation)
                 } catch is CancellationError {
                     return
                 } catch {
@@ -794,20 +1249,29 @@ public actor NativeRoomSessionCoordinator {
         previousMediaQualitySnapshot = nil
     }
 
-    private func publishMediaQualityReport() async throws {
+    private func publishMediaQualityReport(generation: UInt64?) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         let snapshot: NativeMediaQualitySnapshot
         do {
             snapshot = try await rtc.mediaQualitySnapshot()
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "media_quality_snapshot", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "media_quality_snapshot", error: error, generation: generation)
             throw error
         }
         let previous = previousMediaQualitySnapshot
         previousMediaQualitySnapshot = snapshot
         let sentAt = Self.iso8601String(Date())
-        let evidence = await mediaEvidenceSnapshot(from: snapshot, capturedAt: sentAt)
+        let evidence = try await mediaEvidenceSnapshot(
+            from: snapshot,
+            capturedAt: sentAt,
+            generation: generation
+        )
+        try ensureSessionCurrentIfPresent(generation)
         currentMediaEvidenceSnapshot = evidence
         await mediaEvidenceHandler?(evidence)
+        try ensureSessionCurrentIfPresent(generation)
         do {
             try await sendJSON(
                 event: ClientSignalEvent.mediaQuality,
@@ -823,17 +1287,21 @@ public actor NativeRoomSessionCoordinator {
                     deltas: snapshot.deltas(since: previous)
                 )
             )
+            try ensureSessionCurrentIfPresent(generation)
         } catch {
-            await reportMediaError(stage: "media_quality_report", error: error)
+            try ensureSessionCurrentIfPresent(generation)
+            await reportMediaError(stage: "media_quality_report", error: error, generation: generation)
             throw error
         }
     }
 
     private func mediaEvidenceSnapshot(
         from snapshot: NativeMediaQualitySnapshot,
-        capturedAt: String
-    ) async -> NativeMediaEvidenceSnapshot {
+        capturedAt: String,
+        generation: UInt64?
+    ) async throws -> NativeMediaEvidenceSnapshot {
         let context = await mediaEvidenceContextProvider()
+        try ensureSessionCurrentIfPresent(generation)
         return NativeMediaEvidenceSnapshot(
             source: snapshot,
             capturedAt: capturedAt,
@@ -850,7 +1318,12 @@ public actor NativeRoomSessionCoordinator {
         )
     }
 
-    private func reportMediaError(stage: String, error: Error) async {
+    private func reportMediaError(
+        stage: String,
+        error: Error,
+        generation: UInt64? = nil
+    ) async {
+        guard (try? ensureSessionCurrentIfPresent(generation)) != nil else { return }
         try? await sendJSON(
             event: ClientSignalEvent.mediaError,
             payload: NativeMediaErrorPayload(
@@ -909,16 +1382,29 @@ public actor NativeRoomSessionCoordinator {
         ISO8601DateFormatter().string(from: date)
     }
 
-    private func handleRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
+    private func handleRemoteVideoTrack(
+        _ track: NativeRemoteVideoTrack,
+        generation: UInt64
+    ) async {
+        guard isSessionCurrent(generation) else { return }
         remoteVideoTracksByID[track.id] = track
         let info = remoteVideoTrackInfo(for: track)
         await remoteVideoTrackInfoHandler?(info)
+        guard isSessionCurrent(generation) else { return }
         if info.participantName == nil {
-            await requestParticipantTrackRefresh(reason: "unlabeled remote video")
+            await requestParticipantTrackRefresh(
+                reason: "unlabeled remote video",
+                generation: generation
+            )
         }
     }
 
-    private func updateParticipantScreenSharing(name: String, sharing: Bool) async {
+    private func updateParticipantScreenSharing(
+        name: String,
+        sharing: Bool,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanName.isEmpty else { return }
 
@@ -933,9 +1419,14 @@ public actor NativeRoomSessionCoordinator {
         snapshot.mediaStates = mediaStates
         currentRoomSnapshot = snapshot
         await roomSnapshotHandler?(snapshot)
+        try ensureSessionCurrentIfPresent(generation)
     }
 
-    private func handleParticipantTrack(_ metadata: NativeParticipantTrackMetadata) async {
+    private func handleParticipantTrack(
+        _ metadata: NativeParticipantTrackMetadata,
+        generation: UInt64?
+    ) async throws {
+        try ensureSessionCurrentIfPresent(generation)
         guard let name = metadata.normalizedName else { return }
         for key in metadata.trackLabelKeys {
             labelsByTrackID[key] = name
@@ -945,6 +1436,7 @@ public actor NativeRoomSessionCoordinator {
         for track in remoteVideoTracksByID.values {
             guard remoteVideoTrackMatches(track, metadata: metadata) else { continue }
             await remoteVideoTrackInfoHandler?(remoteVideoTrackInfo(for: track))
+            try ensureSessionCurrentIfPresent(generation)
         }
     }
 
@@ -987,17 +1479,23 @@ public actor NativeRoomSessionCoordinator {
         return track.streamIds.contains(streamId)
     }
 
-    private func requestParticipantTrackRefresh(reason: String) async {
+    private func requestParticipantTrackRefresh(reason: String, generation: UInt64) async {
+        guard isSessionCurrent(generation) else { return }
         let now = Date()
         if let lastParticipantTrackRequest,
            now.timeIntervalSince(lastParticipantTrackRequest) < 0.9 {
             return
         }
         lastParticipantTrackRequest = now
+        guard isSessionCurrent(generation) else { return }
         try? await sendJSON(event: ClientSignalEvent.requestParticipantTracks, payload: ParticipantTrackRequestPayload(reason: reason))
     }
 
-    private func sendLocalCandidate(_ candidate: RTCIceCandidatePayload) async {
+    private func sendLocalCandidate(
+        _ candidate: RTCIceCandidatePayload,
+        generation: UInt64
+    ) async {
+        guard isSessionCurrent(generation) else { return }
         do {
             try await sendJSON(event: ClientSignalEvent.candidate, payload: candidate)
         } catch {
@@ -1194,6 +1692,23 @@ public enum NativeRoomSessionError: Error, Equatable {
     case unsupportedProtocol(String)
 }
 
+internal enum NativeRoomControlError: LocalizedError {
+    case joinAlreadyInProgress
+    case roomClosed(String)
+    case sessionCancelled
+
+    var errorDescription: String? {
+        switch self {
+        case .joinAlreadyInProgress:
+            return "A native room join is already in progress."
+        case .roomClosed(let message):
+            return message
+        case .sessionCancelled:
+            return "The native room session ended before joining."
+        }
+    }
+}
+
 private extension JSONValue {
     var stringValue: String? {
         if case .string(let value) = self {
@@ -1204,6 +1719,7 @@ private extension JSONValue {
 }
 
 private struct ParticipantPayload: Encodable {
+    var endpointId: String
     var client: NativeRoomClientIdentity
 }
 

@@ -1760,8 +1760,16 @@ func goalAuthorityRank(authority string) int {
 // HTTP callback uses it so a re-drive (which may make model calls) never blocks
 // the callback response. Assigned as a var, mirroring startGoalThreadAsync, so
 // tests can make it synchronous for deterministic, leak-free assertions.
-var foldGoalChildAsync = func(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
+func foldGoalChildInBackground(app *kanbanBoardApp, parentID string, subtaskID string, child meetingMemoryEntry, status string) {
 	go app.foldGoalChildCompletion(parentID, subtaskID, child, status)
+}
+
+var foldGoalChildAsync func(*kanbanBoardApp, string, string, meetingMemoryEntry, string)
+
+func init() {
+	// Callback finalization also sits on the goal enqueue/replay graph. Assigning
+	// this hook in init keeps that runtime cycle out of package initialization.
+	foldGoalChildAsync = foldGoalChildInBackground
 }
 
 // foldGoalChildCompletion is called from the child thread's terminal seam

@@ -694,6 +694,45 @@ func TestNativeClientConfigRequiresSession(t *testing.T) {
 	}
 }
 
+func TestNativeClientDiscoveryIsIdentityFreeBeforeSession(t *testing.T) {
+	setupAuthTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/native/discovery", nil)
+	recorder := httptest.NewRecorder()
+	nativeClientDiscoveryHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected /native/discovery without session to return 200, got %d", recorder.Code)
+	}
+	var payload struct {
+		ProtocolVersion string `json:"protocolVersion"`
+		Auth            struct {
+			LoginPath string `json:"loginPath"`
+		} `json:"auth"`
+		Room struct {
+			ClientConfigPath string `json:"clientConfigPath"`
+			WebsocketPath    string `json:"websocketPath"`
+			Participants     []any  `json:"participants"`
+		} `json:"room"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal /native/discovery: %v", err)
+	}
+	if payload.ProtocolVersion != nativeClientProtocolV1 || payload.Auth.LoginPath != "/auth/login" {
+		t.Fatalf("unexpected discovery contract: %+v", payload)
+	}
+	if payload.Room.ClientConfigPath != "/client-config" || payload.Room.WebsocketPath != "/websocket" {
+		t.Fatalf("unexpected room discovery: %+v", payload.Room)
+	}
+	if len(payload.Room.Participants) != 0 {
+		t.Fatalf("signed-out discovery leaked %d roster entries", len(payload.Room.Participants))
+	}
+	for _, identityMarker := range []string{"@shareability.com", `"email"`, `"name"`} {
+		if strings.Contains(recorder.Body.String(), identityMarker) {
+			t.Fatalf("signed-out discovery leaked identity marker %q", identityMarker)
+		}
+	}
+}
+
 func TestNativeClientConfigPublishesRosterAndProtocol(t *testing.T) {
 	setupAuthTestEnv(t)
 

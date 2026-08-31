@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "build": "15",
+  "build": "18",
   "runId": "<native release run ID>",
   "roomId": "<mixed-room smoke room ID or label>",
   "physicalDeviceMedia": {
@@ -27,21 +27,6 @@
       "os": "<iPadOS version>",
       "testedAt": "2026-06-29T12:10:00Z",
       "artifactRef": "<artifacts/run-id/ipad-media.json>",
-      "mediaAssertions": {
-        "cameraPublished": true,
-        "microphonePublished": true,
-        "remoteAudioReceived": true,
-        "remoteVideoRendered": true
-      }
-    },
-    "mac": {
-      "status": "passed",
-      "runId": "<same native release run ID>",
-      "roomId": "<same mixed-room smoke room ID or label>",
-      "device": "<Mac model and label>",
-      "os": "<macOS version>",
-      "testedAt": "2026-06-29T12:20:00Z",
-      "artifactRef": "<artifacts/run-id/mac-media.json>",
       "mediaAssertions": {
         "cameraPublished": true,
         "microphonePublished": true,

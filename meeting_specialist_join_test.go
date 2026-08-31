@@ -413,8 +413,9 @@ func TestMeetingSpecialistProductionJoinRequiresApprovalAndBindsServerAuthority(
 	}
 }
 
-func TestMeetingSpecialistProductionHTTPApprovalHandsRuntimeLifetimeToProduct(t *testing.T) {
+func TestMeetingSpecialistCompatibilityHTTPApprovalHandsRuntimeLifetimeToProduct(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv(legacyMeetingSpecialistCustomerMutationsEnvironment, "true")
 	now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
 	product, _, _ := specialistProductFixture(t)
 	provider := &fakeMeetingSpecialistProvider{}

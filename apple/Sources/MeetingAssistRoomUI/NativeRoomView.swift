@@ -38,6 +38,9 @@ public struct NativeRoomView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 connectionForm
+                if model.hasMediaRuntimeState {
+                    mediaRuntimePanel
+                }
                 remoteVideoGrid
                 if model.canUseRoomControls || !model.roomParticipants.isEmpty {
                     roomState
@@ -56,6 +59,9 @@ public struct NativeRoomView: View {
             }
             .frame(maxWidth: 720, alignment: .leading)
             .padding()
+        }
+        .task {
+            await model.prepareMediaControls()
         }
         .task {
             guard model.roster.isEmpty else { return }
@@ -103,13 +109,126 @@ public struct NativeRoomView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             RoomStatusBadge(state: model.lifecycle)
-            Text("MeetingAssist")
+            Text("STRIDE")
                 .font(.largeTitle.bold())
-            Text("Native room")
+            Text("Native media · Local QA")
                 .font(.headline)
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var mediaRuntimePanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Media devices")
+                .font(.headline)
+
+            if !model.mediaRuntime.devices.audioInputs.isEmpty {
+                Picker(
+                    "Microphone",
+                    selection: Binding(
+                        get: { model.selectedAudioInputID },
+                        set: { id in Task { await model.selectAudioInput(id: id) } }
+                    )
+                ) {
+                    Text("Follow system default").tag(nil as String?)
+                    ForEach(model.mediaRuntime.devices.audioInputs, id: \.id) { device in
+                        Text(device.uiDisplayName).tag(Optional(device.id))
+                    }
+                }
+            }
+
+            if !model.mediaRuntime.devices.audioOutputs.isEmpty {
+                Picker(
+                    "Speaker",
+                    selection: Binding(
+                        get: { model.selectedAudioOutputID },
+                        set: { id in Task { await model.selectAudioOutput(id: id) } }
+                    )
+                ) {
+                    Text("Follow system default").tag(nil as String?)
+                    ForEach(model.mediaRuntime.devices.audioOutputs, id: \.id) { device in
+                        Text(device.uiDisplayName).tag(Optional(device.id))
+                    }
+                }
+            }
+
+            if !model.mediaRuntime.devices.cameras.isEmpty {
+                Picker(
+                    "Camera",
+                    selection: Binding(
+                        get: { model.selectedCameraID },
+                        set: { id in Task { await model.selectCamera(id: id) } }
+                    )
+                ) {
+                    Text("Follow system default").tag(nil as String?)
+                    ForEach(model.mediaRuntime.devices.cameras, id: \.id) { device in
+                        Text(device.uiDisplayName).tag(Optional(device.id))
+                    }
+                }
+            }
+
+            if model.mediaRuntime.audioProcessing.requestResult != .notRequested {
+                Divider()
+                Text("Active audio processing")
+                    .font(.subheadline.weight(.semibold))
+                processingRow("Voice processing", value: model.mediaRuntime.audioProcessing.platformVoiceProcessing.enabledActive ? "Apple voice processing" : "Inactive")
+                processingRow("Echo cancellation", value: processingLabel(model.mediaRuntime.audioProcessing.echoCancellation.effective))
+                processingRow("Noise suppression", value: processingLabel(model.mediaRuntime.audioProcessing.noiseSuppression.effective))
+                processingRow("Automatic gain", value: processingLabel(model.mediaRuntime.audioProcessing.automaticGainControl.effective))
+                processingRow("High-pass filter", value: processingLabel(model.mediaRuntime.audioProcessing.highPassFilter.effective))
+            }
+
+            if !model.mediaRuntime.degradations.isEmpty {
+                Divider()
+                Label("Degraded or fallback state", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.orange)
+                ForEach(model.mediaRuntime.degradations, id: \.rawValue) { degradation in
+                    Text(degradationLabel(degradation))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func processingRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.callout.monospaced())
+        }
+    }
+
+    private func processingLabel(_ implementation: NativeAudioProcessingImplementation) -> String {
+        switch implementation {
+        case .software: "WebRTC software"
+        case .platform: "Apple platform"
+        case .softwareAndPlatform: "Apple + WebRTC"
+        case .disabled: "Disabled"
+        case .unknown: "Unknown"
+        }
+    }
+
+    private func degradationLabel(_ degradation: NativeMediaDegradation) -> String {
+        switch degradation {
+        case .audioProcessingRequestFailed: "Requested processing could not be applied."
+        case .requestedAudioProcessingInactive: "Requested processing is currently inactive."
+        case .platformAudioProcessingFellBackToSoftware: "Apple voice processing fell back to WebRTC software processing."
+        case .platformAudioProcessingUnavailableUsingSoftware: "Apple voice processing is unavailable; WebRTC software processing is active."
+        case .selectedAudioInputRemovedUsingDefault: "The selected microphone was removed; the system default is in use."
+        case .selectedAudioOutputRemovedUsingDefault: "The selected speaker was removed; the system default is in use."
+        case .audioDeviceRecoveryFailed: "Audio-device recovery needs attention."
+        case .selectedCameraRemovedUsingDefault: "The selected camera was removed; the default camera is in use."
+        case .cameraRecoveryFailed: "Camera recovery needs attention."
+        case .captureStopTimedOut: "A media device took too long to stop; transport was closed safely."
+        }
     }
 
     private var connectionForm: some View {

@@ -180,7 +180,8 @@ func TestPostgresCanonicalMigrationCompatibilityCapAndFutureTolerance(t *testing
 	if identityTable != nil {
 		t.Fatalf("migration 14 table exists under cap: %q", *identityTable)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES (25,decode($1,'hex'))", strings.Repeat("f", 64)); err != nil {
+	futureVersion := int64(26) // one beyond the currently embedded migration inventory
+	if _, err := pool.Exec(ctx, "INSERT INTO schema_migrations(version,sha256) VALUES ($1,decode($2,'hex'))", futureVersion, strings.Repeat("f", 64)); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ApplyMigrations(ctx); err != nil {

@@ -294,7 +294,6 @@ function collectMissingLocalArtifactRefs(evidence, evidenceRootDir) {
   const refs = [
     ["physicalDeviceMedia.iphone.artifactRef", evidence.physicalDeviceMedia?.iphone?.artifactRef],
     ["physicalDeviceMedia.ipad.artifactRef", evidence.physicalDeviceMedia?.ipad?.artifactRef],
-    ["physicalDeviceMedia.mac.artifactRef", evidence.physicalDeviceMedia?.mac?.artifactRef],
     ["restrictiveNetworkTurn.artifactRef", evidence.restrictiveNetworkTurn?.artifactRef],
     ["roomInterop.artifactRef", evidence.roomInterop?.artifactRef],
     ["appStoreReview.artifactRef", evidence.appStoreReview?.artifactRef],
@@ -312,13 +311,11 @@ function collectMissingLocalArtifactRefs(evidence, evidenceRootDir) {
 const physicalDeviceKinds = {
   iphone: "iphone",
   ipad: "ipad",
-  mac: "mac",
 };
 
 const physicalDeviceClientPlatforms = {
   iphone: "ios",
   ipad: "ipados",
-  mac: "macos",
 };
 
 const assertionEvidenceSources = {
@@ -565,7 +562,7 @@ function nativeDeviceMediaArtifactProblems({
 
 function collectPhysicalDeviceArtifactContentProblems(evidence, evidenceRootDir, expectedVersion, expectedBuild) {
   const problems = [];
-  for (const platform of ["iphone", "ipad", "mac"]) {
+  for (const platform of ["iphone", "ipad"]) {
     const item = evidence.physicalDeviceMedia?.[platform];
     const path = localArtifactPath(item?.artifactRef, evidenceRootDir);
     if (!path || path.startsWith("__") || !path.toLowerCase().endsWith(".json") || !existsSync(path)) {
@@ -781,7 +778,7 @@ function restrictiveTurnArtifactProblems({ item, artifact, expectedVersion, expe
     if (!expectedIdentity(artifact.app.build, expectedBuild)) {
       problems.push("artifact:app.build");
     }
-    if (!["MeetingAssistAppleApp", "MeetingAssistMacApp"].includes(String(artifact.app.target ?? "").trim())) {
+    if (String(artifact.app.target ?? "").trim() !== "MeetingAssistAppleApp") {
       problems.push("artifact:app.target");
     }
     if (!Object.values(physicalDeviceClientPlatforms).includes(String(artifact.app.clientPlatform ?? "").trim())) {
@@ -966,7 +963,7 @@ function normalizedRoomPlatforms(value) {
 }
 
 function hasNativeApplePlatform(platforms) {
-  return platforms.some((platform) => ["ios", "ipados", "macos"].includes(platform));
+  return platforms.some((platform) => ["ios", "ipados"].includes(platform));
 }
 
 function collectUnsafeRoomInteropArtifactContent(value, path = "$") {
@@ -1813,10 +1810,10 @@ function notarizationArtifactProblems({ item, artifact, expectedVersion, expecte
   if (!artifact.distributionArtifact || typeof artifact.distributionArtifact !== "object" || Array.isArray(artifact.distributionArtifact)) {
     problems.push("artifact:distributionArtifact");
   } else {
-    if (!["zip", "dmg", "pkg", "app"].includes(String(artifact.distributionArtifact.kind ?? "").trim())) {
+    if (String(artifact.distributionArtifact.kind ?? "").trim() !== "dmg") {
       problems.push("artifact:distributionArtifact.kind");
     }
-    if (!nonPlaceholderString(artifact.distributionArtifact.filename) || String(artifact.distributionArtifact.filename).includes("/")) {
+    if (String(artifact.distributionArtifact.filename ?? "").trim() !== `STRIDE-${expectedVersion}.dmg`) {
       problems.push("artifact:distributionArtifact.filename");
     }
     if (!/^[a-f0-9]{64}$/i.test(String(artifact.distributionArtifact.sha256 ?? "").trim())) {
@@ -2159,9 +2156,9 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
       ],
       "$"
     ),
-    ...collectUnexpectedKeys(evidence.physicalDeviceMedia, ["iphone", "ipad", "mac"], "$.physicalDeviceMedia"),
+    ...collectUnexpectedKeys(evidence.physicalDeviceMedia, ["iphone", "ipad"], "$.physicalDeviceMedia"),
   ];
-  for (const platform of ["iphone", "ipad", "mac"]) {
+  for (const platform of ["iphone", "ipad"]) {
     const item = evidence.physicalDeviceMedia?.[platform];
     schemaProblems.push(
       ...collectUnexpectedKeys(
@@ -2276,7 +2273,7 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
   const deviceProblems = [
     ...collectPhysicalDeviceArtifactContentProblems(evidence, dirname(appleDir), expectedVersion, expectedBuild),
   ];
-  for (const platform of ["iphone", "ipad", "mac"]) {
+  for (const platform of ["iphone", "ipad"]) {
     const item = media?.[platform];
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       deviceProblems.push(`${platform}:missing`);
@@ -2317,7 +2314,7 @@ function distributionEvidenceBlockers({ appleDir, requestedPath, expectedVersion
     const missing = uniqueLabels(deviceProblems);
     blockers.push({
       id: "physical_device_media_evidence",
-      detail: `Add passed physical iPhone, iPad, and Mac mixed-room media evidence. Missing or invalid: ${missing.slice(0, 6).join(", ")}`,
+      detail: `Add passed physical iPhone and iPad mixed-room media evidence. Missing or invalid: ${missing.slice(0, 6).join(", ")}`,
     });
   }
 
@@ -2791,10 +2788,9 @@ function analyze(options) {
   addCheck(
     checks,
     plistHasURLScheme(iosInfo, "meetingassist") &&
-      plistHasURLScheme(macInfo, "meetingassist") &&
-      (projectYml.match(/CFBundleURLSchemes:\s*\n\s*-\s*meetingassist/g) ?? []).length >= 2,
+      (projectYml.match(/CFBundleURLSchemes:\s*\n\s*-\s*meetingassist/g) ?? []).length >= 1,
     "app_launch_url_scheme",
-    "iOS/iPadOS and macOS apps should register meetingassist:// launch links for non-secret release run context."
+    "The iOS/iPadOS app should register meetingassist:// launch links for non-secret release run context."
   );
   addCheck(
     checks,

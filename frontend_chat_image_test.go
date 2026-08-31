@@ -101,8 +101,9 @@ func TestIndexImageProposalCardNeverRunsGoalPipeline(t *testing.T) {
 		"const isImage = String(proposal.kind || '') === 'image'",
 		// the head names the concept render
 		"? 'Concept render'",
-		// no client-side package/tool chooser in the proposal card
-		"const fieldEls = {}",
+		// one server-owned objective is the only editable field; the retired
+		// package/tool field map must not be reconstructed client-side
+		"const objectiveInput = document.createElement('textarea')",
 		// Run confirms via the proposal route (workstream/image branch) with the
 		// edited objective and returns — never reaching runGoalPipeline
 		"if (isWorkstream || isImage) {",
@@ -115,10 +116,9 @@ func TestIndexImageProposalCardNeverRunsGoalPipeline(t *testing.T) {
 	if strings.Contains(card, "paletteBuildPackageField()") {
 		t.Fatal("image proposal card exposes a client-side package/tool chooser")
 	}
-	// The single-pass branch returns with only postScoutProposalAction (no
-	// runGoalPipeline) — pinned by the comment that rides it.
-	if !strings.Contains(html, "the server does the single pass") {
-		t.Fatal("index.html missing the single-pass confirm comment on the image/workstream Run branch")
+	// The image branch returns through the persisted proposal route only.
+	if !strings.Contains(html, "the async concept render for card 096") {
+		t.Fatal("index.html missing the async concept-render confirmation contract")
 	}
 }
 

@@ -88,7 +88,7 @@ func TestWebHomeScoutOpeningRendersReplyLifecycleWithoutFalseProviderClaims(t *t
 		"const messageActionsReady = !message.reply || message.reply.state === 'completed'",
 		"message.id && kind !== 'error' && messageActionsReady",
 		"? (String(authorLabel || '').trim() || 'scout')",
-		"isPhone ? 'ask…'",
+		"isPhone ? `ask ${directAgent || 'Scout'} anything…`",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("web Scout reply lifecycle missing %q", want)

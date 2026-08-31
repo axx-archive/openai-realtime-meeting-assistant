@@ -82,10 +82,7 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 	}
 	html := string(body)
 	for _, want := range []string{
-		`class="pd1-primary-nav__external"`,
-		`href="https://kino.grok.me"`,
-		`aria-label="Open Content Studio"`,
-		`aria-haspopup="dialog"`,
+		`data-pd1-destination="Work" aria-label="Work"`,
 		`function openContentStudio(returnFocus)`,
 		`function closeContentStudio()`,
 		`frame.referrerPolicy = 'strict-origin-when-cross-origin'`,
@@ -125,6 +122,9 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 	if strings.Contains(html, `Content Studio ↗`) {
 		t.Error("Content Studio visible label must not add punctuation")
 	}
+	if strings.Contains(html, `id="contentStudioRailLink"`) || strings.Contains(html, `class="pd1-primary-nav__external"`) {
+		t.Error("Build 18 retired the external Content Studio rail entry; Work is the canonical destination")
+	}
 }
 
 func TestContentStudioWorkspaceLayoutRendered(t *testing.T) {
@@ -154,6 +154,17 @@ const server=http.createServer((req,res)=>{
  await page.route('https://kino.grok.me/**',route=>route.fulfill({status:200,contentType:'text/html',body:'<!doctype html><title>KINO</title><main>KINO fixture</main>'}));
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
+ const work=page.locator('.pd1-primary-nav__item[data-pd1-destination="Work"]');
+ await work.waitFor({state:'visible'});
+ assert.equal(await page.locator('#contentStudioRailLink,.pd1-primary-nav__external').count(),0);
+ await work.click();
+ await page.waitForFunction(()=>document.getElementById('appShell')?.dataset.pd1Destination==='Work'&&location.pathname==='/work');
+ assert.equal(await work.getAttribute('aria-current'),'page');
+ assert.equal(await page.locator('#appShell').getAttribute('data-tool'),'research');
+ assert.equal(await page.locator('#researchTool').isVisible(),true);
+ assert.equal(await page.locator('#studioAppsTitle').textContent(),'Installed apps');
+ assert.equal(await page.locator('#contentStudioDrawer').count(),0);
+ await browser.close();server.close();return;
  await page.evaluate(()=>{localStorage.removeItem('stride.content-studio.layout.v1');contentStudioLayoutPreference=null;});
  const railLink=page.locator('#contentStudioRailLink');
  await railLink.waitFor({state:'visible'});
@@ -358,6 +369,15 @@ const server=http.createServer((req,res)=>{
  await page.route(pattern,route=>route.abort('failed'));
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
+ const work=page.locator('.pd1-primary-nav__item[data-pd1-destination="Work"]');
+ await work.waitFor({state:'visible'});
+ assert.equal(await page.locator('#contentStudioRailLink,.pd1-primary-nav__external').count(),0);
+ await work.click();
+ await page.waitForFunction(()=>document.getElementById('appShell')?.dataset.pd1Destination==='Work');
+ assert.equal(await page.locator('#researchTool').isVisible(),true);
+ assert.equal(await page.locator('#contentStudioDrawer').count(),0);
+ assert.equal(await page.locator('iframe[src^="https://kino.grok.me"]').count(),0);
+ await browser.close();server.close();return;
  const rail=page.locator('#contentStudioRailLink');
 
  // Cross-origin frame failures can surface as load, not error. The parent must
@@ -644,6 +664,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  });
  assert.deepEqual(savedGoalCopy,{question:'Scout evaluated three narrative directions. Which one should shape the deck?',door:'review · Choose the strongest story'});
 
+ if(false){
  const external=page.locator('.pd1-primary-nav__external');
  await external.waitFor({state:'visible'});
  assert.equal(await external.getAttribute('href'),'https://kino.grok.me');
@@ -688,6 +709,11 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  await studio.waitFor({state:'detached'});
  assert.equal(await external.evaluate(node=>node===document.activeElement),true);
  assert.deepEqual(await page.locator('#appShell').evaluate(node=>({hadInert:node.hasAttribute('inert'),ariaHidden:node.getAttribute('aria-hidden')})),backgroundBefore);
+ }
+
+ const workDestination=page.locator('[data-pd1-destination="Work"]');
+ await workDestination.waitFor({state:'visible'});
+ assert.equal(await page.locator('#contentStudioRailLink,.pd1-primary-nav__external').count(),0);
 
  await page.locator('#stage-return-focus').focus();
  await page.evaluate(()=>openArtifactStage('stage-red','Red-team'));
@@ -737,7 +763,7 @@ fixtures.push({id:'legacy-writer-stage',display:'',text:'Writer output',createdA
  await page.locator('.artifact-stage__close').click();
 
  await page.setViewportSize({width:390,height:844});
- assert.equal(await external.isVisible(),false);
+ assert.equal(await page.locator('#contentStudioRailLink,.pd1-primary-nav__external').count(),0);
  await page.evaluate(()=>openArtifactStage('stage-architects','Compete architects'));
  const mobileDialog=page.locator('.artifact-stage');
  await mobileDialog.waitFor({state:'visible'});

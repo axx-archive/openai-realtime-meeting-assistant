@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -1562,6 +1561,7 @@ func TestMeetingSpecialistProductRoomCloseTearsDownExactSittingOnly(t *testing.T
 
 func TestMeetingSpecialistHTTPRequiresAuthAndReportsDefaultOffHonestly(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv(legacyMeetingSpecialistCustomerMutationsEnvironment, "")
 	previous := kanbanApp
 	kanbanApp = &kanbanBoardApp{meetingSpecialists: NewMeetingSpecialistProduct(MeetingSpecialistProductConfig{})}
 	t.Cleanup(func() { kanbanApp = previous })
@@ -1569,8 +1569,8 @@ func TestMeetingSpecialistHTTPRequiresAuthAndReportsDefaultOffHonestly(t *testin
 	request := httptest.NewRequest(http.MethodGet, "/api/stride/v1/meeting-specialists?roomId=office", nil)
 	recorder := httptest.NewRecorder()
 	meetingSpecialistProductStatusHandler(recorder, request)
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated status=%d", recorder.Code)
+	if recorder.Code != http.StatusGone || !strings.Contains(recorder.Body.String(), "retired") || !strings.Contains(recorder.Body.String(), "Scout is the only meeting participant agent") {
+		t.Fatalf("unauthenticated retired status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
 	request = httptest.NewRequest(http.MethodGet, "/api/stride/v1/meeting-specialists?roomId=office", nil)
@@ -1579,22 +1579,14 @@ func TestMeetingSpecialistHTTPRequiresAuthAndReportsDefaultOffHonestly(t *testin
 	}
 	recorder = httptest.NewRecorder()
 	meetingSpecialistProductStatusHandler(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	var response struct {
-		Specialists MeetingSpecialistProductStatus `json:"specialists"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Specialists.Available || response.Specialists.Reason != "feature_disabled" || len(response.Specialists.Candidates) != 0 {
-		t.Fatalf("default-off response=%+v", response.Specialists)
+	if recorder.Code != http.StatusGone || !strings.Contains(recorder.Body.String(), "retired") || !strings.Contains(recorder.Body.String(), "Researcher and Presenter work through governed Work") {
+		t.Fatalf("authenticated retired status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestMeetingSpecialistHTTPRejectsUnknownFieldsBeforeAuthority(t *testing.T) {
 	setupAuthTestEnv(t)
+	t.Setenv(legacyMeetingSpecialistCustomerMutationsEnvironment, "")
 	product, _, _ := specialistProductFixture(t)
 	previous := kanbanApp
 	kanbanApp = &kanbanBoardApp{meetingSpecialists: product}
@@ -1606,7 +1598,7 @@ func TestMeetingSpecialistHTTPRejectsUnknownFieldsBeforeAuthority(t *testing.T) 
 	}
 	recorder := httptest.NewRecorder()
 	meetingSpecialistProductInvitationHandler(recorder, request)
-	if recorder.Code != http.StatusBadRequest {
+	if recorder.Code != http.StatusGone || !strings.Contains(recorder.Body.String(), "retired") || !strings.Contains(recorder.Body.String(), "Scout is the only meeting participant agent") {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
@@ -1726,118 +1718,32 @@ func TestMeetingSpecialistProductRechecksShortLivedControlAuthority(t *testing.T
 
 func TestMeetingSpecialistHTTPFakeSessionJoinAndFailureStayIsolated(t *testing.T) {
 	setupAuthTestEnv(t)
-	now := time.Date(2026, 7, 30, 17, 0, 0, 0, time.UTC)
-
-	for _, scenario := range []struct {
-		name       string
-		fail       bool
-		wantStatus string
-	}{
-		{name: "joined", wantStatus: "joined_session"},
-		{name: "provider failure isolated", fail: true, wantStatus: "approved_session_failed"},
+	t.Setenv(legacyMeetingSpecialistCustomerMutationsEnvironment, "")
+	product, _, _ := specialistProductFixture(t)
+	previous := kanbanApp
+	kanbanApp = &kanbanBoardApp{meetingSpecialists: product}
+	t.Cleanup(func() { kanbanApp = previous })
+	cookies := loginAs(t, "aj@shareability.com", defaultMeetingRoomPassword)
+	for _, requestCase := range []struct{ path, body string }{
+		{"/api/stride/v1/meeting-specialists/invitations", `{"roomId":"dog-perfect","agentId":"mary","purpose":"review positioning","idempotencyKey":"retired-http-1"}`},
+		{"/api/stride/v1/meeting-specialists/invitations/legacy-invitation", `{"roomId":"dog-perfect","revision":1,"decision":"approved"}`},
 	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			product, productAuthority, _ := specialistProductFixture(t)
-			provider := &fakeMeetingSpecialistProvider{}
-			joinShouldFail := scenario.fail
-			var factoryCalls atomic.Int64
-			joiner, _ := productionJoinFixture(t, now, provider, &factoryCalls)
-			providerFactory := joiner.qualifiedProvider.create
-			joiner.qualifiedProvider.create = func(ctx context.Context, launch MeetingSpecialistLaunch) (MeetingSpecialistProvider, error) {
-				if joinShouldFail {
-					return nil, errors.New("deterministic provider failure")
-				}
-				return providerFactory(ctx, launch)
-			}
-			product.productionJoin = joiner
-
-			previous := kanbanApp
-			kanbanApp = &kanbanBoardApp{meetingSpecialists: product}
-			t.Cleanup(func() { kanbanApp = previous })
-			cookies := loginAs(t, "aj@shareability.com", defaultMeetingRoomPassword)
-			post := func(path, body string) *httptest.ResponseRecorder {
-				request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
-				request.Header.Set("Content-Type", "application/json")
-				for _, cookie := range cookies {
-					request.AddCookie(cookie)
-				}
-				recorder := httptest.NewRecorder()
-				meetingSpecialistProductInvitationHandler(recorder, request)
-				return recorder
-			}
-			requested := post("/api/stride/v1/meeting-specialists/invitations", `{"roomId":"dog-perfect","agentId":"mary","purpose":"review positioning","idempotencyKey":"fake-http-1"}`)
-			if requested.Code != http.StatusOK {
-				t.Fatalf("request status=%d body=%s", requested.Code, requested.Body.String())
-			}
-			var requestPayload struct {
-				Invitation meetingSpecialistInvitationView `json:"invitation"`
-			}
-			if err := json.Unmarshal(requested.Body.Bytes(), &requestPayload); err != nil {
-				t.Fatal(err)
-			}
-			if requestPayload.Invitation.PurposeSummary != "review positioning" || len(requestPayload.Invitation.ContextClasses) != 4 || requestPayload.Invitation.Audience.Visibility != "meeting" || requestPayload.Invitation.ExpectedTimeSeconds != 120 || requestPayload.Invitation.ExpectedCostCents != 25 || requestPayload.Invitation.HardLimits != defaultMeetingSpecialistApprovalLimits() || requestPayload.Invitation.ProviderSessionStarted {
-				t.Fatalf("approval card omitted informed scope: %+v", requestPayload.Invitation)
-			}
-			approved := post("/api/stride/v1/meeting-specialists/invitations/"+requestPayload.Invitation.ID, `{"roomId":"dog-perfect","revision":1,"decision":"approved"}`)
-			if approved.Code != http.StatusOK {
-				t.Fatalf("approval status=%d body=%s", approved.Code, approved.Body.String())
-			}
-			var approvedPayload struct {
-				Invitation             meetingSpecialistInvitationView `json:"invitation"`
-				ProviderSessionStarted bool                            `json:"providerSessionStarted"`
-			}
-			if err := json.Unmarshal(approved.Body.Bytes(), &approvedPayload); err != nil {
-				t.Fatal(err)
-			}
-			if approvedPayload.Invitation.Status != scenario.wantStatus || approvedPayload.ProviderSessionStarted != !scenario.fail || approvedPayload.Invitation.ProviderSessionStarted != !scenario.fail {
-				t.Fatalf("approval=%+v", approvedPayload)
-			}
-			product.mu.Lock()
-			record := product.invitations[requestPayload.Invitation.ID]
-			product.mu.Unlock()
-			if scenario.fail {
-				if record.Runtime != nil || provider.briefs != 0 {
-					t.Fatalf("failed join escaped isolation: %+v briefs=%d", record.Runtime, provider.briefs)
-				}
-				joinShouldFail = false
-				recoveryRequest := post("/api/stride/v1/meeting-specialists/invitations", `{"roomId":"dog-perfect","agentId":"mary","purpose":"review positioning after recovery","idempotencyKey":"fake-http-recovery"}`)
-				if recoveryRequest.Code != http.StatusOK {
-					t.Fatalf("recovery request status=%d body=%s", recoveryRequest.Code, recoveryRequest.Body.String())
-				}
-				var recoveryPayload struct {
-					Invitation meetingSpecialistInvitationView `json:"invitation"`
-				}
-				if err := json.Unmarshal(recoveryRequest.Body.Bytes(), &recoveryPayload); err != nil {
-					t.Fatal(err)
-				}
-				if recoveryPayload.Invitation.ID == requestPayload.Invitation.ID || recoveryPayload.Invitation.Revision != 1 || recoveryPayload.Invitation.Status != "awaiting_approval" {
-					t.Fatalf("failed invitation blocked fresh recovery: failed=%+v recovery=%+v", requestPayload.Invitation, recoveryPayload.Invitation)
-				}
-				recovered := post("/api/stride/v1/meeting-specialists/invitations/"+recoveryPayload.Invitation.ID, `{"roomId":"dog-perfect","revision":1,"decision":"approved"}`)
-				if recovered.Code != http.StatusOK {
-					t.Fatalf("recovery approval status=%d body=%s", recovered.Code, recovered.Body.String())
-				}
-				var recoveredPayload struct {
-					Invitation meetingSpecialistInvitationView `json:"invitation"`
-				}
-				if err := json.Unmarshal(recovered.Body.Bytes(), &recoveredPayload); err != nil {
-					t.Fatal(err)
-				}
-				if recoveredPayload.Invitation.Status != "joined_session" || provider.briefs != 1 {
-					t.Fatalf("recovery did not join isolated fake session: invitation=%+v briefs=%d", recoveredPayload.Invitation, provider.briefs)
-				}
-			} else if record.Runtime == nil || record.Runtime.Snapshot().Session == nil || provider.briefs != 1 {
-				t.Fatalf("fake join did not reach runtime: runtime=%+v briefs=%d", record.Runtime, provider.briefs)
-			} else {
-				// Revoking the specialist from the roster must prevent future
-				// approvals without trapping an already joined test session.
-				productAuthority.roster = nil
-				dismissed := post("/api/stride/v1/meeting-specialists/invitations/"+requestPayload.Invitation.ID, `{"roomId":"dog-perfect","revision":2,"decision":"dismissed"}`)
-				if dismissed.Code != http.StatusOK || provider.closed != 1 {
-					t.Fatalf("dismiss status=%d body=%s provider closes=%d", dismissed.Code, dismissed.Body.String(), provider.closed)
-				}
-			}
-		})
+		request := httptest.NewRequest(http.MethodPost, requestCase.path, strings.NewReader(requestCase.body))
+		request.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			request.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		meetingSpecialistProductInvitationHandler(recorder, request)
+		if recorder.Code != http.StatusGone || !strings.Contains(recorder.Body.String(), "retired") || !strings.Contains(recorder.Body.String(), "Scout is the only meeting participant agent") {
+			t.Fatalf("POST %s status=%d body=%s", requestCase.path, recorder.Code, recorder.Body.String())
+		}
+	}
+	product.mu.Lock()
+	invitationCount := len(product.invitations)
+	product.mu.Unlock()
+	if invitationCount != 0 {
+		t.Fatalf("retired HTTP surface created %d invitation records", invitationCount)
 	}
 }
 

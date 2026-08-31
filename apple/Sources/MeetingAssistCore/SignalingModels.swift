@@ -3,10 +3,19 @@ import Foundation
 public struct WebSocketEnvelope: Codable, Equatable, Sendable {
     public var event: String
     public var data: String
+    public var offerId: String?
+    public var revision: UInt64?
 
-    public init(event: String, data: String) {
+    public init(
+        event: String,
+        data: String,
+        offerId: String? = nil,
+        revision: UInt64? = nil
+    ) {
         self.event = event
         self.data = data
+        self.offerId = offerId
+        self.revision = revision
     }
 }
 
@@ -55,6 +64,7 @@ public enum ClientSignalEvent {
     public static let answer = "answer"
     public static let candidate = "candidate"
     public static let restartICE = "restart_ice"
+    public static let roomPing = "room_ping"
     public static let selectLayer = "select_layer"
     public static let requestParticipantTracks = "request_participant_tracks"
     public static let participantMediaState = "participant_media_state"

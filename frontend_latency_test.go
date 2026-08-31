@@ -442,9 +442,9 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	html := string(rawHTML)
 	for _, want := range []string{
 		`<main id="appShell" data-tool="office" data-pd1-destination="Home">`,
-		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
-		`data-tool="room" aria-label="Video" aria-pressed="false"`,
-		`data-tool="chat" aria-label="Conversations" aria-pressed="false"`,
+		`data-pd1-destination="Home" aria-label="Home" aria-current="page"`,
+		`data-pd1-destination="Video" aria-label="Rooms" aria-current="false"`,
+		`data-pd1-destination="Conversations" aria-label="Conversations" aria-current="false"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		"let railHidden = false",
 		"function loadRailHiddenPreference()",
@@ -475,13 +475,11 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		`.artifact-detail__actions [hidden]`,
 		`id="artifactPublishButton"`,
 		`id="researchTool" class="agent-tool" data-agent-tool="research"`,
-		`class="research-workspace"`,
-		`id="researchArtifactSearch" class="research-library__search-input"`,
-		`id="researchArtifactList" class="research-library__list"`,
-		`id="designTool" class="agent-tool" data-agent-tool="design"`,
-		`id="grillTool" class="agent-tool" data-agent-tool="grill"`,
-		`<button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="artifacts" aria-label="Work library" aria-pressed="false" aria-checked="false">`,
-		`<span class="tool-rail__label">work library</span>`,
+		`<div class="agent-tool__inner studio-projects">`,
+		`id="studioProjectSearch" type="search"`,
+		`id="studioProjectList" class="studio-projects__list"`,
+		`data-pd1-destination="Work" aria-label="Work" aria-current="false"`,
+		`data-pd1-destination="Drive" aria-label="Drive" aria-current="false"`,
 		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
 		// The 4 composer starter pills were cut with the propose-confirm
 		// router (spec §2); frontend_router_test.go pins their absence and the
@@ -517,8 +515,6 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"chat-rich__rule",
 		"renderArtifactRead(report, entry)",
 		"data-agent-tool-form=\"research\"",
-		"data-agent-tool-form=\"design\"",
-		"data-agent-tool-form=\"grill\"",
 		"function addArtifactEntry(entry, options = {})",
 		"function renderArtifactDetail()",
 		"function artifactMatchesQuery(entry, query)",
@@ -588,19 +584,16 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"event: 'set_recording'",
 		"function updateRoomRecordingControls()",
 		"function roomListeningLabel()",
-		"the room is not listening",
+		"return 'room connected'",
 		"function applyRoomListeningStatus()",
 		"setRoomListeningConnectionState()",
 		"roomRecordingEnabled = recording.enabled !== false",
 		".tool-rail__slot[hidden]",
 		".tool-rail__avatar[hidden]",
 		"display: none !important;",
-		"const agentToolIds = ['research', 'design', 'grill']",
-		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'network', 'team']",
-		`<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="research" aria-label="Research" aria-pressed="false" aria-checked="false">`,
-		`<span class="tool-rail__slot" hidden>
-          <button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="design" aria-label="Design" aria-pressed="false" aria-checked="false">`,
+		"const agentToolIds = ['research']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']",
+		`id="researchTool" class="agent-tool" data-agent-tool="research"`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="research" aria-pressed="false" hidden>research</button>`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="design" aria-pressed="false" hidden>design</button>`,
 		`<button class="os-assistant__mode" type="button" data-assistant-mode="grill" aria-pressed="false" hidden>grill</button>`,
@@ -612,7 +605,7 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"data-design-context",
 		"renderArtifactRead(output, entry, { surface: 'design' })",
 		"item.addEventListener('click', () => openAgentArtifact(entry))",
-		"Ask Scout in Chat or voice; research, design, grill, and plans land here as durable outputs.",
+		"Ask Scout in Chat or voice; research and presentations land here as durable outputs.",
 		"appShell.classList.toggle('is-authed', Boolean(authedUser))",
 		"setActiveTool('office')",
 		"stopRealtimeVoiceConversation({ notifyServer: false })",
@@ -663,17 +656,14 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 			t.Fatalf("waveform home should not render the old dashboard prompt cluster %q", removedDashPrompt)
 		}
 	}
-	if !strings.Contains(html, `<span class="tool-rail__slot" hidden>`) {
-		t.Fatal("non-prototype tools should be retained off-rail, not shown in the prototype rail")
-	}
-	for _, visibleTool := range []string{`data-tool="office"`, `data-tool="room"`, `data-tool="chat"`} {
+	for _, visibleTool := range []string{`data-pd1-destination="Home"`, `data-pd1-destination="Video"`, `data-pd1-destination="Conversations"`, `data-pd1-destination="Work"`, `data-pd1-destination="Drive"`} {
 		if !strings.Contains(html, visibleTool) {
-			t.Fatalf("prototype rail tool %s should be present in the OS rail", visibleTool)
+			t.Fatalf("build-18 destination %s should be present in the primary rail", visibleTool)
 		}
 	}
-	for _, hiddenTool := range []string{`data-tool="artifacts"`, `data-tool="research"`, `data-tool="design"`, `data-tool="grill"`, `data-tool="memory"`} {
+	for _, hiddenTool := range []string{`id="artifactsTool"`, `id="researchTool"`, `id="memoryTool"`} {
 		if !strings.Contains(html, hiddenTool) {
-			t.Fatalf("off-rail tool %s should remain addressable for assistant/tool routing", hiddenTool)
+			t.Fatalf("compatibility surface %s should remain addressable for internal routing", hiddenTool)
 		}
 	}
 	openOfficeToolBody := functionBody(html, "function openOfficeTool(tool)")
@@ -801,8 +791,8 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if strings.Contains(html, `id="toolBoard"`) {
 		t.Fatal("retired Board route must not remain mounted in Work navigation")
 	}
-	if !strings.Contains(html, `<button class="tool-rail__tool" type="button" role="menuitemradio" tabindex="-1" data-tool="memory" aria-label="Meetings" aria-pressed="false" aria-checked="false">`) {
-		t.Fatal("Meetings rail slot should be visible so the permanent Meeting Record library is reachable")
+	if !strings.Contains(html, `data-pd1-destination="Conversations" aria-label="Conversations"`) {
+		t.Fatal("the Conversations destination should remain visible while meeting records stay available through its compatibility route")
 	}
 	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false"`) {
 		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
@@ -930,9 +920,9 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
 		"padding-left: 56px;",
-		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
-		`<span class="tool-rail__label">meetings</span>`,
-		`<span class="tool-rail__label">conversations</span>`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
+		`data-pd1-destination="Video" aria-label="Rooms"`,
+		`data-pd1-destination="Conversations" aria-label="Conversations"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
 		`class="tool-rail__account-icon stride-mark"`,
 		`aria-haspopup="dialog"`,
@@ -1851,8 +1841,8 @@ func TestRoomRelayPreservesRTPHeaderExtensions(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"Preserve RTP header extensions from the publisher",
-		"trackLocal.WriteRTP(packet)",
+		"stripTransportScopedRTPExtensions(packet, stripExtensionIDs)",
+		"return trackLocal.WriteRTP(packet)",
 	} {
 		if !strings.Contains(main, want) {
 			t.Fatalf("main.go missing RTP extension preservation marker %q", want)
@@ -1883,10 +1873,11 @@ func TestIndexSimulationQuickFixWiring(t *testing.T) {
 		"function applyBoardSnapshot(data)",
 		"function applyMemorySnapshot(data)",
 		// opening the bell refreshes and positions it without erasing unread state
-		"loadNotifications().then(positionNotificationPanel)",
-		// room-chat unread rides the rail icon and the meeting PiP
+		"loadNotifications().then(() => {",
+		"positionNotificationPanel()",
+		// The retired per-tool room rail no longer owns a rendered unread badge;
+		// live room-chat unread stays visible on the meeting PiP.
 		"function renderRoomChatUnreadBadges()",
-		`id="roomRailUnread"`,
 		`id="pipUnread"`,
 		// per-channel unread dots from the device-local lastSeen map
 		"const chatThreadSeenStorageKey = 'bonfire.chat.lastSeen.v1'",
@@ -2737,8 +2728,8 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 
 	// The rename surfaces (labels only).
 	for _, want := range []string{
-		`<span class="tool-rail__label"><span class="wordmark" role="img" aria-label="Stride"></span></span>`,
-		`data-tool="office" aria-label="Stride home" aria-pressed="true"`,
+		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
+		`data-pd1-destination="Home" aria-label="Home" aria-current="page"`,
 		`aria-label="Back to Stride"`,
 		`id="officeTool" class="office-tool" aria-label="Stride"`,
 		"office: 'Stride',",
@@ -2764,7 +2755,7 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 	for _, key := range []string{
 		`<main id="appShell" data-tool="office" data-pd1-destination="Home">`,
 		`data-tool="office"`,
-		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'network', 'team']",
+		"const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']",
 	} {
 		if !strings.Contains(html, key) {
 			t.Fatalf("index.html dropped the load-bearing office data-tool key %q", key)

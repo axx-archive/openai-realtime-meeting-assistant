@@ -278,9 +278,9 @@ function pendingNotarizationArtifact(runId, createdAt) {
     runId,
     capturedAt: createdAt,
     operatorChecklist: [
-      "Archive and sign the native macOS app outside the sandbox with real credentials.",
-      "Submit with notarytool, wait for accepted status, staple the app, and validate Gatekeeper.",
-      "Record request id, accepted status, and stapling result; do not include certificate private keys or profiles.",
+      "Archive and Developer ID-sign STRIDE.app outside the sandbox with real credentials.",
+      "Build and sign the final STRIDE DMG, submit that DMG with notarytool, wait for accepted status, staple and validate the DMG, then Gatekeeper-assess the DMG and mounted app.",
+      "Record the final DMG basename and SHA-256, request id, accepted status, and stapling result; do not include certificate private keys or profiles.",
     ],
     requestId: "",
     stapled: false,
@@ -292,8 +292,8 @@ function deviceAppMetadata(platform, version, build) {
   return {
     version,
     build,
-    target: platform === "mac" ? "MeetingAssistMacApp" : "MeetingAssistAppleApp",
-    clientPlatform: platform === "ipad" ? "ipados" : platform === "mac" ? "macos" : "ios",
+    target: "MeetingAssistAppleApp",
+    clientPlatform: platform === "ipad" ? "ipados" : "ios",
   };
 }
 
@@ -536,7 +536,7 @@ This folder is for real external-run observations for ${runId}.
 Version/build: ${version} (${build})
 Release room ID: ${roomId}
 
-Use this non-secret launch-link template on iPhone, iPad, or Mac to prefill the
+Use this non-secret launch-link template on iPhone or iPad to prefill the
 room URL, participant name, and release evidence binding:
 
 \`\`\`text
@@ -553,7 +553,6 @@ inbox filename for each physical-device media observation:
 
 - iPhone media: iphone-qa_snapshot.json
 - iPad media: ipad-qa_snapshot.json
-- Mac media: mac-qa_snapshot.json
 
 For release-gate observations that require operator review, copy the matching
 template, fill only the sanitized fields, and promote it with the named helper:
@@ -624,21 +623,6 @@ function releaseEvidenceDraft({ version, build, runId, roomId, createdAt, refs }
         os: "",
         testedAt: createdAt,
         artifactRef: refs.ipad,
-        mediaAssertions: {
-          cameraPublished: false,
-          microphonePublished: false,
-          remoteAudioReceived: false,
-          remoteVideoRendered: false,
-        },
-      },
-      mac: {
-        status: "pending",
-        runId,
-        roomId,
-        device: "",
-        os: "",
-        testedAt: createdAt,
-        artifactRef: refs.mac,
         mediaAssertions: {
           cameraPublished: false,
           microphonePublished: false,
@@ -765,7 +749,7 @@ function releaseEvidenceCompletion(draft) {
   }
 
   const media = draft.physicalDeviceMedia;
-  for (const platform of ["iphone", "ipad", "mac"]) {
+  for (const platform of ["iphone", "ipad"]) {
     const item = media?.[platform];
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       missing.push(`physicalDeviceMedia.${platform}`);
@@ -990,7 +974,6 @@ function createProofpack(args) {
   const artifactPaths = {
     iphone: join(evidenceDir, "iphone-media.json"),
     ipad: join(evidenceDir, "ipad-media.json"),
-    mac: join(evidenceDir, "mac-media.json"),
     turn: join(evidenceDir, "selected-turn-relay.json"),
     roomInterop: join(evidenceDir, "room-interop.json"),
     appStoreReview: join(evidenceDir, "app-store-review.json"),
@@ -1001,7 +984,6 @@ function createProofpack(args) {
   const templatePaths = {
     iphoneMedia: join(inboxDir, "iphone-qa_snapshot.template.json"),
     ipadMedia: join(inboxDir, "ipad-qa_snapshot.template.json"),
-    macMedia: join(inboxDir, "mac-qa_snapshot.template.json"),
     turnRelay: join(inboxDir, "turn-relay-observation.template.json"),
     roomInterop: join(inboxDir, "room-interop-observation.template.json"),
     appStoreReview: join(inboxDir, "app-store-review-observation.template.json"),
@@ -1012,7 +994,6 @@ function createProofpack(args) {
 
   writeJSON(artifactPaths.iphone, pendingDeviceArtifact("iphone", runId, roomId, createdAt));
   writeJSON(artifactPaths.ipad, pendingDeviceArtifact("ipad", runId, roomId, createdAt));
-  writeJSON(artifactPaths.mac, pendingDeviceArtifact("mac", runId, roomId, createdAt));
   writeJSON(artifactPaths.turn, pendingTurnArtifact(runId, roomId, createdAt));
   writeJSON(artifactPaths.roomInterop, pendingRoomInteropArtifact(runId, roomId, createdAt));
   writeJSON(artifactPaths.appStoreReview, pendingAppStoreReviewArtifact(runId, createdAt));
@@ -1020,7 +1001,6 @@ function createProofpack(args) {
   writeJSON(artifactPaths.notarization, pendingNotarizationArtifact(runId, createdAt));
   writeJSON(templatePaths.iphoneMedia, deviceObservationTemplate("iphone", runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.ipadMedia, deviceObservationTemplate("ipad", runId, roomId, createdAt, version, build));
-  writeJSON(templatePaths.macMedia, deviceObservationTemplate("mac", runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.turnRelay, turnObservationTemplate(runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.roomInterop, roomInteropObservationTemplate(runId, roomId, createdAt, version, build));
   writeJSON(templatePaths.appStoreReview, appStoreReviewObservationTemplate(runId, createdAt, version, build, bundleIdentifiers.ios));
@@ -1046,7 +1026,7 @@ function createProofpack(args) {
     gates,
     nextSteps: [
       "Copy generated inbox/*.template.json files to non-template JSON files only after replacing placeholders with real external-run observations.",
-      "Open the inbox README launch-link template on each native device so copied QA evidence is bound to this runId and roomId.",
+      "Open the inbox README launch-link template on iPhone and iPad so copied QA evidence is bound to this runId and roomId.",
       "Create the non-secret Apple-account machine command pack with scripts/native-apple-release-package-plan.mjs --proofpack-dir <proofpack> --write.",
       "Promote real physical-device QA snapshots with scripts/native-apple-promote-media-evidence.mjs.",
       "Promote sanitized restrictive-network TURN relay observations with scripts/native-apple-promote-turn-evidence.mjs.",

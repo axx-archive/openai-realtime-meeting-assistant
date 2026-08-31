@@ -5,4 +5,9 @@
 CODE_SIGN_STYLE = Automatic
 DEVELOPMENT_TEAM = $(APPLE_DEVELOPMENT_TEAM)
 
+// Direct-distribution update configuration. Keep these empty for local/ad-hoc
+// builds; Sparkle starts only when both values are present and valid.
+STRIDE_UPDATE_FEED_URL =
+STRIDE_SPARKLE_PUBLIC_ED_KEY =
+
 #include? "Signing.local.xcconfig"

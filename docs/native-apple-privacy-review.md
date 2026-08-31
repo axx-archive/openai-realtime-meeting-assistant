@@ -8,24 +8,35 @@ Apple privacy manifests describe the app or SDK data practices and required
 reason API use. The native client must not ship with an empty or guessed
 manifest.
 
-## Current Native Client Facts
+## Current Apple Client Facts
 
-- The iOS/iPadOS and macOS apps request camera and microphone access when a
-  user joins a video room. The macOS app also includes camera and audio-input
-  entitlements.
-- The macOS app has a native screen-share path through the WebRTC desktop
-  capturer and must be reviewed as screen/content capture.
-- Authentication sends a roster name and password to `/auth/login`, then keeps
-  the resulting room session in the shared `URLSession` cookie store.
+- The iOS/iPadOS native room app requests camera and microphone access when a
+  user joins a native room. The build-19 macOS Local QA slice can request the
+  same permissions in the existing STRIDE app when the user explicitly selects
+  **Native media**; the normal web workspace remains the default owner. Exactly
+  one path is active at a time.
+- The macOS native slice links the pinned `LiveKitWebRTC` package and uses its
+  public camera, audio-device, WebRTC, and desktop-capture APIs. Native screen
+  sharing requires Screen Recording permission. This path is not approved for
+  public distribution and its physical capture behavior is still awaiting QA.
+- iOS/iPadOS and the macOS Native media surface authenticate through the native
+  service session. On macOS the member enters name and password locally in the
+  native room form; credentials may be sent only to HTTPS `thebonfire.xyz`
+  origins or explicit HTTP(S) loopback origins for local QA. Typed URLs and
+  launch links use the same allowlist. The WebKit product session remains
+  separate, and the locally persisted endpoint identifier is random and
+  contains no account or device name.
 - The user-entered room URL, selected participant, room roster names/emails,
   room recording state, media state, board cards, Scout prompts/chats, memory
   entries, archive metadata/download URLs, and archive email-recipient status
   all flow through the native client.
-- Native diagnostics send `media_quality` over the existing websocket. The
-  payload includes platform/version, enabled media state, remote tile counts,
-  WebRTC RTP counters, jitter/loss/RTT summaries, and ICE candidate-pair
-  metadata.
-- Native QA evidence snapshots can be copied locally from the app into ignored
+- iOS/iPadOS and the macOS native Local QA slice send `media_quality` over the
+  existing websocket. The payload includes platform/version, enabled media
+  state, remote tile counts, WebRTC RTP counters, jitter/loss/RTT summaries,
+  and sanitized ICE candidate-pair metadata. Runtime logs and proof artifacts
+  must omit raw media, SDP, ICE credentials/candidates, device names, account
+  information, cookies, headers, and secrets.
+- Native Apple QA evidence snapshots can be copied locally from the app into ignored
   release proof-pack artifacts. They contain assertion booleans, platform/build
   context, app version/build/target, device kind, hardware model, OS version,
   physical-vs-simulator state, safe WebRTC counters, remote tile counts,
@@ -34,8 +45,12 @@ manifest.
   addresses, TURN credentials, cookies, headers, API keys, Team IDs,
   certificates, provisioning data, iPhone/iPad device names, macOS host names,
   screenshots, pixels, and raw video frames.
-- The Apple package has no app-owned analytics SDK in source. Its direct native
-  binary dependency is `LiveKitWebRTC`, pinned through SwiftPM.
+- The Apple package has no app-owned analytics SDK in source. iOS/iPadOS and the
+  macOS Local QA room graph link `LiveKitWebRTC` at exact SwiftPM version
+  `144.7559.10`; the macOS shell also links Sparkle `2.9.6`. The Local QA DMG
+  includes the applicable third-party notices. Maintenance, privacy-manifest,
+  SBOM, vulnerability, signing, notarization, and updater-feed review remain
+  public-distribution gates.
 
 ## Product Decisions Required
 

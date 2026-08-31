@@ -28,7 +28,7 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		"Share all to source",
 		"Share this reply to source",
 		"Your Riff · private to you",
-		"Channel and company context refresh automatically when you send",
+		"Riff privately with Scout…",
 		`data-icon="riff"`,
 		"mount(chatContextReplyForm, chatContextReplyInput, 'chat')",
 		`.chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"]))`,
@@ -44,7 +44,7 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		!strings.Contains(open, "select: !desktopRail") || !strings.Contains(open, "selectScoutChatThread(thread.id)") {
 		t.Fatalf("Private Riff must preserve the public center pane on desktop and open the Riff conversation on narrow web: %s", open)
 	}
-	renderActive := functionBody(html, "function renderActiveScoutThread(")
+	renderActive := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	if !strings.Contains(renderActive, "privateRiffCheckpointNode(thread)") {
 		t.Fatalf("Private Riff conversation must retain its checkpoint controls on narrow web: %s", renderActive)
 	}
@@ -55,12 +55,13 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 	emptyState := functionBody(html, "function ensureScoutChatEmptyState(")
 	if !strings.Contains(emptyState, "const isRiff = Boolean(thread?.riff)") ||
 		!strings.Contains(emptyState, "Riff from this checkpoint") ||
-		!strings.Contains(emptyState, "!isChannel && !isRiff && !hasStarters") {
+		!strings.Contains(emptyState, "if (!isChannel && !isRiff) empty.after(buildScoutStarterRow())") {
 		t.Fatalf("an empty Private Riff must explain the source-bound conversation without offering durable-work starters: %s", emptyState)
 	}
 	checkpoint := functionBody(html, "function privateRiffCheckpointNode(")
-	if strings.Contains(checkpoint, "Update context") || !strings.Contains(checkpoint, "will be included when you send") {
-		t.Fatalf("Private Riff freshness must be automatic instead of making the user manage a checkpoint: %s", checkpoint)
+	if strings.Contains(checkpoint, "Update context") || strings.Contains(checkpoint, "will be included when you send") ||
+		!strings.Contains(checkpoint, "Open source") || !strings.Contains(checkpoint, "Riff in Realtime") {
+		t.Fatalf("Private Riff checkpoint must keep the compact source and Realtime actions without the retired freshness lecture: %s", checkpoint)
 	}
 	share := functionBody(html, "function renderPrivateRiffShare(")
 	if strings.Count(share, "Share all to source") != 1 || strings.Count(share, "Share this reply to source") != 1 ||
@@ -84,9 +85,10 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 			t.Fatalf("Private Riff web still exposes the retired selective-share contract %q", forbidden)
 		}
 	}
-	narrow := functionBody(html, "function scoutChatMessageRecordNode(")
-	if !strings.Contains(narrow, "!desktopChatLayoutQuery.matches") || !strings.Contains(narrow, "privateRiffShareTriggerNode(activeThread, message)") {
-		t.Fatalf("narrow web must retain full-screen Riff publication controls: %s", narrow)
+	narrow := functionBody(html, "function privateRiffMessageCard(")
+	if !strings.Contains(narrow, "onShareAll:") || !strings.Contains(narrow, "onShareReply:") ||
+		!strings.Contains(narrow, "desktopContextMessageCard(thread, message") {
+		t.Fatalf("Private Riff replies must retain both explicit publication controls in the shared responsive message card: %s", narrow)
 	}
 	realtime := functionBody(html, "async function startPrivateRiffRealtime(")
 	if !strings.Contains(realtime, "startPrivateRealtimeVoiceConversation({ threadId })") || !strings.Contains(realtime, "current?.riff") || !strings.Contains(realtime, "stillVisible") {
@@ -144,7 +146,7 @@ func TestFrontendPrivateRiffIsAChannelWorkspaceNotAPrivateChatRow(t *testing.T) 
 		t.Fatalf("prior Riff episodes must remain inspectable without becoming private-chat rows: %s", history)
 	}
 	view := functionBody(html, "async function viewPrivateRiffEpisode(")
-	if !strings.Contains(view, "?episodeId=${encodeURIComponent(episodeId)}") || !strings.Contains(view, "readOnlyEpisode") {
+	if !strings.Contains(view, "scoutChatTailHydrationURL(thread.id, { episodeId })") || !strings.Contains(view, "readOnlyEpisode") {
 		t.Fatalf("looking at an earlier pass must use the source-reauthorized read-only endpoint: %s", view)
 	}
 	resume := functionBody(html, "async function resumePrivateRiffEpisode(")
@@ -192,8 +194,8 @@ func TestFrontendPrivateRiffUsesSemanticActivityInsteadOfReasoningTranscript(t *
 	html := string(raw)
 	for _, want := range []string{
 		"Refreshing the authorized channel and company context…",
-		"Worked ${privateRiffElapsedLabel(activity.elapsedMs)}",
-		"considered ${Number(activity.sourceCount || 0)} channel messages",
+		"Worked ${privateRiffElapsedLabel(message.activity.elapsedMs)}",
+		"considered ${Number(message.activity.sourceCount || 0)} channel messages",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("semantic Private Riff activity missing %q", want)

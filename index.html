@@ -12200,6 +12200,9 @@
         position: relative;
         display: inline-flex;
       }
+      .manifest-card__more[hidden] {
+        display: none;
+      }
       .manifest-card__more-trigger {
         background: none;
         border: 0;
@@ -37600,10 +37603,13 @@ Wrap the entire export in one code block. After the code block, say whether the 
       let roomRecordingUpdatedAt = ''
       let roomRecordingUpdatedBy = ''
       let hasBoardSnapshot = false
-      let isBoardReady = false
+      // Authentication can synchronously render the board before execution
+      // reaches this state block. Keep these two boot-reachable bindings
+      // hoisted so a restored session cannot abort the rest of the UI bundle.
+      var isBoardReady = false
       let canEditBoard = false
       let canUndoDelete = false
-      let boardProjectFilterValue = 'all'
+      var boardProjectFilterValue = 'all'
       // in-flight draft accept/dismiss requests (D4) — declared with the
       // board state so early renderBoard() calls never hit the TDZ
       const boardDraftPendingActions = new Set()
@@ -71074,6 +71080,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!pin) return
 	        pin.mutationObserver?.disconnect()
 	        pin.resizeObserver?.disconnect()
+	        if (scoutChatThread) scoutChatThread.style.overflowAnchor = pin.previousOverflowAnchor
 	        window.clearTimeout(pin.expiryTimer)
 	        scoutChatThread?.removeEventListener('wheel', pin.cancelForReader)
 	        scoutChatThread?.removeEventListener('touchstart', pin.cancelForReader)
@@ -71120,8 +71127,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          expiryTimer: 0,
 	          cancelForReader: () => cancelScoutChatOwnSendTailPin(),
 	          cancelForKeyboard: null,
-	          lastPinnedScrollTop: 0
+	          lastPinnedScrollTop: 0,
+	          previousOverflowAnchor: scoutChatThread.style.overflowAnchor
 	        }
+	        // The normal feed disables browser anchoring because reader-position
+	        // restores are element keyed. An explicit own-send/navigation pin is
+	        // different: the live edge is the anchor. Let layout preserve that
+	        // edge synchronously when a delayed image acquires intrinsic size;
+	        // ResizeObserver remains the bounded fallback for other geometry.
+	        scoutChatThread.style.overflowAnchor = 'auto'
 	        pin.cancelForKeyboard = event => {
 	          const target = event.target
 	          if (target?.matches?.('input, textarea, select, [contenteditable="true"]')) return

@@ -122,6 +122,8 @@ for (const ref of Object.values(proofpack.observationTemplates)) {
   assert.ok(existsSync(resolve(rootDir, ref)));
 }
 assert.equal(proofpack.observationTemplates.iphoneMedia, `artifacts/native-apple/${runId}/inbox/iphone-qa_snapshot.template.json`);
+assert.equal("mac" in proofpack.evidenceArtifacts, false);
+assert.equal("macMedia" in proofpack.observationTemplates, false);
 assert.equal(proofpack.observationTemplates.roomInterop, `artifacts/native-apple/${runId}/inbox/room-interop-observation.template.json`);
 assert.equal(proofpack.observationTemplates.appStoreReview, `artifacts/native-apple/${runId}/inbox/app-store-review-observation.template.json`);
 assert.equal(proofpack.observationTemplates.testFlight, `artifacts/native-apple/${runId}/inbox/testflight-observation.template.json`);
@@ -134,7 +136,8 @@ assert.match(inboxReadme, /Replace only <participant-name>/);
 assert.match(inboxReadme, /Do not add passwords, tokens, cookies/);
 assert.match(inboxReadme, /iPhone media: iphone-qa_snapshot\.json/);
 assert.match(inboxReadme, /iPad media: ipad-qa_snapshot\.json/);
-assert.match(inboxReadme, /Mac media: mac-qa_snapshot\.json/);
+assert.doesNotMatch(inboxReadme, /Mac media|mac-qa_snapshot/);
+assert.match(inboxReadme, /on iPhone or iPad/);
 assert.match(inboxReadme, /Restrictive TURN: turn-relay-observation\.json/);
 assert.match(inboxReadme, /Browser\/native room gate: room-interop-observation\.json/);
 assert.match(inboxReadme, /App Store review metadata: app-store-review-observation\.json/);
@@ -193,6 +196,7 @@ assert.equal(draft.version, "1.0");
 assert.equal(draft.build, "15");
 assert.equal(draft.physicalDeviceMedia.iphone.status, "pending");
 assert.equal(draft.physicalDeviceMedia.iphone.mediaAssertions.cameraPublished, false);
+assert.deepEqual(Object.keys(draft.physicalDeviceMedia).sort(), ["ipad", "iphone"]);
 assert.equal(draft.restrictiveNetworkTurn.status, "pending");
 assert.equal(draft.appStoreReview.status, "pending");
 assert.equal(draft.appStoreReview.keywordsReady, false);
@@ -215,8 +219,8 @@ const promotionProofpack = runProofpack([
 ]);
 assert.equal(promotionProofpack.status, 0);
 const promotionManifest = JSON.parse(readFileSync(promotionProofpack.output.proofpackPath, "utf8"));
-for (const platform of ["iphone", "ipad", "mac"]) {
-  const templateKey = platform === "iphone" ? "iphoneMedia" : platform === "ipad" ? "ipadMedia" : "macMedia";
+for (const platform of ["iphone", "ipad"]) {
+  const templateKey = platform === "iphone" ? "iphoneMedia" : "ipadMedia";
   const observation = JSON.parse(readFileSync(resolve(rootDir, promotionManifest.observationTemplates[templateKey]), "utf8"));
   const inputPath = resolve(promotionProofpack.output.proofpackDir, "inbox", `${platform}-qa_snapshot.json`);
   writeJSONFile(inputPath, {
@@ -226,7 +230,7 @@ for (const platform of ["iphone", "ipad", "mac"]) {
       ...observation.device,
       physical: true,
       model: `${platform} physical`,
-      os: platform === "mac" ? "macOS 26.5" : platform === "ipad" ? "iPadOS 26.5" : "iOS 26.5",
+      os: platform === "ipad" ? "iPadOS 26.5" : "iOS 26.5",
     },
     mediaAssertions: {
       cameraPublished: true,
@@ -328,7 +332,7 @@ const roomInteropInputPath = writeJSONFile(
     status: "observed",
     room: {
       participantCount: 4,
-      clientPlatforms: ["browser", "ios", "ipados", "macos"],
+      clientPlatforms: ["browser", "ios", "ipados"],
       browserNativeMixed: true,
       threePlusParticipants: true,
     },
@@ -474,7 +478,7 @@ assert.equal(promotedNotarization.status, 0);
 const promotedDraft = JSON.parse(readFileSync(promotionProofpack.output.evidenceDraft, "utf8"));
 assert.equal(promotedDraft.physicalDeviceMedia.iphone.status, "passed");
 assert.equal(promotedDraft.physicalDeviceMedia.ipad.status, "passed");
-assert.equal(promotedDraft.physicalDeviceMedia.mac.status, "passed");
+assert.deepEqual(Object.keys(promotedDraft.physicalDeviceMedia).sort(), ["ipad", "iphone"]);
 assert.equal(promotedDraft.restrictiveNetworkTurn.status, "passed");
 assert.equal(promotedDraft.roomInterop.status, "passed");
 assert.equal(promotedDraft.appStoreReview.status, "ready");
@@ -566,18 +570,6 @@ const completedDraft = {
       status: "passed",
       device: "iPad physical",
       os: "iPadOS 26.5",
-      mediaAssertions: {
-        cameraPublished: true,
-        microphonePublished: true,
-        remoteAudioReceived: true,
-        remoteVideoRendered: true,
-      },
-    },
-    mac: {
-      ...draft.physicalDeviceMedia.mac,
-      status: "passed",
-      device: "Mac physical",
-      os: "macOS 26.5",
       mediaAssertions: {
         cameraPublished: true,
         microphonePublished: true,

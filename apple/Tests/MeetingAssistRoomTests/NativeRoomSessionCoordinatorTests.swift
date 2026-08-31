@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import MeetingAssistCore
 @testable import MeetingAssistMedia
@@ -5,6 +6,20 @@ import XCTest
 @testable import MeetingAssistRoomRTC
 
 final class NativeRoomSessionCoordinatorTests: XCTestCase {
+    func testEndpointIdentityIsStableForAnInstallation() {
+        let suiteName = "NativeRoomSessionCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = NativeRoomEndpointIdentity.current(defaults: defaults)
+        let second = NativeRoomEndpointIdentity.current(defaults: defaults)
+
+        XCTAssertEqual(first, second)
+        XCTAssertTrue(NativeRoomEndpointIdentity.isValid(first))
+        XCTAssertTrue(first.hasPrefix("apple-"))
+    }
+
     func testJoinConfiguresAudioSessionBeforePreparingLocalMedia() async throws {
         let api = MockNativeRoomAPI()
         let signaling = MockSignalingTransport(envelopes: [
@@ -46,7 +61,9 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             ),
             WebSocketEnvelope(
                 event: ServerSignalEvent.offer,
-                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"))
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n")),
+                offerId: "offer-session-9",
+                revision: 9
             )
         ])
         let rtc = MockRoomRTCClient(answerSDP: "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\n")
@@ -54,7 +71,8 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             api: api,
             signaling: signaling,
             rtc: rtc,
-            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test")
+            clientIdentity: NativeRoomClientIdentity(platform: "ios", version: "test"),
+            endpointID: "apple-test-endpoint"
         )
 
         let result = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
@@ -86,6 +104,11 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rtc.configured?.websocketPath, "/websocket")
         XCTAssertEqual(rtc.handledOffers, ["v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"])
         XCTAssertEqual(rtc.remoteCandidates.count, 1)
+        let hello = try decodeSentPayload(ParticipantAssertionPayload.self, from: signaling.sent[0].data)
+        XCTAssertEqual(hello.endpointId, "apple-test-endpoint")
+        XCTAssertEqual(hello.client.platform, "ios")
+        XCTAssertEqual(signaling.sent[2].offerId, "offer-session-9")
+        XCTAssertEqual(signaling.sent[2].revision, 9)
     }
 
     func testJoinWithCameraAdvertisesVideoAndPublishesCameraState() async throws {
@@ -161,6 +184,281 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
             try decodeSentPayload(RTCIceCandidatePayload.self, from: sent[4].data),
             RTCIceCandidatePayload(candidate: "candidate:local", sdpMid: "0", sdpMLineIndex: 0, usernameFragment: "native")
         )
+    }
+
+    func testStaleCandidateCallbackAfterLeaveCannotSendIntoNewGeneration() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        await coordinator.leave()
+        signaling.enqueue([
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        await rtc.emitLocalCandidate(
+            RTCIceCandidatePayload(candidate: "candidate:stale"),
+            installation: 0
+        )
+        XCTAssertFalse(signaling.sent.contains { $0.event == ClientSignalEvent.candidate })
+
+        await rtc.emitLocalCandidate(RTCIceCandidatePayload(candidate: "candidate:current"))
+        let candidates = signaling.sent.filter { $0.event == ClientSignalEvent.candidate }
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertEqual(
+            try decodeSentPayload(RTCIceCandidatePayload.self, from: candidates[0].data).candidate,
+            "candidate:current"
+        )
+    }
+
+    func testDelayedRemoteTrackHandlerCannotRefreshOrMutateReplacementSession() async throws {
+        let signaling = MockSignalingTransport(envelopes: Self.joinEnvelopes())
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        let suspension = AsyncTestSuspension()
+        await coordinator.setRemoteVideoTrackHandler { _ in
+            await suspension.wait()
+        }
+        let staleTrack = Task {
+            await rtc.emitRemoteVideoTrack(
+                NativeRemoteVideoTrack(id: "old-unlabeled-track", streamIds: ["old-stream"])
+            )
+        }
+        await suspension.waitUntilStarted()
+
+        await coordinator.leave()
+        signaling.enqueue(Self.joinEnvelopes())
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        let sentBeforeStaleCompletion = signaling.sent.count
+        await suspension.resume()
+        await staleTrack.value
+
+        XCTAssertFalse(
+            signaling.sent.dropFirst(sentBeforeStaleCompletion).contains {
+                $0.event == ClientSignalEvent.requestParticipantTracks
+            }
+        )
+        let evidence = try await coordinator.captureMediaEvidenceSnapshot()
+        XCTAssertEqual(evidence.remoteVideoTiles, 0)
+
+        await coordinator.leave()
+    }
+
+    func testDelayedRemoteCandidateAfterLeaveCannotReportIntoNewGeneration() async throws {
+        let signaling = MockSignalingTransport(envelopes: Self.joinEnvelopes())
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        let suspension = rtc.suspendNextRemoteCandidate()
+        let delayedCandidate = Task {
+            try await coordinator.handleServerEvent(
+                WebSocketEnvelope(
+                    event: ServerSignalEvent.candidate,
+                    data: encodedJSONString(RTCIceCandidatePayload(candidate: "candidate:old-generation"))
+                )
+            )
+        }
+        await suspension.waitUntilStarted()
+
+        await coordinator.leave()
+        signaling.enqueue(Self.joinEnvelopes())
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        await suspension.resume()
+
+        do {
+            try await delayedCandidate.value
+            XCTFail("an old candidate continuation must be fenced")
+        } catch NativeRoomControlError.sessionCancelled {
+        }
+        XCTAssertFalse(signaling.sent.contains { $0.event == ClientSignalEvent.mediaError })
+    }
+
+    func testDelayedOfferAnswerAfterLeaveCannotSendIntoNewGeneration() async throws {
+        let signaling = MockSignalingTransport(envelopes: Self.joinEnvelopes())
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        let suspension = rtc.suspendNextOffer()
+        let oldJoin = Task {
+            try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        }
+        await suspension.waitUntilStarted()
+
+        await coordinator.leave()
+        signaling.enqueue(Self.joinEnvelopes())
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        await suspension.resume()
+
+        do {
+            _ = try await oldJoin.value
+            XCTFail("an old offer continuation must be fenced")
+        } catch NativeRoomControlError.sessionCancelled {
+        }
+        XCTAssertEqual(
+            signaling.sent.filter { $0.event == ClientSignalEvent.answer }.count,
+            1,
+            "only the current generation may send an answer"
+        )
+        XCTAssertFalse(signaling.sent.contains { $0.event == ClientSignalEvent.mediaError })
+    }
+
+    func testDelayedStatisticsAfterLeaveCannotPublishIntoNewGeneration() async throws {
+        let signaling = MockSignalingTransport(envelopes: Self.joinEnvelopes())
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let collector = MediaEvidenceCollector()
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        await coordinator.setMediaEvidenceHandler { evidence in
+            await collector.append(evidence)
+        }
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        let suspension = rtc.suspendNextStatistics()
+        let oldReport = Task {
+            try await coordinator.sendMediaQualityReport()
+        }
+        await suspension.waitUntilStarted()
+
+        await coordinator.leave()
+        signaling.enqueue(Self.joinEnvelopes())
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        await suspension.resume()
+
+        do {
+            try await oldReport.value
+            XCTFail("an old statistics continuation must be fenced")
+        } catch NativeRoomControlError.sessionCancelled {
+        }
+        let evidenceValues = await collector.values()
+        XCTAssertTrue(evidenceValues.isEmpty)
+        XCTAssertFalse(signaling.sent.contains { $0.event == ClientSignalEvent.mediaQuality })
+        XCTAssertFalse(signaling.sent.contains { $0.event == ClientSignalEvent.mediaError })
+    }
+
+    func testDelayedScreenShareStartCannotMutateOrSignalReplacementSession() async throws {
+        let signaling = MockSignalingTransport(envelopes: Self.joinEnvelopes())
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        let suspension = rtc.suspendNextScreenShare()
+        let staleStart = Task {
+            try await coordinator.setScreenSharing(true)
+        }
+        await suspension.waitUntilStarted()
+
+        await coordinator.leave()
+        signaling.enqueue(Self.joinEnvelopes())
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        let sentBeforeStaleCompletion = signaling.sent.count
+        await suspension.resume()
+
+        do {
+            try await staleStart.value
+            XCTFail("an old screen-share continuation must be fenced")
+        } catch NativeRoomControlError.sessionCancelled {
+        }
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true])
+        XCTAssertFalse(
+            signaling.sent.dropFirst(sentBeforeStaleCompletion).contains {
+                $0.event == ClientSignalEvent.screenShareStarted
+                    || $0.event == ClientSignalEvent.screenShareStopped
+                    || $0.event == ClientSignalEvent.mediaError
+            }
+        )
+
+        try await coordinator.sendParticipantMediaState()
+        let currentState = try decodeSentPayload(
+            ParticipantMediaState.self,
+            from: signaling.sent.last?.data ?? ""
+        )
+        XCTAssertFalse(currentState.screenSharing)
+        let currentLifecycle = await coordinator.lifecycle
+        XCTAssertEqual(currentLifecycle, .connected)
+
+        await coordinator.leave()
+    }
+
+    func testDelayedICERestartCannotMutateOrSignalReplacementSession() async throws {
+        let signaling = MockSignalingTransport(envelopes: Self.joinEnvelopes())
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+
+        let suspension = rtc.suspendNextRestartICE()
+        let staleRestart = Task {
+            try await coordinator.requestICERestart(reason: "old-network-change")
+        }
+        await suspension.waitUntilStarted()
+
+        await coordinator.leave()
+        signaling.enqueue(Self.joinEnvelopes())
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        let sentBeforeStaleCompletion = signaling.sent.count
+        await suspension.resume()
+
+        do {
+            try await staleRestart.value
+            XCTFail("an old ICE-restart continuation must be fenced")
+        } catch NativeRoomControlError.sessionCancelled {
+        }
+        XCTAssertFalse(
+            signaling.sent.dropFirst(sentBeforeStaleCompletion).contains {
+                $0.event == ClientSignalEvent.restartICE || $0.event == ClientSignalEvent.mediaError
+            }
+        )
+        let currentLifecycle = await coordinator.lifecycle
+        XCTAssertEqual(currentLifecycle, .connected)
+
+        await coordinator.leave()
     }
 
     func testRestartIceAndLayerSelectionUseExistingEvents() async throws {
@@ -635,6 +933,167 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(rtc.screenShareEnabledChanges, [true])
     }
 
+    func testScreenShareStartRollsBackWhenMediaStateSignalFails() async throws {
+        let signaling = MockSignalingTransport(
+            envelopes: [],
+            failOnEventOccurrences: [ClientSignalEvent.participantMediaState: [1]]
+        )
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        do {
+            try await coordinator.setScreenSharing(true)
+            XCTFail("start should fail when media-state signaling fails")
+        } catch {}
+
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true, false])
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.screenShareStopped,
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.mediaError
+        ])
+        XCTAssertFalse(try decodeSentPayload(ParticipantMediaState.self, from: signaling.sent[1].data).screenSharing)
+    }
+
+    func testScreenShareStartRollsBackWhenStartedSignalFails() async throws {
+        let signaling = MockSignalingTransport(
+            envelopes: [],
+            failOnEventOccurrences: [ClientSignalEvent.screenShareStarted: [1]]
+        )
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        do {
+            try await coordinator.setScreenSharing(true)
+            XCTFail("start should fail when screen-start signaling fails")
+        } catch {}
+
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true, false])
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.screenShareStopped,
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.mediaError
+        ])
+        XCTAssertTrue(try decodeSentPayload(ParticipantMediaState.self, from: signaling.sent[0].data).screenSharing)
+        XCTAssertFalse(try decodeSentPayload(ParticipantMediaState.self, from: signaling.sent[2].data).screenSharing)
+    }
+
+    func testScreenShareStopFailureLeavesLocalCaptureOff() async throws {
+        let signaling = MockSignalingTransport(
+            envelopes: [],
+            failOnEventOccurrences: [ClientSignalEvent.screenShareStopped: [1]]
+        )
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        try await coordinator.setScreenSharing(true)
+        do {
+            try await coordinator.setScreenSharing(false)
+            XCTFail("stop should surface screen-stop signaling failure")
+        } catch {}
+
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true, false])
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.screenShareStarted,
+            ClientSignalEvent.mediaError
+        ])
+    }
+
+    func testScreenShareStopMediaStateFailureLeavesLocalCaptureOff() async throws {
+        let signaling = MockSignalingTransport(
+            envelopes: [],
+            failOnEventOccurrences: [ClientSignalEvent.participantMediaState: [2]]
+        )
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+
+        try await coordinator.setScreenSharing(true)
+        do {
+            try await coordinator.setScreenSharing(false)
+            XCTFail("stop should surface media-state signaling failure")
+        } catch {}
+
+        XCTAssertEqual(rtc.screenShareEnabledChanges, [true, false])
+        XCTAssertEqual(signaling.sent.map(\.event), [
+            ClientSignalEvent.participantMediaState,
+            ClientSignalEvent.screenShareStarted,
+            ClientSignalEvent.screenShareStopped,
+            ClientSignalEvent.mediaError
+        ])
+    }
+
+    func testUnexpectedScreenCaptureEndRestoresTruthAcrossSignalingAndRecoveryUI() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test")
+        )
+        let recovery = MediaRecoveryCollector()
+        await coordinator.setMediaRecoveryHandler { event in
+            await recovery.append(event)
+        }
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        try await coordinator.setScreenSharing(true)
+        let sentBeforeRuntimeStop = signaling.sent.count
+        await rtc.emitScreenShareRuntimeEvent(.captureError)
+
+        XCTAssertEqual(
+            signaling.sent.dropFirst(sentBeforeRuntimeStop).map(\.event),
+            [ClientSignalEvent.screenShareStopped, ClientSignalEvent.participantMediaState]
+        )
+        XCTAssertFalse(
+            try decodeSentPayload(
+                ParticipantMediaState.self,
+                from: signaling.sent.last?.data ?? ""
+            ).screenSharing
+        )
+        let recoveryEvents = await recovery.values()
+        XCTAssertEqual(
+            recoveryEvents,
+            [
+                NativeMediaRecoveryEvent(
+                    stage: "screen_share_ended",
+                    message: "Screen sharing stopped unexpectedly. Camera video was restored.",
+                    terminal: false
+                )
+            ]
+        )
+
+        await coordinator.leave()
+    }
+
     func testPrepareLocalMediaFailureReportsNativeMediaErrorBeforeRethrow() async throws {
         let signaling = MockSignalingTransport(envelopes: [
             accessGrantedEnvelope(name: "Tom")
@@ -667,6 +1126,41 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(payload.client.platform, "ios")
         XCTAssertTrue(payload.video.settings.enabled)
         XCTAssertTrue(payload.error.message.contains("cameraUnavailable"))
+        XCTAssertEqual(signaling.closeCount, 2)
+        XCTAssertEqual(rtc.leaveCount, 2)
+    }
+
+    func testHeartbeatKeepsOneSignalingSessionAlive() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ])
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: MockRoomRTCClient(answerSDP: "answer"),
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test"),
+            endpointID: "apple-heartbeat-test",
+            heartbeatIntervalNanoseconds: 1_000_000
+        )
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        let emittedHeartbeat = await waitUntil {
+            signaling.sent.contains { $0.event == ClientSignalEvent.roomPing }
+        }
+
+        XCTAssertTrue(emittedHeartbeat)
+        XCTAssertEqual(signaling.connectedURL?.absoluteString, "wss://thebonfire.xyz/websocket")
+        XCTAssertTrue(
+            signaling.sent
+                .filter { $0.event == ClientSignalEvent.roomPing }
+                .allSatisfy { $0.data == "{}" && $0.offerId == nil && $0.revision == nil }
+        )
+
+        await coordinator.leave()
     }
 
     func testIncomingScreenShareEventsUpdateRoomSnapshotMediaState() async throws {
@@ -719,6 +1213,51 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         )
         let lifecycle = await coordinator.lifecycle
         XCTAssertEqual(lifecycle, .reconnecting)
+    }
+
+    func testTerminalReceiveEventClosesMediaAndSignalsRecovery() async throws {
+        let signaling = MockSignalingTransport(envelopes: [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            ),
+            kanbanEnvelope(event: "session_replaced", data: .string("This endpoint was replaced."))
+        ])
+        let rtc = MockRoomRTCClient(answerSDP: "answer")
+        let coordinator = NativeRoomSessionCoordinator(
+            api: MockNativeRoomAPI(),
+            signaling: signaling,
+            rtc: rtc,
+            clientIdentity: NativeRoomClientIdentity(platform: "macos", version: "test"),
+            endpointID: "apple-terminal-test"
+        )
+        let recovery = MediaRecoveryCollector()
+        await coordinator.setMediaRecoveryHandler { event in
+            await recovery.append(event)
+        }
+
+        _ = try await coordinator.joinAudioOnly(name: "Tom", password: "B0NFIRE!")
+        let receivedRecovery = await waitUntil {
+            await !recovery.values().isEmpty
+        }
+        let recoveryEvents = await recovery.values()
+        let lifecycle = await coordinator.lifecycle
+
+        XCTAssertTrue(receivedRecovery)
+        XCTAssertEqual(
+            recoveryEvents,
+            [
+                NativeMediaRecoveryEvent(
+                    stage: "session_replaced",
+                    message: "This endpoint was replaced.",
+                    terminal: true
+                )
+            ]
+        )
+        XCTAssertEqual(lifecycle, .reconnecting)
+        XCTAssertEqual(signaling.closeCount, 2)
+        XCTAssertEqual(rtc.leaveCount, 2)
     }
 
     func testRoomAndBoardSnapshotsAreEmittedDuringJoin() async throws {
@@ -1084,6 +1623,8 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(signaling.sent.map(\.event), [ClientSignalEvent.participant])
         XCTAssertNil(rtc.configured)
         XCTAssertNil(rtc.preparedAudio)
+        XCTAssertEqual(signaling.closeCount, 2)
+        XCTAssertEqual(rtc.leaveCount, 2)
     }
 
     func testLeaveResetsNegotiationStateBeforeReuse() async throws {
@@ -1127,6 +1668,16 @@ final class NativeRoomSessionCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(url.absoluteString, "wss://example.com/app/websocket")
+    }
+
+    private static func joinEnvelopes() -> [WebSocketEnvelope] {
+        [
+            accessGrantedEnvelope(name: "Tom"),
+            WebSocketEnvelope(
+                event: ServerSignalEvent.offer,
+                data: encodedJSONString(RTCSessionDescriptionPayload(type: "offer", sdp: "v=0\r\n"))
+            )
+        ]
     }
 }
 
@@ -1178,34 +1729,68 @@ private final class MockSignalingTransport: NativeRoomSignalingTransport, @unche
     private var envelopes: [WebSocketEnvelope]
     private(set) var connectedURL: URL?
     private(set) var sent: [WebSocketEnvelope] = []
+    private(set) var closeCount = 0
+    private var eventOccurrences: [String: Int] = [:]
+    private let failOnEventOccurrences: [String: Set<Int>]
 
-    init(envelopes: [WebSocketEnvelope]) {
+    init(
+        envelopes: [WebSocketEnvelope],
+        failOnEventOccurrences: [String: Set<Int>] = [:]
+    ) {
         self.envelopes = envelopes
+        self.failOnEventOccurrences = failOnEventOccurrences
     }
 
     func connect(to url: URL) async {
         connectedURL = url
     }
 
+    func enqueue(_ newEnvelopes: [WebSocketEnvelope]) {
+        envelopes.append(contentsOf: newEnvelopes)
+    }
+
     func send(event: String, data: String) async throws {
+        try failIfConfigured(event: event)
         sent.append(WebSocketEnvelope(event: event, data: data))
+    }
+
+    func send(_ envelope: WebSocketEnvelope) async throws {
+        try failIfConfigured(event: envelope.event)
+        sent.append(envelope)
+    }
+
+    private func failIfConfigured(event: String) throws {
+        let occurrence = eventOccurrences[event, default: 0] + 1
+        eventOccurrences[event] = occurrence
+        if failOnEventOccurrences[event]?.contains(occurrence) == true {
+            throw MockError.sendFailed
+        }
     }
 
     func receive() async throws -> WebSocketEnvelope {
         if envelopes.isEmpty {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                throw CancellationError()
+            }
             throw MockError.noEnvelope
         }
         return envelopes.removeFirst()
     }
 
-    func close() async {}
+    func close() async {
+        closeCount += 1
+    }
 }
 
 private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var lifecycle: RoomLifecycleState = .signedOut
     private(set) var configured: ClientRTCConfig?
     private var localCandidateHandler: LocalICECandidateHandler?
+    private var localCandidateHandlerInstallations: [LocalICECandidateHandler] = []
     private var remoteVideoTrackHandler: RemoteVideoTrackHandler?
+    private var screenShareRuntimeStateHandler: NativeScreenShareRuntimeStateHandler?
     private(set) var preparedAudio: Bool?
     private(set) var preparedVideo: Bool?
     private(set) var handledOffers: [String] = []
@@ -1214,6 +1799,7 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private(set) var localVideoEnabledChanges: [Bool] = []
     private(set) var screenShareEnabledChanges: [Bool] = []
     private(set) var didRestartICE = false
+    private(set) var leaveCount = 0
     private var mediaQualitySnapshots: [NativeMediaQualitySnapshot]
     private let answerSDP: String
     private let prepareLocalMediaError: Error?
@@ -1222,6 +1808,11 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     private let mediaQualityError: Error?
     private let screenShareError: Error?
     private let onPrepareLocalMedia: (@Sendable () -> Void)?
+    private var nextOfferSuspension: AsyncTestSuspension?
+    private var nextRemoteCandidateSuspension: AsyncTestSuspension?
+    private var nextStatisticsSuspension: AsyncTestSuspension?
+    private var nextScreenShareSuspension: AsyncTestSuspension?
+    private var nextRestartICESuspension: AsyncTestSuspension?
 
     init(
         answerSDP: String,
@@ -1249,18 +1840,36 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     func setLocalCandidateHandler(_ handler: LocalICECandidateHandler?) async {
         localCandidateHandler = handler
+        if let handler {
+            localCandidateHandlerInstallations.append(handler)
+        }
     }
 
     func setRemoteVideoTrackHandler(_ handler: RemoteVideoTrackHandler?) async {
         remoteVideoTrackHandler = handler
     }
 
+    func setScreenShareRuntimeStateHandler(
+        _ handler: NativeScreenShareRuntimeStateHandler?
+    ) async {
+        screenShareRuntimeStateHandler = handler
+    }
+
     func emitLocalCandidate(_ candidate: RTCIceCandidatePayload) async {
         await localCandidateHandler?(candidate)
     }
 
+    func emitLocalCandidate(_ candidate: RTCIceCandidatePayload, installation: Int) async {
+        guard localCandidateHandlerInstallations.indices.contains(installation) else { return }
+        await localCandidateHandlerInstallations[installation](candidate)
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await remoteVideoTrackHandler?(track)
+    }
+
+    func emitScreenShareRuntimeEvent(_ event: NativeScreenShareRuntimeEvent) async {
+        await screenShareRuntimeStateHandler?(event)
     }
 
     func prepareLocalMedia(audio: Bool, video: Bool) async throws {
@@ -1283,6 +1892,10 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     func setScreenShareEnabled(_ enabled: Bool) async throws {
         screenShareEnabledChanges.append(enabled)
+        if let suspension = nextScreenShareSuspension {
+            nextScreenShareSuspension = nil
+            await suspension.wait()
+        }
         if let screenShareError, enabled {
             throw screenShareError
         }
@@ -1290,6 +1903,10 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     func handleOffer(_ sdp: String) async throws -> String {
         handledOffers.append(sdp)
+        if let suspension = nextOfferSuspension {
+            nextOfferSuspension = nil
+            await suspension.wait()
+        }
         if let handleOfferError {
             throw handleOfferError
         }
@@ -1298,6 +1915,10 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
     }
 
     func addRemoteCandidate(_ json: String) async throws {
+        if let suspension = nextRemoteCandidateSuspension {
+            nextRemoteCandidateSuspension = nil
+            await suspension.wait()
+        }
         if let remoteCandidateError {
             throw remoteCandidateError
         }
@@ -1306,10 +1927,18 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
 
     func restartICE() async {
         didRestartICE = true
+        if let suspension = nextRestartICESuspension {
+            nextRestartICESuspension = nil
+            await suspension.wait()
+        }
         lifecycle = .reconnecting
     }
 
     func mediaQualitySnapshot() async throws -> NativeMediaQualitySnapshot {
+        if let suspension = nextStatisticsSuspension {
+            nextStatisticsSuspension = nil
+            await suspension.wait()
+        }
         if let mediaQualityError {
             throw mediaQualityError
         }
@@ -1319,14 +1948,73 @@ private final class MockRoomRTCClient: RoomRTCClient, @unchecked Sendable {
         return mediaQualitySnapshots.removeFirst()
     }
 
+    func suspendNextOffer() -> AsyncTestSuspension {
+        let suspension = AsyncTestSuspension()
+        nextOfferSuspension = suspension
+        return suspension
+    }
+
+    func suspendNextRemoteCandidate() -> AsyncTestSuspension {
+        let suspension = AsyncTestSuspension()
+        nextRemoteCandidateSuspension = suspension
+        return suspension
+    }
+
+    func suspendNextStatistics() -> AsyncTestSuspension {
+        let suspension = AsyncTestSuspension()
+        nextStatisticsSuspension = suspension
+        return suspension
+    }
+
+    func suspendNextScreenShare() -> AsyncTestSuspension {
+        let suspension = AsyncTestSuspension()
+        nextScreenShareSuspension = suspension
+        return suspension
+    }
+
+    func suspendNextRestartICE() -> AsyncTestSuspension {
+        let suspension = AsyncTestSuspension()
+        nextRestartICESuspension = suspension
+        return suspension
+    }
+
     func leave() async {
+        leaveCount += 1
         lifecycle = .leaving
+    }
+}
+
+private actor AsyncTestSuspension {
+    private var started = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait() async {
+        started = true
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        while !started {
+            await Task.yield()
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
 private struct MediaReadyAssertionPayload: Decodable {
     var client: NativeRoomClientIdentity
     var media: MediaAssertionPayload
+}
+
+private struct ParticipantAssertionPayload: Decodable {
+    var endpointId: String
+    var client: NativeRoomClientIdentity
 }
 
 private struct MediaAssertionPayload: Decodable {
@@ -1414,6 +2102,7 @@ private struct BoardDeleteAssertionPayload: Decodable {
 
 private enum MockError: Error {
     case noEnvelope
+    case sendFailed
 }
 
 private struct RedactionProbeError: Error, CustomStringConvertible {
@@ -1758,4 +2447,20 @@ private func encodedJSONValue<T: Encodable>(_ value: T) -> JSONValue {
 
 private func decodeSentPayload<T: Decodable>(_ type: T.Type, from data: String) throws -> T {
     try JSONDecoder().decode(type, from: Data(data.utf8))
+}
+
+private func waitUntil(
+    timeoutNanoseconds: UInt64 = 1_000_000_000,
+    pollNanoseconds: UInt64 = 5_000_000,
+    condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+    let started = ContinuousClock.now
+    let timeout = Duration.nanoseconds(Int64(clamping: timeoutNanoseconds))
+    while ContinuousClock.now - started < timeout {
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: pollNanoseconds)
+    }
+    return await condition()
 }

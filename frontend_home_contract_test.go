@@ -27,7 +27,7 @@ func TestDesktopHomeUsesServerOwnedContextAndEditableSuggestions(t *testing.T) {
 		`desktopChatScrollToMessage(String(destination.messageId))`,
 		`A failed refresh can`,
 		`homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }`,
-		`Home unavailable · Retry`,
+		`id="homeRefreshRetry" class="home-refresh-retry pressable" type="button" hidden>Retry</button>`,
 		`homeSnapshotGeneration += 1`,
 		`id="homeRealtimeVoice"`,
 		`aria-label="Start a new private voice chat with Scout"`,
@@ -192,6 +192,7 @@ const home={version:'home-v2',generatedAt:'2026-08-11T20:00:00Z',allClear:false,
  {id:'create',label:'Create',detail:'Make the next useful thing',suggestions:[{id:'create-1',text:'Create the next useful deliverable for Country Golf.',whyThis:'Work is already underway here.',destination:{route:'new-private'}}]},
  {id:'challenge',label:'Challenge',detail:'Grill and red-team',suggestions:[{id:'challenge-1',text:'Challenge the current thinking in Country Golf and identify the weakest assumptions.',whyThis:'This decision is waiting on you.',destination:{route:'new-private'}}]}
 ]};
+const homeItems=home.items.map(item=>structuredClone(item));
 let homeAvailable=true;
 let homeRequestCount=0;
 let projectContextRequestCount=0;
@@ -277,18 +278,18 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
    retry:document.getElementById('homeRefreshRetry').textContent.trim()
  }));
  // When refresh fails, starters stay hidden (honest empty state, no fake generic pack)
-	assert.deepEqual(failed,{continuity:0,startersHidden:true,draft:'Unsent local draft',retry:'Home unavailable · Retry'});
+	assert.deepEqual(failed,{continuity:0,startersHidden:true,draft:'Unsent local draft',retry:'Retry'});
 	homeAvailable=true;
 	await page.evaluate(()=>document.getElementById('homeRefreshRetry').click());
 	await page.waitForFunction(()=>document.querySelectorAll('#homeContinuity .home-continuity__row').length===3&&document.getElementById('homeRefreshRetry').hidden);
  await page.fill('#homeScoutInput','');
  const renderDir=String(process.env.HOME_RENDER_DIR||'').trim();
  if(renderDir)fs.mkdirSync(renderDir,{recursive:true});
- const capture=async(name,theme)=>{
+ const capture=async(name,theme,continuity=3)=>{
    await page.evaluate(next=>renderTheme(next),theme);
    await page.mouse.move(2,2);await page.waitForTimeout(180);
    const geometry=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,continuity:document.querySelectorAll('#homeContinuity .home-continuity__row').length,privacyFooter:document.querySelectorAll('.office-launch__hint,#officeLaunchHint').length}));
-   assert.deepEqual(geometry,{fits:true,continuity:3,privacyFooter:0});
+   assert.deepEqual(geometry,{fits:true,continuity,privacyFooter:0});
    if(renderDir)await page.screenshot({path:path.join(renderDir,name+'-'+theme+'.png')});
  };
  for(const theme of ['dark','light'])await capture('desktop-home',theme);
@@ -322,21 +323,24 @@ if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});
  await page.focus('#homeScoutInput');
  const focusedComposer=await page.evaluate(()=>({
    border:getComputedStyle(document.getElementById('homeScoutComposer')).borderColor,
+   focusBorder:getComputedStyle(document.documentElement).getPropertyValue('--line-2').trim(),
    inputBackground:getComputedStyle(document.getElementById('homeScoutInput')).backgroundColor,
    inputOutline:getComputedStyle(document.getElementById('homeScoutInput')).outlineStyle
  }));
- assert.equal(focusedComposer.border,'rgba(0, 0, 0, 0)');
+ assert.equal(focusedComposer.border,focusedComposer.focusBorder);
  assert.equal(focusedComposer.inputBackground,'rgba(0, 0, 0, 0)');
  assert.equal(focusedComposer.inputOutline,'none');
  await page.fill('#homeScoutInput','');
  // Test live meeting rendering with empty Home
+ home.items=[];
  await page.evaluate(async()=>{renderHomeStarters();document.activeElement?.blur();await fetch('/__rooms_live');homeLiveSignature='';await loadRoomsList();});
- for(const theme of ['dark','light'])await capture('desktop-home-live-meeting',theme);
+ for(const theme of ['dark','light'])await capture('desktop-home-live-meeting',theme,0);
  await page.setViewportSize({width:390,height:844});
  await page.waitForTimeout(100);
- for(const theme of ['dark','light'])await capture('phone-home-live-meeting',theme);
+ for(const theme of ['dark','light'])await capture('phone-home-live-meeting',theme,0);
  const phone=await page.evaluate(()=>({fits:document.documentElement.scrollWidth<=innerWidth,startersHidden:document.getElementById('homeStarters').hidden,composer:document.getElementById('homeScoutComposer').getBoundingClientRect().toJSON()}));
  assert.equal(phone.fits,true);assert.equal(phone.startersHidden,true,'starters always hidden');assert.ok(phone.composer.left>=0&&phone.composer.right<=390);
+ home.items=homeItems;
  await page.evaluate(async()=>{
 	   homeScoutInput.value='Country Golf';
    homeScoutInput.dispatchEvent(new Event('input',{bubbles:true}));

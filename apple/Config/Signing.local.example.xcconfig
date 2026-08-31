@@ -3,3 +3,6 @@
 // from your Apple account.
 //
 // DEVELOPMENT_TEAM = <YOUR_REAL_TEAM_ID>
+// In xcconfig, use $() to keep // from being parsed as a comment.
+// STRIDE_UPDATE_FEED_URL = https:/$()/thebonfire.xyz/downloads/stride/appcast.xml
+// STRIDE_SPARKLE_PUBLIC_ED_KEY = "<BASE64_ED25519_PUBLIC_KEY>"

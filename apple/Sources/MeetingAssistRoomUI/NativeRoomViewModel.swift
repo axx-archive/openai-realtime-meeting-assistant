@@ -23,6 +23,11 @@ public protocol NativeRoomSessionControlling: Sendable {
     func setScoutChatEventsHandler(_ handler: NativeScoutChatEventsHandler?) async
     func setMediaRecoveryHandler(_ handler: NativeMediaRecoveryHandler?) async
     func setMediaEvidenceHandler(_ handler: NativeMediaEvidenceHandler?) async
+    func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async
+    func selectAudioInput(id: String?) async throws
+    func selectAudioOutput(id: String?) async throws
+    func selectCamera(id: String?) async throws
+    func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot
     func setMuted(_ muted: Bool) async
     func setCameraOff(_ off: Bool) async
     func setScreenSharing(_ sharing: Bool) async throws
@@ -43,6 +48,26 @@ public protocol NativeRoomSessionControlling: Sendable {
     func currentLifecycle() async -> RoomLifecycleState
 }
 
+public extension NativeRoomSessionControlling {
+    func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async {}
+
+    func selectAudioInput(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    func selectAudioOutput(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    func selectCamera(id: String?) async throws {
+        throw RoomRTCError.webRTCUnavailable
+    }
+
+    func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot {
+        NativeMediaRuntimeSnapshot()
+    }
+}
+
 extension NativeRoomSessionCoordinator: NativeRoomSessionControlling {
     public func currentLifecycle() async -> RoomLifecycleState {
         lifecycle
@@ -51,6 +76,42 @@ extension NativeRoomSessionCoordinator: NativeRoomSessionControlling {
 
 public typealias NativeRoomConfigLoaderFactory = @Sendable (URL) -> NativeRoomConfigLoading
 public typealias NativeRoomSessionFactory = @Sendable (URL) -> NativeRoomSessionControlling
+
+/// The native room may send login credentials only to a STRIDE-controlled
+/// production origin or to a loopback development server. Both typed URLs and
+/// launch-link URLs pass through this same policy before any request is made.
+internal enum NativeRoomServerOrigin {
+    static func normalized(_ value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              let encodedHost = components.host?.lowercased(),
+              !encodedHost.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil else {
+            return nil
+        }
+
+        let host = encodedHost.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let isLoopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
+        let isProduction = host == "thebonfire.xyz" || host.hasSuffix(".thebonfire.xyz")
+
+        if isProduction {
+            guard scheme == "https", components.port == nil || components.port == 443 else { return nil }
+        } else if isLoopback {
+            guard scheme == "http" || scheme == "https" else { return nil }
+        } else {
+            return nil
+        }
+
+        guard components.path.isEmpty || components.path == "/" else { return nil }
+        components.scheme = scheme
+        components.path = ""
+        return components.url
+    }
+}
 
 @MainActor
 public final class NativeRoomViewModel: ObservableObject {
@@ -91,6 +152,7 @@ public final class NativeRoomViewModel: ObservableObject {
     @Published public private(set) var isScoutChatSending = false
     @Published public private(set) var latestMediaEvidence: NativeMediaEvidenceSnapshot?
     @Published public private(set) var latestTurnRelayObservation: NativeTurnRelayObservation?
+    @Published public private(set) var mediaRuntime = NativeMediaRuntimeSnapshot()
     @Published public private(set) var isCapturingMediaEvidence = false
     @Published public private(set) var isCapturingTurnRelayObservation = false
     @Published public var turnRelayNetwork = "restricted guest network"
@@ -101,6 +163,7 @@ public final class NativeRoomViewModel: ObservableObject {
     private let injectedSessionFactory: NativeRoomSessionFactory?
     private let evidenceContextStore = NativeRoomEvidenceContextStore()
     private var session: NativeRoomSessionControlling?
+    private var preparedSessionBaseURL: URL?
 
     public init(
         baseURLString: String = "https://thebonfire.xyz",
@@ -140,6 +203,26 @@ public final class NativeRoomViewModel: ObservableObject {
 
     public var canUseScreenShareControls: Bool {
         canUseCameraControls
+    }
+
+    public var selectedAudioInputID: String? {
+        mediaRuntime.devices.audioInputs.first(where: \.isSelected)?.id
+    }
+
+    public var selectedAudioOutputID: String? {
+        mediaRuntime.devices.audioOutputs.first(where: \.isSelected)?.id
+    }
+
+    public var selectedCameraID: String? {
+        mediaRuntime.devices.cameras.first(where: \.isSelected)?.id
+    }
+
+    public var hasMediaRuntimeState: Bool {
+        !mediaRuntime.devices.audioInputs.isEmpty
+            || !mediaRuntime.devices.audioOutputs.isEmpty
+            || !mediaRuntime.devices.cameras.isEmpty
+            || mediaRuntime.audioProcessing.requestResult != .notRequested
+            || !mediaRuntime.degradations.isEmpty
     }
 
     public var latestMediaEvidenceJSON: String? {
@@ -225,7 +308,11 @@ public final class NativeRoomViewModel: ObservableObject {
         do {
             let launchContext = try NativeRoomLaunchContext(url: url)
             if let baseURLString = launchContext.baseURLString {
-                self.baseURLString = baseURLString
+                guard let trustedOrigin = NativeRoomServerOrigin.normalized(baseURLString) else {
+                    setError("Launch link room URL must use HTTPS on thebonfire.xyz or HTTP(S) on this Mac.")
+                    return
+                }
+                self.baseURLString = trustedOrigin.absoluteString
             }
             if let selectedName = launchContext.selectedName {
                 self.selectedName = selectedName
@@ -248,6 +335,53 @@ public final class NativeRoomViewModel: ObservableObject {
         context.runId = releaseRunId.trimmingCharacters(in: .whitespacesAndNewlines)
         context.roomId = releaseRoomId.trimmingCharacters(in: .whitespacesAndNewlines)
         return context
+    }
+
+    /// Initializes only the native media runtime needed for device inventory.
+    /// Capture and signaling do not start until the user explicitly joins.
+    public func prepareMediaControls() async {
+        guard !isBusy, !canUseRoomControls, let baseURL = normalizedBaseURL() else { return }
+        let prepared = await preparedSession(for: baseURL)
+        await prepared.setMediaRuntimeStateHandler { [weak self] snapshot in
+            await self?.applyMediaRuntime(snapshot)
+        }
+        applyMediaRuntime(await prepared.mediaRuntimeSnapshot())
+    }
+
+    public func selectAudioInput(id: String?) async {
+        await selectMediaDevice(kind: .audioInput, id: id)
+    }
+
+    public func selectAudioOutput(id: String?) async {
+        await selectMediaDevice(kind: .audioOutput, id: id)
+    }
+
+    public func selectCamera(id: String?) async {
+        await selectMediaDevice(kind: .camera, id: id)
+    }
+
+    private func selectMediaDevice(kind: NativeMediaDeviceKind, id: String?) async {
+        guard let baseURL = normalizedBaseURL() else {
+            setError("Enter a valid MeetingAssist URL.")
+            return
+        }
+        let prepared = await preparedSession(for: baseURL)
+        do {
+            switch kind {
+            case .audioInput:
+                try await prepared.selectAudioInput(id: id)
+            case .audioOutput:
+                try await prepared.selectAudioOutput(id: id)
+            case .camera:
+                try await prepared.selectCamera(id: id)
+            }
+            applyMediaRuntime(await prepared.mediaRuntimeSnapshot())
+            statusText = "Media device selected"
+            errorMessage = nil
+        } catch {
+            setError(displayMessage(for: error))
+            applyMediaRuntime(await prepared.mediaRuntimeSnapshot())
+        }
     }
 
     public func refreshRoster() async {
@@ -300,7 +434,7 @@ public final class NativeRoomViewModel: ObservableObject {
         statusText = "Joining"
         lifecycle = .authenticated
 
-        let newSession = makeSession(baseURL: baseURL)
+        let newSession = await preparedSession(for: baseURL)
         await newSession.setRemoteVideoTrackHandler { [weak self] trackInfo in
             await self?.upsertRemoteVideoTrack(trackInfo)
         }
@@ -331,6 +465,9 @@ public final class NativeRoomViewModel: ObservableObject {
         await newSession.setMediaEvidenceHandler { [weak self] evidence in
             await self?.applyMediaEvidence(evidence)
         }
+        await newSession.setMediaRuntimeStateHandler { [weak self] snapshot in
+            await self?.applyMediaRuntime(snapshot)
+        }
 
         do {
             let result = if video {
@@ -338,7 +475,6 @@ public final class NativeRoomViewModel: ObservableObject {
             } else {
                 try await newSession.joinAudioOnly(name: name, password: password)
             }
-            session = newSession
             joinedParticipant = result.participant
             isCameraOff = !video
             hasLocalCamera = video
@@ -355,8 +491,10 @@ public final class NativeRoomViewModel: ObservableObject {
             await newSession.setScoutChatEventsHandler(nil)
             await newSession.setMediaRecoveryHandler(nil)
             await newSession.setMediaEvidenceHandler(nil)
+            await newSession.setMediaRuntimeStateHandler(nil)
             await newSession.leave()
             session = nil
+            preparedSessionBaseURL = nil
             joinedParticipant = nil
             isCameraOff = true
             hasLocalCamera = false
@@ -437,9 +575,10 @@ public final class NativeRoomViewModel: ObservableObject {
             isScreenSharing = sharing
             statusText = sharing ? "Sharing screen" : "Screen share stopped"
         } catch {
-            if sharing {
-                isScreenSharing = false
-            }
+            // Coordinator start failures roll capture back; stop failures occur
+            // after capture is already off. UI therefore reflects actual local
+            // capture truth even when the server notification failed.
+            isScreenSharing = false
             setError(displayMessage(for: error))
         }
     }
@@ -582,6 +721,7 @@ public final class NativeRoomViewModel: ObservableObject {
 
     public func leave() async {
         guard let session else {
+            preparedSessionBaseURL = nil
             lifecycle = .signedOut
             return
         }
@@ -597,8 +737,10 @@ public final class NativeRoomViewModel: ObservableObject {
         await session.setScoutChatEventsHandler(nil)
         await session.setMediaRecoveryHandler(nil)
         await session.setMediaEvidenceHandler(nil)
+        await session.setMediaRuntimeStateHandler(nil)
         await session.leave()
         self.session = nil
+        preparedSessionBaseURL = nil
         joinedParticipant = nil
         isMuted = false
         isCameraOff = true
@@ -612,9 +754,7 @@ public final class NativeRoomViewModel: ObservableObject {
     }
 
     private func normalizedBaseURL() -> URL? {
-        let trimmed = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = URL(string: trimmed), url.scheme != nil, url.host != nil else { return nil }
-        return url
+        NativeRoomServerOrigin.normalized(baseURLString)
     }
 
     private func makeSession(baseURL: URL) -> NativeRoomSessionControlling {
@@ -631,6 +771,30 @@ public final class NativeRoomViewModel: ObservableObject {
                 await evidenceContextStore.context()
             }
         )
+    }
+
+    private func preparedSession(for baseURL: URL) async -> NativeRoomSessionControlling {
+        if let session, preparedSessionBaseURL == baseURL {
+            return session
+        }
+
+        if let staleSession = session {
+            await staleSession.setMediaRuntimeStateHandler(nil)
+            await staleSession.leave()
+        }
+
+        let prepared = makeSession(baseURL: baseURL)
+        session = prepared
+        preparedSessionBaseURL = baseURL
+        await prepared.setMediaRuntimeStateHandler { [weak self] snapshot in
+            await self?.applyMediaRuntime(snapshot)
+        }
+        applyMediaRuntime(await prepared.mediaRuntimeSnapshot())
+        return prepared
+    }
+
+    private func applyMediaRuntime(_ snapshot: NativeMediaRuntimeSnapshot) {
+        mediaRuntime = snapshot
     }
 
     private func setError(_ message: String) {
@@ -702,6 +866,11 @@ public final class NativeRoomViewModel: ObservableObject {
 
     private func applyMediaRecoveryEvent(_ event: NativeMediaRecoveryEvent) async {
         errorMessage = event.message
+        if event.stage == "screen_share_ended" {
+            isScreenSharing = false
+            statusText = "Screen share stopped"
+            return
+        }
         if event.terminal {
             statusText = "Media disconnected"
             let endedSession = session
@@ -725,7 +894,9 @@ public final class NativeRoomViewModel: ObservableObject {
             await endedSession?.setScoutChatEventsHandler(nil)
             await endedSession?.setMediaRecoveryHandler(nil)
             await endedSession?.setMediaEvidenceHandler(nil)
+            await endedSession?.setMediaRuntimeStateHandler(nil)
             await endedSession?.leave()
+            preparedSessionBaseURL = nil
             return
         }
 
@@ -760,6 +931,8 @@ public final class NativeRoomViewModel: ObservableObject {
         }
         if let rtcError = error as? RoomRTCError {
             switch rtcError {
+            case .cameraPermissionDenied:
+                return "Camera access was denied. Enable it in System Settings, then rejoin explicitly."
             case .cameraUnavailable:
                 return "No camera is available on this device."
             case .cameraFormatUnavailable:
@@ -768,10 +941,18 @@ public final class NativeRoomViewModel: ObservableObject {
                 return message
             case .missingSessionDescription:
                 return "The room did not provide a usable media description."
+            case .microphonePermissionDenied:
+                return "Microphone access was denied. Enable it in System Settings, then rejoin explicitly."
+            case .operationCancelled:
+                return "The native media operation ended with the prior room session. Rejoin explicitly if needed."
             case .peerConnectionCreationFailed:
                 return "Could not create a native WebRTC connection."
             case .peerConnectionNotConfigured:
                 return "The native WebRTC connection was not configured."
+            case .peerOperationTimedOut(let operation):
+                return "Native WebRTC timed out during \(operation.replacingOccurrences(of: "_", with: " "))."
+            case .permissionRequestTimedOut(let operation):
+                return "macOS did not resolve the native \(operation.replacingOccurrences(of: "_permission", with: "")) permission request. Rejoin explicitly after reviewing System Settings."
             case .screenCapturePermissionDenied:
                 return "Allow Screen Recording for MeetingAssist in System Settings, then try sharing again."
             case .screenShareUnavailable:

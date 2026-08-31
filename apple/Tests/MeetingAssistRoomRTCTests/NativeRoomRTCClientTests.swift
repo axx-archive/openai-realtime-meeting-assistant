@@ -1,6 +1,9 @@
 import XCTest
 @testable import MeetingAssistCore
 @testable import MeetingAssistRoomRTC
+#if canImport(LiveKitWebRTC)
+@preconcurrency import LiveKitWebRTC
+#endif
 
 final class NativeRoomRTCClientTests: XCTestCase {
     private static let disallowedEvidenceLeakTokens = [
@@ -28,6 +31,299 @@ final class NativeRoomRTCClientTests: XCTestCase {
 
     func testWebRTCBinaryIsImportable() {
         XCTAssertTrue(WebRTCLinkStatus.isWebRTCImportable)
+    }
+
+    func testCaptureStopTimeoutIsStickyUntilProcessRestart() {
+        var state = NativeCaptureStopState()
+
+        XCTAssertTrue(state.record(completed: true))
+        XCTAssertFalse(state.hasUnresolvedStop)
+        XCTAssertFalse(state.record(completed: false))
+        XCTAssertTrue(state.hasUnresolvedStop)
+        XCTAssertFalse(state.record(completed: true), "a later callback must not erase uncertain capture ownership")
+    }
+
+    func testDelayedStartedCaptureIsStoppedInsteadOfInstallingIntoReplacementSession() async {
+        final class CaptureProbe {}
+        let replacementCapture = CaptureProbe()
+        let staleCapture = CaptureProbe()
+        let installedCapture: CaptureProbe? = replacementCapture
+        var stoppedCapture: CaptureProbe?
+
+        let disposition = await resolveStartedCapture(
+            staleCapture,
+            installIfCurrent: { false },
+            stopStaleCapture: { capture in
+                stoppedCapture = capture
+                return true
+            }
+        )
+
+        XCTAssertEqual(disposition, .staleCaptureStopped)
+        XCTAssertTrue(stoppedCapture === staleCapture)
+        XCTAssertTrue(installedCapture === replacementCapture)
+    }
+
+    func testCaptureStopGateFailsClosedWhenCallbackNeverArrives() async {
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let gate = NativeRTCStopContinuationGate(continuation)
+            gate.failAfterDeadline(nanoseconds: 1_000_000)
+        }
+
+        XCTAssertFalse(result)
+    }
+
+    func testAddCandidateCallbackTimesOutAndIgnoresLateCompletion() async {
+        let lateCallbackFinished = Task { () -> Bool in
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    let gate = NativeRTCContinuationGate(continuation)
+                    gate.failAfterDeadline(operation: "add_ice_candidate", nanoseconds: 1_000_000)
+                    Task.detached {
+                        try? await Task.sleep(nanoseconds: 10_000_000)
+                        gate.resume(returning: ())
+                    }
+                }
+                XCTFail("an absent add-candidate callback must time out")
+            } catch let error as RoomRTCError {
+                XCTAssertEqual(error, .peerOperationTimedOut("add_ice_candidate"))
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            return true
+        }
+
+        let didFinishLateCallback = await lateCallbackFinished.value
+        XCTAssertTrue(didFinishLateCallback, "a callback after timeout must be ignored, not double-resume")
+    }
+
+    func testRTCContinuationDeadlineSurvivesDroppedNativeCallback() async {
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let gate = NativeRTCContinuationGate(continuation)
+                gate.failAfterDeadline(operation: "dropped_native_callback", nanoseconds: 1_000_000)
+                // Deliberately do not retain the gate or register a callback.
+            }
+            XCTFail("a dropped native callback must resolve through the deadline")
+        } catch let error as RoomRTCError {
+            XCTAssertEqual(error, .peerOperationTimedOut("dropped_native_callback"))
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testStatisticsCallbackTimesOutAndIgnoresLateCompletion() async {
+        let lateCallbackFinished = Task { () -> Bool in
+            do {
+                let _: String = try await withCheckedThrowingContinuation { continuation in
+                    let gate = NativeRTCContinuationGate(continuation)
+                    gate.failAfterDeadline(operation: "get_statistics", nanoseconds: 1_000_000)
+                    Task.detached {
+                        try? await Task.sleep(nanoseconds: 10_000_000)
+                        gate.resume(returning: "late statistics")
+                    }
+                }
+                XCTFail("an absent statistics callback must time out")
+            } catch let error as RoomRTCError {
+                XCTAssertEqual(error, .peerOperationTimedOut("get_statistics"))
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            return true
+        }
+
+        let didFinishLateCallback = await lateCallbackFinished.value
+        XCTAssertTrue(didFinishLateCallback, "a callback after timeout must be ignored, not double-resume")
+    }
+
+    func testPublisherUplinkLayoutBindsOnlyServerReceivingFixedMIDs() throws {
+        let layout = try NativePublisherUplinkLayout.parse(Self.validNativePublisherOffer)
+
+        XCTAssertEqual(layout.audioMID, "publisher-audio")
+        XCTAssertEqual(layout.videoMID, "publisher-video")
+        XCTAssertEqual(layout.preferredH264PayloadTypes, [102])
+        XCTAssertEqual(layout.preferredRTXPayloadTypes, [103])
+    }
+
+    func testPublisherUplinkLayoutFailsClosedForAmbiguousAudioUplink() {
+        let offer = Self.validNativePublisherOffer + """
+        m=audio 9 UDP/TLS/RTP/SAVPF 111\r
+
+        a=mid:unexpected-second-audio-uplink\r
+
+        a=recvonly\r
+
+        a=rtpmap:111 opus/48000/2\r
+
+        """
+
+        XCTAssertThrowsError(try NativePublisherUplinkLayout.parse(offer)) { error in
+            XCTAssertEqual(
+                error as? RoomRTCError,
+                .invalidOfferLayout(.ambiguousAudioPublisherUplink)
+            )
+        }
+    }
+
+    func testPublisherUplinkLayoutRejectsH264WithoutMatchingRTX() {
+        let offer = Self.validNativePublisherOffer
+            .replacingOccurrences(of: "m=video 9 UDP/TLS/RTP/SAVPF 102 103", with: "m=video 9 UDP/TLS/RTP/SAVPF 102")
+            .replacingOccurrences(of: "a=rtpmap:103 rtx/90000\r\n", with: "")
+            .replacingOccurrences(of: "a=fmtp:103 apt=102\r\n", with: "")
+
+        XCTAssertThrowsError(try NativePublisherUplinkLayout.parse(offer)) { error in
+            XCTAssertEqual(error as? RoomRTCError, .invalidOfferLayout(.missingH264RTX))
+        }
+    }
+
+    func testVideoCodecPreferenceKeepsH264PacketizationModeOneWithItsRTXFirst() throws {
+        let codecs = [
+            NativeVideoCodecDescriptor(name: "VP8", payloadType: 96, parameters: [:]),
+            NativeVideoCodecDescriptor(name: "rtx", payloadType: 97, parameters: ["apt": "96"]),
+            NativeVideoCodecDescriptor(name: "H264", payloadType: 102, parameters: ["packetization-mode": "1"]),
+            NativeVideoCodecDescriptor(name: "rtx", payloadType: 103, parameters: ["apt": "102"]),
+        ]
+
+        XCTAssertEqual(try NativeVideoCodecPreference.orderedIndices(codecs), [2, 3, 0, 1])
+    }
+
+    func testDeviceSelectionRecoveryOnlyFallsBackForRemovedExplicitSelection() {
+        XCTAssertFalse(
+            NativeDeviceSelectionRecovery.needsDefaultRecovery(
+                selectedID: nil,
+                availableIDs: ["built-in"]
+            )
+        )
+        XCTAssertFalse(
+            NativeDeviceSelectionRecovery.needsDefaultRecovery(
+                selectedID: "usb",
+                availableIDs: ["built-in", "usb"]
+            )
+        )
+        XCTAssertTrue(
+            NativeDeviceSelectionRecovery.needsDefaultRecovery(
+                selectedID: "usb",
+                availableIDs: ["built-in"]
+            )
+        )
+    }
+
+    func testPrepareAudioReportsCommunicationProcessingRequestTruth() async throws {
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
+
+        try await client.configure(testClientConfig)
+        try await client.prepareLocalMedia(audio: true, video: false)
+        let runtime = await client.mediaRuntimeSnapshot()
+
+        XCTAssertTrue(runtime.audioProcessing.requestResult.succeeded)
+        XCTAssertEqual(
+            runtime.audioProcessing.echoCancellation.requested,
+            NativeAudioProcessingRequest(enabled: true, mode: .automatic)
+        )
+        XCTAssertEqual(
+            runtime.audioProcessing.noiseSuppression.requested,
+            NativeAudioProcessingRequest(enabled: true, mode: .automatic)
+        )
+        XCTAssertEqual(
+            runtime.audioProcessing.automaticGainControl.requested,
+            NativeAudioProcessingRequest(enabled: true, mode: .automatic)
+        )
+        XCTAssertFalse(runtime.degradations.contains(.audioProcessingRequestFailed))
+
+        await client.leave()
+    }
+
+    func testPrepareAudioFailsClosedWhenMicrophonePermissionIsDenied() async throws {
+        let client = NativeRoomRTCClient(
+            permissionAuthorizer: NativeMediaPermissionAuthorizer(
+                microphone: { false },
+                camera: { true }
+            )
+        )
+
+        try await client.configure(testClientConfig)
+        do {
+            try await client.prepareLocalMedia(audio: true, video: false)
+            XCTFail("audio preparation should require microphone permission")
+        } catch let error as RoomRTCError {
+            XCTAssertEqual(error, .microphonePermissionDenied)
+        }
+
+        await client.leave()
+    }
+
+    func testPrepareVideoFailsClosedWhenCameraPermissionIsDenied() async throws {
+        let client = NativeRoomRTCClient(
+            permissionAuthorizer: NativeMediaPermissionAuthorizer(
+                microphone: { true },
+                camera: { false }
+            )
+        )
+
+        try await client.configure(testClientConfig)
+        do {
+            try await client.prepareLocalMedia(audio: false, video: true)
+            XCTFail("video preparation should require camera permission")
+        } catch let error as RoomRTCError {
+            XCTAssertEqual(error, .cameraPermissionDenied)
+        }
+
+        await client.leave()
+    }
+
+    func testHandleOfferBindsPreparedAudioToServerOfferedPublisherMID() async throws {
+        let offer = try await Self.makeNativePublisherOffer()
+        let offeredLayout = try NativePublisherUplinkLayout.parse(offer)
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
+
+        try await client.configure(testClientConfig)
+        try await client.prepareLocalMedia(audio: true, video: false)
+        let answer = try await client.handleOffer(offer)
+
+        XCTAssertEqual(Self.mediaSectionCount(answer), Self.mediaSectionCount(offer))
+        XCTAssertTrue(Self.mediaSection(answer, mid: offeredLayout.audioMID).contains("a=sendonly"))
+        XCTAssertTrue(Self.mediaSection(answer, mid: offeredLayout.videoMID).contains("a=inactive"))
+        XCTAssertEqual(client.lifecycle, .connected)
+
+        await client.leave()
+    }
+
+    func testUnknownAudioDeviceSelectionFailsWithoutIncludingDeviceInventoryNames() async throws {
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
+        try await client.configure(testClientConfig)
+
+        do {
+            try await client.selectAudioInput(id: "definitely-not-a-real-device")
+            XCTFail("selection should reject an unavailable device identifier")
+        } catch let error as RoomRTCError {
+            XCTAssertEqual(error, .mediaDeviceUnavailable(.audioInput))
+            if case .webRTCOperationFailed(let message) = error {
+                XCTAssertFalse(message.contains("definitely-not-a-real-device"))
+            }
+        }
+
+        await client.leave()
+    }
+
+    func testConfigurePreservesPrejoinCameraSelection() async throws {
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
+        let beforeConfigure = await client.mediaRuntimeSnapshot()
+        guard let camera = beforeConfigure.devices.cameras.first else {
+            throw XCTSkip("No camera is available to exercise prejoin selection persistence")
+        }
+
+        try await client.selectCamera(id: camera.id)
+        try await client.configure(testClientConfig)
+        let afterConfigure = await client.mediaRuntimeSnapshot()
+
+        XCTAssertEqual(
+            afterConfigure.devices.cameras.first(where: \.isSelected)?.id,
+            camera.id
+        )
+
+        await client.leave()
     }
 
     func testICEServerDescriptorParsesTurnCredentialsAndMultipleURLs() {
@@ -90,7 +386,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
     }
 
     func testConfigureAndPrepareAudioOnlyCreatesNativePeerConnection() async throws {
-        let client = NativeRoomRTCClient()
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
 
         try await client.configure(testClientConfig)
         try await client.prepareLocalMedia(audio: true, video: false)
@@ -99,6 +395,16 @@ final class NativeRoomRTCClientTests: XCTestCase {
 
         await client.leave()
         XCTAssertEqual(client.lifecycle, .leaving)
+    }
+
+    func testReconfigureRetiresPriorPeerWithoutDeadlockingDelegateCallbacks() async throws {
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
+
+        try await client.configure(testClientConfig)
+        try await client.configure(testClientConfig)
+
+        XCTAssertEqual(client.lifecycle, .authenticated)
+        await client.leave()
     }
 
     func testMediaQualitySnapshotAggregatesBrowserCompatibleStats() {
@@ -534,7 +840,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
     }
 
     func testLocalTrackTogglesAreSafeBeforeMediaPreparation() async {
-        let client = NativeRoomRTCClient()
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
 
         await client.setLocalAudioEnabled(false)
         await client.setLocalVideoEnabled(false)
@@ -543,7 +849,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
     }
 
     func testScreenShareRequiresPublishedVideoSender() async throws {
-        let client = NativeRoomRTCClient()
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
 
         try await client.configure(testClientConfig)
         try await client.prepareLocalMedia(audio: true, video: false)
@@ -634,7 +940,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
     #endif
 
     func testHandleOfferRequiresConfiguration() async throws {
-        let client = NativeRoomRTCClient()
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
 
         do {
             _ = try await client.handleOffer("v=0\r\n")
@@ -646,7 +952,7 @@ final class NativeRoomRTCClientTests: XCTestCase {
     }
 
     func testMediaQualitySnapshotRequiresConfiguration() async throws {
-        let client = NativeRoomRTCClient()
+        let client = NativeRoomRTCClient(permissionAuthorizer: .allowingAllForTesting)
 
         do {
             _ = try await client.mediaQualitySnapshot()
@@ -701,6 +1007,148 @@ final class NativeRoomRTCClientTests: XCTestCase {
             latestRenderedAt: "2026-06-29T17:00:01Z"
         )
     }
+
+    #if canImport(LiveKitWebRTC)
+    private static func makeNativePublisherOffer() async throws -> String {
+        _ = LKRTCInitializeSSL()
+        let factory = LKRTCPeerConnectionFactory(
+            encoderFactory: LKRTCDefaultVideoEncoderFactory(),
+            decoderFactory: LKRTCDefaultVideoDecoderFactory()
+        )
+        let configuration = LKRTCConfiguration()
+        configuration.sdpSemantics = .unifiedPlan
+        let constraints = LKRTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)
+        guard let connection = factory.peerConnection(
+            with: configuration,
+            constraints: constraints,
+            delegate: nil
+        ) else {
+            throw RoomRTCError.peerConnectionCreationFailed
+        }
+        defer { connection.close() }
+
+        let videoInit = LKRTCRtpTransceiverInit()
+        videoInit.direction = .recvOnly
+        guard let video = connection.addTransceiver(of: .video, init: videoInit) else {
+            throw RoomRTCError.trackPublicationFailed("test video transceiver")
+        }
+        let codecs = factory.rtpSenderCapabilities(forKind: kLKRTCMediaStreamTrackKindVideo).codecs
+        let descriptors = codecs.map {
+            NativeVideoCodecDescriptor(
+                name: $0.name,
+                payloadType: $0.preferredPayloadType?.intValue,
+                parameters: $0.parameters
+            )
+        }
+        let ordered = try NativeVideoCodecPreference.orderedIndices(descriptors).map { codecs[$0] }
+        try video.setCodecPreferences(ordered, error: ())
+
+        let audioInit = LKRTCRtpTransceiverInit()
+        audioInit.direction = .recvOnly
+        guard connection.addTransceiver(of: .audio, init: audioInit) != nil else {
+            throw RoomRTCError.trackPublicationFailed("test audio transceiver")
+        }
+
+        let offer = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<LKRTCSessionDescription, Error>) in
+            connection.offer(for: constraints) { description, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let description {
+                    continuation.resume(returning: description)
+                } else {
+                    continuation.resume(throwing: RoomRTCError.missingSessionDescription)
+                }
+            }
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            connection.setLocalDescription(offer) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+        return try injectH264RTX(into: offer.sdp)
+    }
+
+    private static func injectH264RTX(into sdp: String) throws -> String {
+        var lines = sdp.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard let videoStart = lines.firstIndex(where: { $0.hasPrefix("m=video ") }) else {
+            throw RoomRTCError.invalidOfferLayout(.missingVideoPublisherUplink)
+        }
+        let videoEnd = lines[(videoStart + 1)...].firstIndex(where: { $0.hasPrefix("m=") }) ?? lines.endIndex
+        let videoLines = lines[videoStart..<videoEnd]
+        let h264PayloadTypes = videoLines.compactMap { line -> Int? in
+            guard line.hasPrefix("a=rtpmap:"), line.localizedCaseInsensitiveContains(" H264/") else {
+                return nil
+            }
+            return Int(line.dropFirst("a=rtpmap:".count).split(separator: " ", maxSplits: 1)[0])
+        }
+        guard let h264 = h264PayloadTypes.first(where: { payloadType in
+            videoLines.contains(where: {
+                $0.hasPrefix("a=fmtp:\(payloadType) ") && $0.contains("packetization-mode=1")
+            })
+        }) else {
+            throw RoomRTCError.invalidOfferLayout(.missingH264PacketizationModeOne)
+        }
+        let used = Set(lines[videoStart].split(separator: " ").dropFirst(3).compactMap { Int($0) })
+        guard let rtx = (96...127).reversed().first(where: { !used.contains($0) }) else {
+            throw RoomRTCError.invalidOfferLayout(.missingH264RTX)
+        }
+        lines[videoStart] += " \(rtx)"
+        lines.insert(contentsOf: [
+            "a=rtpmap:\(rtx) rtx/90000",
+            "a=fmtp:\(rtx) apt=\(h264)",
+        ], at: videoEnd)
+        return lines.joined(separator: "\r\n")
+    }
+    #endif
+
+    private static func mediaSectionCount(_ sdp: String) -> Int {
+        sdp.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n")
+            .count(where: { $0.hasPrefix("m=") })
+    }
+
+    private static func mediaSection(_ sdp: String, mid: String) -> String {
+        let sections = sdp.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\nm=")
+        return sections.first(where: { $0.contains("a=mid:\(mid)\n") }) ?? ""
+    }
+
+    private static let validNativePublisherOffer = [
+        "v=0",
+        "o=- 1 1 IN IP4 0.0.0.0",
+        "s=-",
+        "t=0 0",
+        "a=group:BUNDLE publisher-video publisher-audio remote-video remote-audio",
+        "m=video 9 UDP/TLS/RTP/SAVPF 102 103",
+        "a=mid:publisher-video",
+        "a=recvonly",
+        "a=rtpmap:102 H264/90000",
+        "a=fmtp:102 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+        "a=rtpmap:103 rtx/90000",
+        "a=fmtp:103 apt=102",
+        "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+        "a=mid:publisher-audio",
+        "a=recvonly",
+        "a=rtpmap:111 opus/48000/2",
+        "m=video 9 UDP/TLS/RTP/SAVPF 102 103",
+        "a=mid:remote-video",
+        "a=sendonly",
+        "a=rtpmap:102 H264/90000",
+        "a=fmtp:102 packetization-mode=1",
+        "a=rtpmap:103 rtx/90000",
+        "a=fmtp:103 apt=102",
+        "m=audio 9 UDP/TLS/RTP/SAVPF 111",
+        "a=mid:remote-audio",
+        "a=sendonly",
+        "a=rtpmap:111 opus/48000/2",
+    ].joined(separator: "\r\n") + "\r\n"
 }
 
 private func stat(

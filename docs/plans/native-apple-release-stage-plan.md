@@ -1,12 +1,13 @@
 # Native Apple Release Stage Plan
 
-This plan starts from the current checkpoint: the native iOS/iPadOS and macOS
-clients build locally, repo-owned release rails exist, and strict readiness is
-blocked only by external Apple/account/device evidence.
+This plan starts from the current checkpoint: the native iOS/iPadOS room client
+and the SwiftUI/WebKit macOS workspace shell build locally, repo-owned release
+rails exist, and strict readiness is blocked only by external
+Apple/account/device evidence.
 
 Do not treat this document as release proof. It is the ordered operator plan
-for turning the repo-ready native clients into TestFlight and macOS
-distribution candidates.
+for turning the iOS/iPadOS client into a TestFlight candidate and STRIDE.app
+into a direct-distribution macOS DMG.
 
 ## Current Stage
 
@@ -33,7 +34,8 @@ Current strict blockers:
 
 The following are still unproven until the later gates pass:
 
-- Physical iPhone, iPad, or Mac video chat quality.
+- Physical iPhone or iPad native video chat quality.
+- Authenticated Mac WebKit workspace and browser-media behavior on the release build.
 - Browser/native mixed-room stability.
 - TestFlight availability or external testing readiness.
 - App Store review readiness.
@@ -41,7 +43,8 @@ The following are still unproven until the later gates pass:
 - End-user shipping readiness.
 
 Simulator and local macOS XCTest results are necessary build health checks, but
-they are not media-quality or distribution proof.
+they are not native media-quality, authenticated workspace, or distribution
+proof.
 
 ## Stage 1 - Repeat Local Xcode Gates
 
@@ -155,19 +158,20 @@ profile presence, and generic Release build rehearsals pass.
 
 In the real release room:
 
-1. Open the proof-pack launch link on the iPhone, iPad, and Mac native apps.
+1. Open the proof-pack launch link on the iPhone and iPad native apps.
 2. Join the same room as a browser peer.
 3. Verify native mic/camera publish and remote audio/video render.
 4. Save the app-generated QA evidence files into the proof-pack inbox:
    - `iphone-qa_snapshot.json`
    - `ipad-qa_snapshot.json`
-   - `mac-qa_snapshot.json`
 5. Promote each file with
    `scripts/native-apple-promote-media-evidence.mjs`.
 
-Expected result: `ReleaseEvidence.draft.json` has passed media evidence for all
-three physical platforms. Simulator snapshots must not be promoted as physical
-proof.
+Expected result: `ReleaseEvidence.draft.json` has passed native-media evidence
+for both physical mobile platforms. Simulator snapshots must not be promoted
+as physical proof. Separately, exercise the authenticated Home, Rooms,
+Conversations, Work, and Drive surfaces in the release Mac app, including its
+camera/microphone browser permissions and offline recovery.
 
 ## Stage 6 - TURN And Room-Interop Evidence
 
@@ -179,7 +183,7 @@ On a restrictive network:
 For room interop:
 
 1. Run a same-room smoke with at least three participants.
-2. Include at least one browser client and at least one native Apple client.
+2. Include at least one browser client and at least one native iPhone/iPad client.
 3. Confirm remote audio, remote video, no missing/duplicate/stalled remote
    health, clean leave with `/participants` empty, and recording-off
    transcript/Realtime forwarding stopped.
@@ -210,13 +214,12 @@ approved public App Store release.
 
 On the Apple-account machine:
 
-1. Archive `MeetingAssistMacApp`.
-2. Export with Developer ID signing.
-3. Zip/package the app for notarization.
-4. Submit to Apple notary service and wait for accepted status.
-5. Staple the accepted ticket.
-6. Run Gatekeeper assessment.
-7. Create and promote `notarization-observation.json`.
+1. Archive `MeetingAssistMacApp` and export `STRIDE.app` with Developer ID signing.
+2. Build and sign `STRIDE-<version>.dmg` from that exact exported app.
+3. Submit the final DMG to Apple notary service and wait for accepted status.
+4. Staple and validate the accepted ticket on the DMG.
+5. Gatekeeper-assess both the DMG and its mounted `STRIDE.app`.
+6. Create and promote `notarization-observation.json` for that exact DMG.
 
 Expected result: `ReleaseEvidence.draft.json` has passed macOS notarization
 evidence with distribution artifact kind, basename, SHA-256, notary request ID,

@@ -285,11 +285,7 @@ func meetingSpecialistProductStatusHandler(w http.ResponseWriter, r *http.Reques
 		writeAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	user, product, ok := meetingSpecialistRequestContext(w, r)
-	if !ok {
-		return
-	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "specialists": product.Status(r.Context(), user, r.URL.Query().Get("roomId"))})
+	rejectRetiredMeetingSpecialistMutation(w)
 }
 
 func meetingSpecialistProductInvitationHandler(w http.ResponseWriter, r *http.Request) {

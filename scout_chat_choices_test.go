@@ -381,7 +381,9 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 
 			var routed openAITextRequest
 			swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
-				routed = request
+				if request.Workflow == "scout_route" {
+					routed = request
+				}
 				return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
 					Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: scenario.toolID, Objective: scenario.objective,
 				}), nil
@@ -403,12 +405,17 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 				t.Fatalf("append scenario message: %v", err)
 			}
 
-			// The intent map rides the system prompt — that is what makes these
-			// phrasings route well on the live model.
-			for _, anchor := range []string{"Intent map", "deck_outline", "brand_design_brief", "packaging_studio", "clarify_once"} {
-				if !strings.Contains(routed.Instructions, anchor) {
-					t.Fatalf("router system prompt missing intent-map anchor %q", anchor)
+			// Model-routed scenarios carry the complete intent map. Exact authored
+			// output asks may instead take the server-owned deterministic route and
+			// must not be mistaken for an absent or overwritten router request.
+			if routed.Workflow != "" {
+				for _, anchor := range []string{"Intent map", "deck_outline", "brand_design_brief", "packaging_studio", "clarify_once"} {
+					if !strings.Contains(routed.Instructions, anchor) {
+						t.Fatalf("router system prompt missing intent-map anchor %q", anchor)
+					}
 				}
+			} else if scenario.toolID != packagingStudioProcessID {
+				t.Fatalf("non-Studio scenario bypassed the model router: %q", scenario.utterance)
 			}
 
 			launched, ok := response["agentThread"].(scoutAgentThread)
@@ -418,8 +425,12 @@ func TestScoutChatRouterScenarioPhrasingsRouteToIntendedProposal(t *testing.T) {
 			if launched.Artifact.Metadata["toolTemplate"] != scenario.toolID && launched.Artifact.Metadata["processId"] != scenario.toolID {
 				t.Fatalf("launch metadata=%#v, want %s", launched.Artifact.Metadata, scenario.toolID)
 			}
-			if launched.Query != canonicalizeBoardText(scenario.objective) {
-				t.Fatalf("objective=%q, want the routed objective", launched.Query)
+			wantObjective := scenario.objective
+			if routed.Workflow == "" {
+				wantObjective = scenario.utterance
+			}
+			if launched.Query != canonicalizeBoardText(wantObjective) {
+				t.Fatalf("objective=%q, want %q", launched.Query, canonicalizeBoardText(wantObjective))
 			}
 			answer, ok := response["answer"].(scoutChatMessageRecord)
 			if !ok || answer.Thread == nil || strings.TrimSpace(answer.Thread.Status) == "" {

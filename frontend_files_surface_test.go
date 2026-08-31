@@ -24,17 +24,19 @@ func readIndexForFilesSurface(t *testing.T) string {
 func TestIndexFilesToolRegistration(t *testing.T) {
 	html := readIndexForFilesSurface(t)
 	for _, want := range []string{
-		// rail button + surface section
-		`data-tool="files" aria-label="Files"`,
+		// Build 18 renamed the public Files doorway to Drive while retaining the
+		// load-bearing internal files tool and section.
+		`data-pd1-destination="Drive" aria-label="Drive"`,
 		`<section id="filesTool" class="memory-tool" aria-label="Drive">`,
 		// tool registries: routable + full-page treatment
-		`const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files', 'network', 'team']`,
-		`const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files', 'network', 'team']`,
+		`const osToolIds = ['office', 'chat', 'artifacts', ...agentToolIds, 'memory', 'files']`,
+		`const TOOL_IDS = ['office', 'room', 'chat', 'artifacts', ...agentToolIds, 'board', 'memory', 'files']`,
 		// topbar identity + canon subtitle
 		`files: 'Drive'`,
 		"company files",
-		// the meeting PiP follows you onto the files page
-		"tool === 'memory' || tool === 'files')",
+		// the meeting PiP follows you onto every surface away from Rooms,
+		// including Drive.
+		"const awayFromRoom = (appShell.dataset.tool || 'office') !== 'room'",
 		// full-page CSS: surface swap + active pane
 		`#appShell.is-authed[data-tool="files"] #filesTool`,
 		`#appShell[data-tool="files"] .hearth-presentation`,

@@ -49,6 +49,13 @@ func TestCompanyDigestIsLedgerStateViewPlusThinNarrative(t *testing.T) {
 	closedPayload.ActionItems[0].Status = "done"
 	upsertLedgerTestDigest(t, app, "meeting-a", closedPayload)
 	runLedgerPass(t, app, forbiddenLedgerResponder(t))
+	// The historical transcript fixture above exercises meeting-linked ledger
+	// intake and therefore leaves its synthetic meeting identity current. Reset
+	// that fixture state so the assertion below isolates the company pass itself.
+	app.memory.rotateMeetingID(officeRoomID)
+	if got := app.memory.currentMeetingID(officeRoomID); got != "" {
+		t.Fatalf("historical ledger fixture left a live meeting id %q", got)
+	}
 
 	var got openAITextRequest
 	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {

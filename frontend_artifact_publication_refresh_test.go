@@ -27,6 +27,7 @@ const html=fs.readFileSync(process.env.PUBLICATION_REFRESH_INDEX,'utf8');
 const deckId='managed-deck-refresh';
 const documentId='managed-document-refresh';
 const pdfRef='a'.repeat(64);
+const documentDigest='d'.repeat(64);
 let admitted=true;
 let capabilityRequests=0;
 let exportRequests=0;
@@ -59,16 +60,16 @@ const server=http.createServer((req,res)=>{
   const origin='http://127.0.0.1:'+server.address().port;
   await page.goto(origin,{waitUntil:'domcontentloaded'});
   await page.waitForSelector('#appShell.is-authed');
-  await page.evaluate(({deckId,documentId,pdfRef})=>{
+  await page.evaluate(({deckId,documentId,pdfRef,documentDigest})=>{
     const pdf={ref:pdfRef,kind:'pdf',mime:'application/pdf',name:'reviewed-report.pdf'};
     const deckEntry={id:deckId,text:'<!doctype html><html><body>deck</body></html>',metadata:{title:'Reviewed deck',type:'html_deck',status:'approved',artifactVersion:'2',goalId:'deck-goal'}};
-    const documentEntry={id:documentId,text:'# Reviewed report\n\nEvidence-backed copy.',metadata:{title:'Reviewed report',type:'markdown',status:'approved',artifactVersion:'3',goalId:'document-goal',assets:JSON.stringify([pdf]),renderPdfArtifactVersion:'3',renderPdfAssetRef:pdfRef}};
+    const documentEntry={id:documentId,text:'# Reviewed report\n\nEvidence-backed copy.',metadata:{title:'Reviewed report',type:'markdown',status:'approved',artifactVersion:'3',contentDigest:documentDigest,goalId:'document-goal',assets:JSON.stringify([pdf]),renderPdfArtifactVersion:'3',renderPdfAssetRef:pdfRef}};
     artifactEntries=[deckEntry,documentEntry];
-    const resultMessage={id:'document-result',kind:'thread',thread:{artifactId:'document-goal',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultTitle:'Reviewed report',resultQualityState:'admitted',resultCanEdit:true,resultCanPresent:false,resultCanExport:true}};
+    const resultMessage={id:'document-result',kind:'thread',thread:{artifactId:'document-goal',mode:'goal',goalStatus:'completed',resultArtifactId:documentId,resultArtifactType:'markdown',resultArtifactVersion:3,resultArtifactDigest:documentDigest,resultTitle:'Reviewed report',resultQualityState:'admitted',resultCanEdit:true,resultCanPresent:false,resultCanExport:true}};
     scoutChatThreads=[{id:'refresh-thread',messages:[resultMessage]}];
     activeScoutThreadId='refresh-thread';
     globalThis.__refreshFixtures={deckEntry,documentEntry,resultMessage};
-  },{deckId,documentId,pdfRef});
+  },{deckId,documentId,pdfRef,documentDigest});
 
   // Intelligence learns the initial admission, then revokes itself while idle.
   await page.evaluate(id=>{selectedArtifactId=id;renderArtifactDetail()},documentId);
@@ -123,15 +124,16 @@ const server=http.createServer((req,res)=>{
   assert.equal((await (await page.request.get(origin+'/test/state')).json()).exportRequests,0);
   await deckStudio.getByRole('button',{name:'Close Deck Studio'}).click();
 
-  // Channel document cards and manifest rows start closed, open only after a
-  // fresh exact-revision grant, and close again on the same bounded lease.
+  // The channel document card opens only after a fresh exact-revision grant.
+  // Build 18 keeps non-deck manifest rows permanently fail-closed because the
+  // manifest itself does not carry an exact result-receipt binding.
   await page.request.get(origin+'/test/admit');
   await page.evaluate(()=>{
     const card=scoutMarkdownDocumentRefRecordNode(__refreshFixtures.resultMessage,__refreshFixtures.documentEntry);card.id='refresh-document-card';document.body.append(card);
     const manifest=scoutManifestCardNode({id:'manifest-refresh',kind:'manifest',manifest:{goalId:'document-goal',status:'shipped',title:'Reviewed package',shareArtifactId:'managed-document-refresh',deliverables:[{badge:'paper',title:'Reviewed report',artifactId:'managed-document-refresh',pdfRef:'a'.repeat(64),pdfName:'reviewed-report.pdf'}]}});manifest.id='refresh-manifest';document.body.append(manifest);
   });
   await page.locator('#refresh-document-card object[type="application/pdf"]').waitFor({state:'attached'});
-  await page.locator('#refresh-manifest a[download$=".pdf"]').waitFor({state:'visible'});
+  assert.equal(await page.locator('#refresh-manifest a[download$=".pdf"]:visible,#refresh-manifest .manifest-card__more:visible').count(),0);
   await page.request.get(origin+'/test/revoke');
   await page.waitForFunction(()=>document.querySelectorAll('#refresh-document-card object[type="application/pdf"],#refresh-document-card a[download$=".pdf"],#refresh-manifest a[download$=".pdf"]:not([hidden]),#refresh-manifest .manifest-card__more:not([hidden])').length===0,null,{timeout:5500});
 

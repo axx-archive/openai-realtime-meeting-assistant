@@ -25,6 +25,7 @@ func TestAIProviderSourceInventoryUsesSharedNetworkBoundary(t *testing.T) {
 		"embeddings.go":                          {"aiProviderHTTPClient(embeddingRequestTimeout).Do(httpRequest)"},
 		"agent_runner_anthropic.go":              {"aiProviderHTTPClient(0).Do(httpRequest)"},
 		"fiscal_client.go":                       {"client := aiProviderHTTPClient(fiscalRequestTimeout)"},
+		"stride_lead_responses.go":               {"httpClient: aiProviderHTTPClient(strideLeadResponsesTimeout)", "client.httpClient.Do(request)"},
 	}
 	for path, required := range inventory {
 		raw, err := os.ReadFile(path)

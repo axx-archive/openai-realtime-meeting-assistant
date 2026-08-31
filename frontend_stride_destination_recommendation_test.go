@@ -12,22 +12,24 @@ func TestSTRIDESuggestedWorkUISurfacesRecommendationOrManualChoiceWithoutLaunchi
 		t.Fatal(err)
 	}
 	body := string(raw)
+	// Build 18 removed the legacy Suggested Work resolver and its project
+	// chooser. Work is now a first-class destination; visiting it renders
+	// server-owned projects and never mutates merely because a recommendation
+	// was displayed.
 	for _, required := range []string{
-		"destinationRecommendation",
-		"eligibleThreadIds",
-		"eligibleThreadSet.has(String(thread.id))",
-		"Recommended · ${strideWords(strideField(record, 'destinationTitle', 'DestinationTitle'), 'Project')} · ${confidence}% · access checked",
-		"Project · pick the right match",
-		"Project · choose or create",
-		"destinationMeta.dataset.routeResolver",
-		"destinationMeta.dataset.routeDigest",
-		"}, !destination))",
+		`data-pd1-destination="Work" aria-label="Work"`,
+		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Conversations', 'Work', 'Drive'])`,
+		"function renderStudioProjects()",
+		"async function loadStudioProjects(",
+		"selectPD1Destination('Work'",
 	} {
 		if !strings.Contains(body, required) {
-			t.Fatalf("Suggested Work UI is missing %q", required)
+			t.Fatalf("build-18 Work destination is missing %q", required)
 		}
 	}
-	if strings.Contains(body, "recommendationStatus === 'recommended' && destination) {\n          await strideTeamJSON") {
-		t.Fatal("rendering a recommendation unexpectedly performs a mutation")
+	for _, retired := range []string{"destinationRecommendation", "eligibleThreadIds", "destinationMeta.dataset.routeResolver", "Project · choose or create"} {
+		if strings.Contains(body, retired) {
+			t.Fatalf("retired Suggested Work resolver returned: %q", retired)
+		}
 	}
 }

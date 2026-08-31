@@ -194,6 +194,10 @@ function shellQuote(value) {
   if (/^\$[A-Z_][A-Z0-9_]*$/.test(text)) {
     return `"${text}"`;
   }
+  const environmentReference = /^([A-Z_][A-Z0-9_]*)=(\$[A-Z_][A-Z0-9_]*)$/.exec(text);
+  if (environmentReference) {
+    return `${environmentReference[1]}="${environmentReference[2]}"`;
+  }
   if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(text)) {
     return text;
   }
@@ -335,14 +339,15 @@ function buildPlan(args) {
   const archivesDir = join(outputDir, "archives");
   const exportsDir = join(outputDir, "exports");
   const iosArchivePath = join(archivesDir, "MeetingAssist-iOS.xcarchive");
-  const macArchivePath = join(archivesDir, "MeetingAssist-macOS.xcarchive");
+  const macArchivePath = join(archivesDir, "STRIDE-macOS.xcarchive");
   const iosExportPath = join(exportsDir, "testflight");
   const macExportPath = join(exportsDir, "macos");
   const testflightOptionsPath = join(outputDir, "ExportOptions.testflight.plist");
   const developerIdOptionsPath = join(outputDir, "ExportOptions.developer-id.plist");
-  const notarizedExportPath = join(exportsDir, "macos-notarized");
-  const macZipPath = join(exportsDir, "macos", "MeetingAssistMacApp.zip");
-  const macAppPath = join(exportsDir, "macos", "MeetingAssist.app");
+  const macAppPath = join(macExportPath, "STRIDE.app");
+  const macDmgPath = join(macExportPath, `STRIDE-${metadata.version}.dmg`);
+  const macDmgVerificationMountPath = join(outputDir, "verify", "STRIDE");
+  const mountedMacAppPath = join(macDmgVerificationMountPath, "STRIDE.app");
   const projectPath = join(appleDir, "MeetingAssist.xcodeproj");
   const relativeProjectPath = repoRelative(projectPath);
 
@@ -369,8 +374,6 @@ function buildPlan(args) {
         iphoneMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "iphone-qa_snapshot.json")),
         ipadMediaTemplate: proofpack.proofpack.observationTemplates?.ipadMedia ?? null,
         ipadMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "ipad-qa_snapshot.json")),
-        macMediaTemplate: proofpack.proofpack.observationTemplates?.macMedia ?? null,
-        macMediaInput: artifactRef(join(proofpack.proofpackDir, "inbox", "mac-qa_snapshot.json")),
         turnRelayTemplate: proofpack.proofpack.observationTemplates?.turnRelay ?? null,
         turnRelayInput: artifactRef(join(proofpack.proofpackDir, "inbox", "turn-relay-observation.json")),
         roomInteropTemplate: proofpack.proofpack.observationTemplates?.roomInterop ?? null,
@@ -469,25 +472,51 @@ function buildPlan(args) {
       ],
       "Exports the macOS archive for Developer ID distribution."
     ),
-    macZipForNotary: commandSpec(
-      ["ditto", "-c", "-k", "--keepParent", artifactRef(macAppPath), artifactRef(macZipPath)],
-      "Creates a zip suitable for notarytool submission after Developer ID export."
+    macCreateDmg: commandSpec(
+      [
+        "env",
+        `STRIDE_APP_PATH=${artifactRef(macAppPath)}`,
+        "STRIDE_DMG_SIGN_IDENTITY=$STRIDE_DMG_SIGN_IDENTITY",
+        "scripts/build-macos-dmg.sh",
+        artifactRef(macExportPath),
+      ],
+      "Packages the Developer ID-exported STRIDE.app and an Applications symlink into the final signed DMG. Set STRIDE_DMG_SIGN_IDENTITY to the installed Developer ID Application identity before running it."
     ),
     macSubmitNotary: commandSpec(
-      ["xcrun", "notarytool", "submit", artifactRef(macZipPath), "--keychain-profile", "$NOTARYTOOL_KEYCHAIN_PROFILE", "--wait"],
-      "Submits the zipped macOS app for notarization using a preconfigured local keychain profile. The profile name is not stored in this plan."
+      ["xcrun", "notarytool", "submit", artifactRef(macDmgPath), "--keychain-profile", "$NOTARYTOOL_KEYCHAIN_PROFILE", "--wait"],
+      "Submits the final signed DMG for notarization using a preconfigured local keychain profile. The profile name is not stored in this plan."
     ),
-    macStaple: commandSpec(
-      ["xcrun", "stapler", "staple", artifactRef(macAppPath)],
-      "Staples the accepted notarization ticket to the exported app."
+    macStapleDmg: commandSpec(
+      ["xcrun", "stapler", "staple", artifactRef(macDmgPath)],
+      "Staples the accepted notarization ticket to the final DMG."
     ),
-    macGatekeeper: commandSpec(
-      ["spctl", "-a", "-vv", "--type", "execute", artifactRef(macAppPath)],
-      "Verifies Gatekeeper acceptance after stapling."
+    macValidateStapledDmg: commandSpec(
+      ["xcrun", "stapler", "validate", artifactRef(macDmgPath)],
+      "Validates that the final DMG carries a stapled notarization ticket."
     ),
-    macExportNotarizedArchive: commandSpec(
-      ["xcodebuild", "-exportNotarizedApp", "-archivePath", artifactRef(macArchivePath), "-exportPath", artifactRef(notarizedExportPath)],
-      "Alternative Xcode export path after the archive has been notarized by Apple."
+    macVerifySignedDmg: commandSpec(
+      ["codesign", "--verify", "--strict", "--verbose=2", artifactRef(macDmgPath)],
+      "Verifies the final DMG's Developer ID signature after stapling."
+    ),
+    macGatekeeperDmg: commandSpec(
+      ["spctl", "--assess", "--verbose=2", "--type", "open", "--context", "context:primary-signature", artifactRef(macDmgPath)],
+      "Asks Gatekeeper to assess opening the final DMG using its primary signature."
+    ),
+    macPrepareDmgVerificationMount: commandSpec(
+      ["mkdir", "-p", artifactRef(macDmgVerificationMountPath)],
+      "Creates the deterministic empty mount point used to inspect the notarized DMG."
+    ),
+    macMountDmgForVerification: commandSpec(
+      ["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", artifactRef(macDmgVerificationMountPath), artifactRef(macDmgPath)],
+      "Mounts the final DMG read-only so Gatekeeper can assess the app exactly as distributed."
+    ),
+    macGatekeeperMountedApp: commandSpec(
+      ["spctl", "--assess", "--verbose=2", "--type", "execute", artifactRef(mountedMacAppPath)],
+      "Asks Gatekeeper to assess the STRIDE.app copied inside the mounted final DMG."
+    ),
+    macDetachDmgVerificationMount: commandSpec(
+      ["hdiutil", "detach", artifactRef(macDmgVerificationMountPath)],
+      "Detaches the read-only DMG verification mount after Gatekeeper assessment."
     ),
   };
   if (proofpack) {
@@ -520,21 +549,6 @@ function buildPlan(args) {
         "--confirm-same-room",
       ],
       "Promotes the saved iPad QA snapshot after it was captured on a physical iPad in the release room."
-    );
-    commands.promoteMacMediaEvidence = commandSpec(
-      [
-        "node",
-        "scripts/native-apple-promote-media-evidence.mjs",
-        "--proofpack-dir",
-        artifactRef(proofpack.proofpackDir),
-        "--platform",
-        "mac",
-        "--input",
-        observationInputs.macMediaInput,
-        "--confirm-physical-device",
-        "--confirm-same-room",
-      ],
-      "Promotes the saved Mac QA snapshot after it was captured on the physical Mac in the release room."
     );
     commands.promoteTurnRelayObservation = commandSpec(
       [
@@ -793,11 +807,13 @@ function buildPlan(args) {
     exports: {
       testflight: artifactRef(iosExportPath),
       macos: artifactRef(macExportPath),
-      macosNotarized: artifactRef(notarizedExportPath),
+      macosApp: artifactRef(macAppPath),
+      macosDmg: artifactRef(macDmgPath),
     },
     commands,
     operatorEnvironment: {
       appleDevelopmentTeam: "Configure through apple/Config/Signing.local.xcconfig or APPLE_DEVELOPMENT_TEAM; this plan intentionally does not print the Team ID.",
+      dmgSignIdentity: "Set STRIDE_DMG_SIGN_IDENTITY to the installed Developer ID Application identity before creating the final DMG.",
       notarytoolKeychainProfile: "Set NOTARYTOOL_KEYCHAIN_PROFILE in the local shell before running the notarytool command.",
       restrictiveNetworkLabel: "Set NATIVE_APPLE_RESTRICTIVE_NETWORK to a non-secret label before promoting TURN evidence.",
       roomInteropParticipantCount: "Set NATIVE_APPLE_ROOM_INTEROP_PARTICIPANT_COUNT to the total browser/native participant count before creating room-gate evidence.",
@@ -806,8 +822,8 @@ function buildPlan(args) {
       appReviewPrivacyPolicyURL: "Set NATIVE_APPLE_PRIVACY_POLICY_URL to the public HTTPS privacy policy URL before creating App Store review metadata evidence.",
       appStoreConnectBuildId: "Set NATIVE_APPLE_APP_STORE_CONNECT_BUILD_ID to the non-secret App Store Connect build id before creating TestFlight evidence.",
       testFlightProcessingStatus: "Set NATIVE_APPLE_TESTFLIGHT_PROCESSING_STATUS to ready, uploaded, processing, or accepted before creating TestFlight evidence.",
-      macDistributionKind: "Set NATIVE_APPLE_MAC_DISTRIBUTION_KIND to zip, dmg, pkg, or app before creating macOS notarization evidence.",
-      macDistributionFilename: "Set NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME to the basename of the notarized macOS distribution artifact.",
+      macDistributionKind: "Set NATIVE_APPLE_MAC_DISTRIBUTION_KIND to dmg before creating macOS notarization evidence.",
+      macDistributionFilename: `Set NATIVE_APPLE_MAC_DISTRIBUTION_FILENAME to STRIDE-${metadata.version}.dmg before creating macOS notarization evidence.`,
       macDistributionSHA256: "Set NATIVE_APPLE_MAC_DISTRIBUTION_SHA256 to the 64-character SHA-256 of the notarized macOS distribution artifact.",
       notaryRequestId: "Set NATIVE_APPLE_NOTARY_REQUEST_ID to the non-secret notary request id before creating macOS notarization evidence.",
       gatekeeperSource: "Set NATIVE_APPLE_GATEKEEPER_SOURCE to the non-secret Gatekeeper source label before creating macOS notarization evidence.",
@@ -816,13 +832,13 @@ function buildPlan(args) {
     warnings,
     nextSteps: [
       "Run operatorPreflight on the Apple-account machine before archive/upload/notarization.",
-      "Capture and promote physical iPhone, iPad, and Mac media QA snapshots from the release room.",
+      "Capture and promote physical iPhone and iPad native-media QA snapshots from the release room.",
       "Capture and promote restrictive-network TURN relay evidence.",
       "Capture browser/native 3+ participant room gate evidence, create the sanitized observation, and promote it.",
       "Complete App Store Connect review metadata, create the sanitized observation, and promote it.",
       "Archive and upload MeetingAssistAppleApp for TestFlight only on the Apple-account machine, then create and promote the sanitized TestFlight observation.",
       "Archive and export MeetingAssistMacApp with Developer ID signing.",
-      "Submit, staple, and Gatekeeper-verify the macOS app, then create and promote the sanitized macOS notarization observation.",
+      "Create the signed STRIDE DMG, submit that final DMG to notarytool, staple and validate it, then Gatekeeper-assess both the DMG and its mounted STRIDE.app.",
       "Create proof-pack inbox room-gate, App Store review, TestFlight, and macOS notarization observations from the real operator run.",
       "Promote sanitized room-gate, App Store review, TestFlight, and macOS notarization observations into the proof pack.",
       "Copy the completed proof-pack draft into ignored local release evidence.",

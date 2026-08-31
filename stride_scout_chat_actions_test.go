@@ -47,7 +47,7 @@ func TestSTRIDEScoutRichActionsRemainUnavailableUntilIndividuallyAdmitted(t *tes
 	if !ok || fileAnswer.IntentOutcome != string(conversationIntentUnavailable) || len(fileAnswer.Files) != 0 {
 		t.Fatalf("file answer=%+v response=%+v", fileAnswer, fileResponse)
 	}
-	if fileResponse["intentOutcome"] != string(conversationIntentUnavailable) || fileResponse["file"] != nil || fileResponse["providerCalls"] != 0 || fileResponse["providerExecutionFenced"] != true {
+	if fileResponse["intentOutcome"] != string(conversationIntentUnavailable) || fileResponse["file"] != nil || fileResponse["providerCalls"] != 0 || fileResponse["dependencyRequired"] != true {
 		t.Fatalf("unadmitted file action did not fail closed: %+v", fileResponse)
 	}
 	if providerCalls != 0 {

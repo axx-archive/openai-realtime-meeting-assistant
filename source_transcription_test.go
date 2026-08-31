@@ -83,7 +83,11 @@ func TestTranscriptionMixerPreservesOverlappingSourceIdentity(t *testing.T) {
 func TestKnownSourceTranscriptUsesExactSpeakerAndRejectsPriorRecordingEpoch(t *testing.T) {
 	app := newW2ATestApp(t)
 	defer app.Close()
-	roomID := "room-source2222"
+	room, err := appRoomStore().create("source transcript room", "", "aj@shareability.com", false)
+	if err != nil {
+		t.Fatalf("create source transcript room: %v", err)
+	}
+	roomID := room.ID
 	sittingID := admitMemberWithTranscriptConsentForTest(t, app, roomID, "aj@shareability.com")
 	authority := currentConsentLaneAuthority()
 	binding, err := app.consentBindingForPrincipal(context.Background(), memberAdmissionPrincipal("aj@shareability.com"), roomID, sittingID)

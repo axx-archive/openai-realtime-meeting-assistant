@@ -6,9 +6,81 @@ import XCTest
 
 @MainActor
 final class NativeRoomViewModelTests: XCTestCase {
-    func testRefreshRosterLoadsParticipantsAndSelectsFirstName() async {
+    func testServerOriginPolicyAllowsProductionSubdomainsAndLoopbackOnly() {
+        XCTAssertEqual(
+            NativeRoomServerOrigin.normalized("https://thebonfire.xyz")?.absoluteString,
+            "https://thebonfire.xyz"
+        )
+        XCTAssertEqual(
+            NativeRoomServerOrigin.normalized("https://media.thebonfire.xyz/")?.absoluteString,
+            "https://media.thebonfire.xyz"
+        )
+        XCTAssertEqual(
+            NativeRoomServerOrigin.normalized("http://127.0.0.1:3100")?.absoluteString,
+            "http://127.0.0.1:3100"
+        )
+        XCTAssertEqual(
+            NativeRoomServerOrigin.normalized("http://localhost:3100")?.absoluteString,
+            "http://localhost:3100"
+        )
+        XCTAssertEqual(
+            NativeRoomServerOrigin.normalized("http://[::1]:3100")?.absoluteString,
+            "http://[::1]:3100"
+        )
+        XCTAssertNil(NativeRoomServerOrigin.normalized("http://thebonfire.xyz"))
+        XCTAssertNil(NativeRoomServerOrigin.normalized("http://192.168.1.20:3100"))
+        XCTAssertNil(NativeRoomServerOrigin.normalized("https://example.com"))
+        XCTAssertNil(NativeRoomServerOrigin.normalized("https://thebonfire.xyz.evil.example"))
+        XCTAssertNil(NativeRoomServerOrigin.normalized("https://user:secret@thebonfire.xyz"))
+    }
+
+    func testManuallyEditedUntrustedOriginCannotReachLogin() async {
+        let factoryCalls = LockedCounter()
         let model = NativeRoomViewModel(
             baseURLString: "https://example.com",
+            selectedName: "Tom",
+            password: "typed-locally",
+            configLoaderFactory: { _ in
+                factoryCalls.increment()
+                return MockConfigLoader(participants: [])
+            },
+            sessionFactory: { _ in
+                factoryCalls.increment()
+                return MockRoomSession()
+            }
+        )
+
+        XCTAssertFalse(model.canJoin)
+        await model.joinAudioOnly()
+
+        XCTAssertEqual(factoryCalls.value, 0)
+        XCTAssertEqual(model.errorMessage, "Enter a valid room URL and name.")
+        XCTAssertEqual(model.password, "typed-locally")
+    }
+
+    func testLaunchURLUsesSameOriginPolicyAndCannotRedirectLogin() {
+        let model = NativeRoomViewModel(
+            baseURLString: "https://thebonfire.xyz",
+            selectedName: "Tom",
+            password: "typed-locally",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in MockRoomSession() }
+        )
+
+        model.applyLaunchURL(URL(string: "meetingassist://room?url=https%3A%2F%2Fexample.com&name=Caitlyn")!)
+
+        XCTAssertEqual(model.baseURLString, "https://thebonfire.xyz")
+        XCTAssertEqual(model.selectedName, "Tom")
+        XCTAssertEqual(model.password, "typed-locally")
+        XCTAssertEqual(
+            model.errorMessage,
+            "Launch link room URL must use HTTPS on thebonfire.xyz or HTTP(S) on this Mac."
+        )
+    }
+
+    func testRefreshRosterLoadsParticipantsAndSelectsFirstName() async {
+        let model = NativeRoomViewModel(
+            baseURLString: "https://thebonfire.xyz",
             configLoaderFactory: { _ in
                 MockConfigLoader(participants: [
                     Participant(name: "Tom", email: "tom@example.com"),
@@ -26,10 +98,40 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertNil(model.errorMessage)
     }
 
+    func testPrepareMediaControlsExposesRuntimeTruthWithoutJoining() async {
+        let runtime = NativeMediaRuntimeSnapshot(
+            devices: NativeMediaDeviceInventory(
+                audioInputs: [NativeMediaDevice(id: "input-1", uiDisplayName: "QA Input", kind: .audioInput)],
+                audioOutputs: [NativeMediaDevice(id: "output-1", uiDisplayName: "QA Output", kind: .audioOutput)],
+                cameras: [NativeMediaDevice(id: "camera-1", uiDisplayName: "QA Camera", kind: .camera)]
+            ),
+            audioProcessing: NativeAudioProcessingSnapshot(requestResult: .stored),
+            degradations: [.platformAudioProcessingUnavailableUsingSoftware]
+        )
+        let session = MockRoomSession(mediaRuntimeSnapshot: runtime)
+        let model = NativeRoomViewModel(
+            baseURLString: "https://thebonfire.xyz",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.prepareMediaControls()
+        await model.selectAudioInput(id: "input-1")
+        await model.selectAudioOutput(id: "output-1")
+        await model.selectCamera(id: "camera-1")
+
+        XCTAssertEqual(model.mediaRuntime, runtime)
+        XCTAssertTrue(model.hasMediaRuntimeState)
+        XCTAssertEqual(session.selectedAudioInputIDs, ["input-1"])
+        XCTAssertEqual(session.selectedAudioOutputIDs, ["output-1"])
+        XCTAssertEqual(session.selectedCameraIDs, ["camera-1"])
+        XCTAssertNil(session.joinedName)
+    }
+
     func testJoinAudioOnlyConnectsAndStoresParticipant() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             password: "B0NFIRE!",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
@@ -51,7 +153,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testJoinWithCameraConnectsWithVideoEnabled() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -69,7 +171,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testJoinFailureLeavesSessionAndReturnsToSignedOut() async {
         let session = MockRoomSession(error: NativeRoomSessionError.accessDenied("Room is full."))
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -143,7 +245,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testLaunchURLDoesNotMutateConnectedRoom() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             password: "B0NFIRE!",
             releaseRunId: "native-apple-run-1",
@@ -155,7 +257,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         await model.joinWithCamera()
         model.applyLaunchURL(URL(string: "meetingassist://room?url=https%3A%2F%2Fother.example.com&name=Caitlyn&runId=native-apple-run-2&roomId=release-room-2")!)
 
-        XCTAssertEqual(model.baseURLString, "https://example.com")
+        XCTAssertEqual(model.baseURLString, "https://thebonfire.xyz")
         XCTAssertEqual(model.selectedName, "Tom")
         XCTAssertEqual(model.releaseRunId, "native-apple-run-1")
         XCTAssertEqual(model.releaseRoomId, "release-room-1")
@@ -166,7 +268,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testMutePublishesParticipantMediaState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -183,7 +285,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testCameraTogglePublishesParticipantMediaState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -200,7 +302,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testScreenShareToggleDelegatesAndResetsOnLeave() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -224,7 +326,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testScreenShareUnavailableShowsReadableError() async {
         let session = MockRoomSession(screenShareError: RoomRTCError.screenShareUnavailable)
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -240,7 +342,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testScreenRecordingPermissionErrorIsActionable() async {
         let session = MockRoomSession(screenShareError: RoomRTCError.screenCapturePermissionDenied)
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -253,10 +355,58 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, "Allow Screen Recording for MeetingAssist in System Settings, then try sharing again.")
     }
 
+    func testScreenShareStopSignalFailureStillShowsLocalCaptureStopped() async {
+        let session = MockRoomSession(
+            screenShareError: RoomRTCError.webRTCOperationFailed("signal failed"),
+            screenShareErrorWhen: false
+        )
+        let model = NativeRoomViewModel(
+            baseURLString: "https://thebonfire.xyz",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.setScreenSharing(true)
+        XCTAssertTrue(model.isScreenSharing)
+
+        await model.setScreenSharing(false)
+
+        XCTAssertFalse(model.isScreenSharing)
+        XCTAssertEqual(session.screenSharingChanges, [true, false])
+        XCTAssertNotNil(model.errorMessage)
+    }
+
+    func testUnexpectedScreenCaptureEndClearsShareWithoutDisconnectingRoom() async {
+        let session = MockRoomSession()
+        let model = NativeRoomViewModel(
+            baseURLString: "https://thebonfire.xyz",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinWithCamera()
+        await model.setScreenSharing(true)
+        await session.emitMediaRecoveryEvent(
+            NativeMediaRecoveryEvent(
+                stage: "screen_share_ended",
+                message: "Screen sharing stopped unexpectedly. Camera video was restored.",
+                terminal: false
+            )
+        )
+
+        XCTAssertFalse(model.isScreenSharing)
+        XCTAssertEqual(model.statusText, "Screen share stopped")
+        XCTAssertEqual(model.lifecycle, .connected)
+        XCTAssertFalse(session.didLeave)
+    }
+
     func testRemoteScreenShareSnapshotUpdatesParticipantState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -276,7 +426,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testMediaRecoveryRequestsIceRestartForConnectedSession() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -294,7 +444,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testMediaRecoveryNoopsBeforeJoining() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -310,7 +460,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testMediaRecoveryFailureShowsReadableError() async {
         let session = MockRoomSession(iceRestartError: NativeRoomSessionError.unexpectedSignal("restart_ice"))
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -327,7 +477,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testTerminalMediaRecoveryEventLeavesBrokenSessionAndAllowsRejoin() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -357,7 +507,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         let session = MockRoomSession()
         let loader = SuspendedConfigLoader()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in loader },
             sessionFactory: { _ in session }
@@ -427,7 +577,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testCameraUnavailableShowsReadableError() async {
         let session = MockRoomSession(error: RoomRTCError.cameraUnavailable)
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -440,10 +590,29 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, "No camera is available on this device.")
     }
 
+    func testPermissionTimeoutShowsTruthfulFallbackGuidance() async {
+        let session = MockRoomSession(error: RoomRTCError.permissionRequestTimedOut("microphone_permission"))
+        let model = NativeRoomViewModel(
+            baseURLString: "https://thebonfire.xyz",
+            selectedName: "Tom",
+            configLoaderFactory: { _ in MockConfigLoader(participants: []) },
+            sessionFactory: { _ in session }
+        )
+
+        await model.joinAudioOnly()
+
+        XCTAssertTrue(session.didLeave)
+        XCTAssertEqual(model.lifecycle, .signedOut)
+        XCTAssertEqual(
+            model.errorMessage,
+            "macOS did not resolve the native microphone permission request. Rejoin explicitly after reviewing System Settings."
+        )
+    }
+
     func testRemoteVideoTracksAppendDedupeAndClearOnLeave() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -464,7 +633,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testRemoteVideoTrackRelabelsWithoutDuplicatingTile() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -482,7 +651,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testRemoteVideoTrackUsesParticipantNameWhenMetadataArrivesFirst() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -503,7 +672,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         let evidence = Self.passingMediaEvidence()
         let session = MockRoomSession(mediaEvidenceSnapshot: evidence)
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -534,7 +703,7 @@ final class NativeRoomViewModelTests: XCTestCase {
             turnRelayObservation: observation
         )
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -569,7 +738,7 @@ final class NativeRoomViewModelTests: XCTestCase {
         let evidence = Self.passingMediaEvidence()
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -627,7 +796,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testRoomAndBoardSnapshotsUpdateNativeState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -667,7 +836,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testUndoAvailabilityUpdatesNativeState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -682,7 +851,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testAssistantMemoryAndArchiveUpdatesNativeState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -718,9 +887,9 @@ final class NativeRoomViewModelTests: XCTestCase {
         XCTAssertEqual(model.memoryEntries.map(\.kind), ["brain", "transcript"])
         XCTAssertEqual(model.recentMemoryEntries.map(\.id), ["memory-2", "memory-1"])
         XCTAssertEqual(model.latestArchive?.id, "meeting-20260624")
-        XCTAssertEqual(model.latestArchiveDownloadURL?.host, "example.com")
+        XCTAssertEqual(model.latestArchiveDownloadURL?.host, "thebonfire.xyz")
         XCTAssertEqual(model.latestArchiveDownloadURL?.path, "/archives/meeting-20260624.json")
-        XCTAssertEqual(model.assistantDownloadURL(for: assistantArchive)?.host, "example.com")
+        XCTAssertEqual(model.assistantDownloadURL(for: assistantArchive)?.host, "thebonfire.xyz")
         XCTAssertEqual(model.assistantDownloadURL(for: assistantArchive)?.path, "/archives/latest.json")
         XCTAssertEqual(model.statusText, "Archive ready")
 
@@ -737,7 +906,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testAssistantAndPrivateScoutChatDelegateToSession() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -763,7 +932,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testRecordingAndArchiveControlsDelegateToSession() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -783,7 +952,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testBoardMutationsDelegateToSession() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -817,7 +986,7 @@ final class NativeRoomViewModelTests: XCTestCase {
     func testLeaveResetsJoinedState() async {
         let session = MockRoomSession()
         let model = NativeRoomViewModel(
-            baseURLString: "https://example.com",
+            baseURLString: "https://thebonfire.xyz",
             selectedName: "Tom",
             configLoaderFactory: { _ in MockConfigLoader(participants: []) },
             sessionFactory: { _ in session }
@@ -889,6 +1058,19 @@ final class NativeRoomViewModelTests: XCTestCase {
     }
 }
 
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock { count }
+    }
+
+    func increment() {
+        lock.withLock { count += 1 }
+    }
+}
+
 private struct MockConfigLoader: NativeRoomConfigLoading {
     var participants: [Participant]
 
@@ -949,6 +1131,7 @@ private actor SuspendedConfigLoader: NativeRoomConfigLoading {
 private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Sendable {
     private let error: Error?
     private let screenShareError: Error?
+    private let screenShareErrorWhen: Bool?
     private let iceRestartError: Error?
     private(set) var remoteVideoTrackHandler: NativeRemoteVideoTrackInfoHandler?
     private(set) var roomSnapshotHandler: NativeRoomSnapshotHandler?
@@ -960,6 +1143,7 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var scoutChatEventsHandler: NativeScoutChatEventsHandler?
     private(set) var mediaRecoveryHandler: NativeMediaRecoveryHandler?
     private(set) var mediaEvidenceHandler: NativeMediaEvidenceHandler?
+    private(set) var mediaRuntimeStateHandler: NativeMediaRuntimeStateHandler?
     private(set) var joinedName: String?
     private(set) var joinedPassword: String?
     private(set) var didJoinWithCamera = false
@@ -979,23 +1163,31 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     private(set) var assistantQueries: [String] = []
     private(set) var scoutChatMessages: [String] = []
     private(set) var scoutChatResetCount = 0
+    private(set) var selectedAudioInputIDs: [String?] = []
+    private(set) var selectedAudioOutputIDs: [String?] = []
+    private(set) var selectedCameraIDs: [String?] = []
 
     private var lifecycle: RoomLifecycleState = .connected
     private let mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot
     private let turnRelayObservation: NativeTurnRelayObservation
+    private var runtimeSnapshot: NativeMediaRuntimeSnapshot
 
     init(
         error: Error? = nil,
         screenShareError: Error? = nil,
+        screenShareErrorWhen: Bool? = nil,
         iceRestartError: Error? = nil,
         mediaEvidenceSnapshot: NativeMediaEvidenceSnapshot = NativeMediaEvidenceSnapshot(source: NativeMediaQualitySnapshot()),
-        turnRelayObservation: NativeTurnRelayObservation? = nil
+        turnRelayObservation: NativeTurnRelayObservation? = nil,
+        mediaRuntimeSnapshot: NativeMediaRuntimeSnapshot = NativeMediaRuntimeSnapshot()
     ) {
         self.error = error
         self.screenShareError = screenShareError
+        self.screenShareErrorWhen = screenShareErrorWhen
         self.iceRestartError = iceRestartError
         self.mediaEvidenceSnapshot = mediaEvidenceSnapshot
         self.turnRelayObservation = turnRelayObservation ?? Self.defaultTurnRelayObservation()
+        self.runtimeSnapshot = mediaRuntimeSnapshot
     }
 
     func joinAudioOnly(name: String, password: String) async throws -> NativeRoomJoinResult {
@@ -1077,6 +1269,29 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
         mediaEvidenceHandler = handler
     }
 
+    func setMediaRuntimeStateHandler(_ handler: NativeMediaRuntimeStateHandler?) async {
+        mediaRuntimeStateHandler = handler
+        if let handler {
+            await handler(runtimeSnapshot)
+        }
+    }
+
+    func selectAudioInput(id: String?) async throws {
+        selectedAudioInputIDs.append(id)
+    }
+
+    func selectAudioOutput(id: String?) async throws {
+        selectedAudioOutputIDs.append(id)
+    }
+
+    func selectCamera(id: String?) async throws {
+        selectedCameraIDs.append(id)
+    }
+
+    func mediaRuntimeSnapshot() async -> NativeMediaRuntimeSnapshot {
+        runtimeSnapshot
+    }
+
     func emitRemoteVideoTrack(_ track: NativeRemoteVideoTrack) async {
         await emitRemoteVideoTrack(NativeRemoteVideoTrackInfo(track: track))
     }
@@ -1090,8 +1305,11 @@ private final class MockRoomSession: NativeRoomSessionControlling, @unchecked Se
     }
 
     func setScreenSharing(_ sharing: Bool) async throws {
-        if let screenShareError { throw screenShareError }
         screenSharingChanges.append(sharing)
+        if let screenShareError,
+           screenShareErrorWhen == nil || screenShareErrorWhen == sharing {
+            throw screenShareError
+        }
     }
 
     func requestICERestart(reason: String) async throws {

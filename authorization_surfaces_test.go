@@ -16,7 +16,7 @@ var authorizationNonObjectHTTPRoutes = map[string]struct{}{
 	// web-push siblings on the line above.
 	"/assistant/push/devices":   {},
 	"/assistant/realtime/usage": {}, "/assistant/realtime/should-route": {}, "/api/usage/rollup": {}, "/calendar/event.ics": {},
-	"/client-config": {}, "/native/config": {}, "/g": {}, "/g/": {}, "/guest/lookup": {}, "/guest/me": {},
+	"/client-config": {}, "/native/config": {}, "/native/discovery": {}, "/g": {}, "/g/": {}, "/guest/lookup": {}, "/guest/me": {},
 	"/ice-test": {}, "/public/": {}, "/sw.js": {}, "/": {},
 }
 

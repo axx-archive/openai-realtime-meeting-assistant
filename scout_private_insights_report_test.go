@@ -116,7 +116,7 @@ func TestPrivateScoutInsightsReportStartsExactlyOnceAndStaysPrivate(t *testing.T
 		t.Fatalf("goal plan=%+v err=%v", plan, err)
 	}
 	saved, ok := response["thread"].(scoutChatThreadRecord)
-	if !ok || len(saved.Messages) != 2 || saved.Messages[1].Thread == nil || saved.Messages[1].Thread.ArtifactID != launched.Artifact.ID || saved.Messages[1].Text != "Insights & Opportunities report in progress" {
+	if !ok || len(saved.Messages) != 2 || saved.Messages[1].Thread == nil || saved.Messages[1].Thread.ArtifactID != launched.Artifact.ID || saved.Messages[1].Text != "I’m researching and writing your report now. I’ll post the finished file here." {
 		t.Fatalf("saved private report card=%#v", response["thread"])
 	}
 

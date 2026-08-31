@@ -20,4 +20,23 @@ final class SignalingClientTests: XCTestCase {
             XCTFail("unexpected error: \(error)")
         }
     }
+
+    func testCorrelatedEnvelopeSendBeforeConnectThrows() async {
+        let client = MeetingAssistSignalingClient()
+
+        do {
+            try await client.send(
+                WebSocketEnvelope(
+                    event: ClientSignalEvent.answer,
+                    data: "{}",
+                    offerId: "offer-1",
+                    revision: 1
+                )
+            )
+            XCTFail("send should throw before a websocket task is connected")
+        } catch MeetingAssistSignalingError.notConnected {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
 }

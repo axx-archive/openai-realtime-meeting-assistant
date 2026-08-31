@@ -20,8 +20,11 @@ public actor MeetingAssistSignalingClient {
     }
 
     public func send(event: String, data: String = "{}") async throws {
+        try await send(WebSocketEnvelope(event: event, data: data))
+    }
+
+    public func send(_ envelope: WebSocketEnvelope) async throws {
         guard let task else { throw MeetingAssistSignalingError.notConnected }
-        let envelope = WebSocketEnvelope(event: event, data: data)
         let payload = try encoder.encode(envelope)
         try await task.send(.data(payload))
     }

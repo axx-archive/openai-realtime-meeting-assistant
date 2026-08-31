@@ -168,7 +168,7 @@ func TestIndexComposerDestinationGuard(t *testing.T) {
 	}
 
 	// the active-thread render pass must keep the guard in lockstep
-	activeBody := functionBody(html, "function renderActiveScoutThread()")
+	activeBody := functionBodyAfterSignature(html, "function renderActiveScoutThread(options = {})")
 	if !strings.Contains(activeBody, "renderScoutChatDestination()") {
 		t.Error("renderActiveScoutThread must sync the destination guard")
 	}
@@ -180,9 +180,9 @@ func TestIndexComposerDestinationGuard(t *testing.T) {
 
 func TestIndexAgentMessagesGroupByStampedIdentityNotSharedScoutRole(t *testing.T) {
 	html := readIndexForThreadNavSplit(t)
-	body := functionBody(html, "function scoutChatMessageRecordNode(message)")
+	body := functionBody(html, "function scoutChatMessageFollowKey(message)")
 	if body == "" {
-		t.Fatal("could not extract scoutChatMessageRecordNode body")
+		t.Fatal("could not extract scoutChatMessageFollowKey body")
 	}
 	if !strings.Contains(body, "authorEmail || authorName.toLowerCase() || kind") {
 		t.Fatal("agent-authored messages without a human email must group by stamped author name")

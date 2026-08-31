@@ -67,8 +67,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/assistant/chat-threads/source') {
     res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({thread:sourceThread}));
   }
-  if (req.method === 'GET' && req.url.startsWith('/assistant/chat-threads/riff-space?episodeId=')) {
-    const episodeId = decodeURIComponent(req.url.split('episodeId=')[1]);
+  const requestURL = new URL(req.url, 'http://local.test');
+  if (req.method === 'GET' && requestURL.pathname === '/assistant/chat-threads/riff-space' && requestURL.searchParams.get('episodeId')) {
+    const episodeId = requestURL.searchParams.get('episodeId');
     requests.push({method:'GET',kind:'view',episodeId});
     res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({thread:riffThread('ep-2', episodeId)}));
   }
@@ -109,13 +110,20 @@ const server = http.createServer(async (req, res) => {
   await page.waitForSelector('#chatContextRail:not([hidden])');
   assert.match(await page.locator('#chatContextRail').innerText(),/Your Riff|Current pass/);
   assert.doesNotMatch(await page.locator('#chatContextRail').innerText(),/Update context|Refresh context/);
-  assert.match(await page.locator('#chatContextRail').innerText(),/refresh automatically/);
+  assert.match(await page.locator('#chatContextRail').innerText(),/Open source/);
+  assert.match(await page.locator('#chatContextRail').innerText(),/Riff in Realtime/);
+  assert.match(await page.locator('#chatContextRail').innerText(),/1 earlier pass/);
   const firstOpen=requests.find(item => item.kind === 'open');
   assert.equal(firstOpen.body.entryPoint,'resume');
   assert.equal(firstOpen.body.throughMessageId,'source-2');
 
-  await page.locator('.private-riff-history summary').click();
-  await page.locator('.private-riff-history__pass').click();
+  await page.locator('#chatContextRail .private-riff-history summary').click();
+  const viewResponse=page.waitForResponse(response=>{
+    const url=new URL(response.url());
+    return url.pathname==='/assistant/chat-threads/riff-space'&&url.searchParams.get('episodeId')==='ep-1';
+  });
+  await page.getByRole('button',{name:/View earlier private Riff pass/}).click();
+  await viewResponse;
   await page.waitForFunction(() => document.getElementById('chatContextReplyInput').disabled === true);
   assert.match(await page.locator('#chatContextRail').innerText(),/Earlier pass|Read-only pass/);
   assert.match(await page.locator('#chatContextRail').innerText(),/Resume this pass/);
@@ -127,9 +135,14 @@ const server = http.createServer(async (req, res) => {
   assert.equal(resume.body.entryPoint,'resume');
   assert.equal(resume.body.episodeId,'ep-1');
 
-  await page.locator('.private-riff-share-control > button').click();
-  await page.getByRole('button',{name:'Share this reply to source'}).click();
-  await page.waitForFunction(() => document.querySelector('.private-riff-share')?.dataset.publishedScope === 'reply');
+  const riffRail=page.locator('#chatContextRail');
+  const scoutReply=riffRail.locator('[data-message-id="scout-ep-1"]');
+  await scoutReply.scrollIntoViewIfNeeded();
+  await scoutReply.hover();
+  await scoutReply.getByRole('button',{name:'More reply actions'}).click();
+  const publishResponse=page.waitForResponse(response=>response.url().endsWith('/assistant/chat-threads/riff-space/riff-publish'));
+  await riffRail.getByRole('menuitem',{name:'Share this reply'}).click();
+  await publishResponse;
   const publish=requests.find(item => item.kind === 'publish');
   assert.equal(publish.body.scope,'reply');
   assert.equal(publish.body.episodeId,'ep-1');

@@ -18,6 +18,12 @@ public struct MeetingAssistAPIClient: Sendable {
         try await get("native/config")
     }
 
+    /// Returns the identity-free bootstrap contract used before account login.
+    /// The authenticated `nativeConfig()` surface remains the roster source.
+    public func nativeDiscovery() async throws -> NativeClientConfig {
+        try await get("native/discovery")
+    }
+
     public func clientConfig(path: String = "client-config") async throws -> ClientRTCConfig {
         try await get(path)
     }
