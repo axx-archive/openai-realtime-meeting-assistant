@@ -39,17 +39,26 @@ iOS/iPadOS target and the protocol test harness. It includes room discovery,
 sign-in, audio/video join, mute/camera publication, remote video rendering, and
 leave controls backed by `NativeRoomSessionCoordinator`.
 
-The macOS target intentionally has a different product boundary: it is a native
-SwiftUI app shell around the current production workspace at
-`https://thebonfire.xyz/index.html`. SwiftUI owns the unified macOS window,
-sidebar navigation, live organization/theme/status presentation, keyboard
-commands, and accessibility behavior. WebKit owns the feature canvases for
-Home, Rooms, Conversations, Work, and Drive, plus authentication and
-server-driven web updates. A small, versioned, main-frame-only bridge keeps those
-layers in sync; the native layer also owns persistent website data, trusted
-navigation, downloads, media-capture permission, loading, and offline recovery.
-This honest hybrid boundary keeps the Mac app visually native and aligned with
-the current web product instead of duplicating an older native feature set.
+The macOS target is currently a transitional hybrid: a native SwiftUI desktop
+shell around the production workspace at `https://thebonfire.xyz/index.html`.
+SwiftUI owns the unified macOS window, sidebar navigation, live
+organization/theme/status presentation, keyboard commands, accessibility, and
+the native room preview. WebKit still owns the Home, Rooms, Conversations,
+Work, and Drive canvases, authentication, and server-driven web updates. A
+small, versioned, main-frame-only bridge keeps those layers in sync; the native
+layer also owns persistent website data, trusted navigation, downloads,
+media-capture permission, loading, and offline recovery.
+
+This is not the final desktop product boundary. STRIDE's Mac app is the primary
+desktop client, so high-frequency surfaces should move to first-class native
+macOS compositions in coherent vertical slices, starting with Rooms and the
+interactions where native latency, media, commands, notifications, or windowing
+produce a user-visible benefit. WebKit remains the fallback and migration seam
+for a surface until its native replacement reaches behavioral and evidence
+parity; it is not a permanent excuse to keep a web page inside native chrome.
+The browser product remains a first-class network client and must be refined on
+its own terms. Both clients share API, authorization, room-protocol, semantic
+state, and design-token contracts without sharing rendering technology.
 
 ## Xcode Project
 

@@ -3,6 +3,12 @@
 Date: 2026-08-31
 Status: accepted for a local-QA vertical slice; WebKit remains the default until the evidence gate passes
 
+This document decides meeting-media ownership only. Keeping WebKit as the
+default meeting path until physical evidence passes does not make WKWebView the
+permanent Mac product architecture. The Mac app is now directed toward a
+first-class native desktop composition, while the browser remains a separate
+first-class network client; both retain shared service and protocol contracts.
+
 ## Decision
 
 STRIDE will not attempt to inject native audio or video into a JavaScript `MediaStream` in `WKWebView`. The public macOS WebKit surface can grant or stop page capture and exchange property-list messages, but it has no native media-track insertion API. Passing media, SDP, ICE, credentials, or device identity through evaluated JavaScript would be brittle and would expand the trust boundary.
@@ -30,6 +36,6 @@ The local-QA slice must prove one active owner, audio/video interoperability, no
 
 ## Local QA result
 
-Build 19 preserves build 18's shell and adds the native room as a Local QA destination in the same `STRIDE.app` bundle. Identity-free discovery, authenticated login, the versioned room socket, server offer delivery, explicit microphone/camera authorization, fixed publisher MIDs, bounded WebRTC operations, device/runtime truth, single-owner gating, and teardown are integrated. Capture shutdown is a fail-closed, process-sticky gate, native desktop capture reports asynchronous start/stop/error state through the coordinator, and the A/B harness requires complete source and artifact identity before it can report material benefit. A loopback signaling test received a real server publisher offer, and an earlier installed candidate entered and then removed exactly one seat.
+Build 21 preserves the current shell, exposes the native room as a truthful preview in the same `STRIDE.app` bundle, and makes the web canvas edge-to-edge in full screen so native and web borders do not compete. Identity-free discovery, authenticated login, the versioned room socket, server offer delivery, explicit microphone/camera authorization, fixed publisher MIDs, bounded WebRTC operations, device/runtime truth, single-owner gating, and teardown are integrated. Capture shutdown is a fail-closed, process-sticky gate, native desktop capture reports asynchronous start/stop/error state through the coordinator, and the A/B harness requires complete source and artifact identity before it can report material benefit. A loopback signaling test received a real server publisher offer, and an earlier installed candidate entered and then removed exactly one seat.
 
 An earlier pre-review candidate was Apple Development signed with the hardened runtime and installed at `/Applications/STRIDE.app`; it retained the build 18 sidebar, WebKit workspace, and explicit return-to-Web control. That artifact is obsolete and must not be shared because later security and lifecycle corrections changed the source. A fresh local-QA artifact must be built only from the final reviewed commit and its receipt must bind that exact commit and source fingerprint. In an earlier physical permission run, macOS did not resolve the microphone authorization request; the bounded request timed out after 15 seconds, tore down the single admitted seat, reported the unresolved permission honestly, and returned only by explicit user action to the working WebKit surface. No exact final artifact has completed a physical native audio call. Therefore mixed browser/mobile interoperability, physical native camera and screen sharing, and controlled same-Mac A/B/BA quality remain unproven. There is no measured basis to call the native path materially better, so WebKit remains the default and this slice is not ready for public distribution.

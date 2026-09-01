@@ -13,6 +13,7 @@ public struct MeetingAssistMacRootView: View {
     @StateObject private var nativeRoom: NativeRoomViewModel
     @State private var surface = MeetingAssistMacSurface.web
     @State private var nativeMediaNotice: String?
+    @State private var isFullScreen = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
@@ -83,6 +84,7 @@ public struct MeetingAssistMacRootView: View {
                 session: session,
                 updates: updates,
                 isNativeMediaSelected: surface == .nativeMedia,
+                isFullScreen: isFullScreen,
                 canOpenNativeMedia: !session.shellState.isInRoom,
                 onSelectWorkspace: openWebWorkspace,
                 onOpenNativeMedia: requestNativeMediaSurface
@@ -96,7 +98,7 @@ public struct MeetingAssistMacRootView: View {
         .tint(ember)
         .preferredColorScheme(.dark)
         .background(shellBlack)
-        .background(WindowChromeConfigurator())
+        .background(WindowChromeConfigurator(isFullScreen: $isFullScreen))
         .toolbarBackground(shellBlack, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
@@ -167,15 +169,20 @@ public struct MeetingAssistMacRootView: View {
 
                 NativeRoomView(model: nativeRoom)
             }
-            .background(.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(
+                .black.opacity(isFullScreen ? 0 : 0.18),
+                in: RoundedRectangle(cornerRadius: isFullScreen ? 0 : 18, style: .continuous)
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                if !isFullScreen {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                }
             }
-            .padding(.top, 8)
-            .padding(.trailing, 12)
-            .padding(.bottom, 12)
-            .padding(.leading, 10)
+            .padding(.top, isFullScreen ? 0 : 8)
+            .padding(.trailing, isFullScreen ? 0 : 12)
+            .padding(.bottom, isFullScreen ? 0 : 12)
+            .padding(.leading, isFullScreen ? 0 : 10)
         }
         .navigationTitle("")
     }
@@ -269,17 +276,23 @@ public struct MeetingAssistMacRootView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: isFullScreen ? 0 : 18, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(.white.opacity(colorSchemeContrast == .increased ? 0.25 : 0.10), lineWidth: 1)
-                    .allowsHitTesting(false)
+                if !isFullScreen {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(.white.opacity(colorSchemeContrast == .increased ? 0.25 : 0.10), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
             }
-            .shadow(color: .black.opacity(reduceTransparency ? 0.16 : 0.44), radius: 22, y: 10)
-            .padding(.top, 8)
-            .padding(.trailing, 12)
-            .padding(.bottom, 12)
-            .padding(.leading, 10)
+            .shadow(
+                color: .black.opacity(isFullScreen ? 0 : (reduceTransparency ? 0.16 : 0.44)),
+                radius: isFullScreen ? 0 : 22,
+                y: isFullScreen ? 0 : 10
+            )
+            .padding(.top, isFullScreen ? 0 : 8)
+            .padding(.trailing, isFullScreen ? 0 : 12)
+            .padding(.bottom, isFullScreen ? 0 : 12)
+            .padding(.leading, isFullScreen ? 0 : 10)
         }
         .background(shellBlack)
         .navigationTitle("")
@@ -345,6 +358,7 @@ private struct MacSidebar: View {
     @ObservedObject var session: MeetingAssistWebSession
     @ObservedObject var updates: MeetingAssistUpdateController
     let isNativeMediaSelected: Bool
+    let isFullScreen: Bool
     let canOpenNativeMedia: Bool
     let onSelectWorkspace: (MeetingAssistWorkspace) -> Void
     let onOpenNativeMedia: () -> Void
@@ -472,10 +486,12 @@ private struct MacSidebar: View {
             .ignoresSafeArea()
         }
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(.white.opacity(0.055))
-                .frame(width: 1)
-                .allowsHitTesting(false)
+            if !isFullScreen {
+                Rectangle()
+                    .fill(.white.opacity(0.055))
+                    .frame(width: 1)
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -860,19 +876,27 @@ private struct SidebarPressButtonStyle: ButtonStyle {
 }
 
 private struct WindowChromeConfigurator: NSViewRepresentable {
+    @Binding var isFullScreen: Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(isFullScreen: $isFullScreen)
+    }
+
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
-        configure(view)
+        configure(view, coordinator: context.coordinator)
         return view
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        configure(nsView)
+        context.coordinator.isFullScreen = $isFullScreen
+        configure(nsView, coordinator: context.coordinator)
     }
 
-    private func configure(_ view: NSView) {
+    private func configure(_ view: NSView, coordinator: Coordinator) {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
+            coordinator.observe(window)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = NSColor(calibratedWhite: 0.012, alpha: 1)
             window.isOpaque = true
@@ -882,6 +906,67 @@ private struct WindowChromeConfigurator: NSViewRepresentable {
             window.styleMask.insert(.fullSizeContentView)
             window.toolbarStyle = .unified
             window.toolbar?.showsBaselineSeparator = false
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var isFullScreen: Binding<Bool>
+        private weak var window: NSWindow?
+
+        init(isFullScreen: Binding<Bool>) {
+            self.isFullScreen = isFullScreen
+        }
+
+        func observe(_ window: NSWindow) {
+            guard self.window !== window else {
+                synchronize(with: window)
+                return
+            }
+
+            if let previousWindow = self.window {
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSWindow.didEnterFullScreenNotification,
+                    object: previousWindow
+                )
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSWindow.didExitFullScreenNotification,
+                    object: previousWindow
+                )
+            }
+
+            self.window = window
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(fullScreenStateChanged),
+                name: NSWindow.didEnterFullScreenNotification,
+                object: window
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(fullScreenStateChanged),
+                name: NSWindow.didExitFullScreenNotification,
+                object: window
+            )
+            synchronize(with: window)
+        }
+
+        @objc private func fullScreenStateChanged(_ notification: Notification) {
+            guard let window = notification.object as? NSWindow else { return }
+            synchronize(with: window)
+        }
+
+        private func synchronize(with window: NSWindow) {
+            let currentValue = window.styleMask.contains(.fullScreen)
+            if isFullScreen.wrappedValue != currentValue {
+                isFullScreen.wrappedValue = currentValue
+            }
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
         }
     }
 }
