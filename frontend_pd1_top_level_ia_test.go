@@ -291,7 +291,8 @@ const server = http.createServer((req, res) => {
   await page.click('#topbarOrganizationSwitcher');
   await page.waitForFunction(() => !document.getElementById('topbarOrganizationMenu').hidden && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2);
   assert.equal(await page.locator('#topbarOrganizationMenu').evaluate(el => !el.hidden), true);
-  assert.deepEqual(await page.locator('#topbarOrganizationMenu [role="menuitemradio"]').evaluateAll(items => items.map(item => ({name:item.innerText.trim(),current:item.getAttribute('aria-checked')}))), [{name:'Synthetic Lab',current:'true'},{name:'Another Studio',current:'false'}]);
+  // Each row wears its initial badge before the name (design evolution 2026-09-01).
+  assert.deepEqual(await page.locator('#topbarOrganizationMenu [role="menuitemradio"]').evaluateAll(items => items.map(item => ({name:item.innerText.trim(),current:item.getAttribute('aria-checked')}))), [{name:'S\nSynthetic Lab',current:'true'},{name:'A\nAnother Studio',current:'false'}]);
   assert.equal(await page.locator('#topbarOrganizationCreate').innerText(), 'Create organization');
   await page.keyboard.press('Escape');
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'topbarOrganizationSwitcher');

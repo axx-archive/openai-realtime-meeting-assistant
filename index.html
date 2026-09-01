@@ -1203,6 +1203,17 @@
       .topbar__organization-menu-action > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-caption-medium); }
       .topbar__organization-menu-item[aria-checked="true"] { color: var(--text-1); background: var(--surface-3); }
       .topbar__organization-menu-item[aria-checked="true"]::after { content: 'Current'; color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); text-transform: uppercase; }
+      /* each org row wears its initial, same material as the topbar badge */
+      .topbar__organization-menu-badge {
+        display: grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        background: linear-gradient(160deg, var(--accent), color-mix(in srgb, var(--accent) 78%, var(--ember)));
+        color: var(--on-accent);
+        font: 600 10px/1 var(--font-sans);
+      }
       .topbar__organization-menu-empty { padding: 12px 11px; color: var(--text-3); font: var(--type-caption); text-wrap: pretty; }
       .topbar__organization-menu-action { grid-template-columns: 20px minmax(0, 1fr); margin-top: 6px; border-top: 1px solid var(--line-1); border-radius: 0 0 12px 12px; padding-top: 6px; }
 
@@ -17966,7 +17977,7 @@
         #chatTool .desktop-chat-actions button:focus-visible,
         #chatTool .desktop-chat-reactions button:focus-visible,
         #chatTool .desktop-chat-source:focus-visible,
-        #chatTool .desktop-chat-link-preview:focus-visible,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:focus-visible,
         #chatTool .scout-chat-file:focus-visible {
           outline: 2px solid var(--ring);
           outline-offset: 2px;
@@ -18086,7 +18097,7 @@
         #chatTool .desktop-chat-actions button:active,
         #chatTool .desktop-chat-reactions button:active,
         #chatTool .desktop-chat-source:active,
-        #chatTool .desktop-chat-link-preview:active,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:active,
         #chatTool .scout-chat-file:active {
           transform: scale(0.96);
         }
@@ -18514,7 +18525,7 @@
           background: color-mix(in srgb, var(--ember) 44%, var(--line-1));
         }
 
-        #chatTool .desktop-chat-link-preview {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview {
           order: 2;
           width: min(720px, 100%);
           min-height: 168px;
@@ -18537,11 +18548,11 @@
           transition-timing-function: var(--ease);
         }
 
-        [data-theme="dark"] #chatTool .desktop-chat-link-preview {
+        [data-theme="dark"] :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview {
           box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09);
         }
 
-        #chatTool .desktop-chat-link-preview:hover {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:hover {
           transform: translateY(-2px);
           box-shadow:
             0 0 0 1px rgba(0, 0, 0, 0.1),
@@ -18549,13 +18560,13 @@
             0 14px 32px rgba(0, 0, 0, 0.09);
         }
 
-        [data-theme="dark"] #chatTool .desktop-chat-link-preview:hover {
+        [data-theme="dark"] :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:hover {
           box-shadow:
             0 0 0 1px rgba(255, 255, 255, 0.14),
             0 14px 32px rgba(0, 0, 0, 0.45);
         }
 
-        #chatTool .desktop-chat-link-preview__copy {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__copy {
           min-width: 0;
           display: grid;
           align-content: center;
@@ -18563,15 +18574,15 @@
           padding: 15px 17px;
         }
 
-        #chatTool .desktop-chat-link-preview__eyebrow,
-        #chatTool .desktop-chat-link-preview__domain,
-        #chatTool .desktop-chat-link-preview__status {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__eyebrow,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__domain,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__status {
           color: var(--text-3);
           font: var(--type-label);
           letter-spacing: var(--track-label);
         }
 
-        #chatTool .desktop-chat-link-preview__title {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__title {
           color: var(--text-1);
           font: 650 13.5px/1.35 var(--font-sans);
           text-wrap: balance;
@@ -18581,7 +18592,7 @@
           overflow: hidden;
         }
 
-        #chatTool .desktop-chat-link-preview__description {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__description {
           color: var(--text-2);
           font: var(--type-caption);
           text-wrap: pretty;
@@ -18591,15 +18602,15 @@
           overflow: hidden;
         }
 
-        #chatTool .desktop-chat-link-preview__media,
-        #chatTool .desktop-chat-link-preview__skeleton {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__media,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__skeleton {
           width: 100%;
           min-height: 168px;
           aspect-ratio: 16 / 10;
           background: var(--surface-3);
         }
 
-        #chatTool .desktop-chat-link-preview__media {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__media {
           display: block;
           height: 100%;
           object-fit: cover;
@@ -18607,62 +18618,62 @@
           outline-offset: -1px;
         }
 
-        [data-theme="dark"] #chatTool .desktop-chat-link-preview__media {
+        [data-theme="dark"] :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__media {
           outline-color: rgba(255, 255, 255, 0.1);
         }
 
-        #chatTool .desktop-chat-link-preview.is-loading {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview.is-loading {
           pointer-events: none;
           cursor: progress;
         }
 
-        #chatTool .desktop-chat-link-preview.is-loading .desktop-chat-link-preview__title,
-        #chatTool .desktop-chat-link-preview.is-loading .desktop-chat-link-preview__description {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview.is-loading .desktop-chat-link-preview__title,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview.is-loading .desktop-chat-link-preview__description {
           min-height: 12px;
           border-radius: 6px;
           color: transparent;
           background: color-mix(in srgb, var(--text-3) 13%, transparent);
         }
 
-        #chatTool .desktop-chat-link-preview.is-degraded {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview.is-degraded {
           min-height: 64px;
           grid-template-columns: 1fr;
           box-shadow: 0 0 0 1px var(--line-1);
         }
 
-        #chatTool .desktop-chat-link-preview.is-text-only {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview.is-text-only {
           min-height: 96px;
           grid-template-columns: 1fr;
         }
 
-	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) {
 	      width: min(840px, 100%);
 	      min-height: 0;
 	      grid-template-columns: 1fr;
 	    }
 
-	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__media,
-	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__skeleton,
-	    #chatTool .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__media,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__skeleton,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__visual {
 	      grid-row: 1;
 	      aspect-ratio: 16 / 9;
 	      min-height: 0;
 	      max-height: 472px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__copy {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview:is([data-kind="video"], [data-kind="youtube_video"]) .desktop-chat-link-preview__copy {
 	      grid-row: 2;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__visual,
-	    #chatTool .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__media {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__visual,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="youtube_video"] .desktop-chat-link-preview__media {
 	      width: 100%;
 	      height: 100%;
 	      min-height: 0;
 	      aspect-ratio: 16 / 9;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="tiktok_video"] {
 	      position: relative;
 	      width: min(720px, 100%);
 	      min-height: 384px;
@@ -18672,20 +18683,20 @@
 	        var(--surface-2);
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__copy {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__copy {
 	      grid-column: 1;
 	      align-content: end;
 	      gap: 8px;
 	      padding: 26px 24px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__creator {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__creator {
 	      color: var(--text-2);
 	      font: 600 12px/1.35 var(--font-sans);
 	      text-wrap: pretty;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__visual {
 	      position: relative;
 	      display: block;
 	      min-width: 0;
@@ -18693,14 +18704,14 @@
 	      background: #09090b;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual {
 	      grid-column: 2;
 	      width: 100%;
 	      min-height: 384px;
 	      aspect-ratio: 9 / 16;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__media {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__media {
 	      width: 100%;
 	      height: 100%;
 	      min-height: 0;
@@ -18708,7 +18719,7 @@
 	      object-fit: cover;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind^="instagram_"] {
 	      width: min(760px, 100%);
 	      min-height: 348px;
 	      grid-template-columns: minmax(0, 1fr) clamp(236px, 38%, 288px);
@@ -18717,24 +18728,24 @@
 	        var(--surface-2);
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__copy {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__copy {
 	      align-content: end;
 	      gap: 8px;
 	      padding: 26px 24px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
 	      grid-column: 2;
 	      min-height: 348px;
 	      aspect-ratio: 4 / 5;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__visual,
-	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__media {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__visual,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__media {
 	      aspect-ratio: 1;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__media {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__media {
 	      width: 100%;
 	      height: 100%;
 	      min-height: 0;
@@ -18742,45 +18753,45 @@
 	      object-fit: cover;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__visual {
 	      align-self: center;
 	      min-height: 0;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__media {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="instagram_post"] .desktop-chat-link-preview__media {
 	      aspect-ratio: 1;
 	    }
 
-	    #chatTool .desktop-chat-link-preview.is-text-only[data-kind^="instagram_"] {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview.is-text-only[data-kind^="instagram_"] {
 	      min-height: 124px;
 	      grid-template-columns: 1fr;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="x_post"] {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="x_post"] {
 	      width: min(640px, 100%);
 	      min-height: 0;
 	      grid-template-columns: 1fr;
 	      background: var(--surface-2);
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="x_post"] .desktop-chat-link-preview__copy {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="x_post"] .desktop-chat-link-preview__copy {
 	      gap: 13px;
 	      padding: 18px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-header,
-	    #chatTool .desktop-chat-link-preview__post-footer {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-header,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-footer {
 	      display: flex;
 	      align-items: center;
 	      min-width: 0;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-header {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-header {
 	      gap: 10px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-avatar,
-	    #chatTool .desktop-chat-link-preview__post-avatar-fallback {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-avatar,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-avatar-fallback {
 	      flex: 0 0 auto;
 	      width: 38px;
 	      height: 38px;
@@ -18788,7 +18799,7 @@
 	      border-radius: 50%;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-avatar-fallback {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-avatar-fallback {
 	      display: inline-flex;
 	      align-items: center;
 	      justify-content: center;
@@ -18797,14 +18808,14 @@
 	      font: 650 13px/1 var(--font-sans);
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-author {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-author {
 	      min-width: 0;
 	      display: grid;
 	      flex: 1;
 	      gap: 1px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-name {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-name {
 	      overflow: hidden;
 	      color: var(--text-1);
 	      font: 650 13px/1.35 var(--font-sans);
@@ -18812,18 +18823,18 @@
 	      white-space: nowrap;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-handle,
-	    #chatTool .desktop-chat-link-preview__post-footer {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-handle,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-footer {
 	      color: var(--text-3);
 	      font: var(--type-caption);
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-mark {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-mark {
 	      color: var(--text-1);
 	      font: 500 21px/1 var(--font-sans);
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-text {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-text {
 	      color: var(--text-1);
 	      font: 400 14px/1.55 var(--font-sans);
 	      white-space: pre-line;
@@ -18833,12 +18844,12 @@
 	      overflow: hidden;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__post-footer {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__post-footer {
 	      justify-content: space-between;
 	      gap: 12px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__provider-fallback {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__provider-fallback {
 	      width: fit-content;
 	      min-height: 30px;
 	      display: inline-flex;
@@ -18851,8 +18862,8 @@
 	      font: 650 11px/1 var(--font-sans);
 	    }
 
-	    #chatTool .desktop-chat-link-preview__brand,
-	    #chatTool .desktop-chat-link-preview__play {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__brand,
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__play {
 	      position: absolute;
 	      z-index: 1;
 	      display: inline-flex;
@@ -18865,7 +18876,7 @@
 	      -webkit-backdrop-filter: blur(12px);
 	    }
 
-	    #chatTool .desktop-chat-link-preview__brand {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__brand {
 	      top: 12px;
 	      left: 12px;
 	      min-height: 30px;
@@ -18875,7 +18886,7 @@
 	      letter-spacing: 0.02em;
 	    }
 
-	    #chatTool .desktop-chat-link-preview__play {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__play {
 	      top: 50%;
 	      left: 50%;
 	      width: 58px;
@@ -18887,9 +18898,30 @@
 	    }
 
         /* seamless: a message that IS a link renders as the card alone —
-           the raw-URL bubble yields once the preview has taken its place */
-        #chatTool .scout-chat-msg__stack.desktop-chat-stack--link-only .scout-chat-text {
+           the raw-URL bubble yields once the preview has taken its place.
+           In room chat the article itself is the stack, so it carries the
+           same class from the shared mount. */
+        #chatTool .scout-chat-msg__stack.desktop-chat-stack--link-only .scout-chat-text,
+        #roomChatPanel .scout-chat-msg.desktop-chat-stack--link-only .scout-chat-text {
           display: none;
+        }
+
+        /* room chat runs narrow — the card fills the bubble column and long
+           URLs that stay as text break cleanly instead of overflowing.
+           Double-id specificity so the responsive two-column rules for the
+           wide Conversations canvas can never re-split this card. */
+        #appShell #roomChatPanel .desktop-chat-link-preview {
+          width: 100%;
+          min-height: 0;
+          grid-template-columns: minmax(0, 1fr);
+        }
+        #appShell #roomChatPanel .desktop-chat-link-preview__media,
+        #appShell #roomChatPanel .desktop-chat-link-preview__skeleton {
+          min-height: 120px;
+          aspect-ratio: 16 / 9;
+        }
+        #appShell #roomChatPanel .scout-chat-text {
+          overflow-wrap: anywhere;
         }
 
         #chatTool .scout-chat-files {
@@ -19769,30 +19801,30 @@
           display: none;
         }
 
-        #chatTool .desktop-chat-link-preview {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview {
           grid-template-columns: minmax(0, 1fr) 180px;
         }
 
-        #chatTool .desktop-chat-link-preview__media,
-        #chatTool .desktop-chat-link-preview__skeleton {
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__media,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview__skeleton {
           width: 100%;
         }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="tiktok_video"] {
 	      grid-template-columns: minmax(0, 1fr) 190px;
 	      min-height: 338px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind="tiktok_video"] .desktop-chat-link-preview__visual {
 	      min-height: 338px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind^="instagram_"] {
 	      min-height: 320px;
 	      grid-template-columns: minmax(0, 1fr) 210px;
 	    }
 
-	    #chatTool .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
+	    :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview[data-kind^="instagram_"] .desktop-chat-link-preview__visual {
 	      min-height: 320px;
 	    }
 	  }
@@ -19845,7 +19877,7 @@
 
       @media (prefers-reduced-motion: reduce) and (min-width: 861px) {
         #chatTool .desktop-chat-actions,
-        #chatTool .desktop-chat-link-preview,
+        :is(#chatTool, #roomChatPanel) .desktop-chat-link-preview,
         #chatTool .desktop-chat-reply,
         #chatTool .desktop-chat-thread-summary,
         #chatTool .desktop-chat-thread-summary__avatar,
@@ -34486,7 +34518,6 @@
       #appShell.is-in-room[data-tool="room"] .meeting-bar .room-clock,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #roomBoardToggle,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #consentToggle,
-      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #recordMeeting,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #inviteToggle,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #roomScoutQuickAction,
@@ -34494,10 +34525,14 @@
         display: none;
       }
 
+      /* Chat is first-class on the dock (AJ 2026-09-01: "chat belongs one
+         click away in a meeting") — icon disc like its neighbors, unread
+         count riding the top-right shoulder. */
       #appShell.is-in-room[data-tool="room"] .meeting-bar #muteMic,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #toggleCamera,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #audioSettingsButton,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #screenShare,
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #roomMoreToggle,
       #appShell.is-in-room[data-tool="room"] .meeting-bar #leave {
         display: grid;
@@ -34511,6 +34546,22 @@
         padding: 0;
         border: 0;
         border-radius: var(--r-full);
+      }
+
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle {
+        position: relative;
+      }
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle .room-chat-toggle__label {
+        display: none;
+      }
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle .room-chat-toggle__unread {
+        position: absolute;
+        top: -3px;
+        right: -3px;
+      }
+      #appShell.is-in-room[data-tool="room"] .meeting-bar #roomChatToggle[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.22);
+        color: #fff;
       }
 
       #appShell.is-in-room[data-tool="room"] .meeting-bar #roomMoreToggle {
@@ -39285,7 +39336,12 @@ Wrap the entire export in one code block. After the code block, say whether the 
           sendRoomChatFromForm(event)
         }
       })
-      roomChatToggle.addEventListener('click', () => setRoomChatOpen(!isRoomChatOpen()))
+      roomChatToggle.addEventListener('click', () => {
+        const opening = !isRoomChatOpen()
+        if (opening) setRoomMeetingMode('chat')
+        setRoomChatOpen(opening)
+        if (opening) focusRoomChatComposer()
+      })
       roomChatClose.addEventListener('click', () => setRoomChatOpen(false))
       const roomMeetingTabs = [roomMeetingRecapTab, roomMeetingTranscriptTab, roomMeetingChatTab]
       roomMeetingTabs.forEach((tab, index) => {
@@ -69942,6 +69998,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           appendChatMentionTextNodes(body, String(message?.text || ''))
         }
         item.append(meta, body)
+        // A pasted link deserves the same rich card here as in Conversations —
+        // a raw wrapping URL is not how a meeting shares a page.
+        if (!scout && message?.error !== true) {
+          mountDesktopChatLinkPreview(item, String(message?.text || ''))
+        }
         // Close-the-loop delivery: a completed Scout thread posts its card
         // back to the room; artifactId turns the bubble into a doorway to the
         // full report in the intel library.
@@ -90972,7 +91033,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             button.type = 'button'
             button.role = 'menuitemradio'
             button.className = 'topbar__organization-menu-item'
-            button.textContent = String(item?.title || 'Organization')
+            // Structured children, never bare text: the row is a 3-column grid
+            // (badge / label / Current tag), and a raw text node collapses into
+            // the 20px badge track and collides with the tag.
+            const title = String(item?.title || 'Organization')
+            const rowBadge = document.createElement('span')
+            rowBadge.className = 'topbar__organization-menu-badge'
+            rowBadge.setAttribute('aria-hidden', 'true')
+            rowBadge.textContent = title.trim().charAt(0).toUpperCase() || '·'
+            const rowLabel = document.createElement('span')
+            rowLabel.textContent = title
+            button.append(rowBadge, rowLabel)
             button.setAttribute('aria-checked', item?.detail?.isCurrent ? 'true' : 'false')
             button.addEventListener('click', openOrganizationsSettings)
             menuItems.appendChild(button)
@@ -90993,7 +91064,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
             const response = await fetch('/api/stride/v1/mobile/surfaces/organizations', { credentials: 'same-origin' })
             if (!response.ok) throw new Error('organization projection unavailable')
             const payload = await response.json()
-            organizations = Array.isArray(payload?.items) ? payload.items : []
+            // The surface projection also carries authority-binding and
+            // receipt rows ("Authorized action", export/purge receipts).
+            // The switcher is a chooser of organizations, nothing else.
+            organizations = (Array.isArray(payload?.items) ? payload.items : [])
+              .filter(item => (item?.kind || item?.detail?.kind) === 'organization-summary')
           } catch (_) {
             organizations = []
           }
