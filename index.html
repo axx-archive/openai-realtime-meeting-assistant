@@ -10315,6 +10315,153 @@
         color: var(--text-3);
       }
 
+      /* W1 D8 — message search results replace the section lists while a
+         2+ character query has server results; the search field stays */
+      #chatTool[data-chat-search="results"] .chat-threads > :not(.chat-threads__search):not(#chatSearchResults) {
+        display: none;
+      }
+
+      .chat-search-results {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: grid;
+        align-content: start;
+        gap: 2px;
+        padding: 0 8px 12px;
+      }
+
+      .chat-search-results[hidden] {
+        display: none;
+      }
+
+      /* server search down: one honest line, the local title filter beneath */
+      #chatTool[data-chat-search="unavailable"] .chat-search-results {
+        flex: none;
+        padding-bottom: 2px;
+      }
+
+      .chat-search-results__empty {
+        margin: 0;
+        padding: 8px 8px 10px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      /* group heads: conversations (name matches) above messages (server hits) */
+      .chat-search-results__head {
+        margin: 0;
+        padding: 10px 6px 4px;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      .chat-search-results .chat-thread-item.is-active {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+      }
+
+      .chat-search-result {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        width: 100%;
+        padding: 9px 12px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: var(--text-1);
+        text-align: left;
+        cursor: pointer;
+        transition: background var(--dur-med) var(--ease), border-color var(--dur-med) var(--ease);
+      }
+
+      .chat-search-result:hover,
+      .chat-search-result.is-active {
+        background: var(--surface-3);
+        border-color: var(--line-1);
+      }
+
+      .chat-search-result:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+      }
+
+      .chat-search-result__body {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+      }
+
+      .chat-search-result__row {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .chat-search-result__title {
+        flex: 1;
+        min-width: 0;
+        font: 600 13.5px/1.35 var(--font-sans);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* author + relative time — machine facts, mono */
+      .chat-search-result__meta {
+        flex: none;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .chat-search-result__snippet {
+        font: 400 12.5px/1.4 var(--font-sans);
+        color: var(--text-2);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow-wrap: anywhere;
+      }
+
+      /* the matched substring — an earned ember well, nothing else */
+      .chat-search-result__mark {
+        background: color-mix(in srgb, var(--ember) 10%, transparent);
+        color: inherit;
+        font: inherit;
+        border-radius: 3px;
+        padding: 0 1px;
+        text-decoration: none;
+      }
+
+      /* the opened result: a brief ring on the message it lands on */
+      .scout-chat-msg.is-search-hit,
+      [data-message-id].is-search-hit {
+        outline: 2px solid var(--ring);
+        outline-offset: 4px;
+        border-radius: var(--r-md);
+        animation: bf-search-hit calc(var(--dur-slow) * 5) var(--ease) forwards;
+      }
+
+      @keyframes bf-search-hit {
+        0%, 55% { outline-color: var(--ring); }
+        100% { outline-color: transparent; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .scout-chat-msg.is-search-hit,
+        [data-message-id].is-search-hit {
+          animation: none;
+        }
+      }
+
       .chat-threads__new {
         flex: none;
         width: 34px;
@@ -10537,6 +10684,277 @@
 
       .chat-channels-empty[hidden] {
         display: none;
+      }
+
+      /* W1 D1 — group creation: the channel form's flat field family, stacked
+         so the member picker gets its own row beneath the name */
+      .chat-group-create {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+
+      .chat-group-create__row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .chat-channel-create__go:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        filter: none;
+      }
+
+      /* member picker — chips plus a type-ahead over the people directory
+         (kind person only). One control seeds a new group and adds people
+         from the header members popover. */
+      .chat-member-picker {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-height: 34px;
+        padding: 4px 6px;
+        background: var(--surface-3);
+        border: 1px solid var(--line-1);
+        border-radius: 12px;
+        cursor: text;
+        transition: box-shadow var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+      }
+
+      .chat-member-picker:focus-within {
+        border-color: var(--line-2);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+
+      .chat-member-picker__chips {
+        display: contents;
+      }
+
+      .chat-member-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        padding: 2px 4px 2px 2px;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-1);
+        font: 500 12px/1.3 var(--font-sans);
+      }
+
+      .chat-member-chip__name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-member-chip__remove {
+        flex: none;
+        width: 20px;
+        height: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-3);
+        font: 500 14px/1 var(--font-sans);
+        cursor: pointer;
+      }
+
+      .chat-member-chip__remove:hover,
+      .chat-member-chip__remove:focus-visible {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .chat-member-chip__remove:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 1px;
+      }
+
+      .chat-member-avatar {
+        flex: none;
+        width: 22px;
+        height: 22px;
+        display: grid;
+        place-items: center;
+        border-radius: var(--r-full);
+        background: var(--surface-2);
+        color: var(--text-2);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        overflow: hidden;
+      }
+
+      .chat-member-avatar img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .chat-member-picker__input {
+        flex: 1;
+        min-width: 96px;
+        height: 24px;
+        padding: 0 4px;
+        border: 0;
+        background: transparent;
+        outline: 0;
+        color: var(--text-1);
+        font: 400 12.5px/1.35 var(--font-sans);
+        letter-spacing: var(--track-text);
+      }
+
+      .chat-member-picker__input::placeholder {
+        color: var(--text-3);
+      }
+
+      /* the picker's field is chromeless — its focus ring belongs to the
+         whole control (:focus-within above), never a second ring on the input */
+      #chatTool .chat-member-picker__input:focus,
+      #chatTool .chat-member-picker__input:focus-visible,
+      .chat-member-picker__input:focus,
+      .chat-member-picker__input:focus-visible {
+        outline: 0;
+        box-shadow: none;
+      }
+
+      .chat-member-picker__list {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        right: 0;
+        z-index: 40;
+        max-height: 224px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 5px;
+        border-radius: 13px;
+        background: color-mix(in oklab, var(--surface-1) 94%, transparent);
+        -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        box-shadow: 0 0 0 1px var(--glass-border), 0 16px 38px rgba(0, 0, 0, 0.22);
+        transform-origin: top left;
+        transition-property: opacity, transform, display;
+        transition-duration: var(--dur-fast), var(--dur-med), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring), var(--ease);
+        transition-behavior: allow-discrete;
+      }
+
+      @starting-style {
+        .chat-member-picker__list:not([hidden]) {
+          opacity: 0;
+          transform: translateY(-5px) scale(0.96);
+        }
+      }
+
+      .chat-member-picker__list[hidden] {
+        display: none;
+      }
+
+      .chat-member-picker__option {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        min-height: 36px;
+        padding: 4px 8px;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .chat-member-picker__option.is-active,
+      .chat-member-picker__option:hover {
+        background: var(--surface-3);
+      }
+
+      /* the name wins the row; the email hint yields and ellipsizes */
+      .chat-member-picker__option-name {
+        flex: none;
+        max-width: 62%;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-member-picker__option-hint {
+        flex: 1;
+        min-width: 0;
+        margin-left: auto;
+        padding-left: 10px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        text-align: right;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-member-picker__empty {
+        padding: 8px 10px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      /* group rows lead with the people in them (max 3 + "+N"), not a # glyph */
+      .chat-thread-item__icon--cluster {
+        width: auto;
+        min-width: 26px;
+      }
+
+      .chat-thread-item__cluster {
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .chat-thread-item__cluster .chat-member-avatar {
+        width: 20px;
+        height: 20px;
+        font-size: 9px;
+        box-shadow: 0 0 0 2px var(--surface-1);
+      }
+
+      .chat-thread-item__cluster .chat-member-avatar + .chat-member-avatar {
+        margin-left: -7px;
+      }
+
+      .chat-thread-item[aria-pressed="true"] .chat-thread-item__cluster .chat-member-avatar {
+        box-shadow: 0 0 0 2px var(--surface-3);
+      }
+
+      .chat-thread-item__cluster-more {
+        margin-left: 3px;
+        color: var(--text-3);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* W1 D6: a muted row carries a quiet bell-slash beside its time */
+      .chat-thread-item__muted {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        align-self: center;
+        color: var(--text-3);
       }
 
       /* thread rows — design §7.1: 11/13 padding, radius 14, active row wears
@@ -10960,6 +11378,288 @@
       .chat-convo-head__riff:active { transform: scale(0.96); }
       .chat-convo-head__riff:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
       .chat-convo-head__riff[hidden] { display: none; }
+
+      /* W1 D3/D6 — header tools (people · notifications). Each anchors a
+         glass popover beneath itself: the chat more-menu recipe (94% surface
+         glass, chrome blur, spring enter from the trigger's origin). */
+      .chat-convo-popwrap {
+        position: relative;
+        flex: none;
+        display: inline-flex;
+      }
+
+      .chat-convo-popwrap[hidden] {
+        display: none;
+      }
+
+      .chat-convo-head__tool {
+        flex: none;
+        min-height: 30px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-2);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-1) 10%, transparent);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+        transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+      }
+
+      .chat-convo-head__tool--icon {
+        width: 30px;
+        padding: 0;
+        justify-content: center;
+      }
+
+      .chat-convo-head__tool:hover,
+      .chat-convo-head__tool[aria-expanded="true"] {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .chat-convo-head__tool:active { transform: scale(0.96); }
+      .chat-convo-head__tool:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+      .chat-convo-head__bell-slash { display: none; }
+      .chat-convo-head__tool[data-muted="true"] .chat-convo-head__bell-slash { display: block; }
+
+      .chat-convo-popover {
+        position: absolute;
+        top: calc(100% + 7px);
+        left: 0;
+        z-index: 40;
+        width: 280px;
+        max-width: calc(100vw - 32px);
+        display: grid;
+        gap: 2px;
+        padding: 6px;
+        border-radius: 13px;
+        background: color-mix(in oklab, var(--surface-1) 94%, transparent);
+        -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        box-shadow: 0 0 0 1px var(--glass-border), 0 16px 38px rgba(0, 0, 0, 0.22);
+        transform-origin: top left;
+        transition-property: opacity, transform, display;
+        transition-duration: var(--dur-fast), var(--dur-med), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring), var(--ease);
+        transition-behavior: allow-discrete;
+        text-align: left;
+      }
+
+      .chat-convo-popover--flip {
+        left: auto;
+        right: 0;
+        transform-origin: top right;
+      }
+
+      @starting-style {
+        .chat-convo-popover:not([hidden]) {
+          opacity: 0;
+          transform: translateY(-5px) scale(0.92);
+        }
+      }
+
+      .chat-convo-popover[hidden] { display: none; }
+      .chat-convo-popover--notify { width: 196px; }
+
+      .chat-convo-popover__head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px 4px;
+      }
+
+      .chat-convo-popover__title {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
+
+      /* the member count is a machine fact — mono */
+      .chat-convo-popover__count {
+        font: 600 10.5px/1.4 var(--font-mono);
+        letter-spacing: 0.06em;
+        color: var(--text-3);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .chat-convo-members__list {
+        display: grid;
+        gap: 1px;
+        max-height: 260px;
+        overflow-y: auto;
+      }
+
+      .chat-convo-member {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-height: 38px;
+        padding: 3px 8px;
+        border-radius: 9px;
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        transition: opacity var(--dur-fast) var(--ease);
+      }
+
+      .chat-convo-member.is-pending { opacity: 0.55; }
+
+      .chat-convo-member__name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chat-convo-member__owner {
+        flex: none;
+        font: 600 10px/1.4 var(--font-mono);
+        letter-spacing: 0.08em;
+        color: var(--text-3);
+      }
+
+      .chat-convo-member__remove {
+        flex: none;
+        width: 28px;
+        height: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--text-3);
+        font: 500 16px/1 var(--font-sans);
+        cursor: pointer;
+      }
+
+      .chat-convo-member__remove:hover,
+      .chat-convo-member__remove:focus-visible {
+        background: var(--surface-3);
+        color: var(--text-1);
+      }
+
+      .chat-convo-member__remove:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 1px;
+      }
+
+      .chat-convo-members__add {
+        display: grid;
+        gap: 6px;
+        margin-top: 4px;
+        padding: 8px 2px 2px;
+        border-top: 1px solid var(--line-1);
+      }
+
+      .chat-convo-members__add[hidden] { display: none; }
+
+      .chat-convo-members__add-go {
+        justify-self: end;
+        min-height: 30px;
+        padding: 0 12px;
+        border: 0;
+        border-radius: var(--r-full);
+        background: var(--surface-3);
+        color: var(--text-1);
+        font: 600 12px/1 var(--font-sans);
+        cursor: pointer;
+      }
+
+      .chat-convo-members__add-go:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .chat-convo-members__add-go:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 2px;
+      }
+
+      .chat-convo-notify__option {
+        width: 100%;
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: 9px;
+        background: transparent;
+        color: var(--text-1);
+        font: var(--type-body-sm);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .chat-convo-notify__option::before {
+        content: "";
+        flex: none;
+        width: 14px;
+        height: 14px;
+        border-radius: var(--r-full);
+        box-shadow: inset 0 0 0 1.5px var(--text-3);
+        transition: box-shadow var(--dur-fast) var(--ease);
+      }
+
+      .chat-convo-notify__option[aria-checked="true"]::before {
+        box-shadow: inset 0 0 0 4.5px var(--text-1);
+      }
+
+      .chat-convo-notify__option:hover,
+      .chat-convo-notify__option:focus-visible {
+        background: var(--surface-3);
+      }
+
+      .chat-convo-notify__option:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: -2px;
+      }
+
+      /* an open header popover lifts the header above the log it overlays
+         (the header is a sibling of the message log, never its ancestor) */
+      .chat-convo-head:has(.chat-convo-popover:not([hidden])) {
+        position: relative;
+        z-index: 12;
+      }
+
+      /* phones: the header tools go icon-only and drop to the eyebrow line —
+         "group · 3 people" on the left, people + notifications on the right —
+         so the title line keeps back · title · rename · Riff intact */
+      @media (max-width: 640px) {
+        .chat-convo-head__tool {
+          width: 40px;
+          min-height: 40px;
+          padding: 0;
+          justify-content: center;
+        }
+
+        .chat-convo-head__tool > span {
+          display: none;
+        }
+
+        #chatTool .chat-convo-head__meta {
+          flex: 1 1 auto;
+          min-width: 0;
+          margin-right: auto;
+        }
+
+        .chat-convo-popwrap {
+          order: 6;
+        }
+
+        .chat-convo-popover {
+          width: min(280px, calc(100vw - 32px));
+        }
+      }
 
       .private-riff-episode {
         display: flex;
@@ -15833,6 +16533,64 @@
 	        display: none;
 	      }
 
+	      /* W1 D5 — who is typing, pinned directly above the composer. The
+	         three-dot ripple rides the motion tokens and is switched off
+	         entirely under prefers-reduced-motion. */
+	      .scout-chat-typing {
+	        flex: none;
+	        display: flex;
+	        align-items: center;
+	        gap: 8px;
+	        min-height: 20px;
+	        margin: 0 16px 4px;
+	        color: var(--text-3);
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	      }
+
+	      .scout-chat-typing[hidden] {
+	        display: none;
+	      }
+
+	      .scout-chat-typing__text {
+	        min-width: 0;
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	      }
+
+	      .scout-chat-typing__dots {
+	        display: inline-flex;
+	        align-items: center;
+	        gap: 3px;
+	      }
+
+	      .scout-chat-typing__dots span {
+	        width: 4px;
+	        height: 4px;
+	        border-radius: 50%;
+	        background: currentColor;
+	        opacity: 0.35;
+	        animation: bf-typing-ripple calc(var(--dur-slow) * 3) var(--ease) infinite;
+	      }
+
+	      .scout-chat-typing__dots span:nth-child(2) {
+	        animation-delay: var(--dur-med);
+	      }
+
+	      .scout-chat-typing__dots span:nth-child(3) {
+	        animation-delay: calc(var(--dur-med) * 2);
+	      }
+
+	      @keyframes bf-typing-ripple {
+	        0%, 70%, 100% { opacity: 0.35; transform: translateY(0); }
+	        35% { opacity: 1; transform: translateY(-2px); }
+	      }
+
+	      @media (prefers-reduced-motion: reduce) {
+	        .scout-chat-typing__dots span { animation: none; opacity: 0.7; transform: none; }
+	      }
+
 	      .scout-chat-destination--channel {
 	        border-color: color-mix(in srgb, var(--accent) 55%, var(--line-1));
 	        background: var(--accent-soft);
@@ -16692,6 +17450,26 @@
       .chat-context-rail,
       .chat-work-indicator {
         display: none;
+      }
+
+      /* W1 D4: the "n new messages" seam is no longer desktop-only — phones
+         render the same ember hairline (the ≥861px block restates it) */
+      #chatTool .desktop-chat-unread {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-block: 20px 8px;
+        color: var(--ember-text);
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+      }
+
+      #chatTool .desktop-chat-unread::before,
+      #chatTool .desktop-chat-unread::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: color-mix(in srgb, var(--ember) 44%, var(--line-1));
       }
 
       @media (min-width: 861px) {
@@ -35362,8 +36140,12 @@
               <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="10" cy="10" r="6"/><path d="m21 21-5.5-5.5"/>
               </svg>
-              <input id="chatThreadSearch" class="chat-threads__search-input" type="search" autocomplete="off" placeholder="search threads…" aria-label="Search threads">
+              <input id="chatThreadSearch" class="chat-threads__search-input" type="search" autocomplete="off" placeholder="search threads…" aria-label="Search threads" aria-controls="chatSearchResults">
             </div>
+            <!-- W1 D8: message search — at 2+ characters the rail swaps its
+                 section lists for server results (GET /assistant/chat-search);
+                 fewer characters keep the local title/preview filter -->
+            <div id="chatSearchResults" class="chat-search-results" role="listbox" aria-label="Message search results" hidden></div>
             <div class="chat-threads__section-head">
               <span id="chatChannelsLabel" class="chat-threads__label">channels · whole office</span>
               <button id="chatNewChannel" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new channel" title="new channel">
@@ -35382,6 +36164,31 @@
             </form>
             <div id="chatChannelThreads" class="chat-agent-threads" aria-label="Team channels"></div>
             <p id="chatChannelsEmpty" class="chat-channels-empty" hidden>no channels yet — press + to start</p>
+            <!-- W1 D1: human groups — a titled conversation between named people
+                 (conversationKind human_group). Sits between the whole-office
+                 channels and the private Scout threads; the + opens the same
+                 flat create field as channels plus a member picker. -->
+            <div class="chat-threads__section-head">
+              <span id="chatGroupsLabel" class="chat-threads__label">groups · you + people</span>
+              <button id="chatNewGroup" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new group" title="new group" aria-expanded="false" aria-controls="chatGroupCreate">
+                <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </button>
+            </div>
+            <form id="chatGroupCreate" class="chat-channel-create chat-group-create" hidden>
+              <div class="chat-group-create__row">
+                <input id="chatGroupName" class="chat-channel-create__input" type="text" maxlength="80" autocomplete="off" placeholder="group name…" aria-label="New group name">
+                <button id="chatGroupCreateGo" class="chat-channel-create__go" type="submit" aria-label="Create group" title="create group" disabled>
+                  <svg class="stride-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+                  </svg>
+                </button>
+              </div>
+              <div id="chatGroupMembers" class="chat-member-picker" data-member-picker="group-create"></div>
+            </form>
+            <div id="chatGroupThreads" class="chat-agent-threads" aria-label="Group conversations"></div>
+            <p id="chatGroupsEmpty" class="chat-channels-empty" hidden>no groups yet — press + to start one</p>
             <div class="chat-threads__section-head">
               <span id="chatPrivateLabel" class="chat-threads__label">private · you + Scout</span>
               <button id="chatNewThread" class="chat-threads__new chat-threads__new--inline" type="button" aria-label="new thread" title="new thread">
@@ -35426,6 +36233,39 @@
                 </svg>
                 <span>Riff</span>
               </button>
+              <!-- W1 D3: members of a group / explicit-member project thread -->
+              <span id="chatConvoMembers" class="chat-convo-popwrap" hidden>
+                <button id="chatConvoMembersOpen" class="chat-convo-head__tool" type="button" aria-label="Members" title="members" aria-haspopup="dialog" aria-expanded="false" aria-controls="chatConvoMembersPopover">
+                  <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3.5"/><path d="M21 21v-2a4 4 0 0 0-3-3.9"/><path d="M16 3.1a3.5 3.5 0 0 1 0 6.8"/>
+                  </svg>
+                  <span>people</span>
+                </button>
+                <div id="chatConvoMembersPopover" class="chat-convo-popover chat-convo-popover--members" role="dialog" aria-label="Members" hidden>
+                  <div class="chat-convo-popover__head">
+                    <span class="chat-convo-popover__title">members</span>
+                    <span id="chatConvoMembersCount" class="chat-convo-popover__count"></span>
+                  </div>
+                  <div id="chatConvoMembersList" class="chat-convo-members__list"></div>
+                  <div id="chatConvoMembersAdd" class="chat-convo-members__add" hidden>
+                    <div id="chatConvoMembersPicker" class="chat-member-picker" data-member-picker="members-add"></div>
+                    <button id="chatConvoMembersAddGo" class="chat-convo-members__add-go" type="button" disabled>add</button>
+                  </div>
+                </div>
+              </span>
+              <!-- W1 D6: per-conversation notification level -->
+              <span id="chatConvoNotify" class="chat-convo-popwrap" hidden>
+                <button id="chatConvoNotifyOpen" class="chat-convo-head__tool chat-convo-head__tool--icon" type="button" aria-label="Notifications" title="notifications" aria-haspopup="menu" aria-expanded="false" aria-controls="chatConvoNotifyMenu" data-muted="false">
+                  <svg class="stride-mark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path class="chat-convo-head__bell-slash" d="m4 4 16 16"/>
+                  </svg>
+                </button>
+                <div id="chatConvoNotifyMenu" class="chat-convo-popover chat-convo-popover--notify" role="menu" aria-label="Notifications for this conversation" hidden>
+                  <button class="chat-convo-notify__option" type="button" role="menuitemradio" aria-checked="true" data-notify-level="all">All messages</button>
+                  <button class="chat-convo-notify__option" type="button" role="menuitemradio" aria-checked="false" data-notify-level="mentions">Mentions only</button>
+                  <button class="chat-convo-notify__option" type="button" role="menuitemradio" aria-checked="false" data-notify-level="none">Nothing</button>
+                </div>
+              </span>
               <span id="chatConvoMeta" class="chat-convo-head__meta"></span>
               <div id="chatConvoContext" class="desktop-chat-context" aria-label="Conversation context">
                 <span id="chatConvoScope" class="desktop-chat-context__scope">private</span>
@@ -35463,6 +36303,12 @@
                 <span class="chat-work-indicator__activity">view activity</span>
               </button>
               <span id="chatWorkIndicatorActions" class="chat-work-indicator__actions" hidden></span>
+            </div>
+            <!-- W1 D5: who else is typing in this conversation — pinned directly
+                 above the composer; never the viewer, never Scout -->
+            <div id="scoutChatTyping" class="scout-chat-typing" role="status" aria-live="polite" aria-atomic="true" hidden>
+              <span class="scout-chat-typing__dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span id="scoutChatTypingText" class="scout-chat-typing__text"></span>
             </div>
             <form id="scoutChatForm" class="scout-chat-form">
               <input id="scoutChatFileInput" type="file" multiple hidden>
@@ -37333,6 +38179,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		      const sentMessageProjectLoading = document.getElementById('sentMessageProjectLoading')
 		      const sentMessageProjectStatus = document.getElementById('sentMessageProjectStatus')
 	      const chatThreadSearch = document.getElementById('chatThreadSearch')
+	      const chatSearchResultsEl = document.getElementById('chatSearchResults')
 	      const chatNewThread = document.getElementById('chatNewThread')
 	      const chatNewChannel = document.getElementById('chatNewChannel')
 	      const chatDefaultThread = document.getElementById('chatDefaultThread')
@@ -37343,6 +38190,27 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      const chatPrivateLabel = document.getElementById('chatPrivateLabel')
 	      const chatChannelCreate = document.getElementById('chatChannelCreate')
 	      const chatChannelName = document.getElementById('chatChannelName')
+	      // W1 conversations: groups section, header members/notify tools, typing row
+	      const chatNewGroup = document.getElementById('chatNewGroup')
+	      const chatGroupCreate = document.getElementById('chatGroupCreate')
+	      const chatGroupName = document.getElementById('chatGroupName')
+	      const chatGroupCreateGo = document.getElementById('chatGroupCreateGo')
+	      const chatGroupMembers = document.getElementById('chatGroupMembers')
+	      const chatGroupThreads = document.getElementById('chatGroupThreads')
+	      const chatGroupsEmpty = document.getElementById('chatGroupsEmpty')
+	      const chatConvoMembers = document.getElementById('chatConvoMembers')
+	      const chatConvoMembersOpen = document.getElementById('chatConvoMembersOpen')
+	      const chatConvoMembersPopover = document.getElementById('chatConvoMembersPopover')
+	      const chatConvoMembersCount = document.getElementById('chatConvoMembersCount')
+	      const chatConvoMembersList = document.getElementById('chatConvoMembersList')
+	      const chatConvoMembersAdd = document.getElementById('chatConvoMembersAdd')
+	      const chatConvoMembersPicker = document.getElementById('chatConvoMembersPicker')
+	      const chatConvoMembersAddGo = document.getElementById('chatConvoMembersAddGo')
+	      const chatConvoNotify = document.getElementById('chatConvoNotify')
+	      const chatConvoNotifyOpen = document.getElementById('chatConvoNotifyOpen')
+	      const chatConvoNotifyMenu = document.getElementById('chatConvoNotifyMenu')
+	      const scoutChatTyping = document.getElementById('scoutChatTyping')
+	      const scoutChatTypingText = document.getElementById('scoutChatTypingText')
 	      const chatConvoTitle = document.getElementById('chatConvoTitle')
 	      const chatConvoRename = document.getElementById('chatConvoRename')
 	      const chatConvoRiff = document.getElementById('chatConvoRiff')
@@ -37743,6 +38611,38 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	      // can race with the local state causing duplicate render cycles.
 	      let homeScoutOpeningJustCompleted = false
 	      let chatThreadsGeneration = 0
+	      // W1 conversations state — declared here (early) so boot-time renders
+	      // never trip the TDZ on it: server read markers (D4), typing presence
+	      // (D5), member mutations in flight (D3), header popover registry.
+	      let chatReadMarkerTimer = 0
+	      let chatReadMarkerPending = null
+	      const chatReadMarkerSent = new Map()
+	      const chatTypingByThread = new Map()
+	      let chatTypingExpiryTimer = 0
+	      let chatTypingSentAt = 0
+	      let chatTypingThreadId = ''
+	      let chatTypingActive = false
+	      let chatGroupMemberPicker = null
+	      let chatMembersAddPicker = null
+	      const chatMembersPending = new Set()
+	      // threads whose mute POST is in flight: polls keep the optimistic level
+	      const chatNotifyPending = new Set()
+	      const chatHeaderPopoverControllers = []
+	      let chatConvoMembersController = null
+	      let chatConvoNotifyController = null
+	      // the participants directory (S3: declared here, ahead of every reader,
+	      // so no boot-time render can trip the TDZ on it)
+	      const desktopChatParticipantDirectory = new Map()
+	      let desktopChatMentionCandidates = []
+	      let desktopChatParticipantDirectoryLoaded = false
+	      // D8 message search: debounce timer, response generation, in-flight
+	      // abort, the rendered results and the keyboard cursor over them
+	      let chatSearchTimer = 0
+	      let chatSearchGeneration = 0
+	      let chatSearchController = null
+	      let chatSearchResults = []
+	      let chatSearchActiveIndex = 0
+	      let chatSearchQuery = ''
 	      // Failed sends are recoverable state owned by the exact authenticated
 	      // conversation generation. They never paint over the destination the
 	      // reader navigated to while a request was in flight; returning to the
@@ -39181,6 +40081,32 @@ Wrap the entire export in one code block. After the code block, say whether the 
       })
       scoutChatForm.addEventListener('submit', sendScoutChatFromForm)
 	      chatThreadSearch?.addEventListener('input', filterChatThreads)
+	      // W1 D8: Escape clears the query and restores the normal list; ↑/↓ and
+	      // Enter steer and open the server results while they are showing
+	      chatThreadSearch?.addEventListener('keydown', event => {
+	        if (event.key === 'Escape') {
+	          if (!chatThreadSearch.value && !chatSearchIsActive()) return
+	          event.preventDefault()
+	          event.stopPropagation()
+	          chatThreadSearch.value = ''
+	          clearChatSearch()
+	          renderChatAgentThreads()
+	          return
+	        }
+	        if (!chatSearchIsActive()) return
+	        const entries = chatSearchEntries()
+	        if (!entries.length) return
+	        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+	          event.preventDefault()
+	          const step = event.key === 'ArrowDown' ? 1 : entries.length - 1
+	          setChatSearchActiveIndex((chatSearchActiveIndex + step) % entries.length)
+	          return
+	        }
+	        if (event.key === 'Enter') {
+	          event.preventDefault()
+	          void openChatSearchEntry(entries[chatSearchActiveIndex] || entries[0])
+	        }
+	      })
 	      chatNewThread?.addEventListener('click', startNewScoutThread)
 	      // card 070: the channels section owns its own create + (opens the inline
 	      // glass name field); private threads are the new-thread + above
@@ -39199,6 +40125,31 @@ Wrap the entire export in one code block. After the code block, say whether the 
 	        if (event.key === 'Escape') {
 	          event.stopPropagation()
 	          setChannelCreateOpen(false)
+	        }
+	      })
+	      // W1 D1: the groups section owns its own create + (name + member picker);
+	      // at least one person is required before the arrow arms
+	      chatNewGroup?.addEventListener('click', () => setGroupCreateOpen(chatGroupCreate?.hidden !== false))
+	      chatGroupCreate?.addEventListener('submit', async event => {
+	        event.preventDefault()
+	        const memberEmails = chatGroupMemberPicker ? chatGroupMemberPicker.selected() : []
+	        if (!memberEmails.length) {
+	          chatGroupMemberPicker?.focus()
+	          return
+	        }
+	        const title = String(chatGroupName?.value || '').trim() || chatGroupDefaultTitle(memberEmails)
+	        setGroupCreateOpen(false)
+	        try {
+	          await createHumanGroupOnServer(title, memberEmails)
+	        } catch (error) {
+	          showToast({ text: error.message || 'could not create group', kind: 'error' })
+	        }
+	      })
+	      chatGroupCreate?.addEventListener('keydown', event => {
+	        if (event.key === 'Escape' && !chatGroupMemberPicker?.listOpen()) {
+	          event.stopPropagation()
+	          setGroupCreateOpen(false)
+	          chatNewGroup?.focus()
 	        }
 	      })
 	      chatDefaultThread?.addEventListener('click', () => {
@@ -39291,6 +40242,9 @@ Wrap the entire export in one code block. After the code block, say whether the 
       artifactShareButton?.addEventListener('click', toggleArtifactSharePanel)
       scoutChatInput.addEventListener('input', () => {
         resizeScoutChatInput()
+        // W1 D5: typing:true at most once per 3s while there is text; a
+        // cleared field sends typing:false
+        sendChatTypingSignal(Boolean(scoutChatInput.value.trim()))
 		scoutChatMessageAttempt = null
 		scoutChatProjectGeneration += 1
 		if (scoutChatProjectContext.selected?.threadId !== activeScoutThreadId) scoutChatProjectContext.selected = null
@@ -61457,6 +62411,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           case 'chat_thread':
             handleChatThreadEvent(message.data)
             break
+          case 'chat_typing':
+            handleChatTypingEvent(message.data)
+            break
           case 'room_chat':
             handleRoomChatEvent(message.data)
             break
@@ -64997,6 +65954,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		scoutChatThreadRequests.clear()
 		scoutChatHydrationRetries.clear()
 		scoutChatHistoryRequests.clear()
+		chatReadMarkerSent.clear()
+		chatReadMarkerPending = null
+		chatTypingByThread.clear()
+		chatMembersPending.clear()
+		clearChatSearch()
 		chatRenameActive = false
 		if (chatConvoRenameInput) chatConvoRenameInput.value = ''
 	        scoutChatThreads = []
@@ -65028,7 +65990,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function chatThreadsListFingerprint(threads) {
-	        return threads.map(thread => `${thread?.id || ''}:${thread?.updatedAt || ''}`).join('|')
+	        // W1: viewer state rides the fingerprint so a poll that only moves an
+	        // unread count, a read marker or a notification level still applies
+	        return threads.map(thread => `${thread?.id || ''}:${thread?.updatedAt || ''}:${thread?.unreadCount ?? ''}:${thread?.lastReadMessageId ?? ''}:${thread?.notificationLevel ?? ''}`).join('|')
 	      }
 
 	      function chatThreadSkeletonNode() {
@@ -65094,12 +66058,17 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		return rows.map(row => {
 		  const current = currentByID.get(String(row?.id || ''))
 		  const revisionOrder = scoutChatThreadRevisionCompare(current?.updatedAt, row?.updatedAt)
-		  if (current && revisionOrder > 0) return current
+		  // W1 D4/D6: viewer state (unread count, read marker, notification
+		  // level) is not a thread revision — the fresh row wins in every branch,
+		  // except a level while this tab's own mute POST is still in flight and
+		  // a read marker the server has not caught up to yet
+		  const viewerState = chatThreadViewerStateForMerge(row)
+		  if (current && revisionOrder > 0) return { ...current, ...viewerState }
 		  if (current?.messagesLoaded === true && revisionOrder === 0) {
-			return { ...row, ...current, unreadCount: row.unreadCount, lastReadMessageId: row.lastReadMessageId, messagesLoaded: true }
+			return { ...row, ...current, ...viewerState, messagesLoaded: true }
 		  }
-		  if (current && revisionOrder === 0) return { ...row, ...current, messagesLoaded: current.messagesLoaded === true }
-		  return { ...row, messagesLoaded: false, messages: undefined }
+		  if (current && revisionOrder === 0) return { ...row, ...current, ...viewerState, messagesLoaded: current.messagesLoaded === true }
+		  return { ...row, ...viewerState, messagesLoaded: false, messages: undefined }
 		})
 	      }
 
@@ -65137,6 +66106,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').toLowerCase()) return null
 			const hydrated = payload?.thread ? {
 			  ...payload.thread,
+			  // W1 D4/D6: the viewer-scoped keys ride beside the thread body
+			  ...chatThreadViewerStateFromPayload(payload, id),
 			  messagesLoaded: true,
 			  history: payload.history || { mode: 'tail', hasEarlier: false, messageCount: Array.isArray(payload.thread.messages) ? payload.thread.messages.length : 0 }
 			} : null
@@ -65345,6 +66316,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!thread?.id) {
 	          return false
 	        }
+	        // W1 D6: a fully muted conversation never carries the dot
+	        if (chatThreadMuteLevel(thread) === 'none') {
+	          return false
+	        }
+	        // W1 D4: the server's per-viewer unreadCount is the authority when the
+	        // row carries it; the device-local lastSeen map is only the fallback
+	        if (typeof thread.unreadCount === 'number' && Number.isFinite(thread.unreadCount)) {
+	          return thread.unreadCount > 0
+	        }
 	        const updated = String(thread.updatedAt || thread.createdAt || '')
 	        if (!updated) {
 	          return false
@@ -65514,14 +66494,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          loadScoutChatThreads({ onlyIfChanged: true, queueIfBusy: true })
 	          return
 	        }
+		// W1 D3: the server tells a removed member so explicitly ({removed:true});
+		// a member list that no longer names the viewer means the same — the
+		// row leaves and an active conversation falls back to a channel
+		if (payload.removed === true) {
+		  dropChatThreadForViewer(id)
+		  return
+		}
 		if (payload.updatedAt && existing.updatedAt && scoutChatThreadRevisionCompare(payload.updatedAt, existing.updatedAt) < 0) return
+		const viewerEmail = String(authedUser?.email || '').trim().toLowerCase()
+		if (Array.isArray(payload.memberEmails) && viewerEmail &&
+		    !payload.memberEmails.map(email => String(email || '').trim().toLowerCase()).includes(viewerEmail)) {
+		  dropChatThreadForViewer(id)
+		  return
+		}
 		const candidate = {
 		  ...existing,
 		  title: payload.title || existing.title,
 		  preview: payload.preview || existing.preview,
 		  updatedAt: payload.updatedAt || existing.updatedAt,
 		  visibility: payload.visibility || existing.visibility,
+		  conversationKind: payload.conversationKind || existing.conversationKind,
+		  memberEmails: Array.isArray(payload.memberEmails) ? payload.memberEmails : existing.memberEmails,
 		  messages: Array.isArray(existing.messages) ? [...existing.messages] : existing.messages,
+		}
+		// W1 D5: a committed message ends its author's typing presence
+		const typers = chatTypingByThread.get(id)
+		if (typers && payload.message?.authorEmail && typers.delete(String(payload.message.authorEmail).trim().toLowerCase())) {
+		  renderChatTypingPresence()
 		}
 	        // card 073: a deletion travels as deletedMessageId instead of a
 	        // message — drop the bubble here (idempotent when this tab already
@@ -65542,6 +66542,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          if (messageIndex === -1) {
 	            messageWasNew = true
 	            candidate.messages = [...messages, message]
+	            // W1 D4: an unopened conversation's server unread count advances
+	            // locally until the next index poll confirms it (never own posts)
+	            if (typeof existing.unreadCount === 'number' && activeScoutThreadId !== id &&
+	                String(message?.authorEmail || '').trim().toLowerCase() !== viewerEmail) {
+	              candidate.unreadCount = existing.unreadCount + 1
+	            }
 	          } else if (!chatMessageEventRegressesProjectAdmission(messages[messageIndex], message)) {
 	            previousMessage = messages[messageIndex]
 	            // A re-broadcast of an existing message (e.g. a thread ref whose
@@ -66295,6 +67301,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // composer copy (design §7.2) — matches the thread context, not a generic LLM box
 	        const thread = selectedScoutChatThread()
 	        const isPhone = !!(phoneLayoutQuery && phoneLayoutQuery.matches)
+	        // W1 D1: a group is addressed by name, without the channel #
+	        if (chatThreadIsHumanGroup(thread)) {
+	          return isPhone ? 'message…' : `message ${chatThreadDisplayTitle(thread)}`
+	        }
 	        // Channel check first — "message the channel" matches the room language
 	        if (chatThreadIsChannel(thread)) {
 	          const title = chatThreadDisplayTitle(thread)
@@ -66334,8 +67344,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatDestination.classList.toggle('scout-chat-destination--channel', isChannel)
 	        scoutChatDestination.classList.toggle('scout-chat-destination--private', !isChannel)
 	        const title = chatThreadDisplayTitle(thread)
+	        // W1 D1: a group names its people, not a # channel
+	        const isGroup = chatThreadIsHumanGroup(thread)
+	        const groupCount = isGroup ? chatThreadMemberEmails(thread).length : 0
 	        scoutChatDestination.textContent = privateRiffThread(thread)
 	          ? `→ your riff · #${thread?.riff?.sourceTitle || 'channel'} · private to you`
+	          : isGroup
+	          ? `→ ${title} · ${groupCount} ${groupCount === 1 ? 'person' : 'people'}`
 	          : isChannel
 	          ? `→ #${title} · ${isTeam ? 'everyone in the office' : 'project members only'}`
 	          : `→ ${privateTarget} · private to you`
@@ -66343,6 +67358,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (scoutChatInput) {
 	          scoutChatInput.setAttribute('aria-label', privateRiffThread(thread)
 	            ? `Riff privately with Scout about #${thread?.riff?.sourceTitle || 'this channel'}`
+	            : isGroup
+	            ? `Message ${title} — group members only`
 	            : isChannel
 	            ? `Message #${title} — ${isTeam ? 'everyone in the office' : 'project members only'}`
 	            : `Message ${privateTarget} privately`)
@@ -66554,6 +67571,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (sendScoutChat(scoutChatInput.value)) {
 	          scoutChatInput.value = ''
+	          sendChatTypingSignal(false)
           resizeScoutChatInput()
 	          maintainScoutChatOwnSendTailPin()
         }
@@ -67804,26 +68822,56 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         )
       }
 
-      function mentionRosterCandidates() {
+      // D7: once /assistant/chat-participants has landed it IS the mention
+      // roster — verbatim: Scout first, viewer excluded, server order. The
+      // hardcoded room roster is only the fallback while it is still loading,
+      // and it never offers the viewer their own handle either.
+      function mentionDirectoryLoaded() {
+        return desktopChatParticipantDirectoryLoaded === true
+      }
+
+      // the directory as served — people and governed agents alike stay
+      // addressable
+      function mentionDirectoryCandidates() {
+        const candidates = []
+        desktopChatMentionCandidates.forEach(candidate => {
+          if (candidate) candidates.push(candidate)
+        })
+        return candidates
+      }
+
+      function mentionViewerMatches(candidate) {
+        const viewerEmail = String(authedUser?.email || '').trim().toLowerCase()
+        const viewerName = String(authedUser?.name || '').trim().toLowerCase()
+        const email = String(candidate?.email || '').trim().toLowerCase()
+        if (email && viewerEmail) return email === viewerEmail
+        return Boolean(viewerName) && String(candidate?.name || '').trim().toLowerCase() === viewerName
+      }
+
+      function mentionRosterFallback() {
         const byName = new Map()
-        ;[...participantNames(), 'Scout'].forEach(name => {
+        ;['Scout', ...participantNames()].forEach(name => {
           const clean = String(name || '').trim()
-          if (clean) byName.set(clean.toLowerCase(), {
+          if (clean && !byName.has(clean.toLowerCase())) byName.set(clean.toLowerCase(), {
             name: clean,
             handle: clean.replace(/\s+/g, '-'),
             kind: clean.toLowerCase() === 'scout' ? 'scout' : 'person',
             roleTitle: clean.toLowerCase() === 'scout' ? 'Chief of staff' : ''
           })
         })
-        desktopChatMentionCandidates.forEach(candidate => {
-          const name = String(candidate?.name || '').trim()
-          if (name) byName.set(name.toLowerCase(), candidate)
-        })
         return Array.from(byName.values())
       }
 
+      function mentionRosterCandidates() {
+        const source = mentionDirectoryLoaded() ? mentionDirectoryCandidates() : mentionRosterFallback()
+        return source.filter(candidate => !mentionViewerMatches(candidate))
+      }
+
+      // every mentionable name, viewer included — the message highlight pass
+      // must still lift "@AJ" when AJ is the reader
       function mentionRosterNames() {
-        return Array.from(new Set(mentionRosterCandidates().flatMap(candidate => [candidate?.name, candidate?.handle]).map(value => String(value || '').trim()).filter(Boolean)))
+        const source = [...mentionDirectoryCandidates(), ...mentionRosterFallback()]
+        return Array.from(new Set(source.flatMap(candidate => [candidate?.name, candidate?.handle]).map(value => String(value || '').trim()).filter(Boolean)))
       }
 
       function closeMentionPopover() {
@@ -67966,6 +69014,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      })
       roomChatInput?.addEventListener('blur', closeMentionPopover)
       scoutChatInput?.addEventListener('blur', closeMentionPopover)
+      scoutChatInput?.addEventListener('blur', () => sendChatTypingSignal(false))
       chatContextReplyInput?.addEventListener('blur', closeMentionPopover)
       // capture phase so ↑/↓/↵/Tab steer the popover before the Enter-send
       // handler fires — same pattern as the inline palette keydown above.
@@ -70154,6 +71203,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // kit: live, case-insensitive filter over durable chat thread rows.
 	      function filterChatThreads() {
 	        renderChatAgentThreads()
+	        // W1 D8: 2+ characters also ask the server for matching messages
+	        syncChatSearch()
 	      }
 
 	      function setChannelCreateOpen(open) {
@@ -70187,6 +71238,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        scoutChatSessionSeen = false
 	        if (chatThreadSearch) {
 	          chatThreadSearch.value = ''
+	          clearChatSearch()
 	        }
 	        if (authedUser) {
 	          // card 070: the new-thread + is private only; channels get created
@@ -70253,8 +71305,1290 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function chatThreadIsProject(thread) {
-	        return chatThreadIsChannel(thread) && !chatThreadIsTeam(thread) && !thread?.archivedAt
+	        return chatThreadIsChannel(thread) && !chatThreadIsTeam(thread) && !chatThreadIsHumanGroup(thread) && !thread?.archivedAt
 	      }
+
+	      // ================================================================
+	      // W1 — Conversations completeness: human groups (D1), member
+	      // management (D3), server read markers (D4), typing presence (D5),
+	      // per-conversation mute (D6).
+	      // ================================================================
+
+	      // a human group is a public-visibility thread scoped to named people
+	      // (conversationKind human_group); it never lands in the channel bucket
+	      function chatThreadIsHumanGroup(thread) {
+	        return String(thread?.conversationKind || '').toLowerCase() === 'human_group'
+	      }
+
+	      // memberEmails from the server is canonical — it already includes the
+	      // owner; the client only normalizes and de-duplicates
+	      function chatThreadMemberEmails(thread) {
+	        const raw = Array.isArray(thread?.memberEmails) ? thread.memberEmails : []
+	        return Array.from(new Set(raw.map(email => String(email || '').trim().toLowerCase()).filter(Boolean)))
+	      }
+
+	      // explicit-member conversations: a human group, or a project channel the
+	      // server scoped to named members (the Table carries no member list)
+	      function chatThreadHasExplicitMembers(thread) {
+	        return chatThreadIsChannel(thread) && !chatThreadIsTeam(thread) && chatThreadMemberEmails(thread).length > 0
+	      }
+
+	      function chatThreadViewerIsOwner(thread) {
+	        const viewer = String(authedUser?.email || '').trim().toLowerCase()
+	        return Boolean(viewer) && String(thread?.ownerEmail || '').trim().toLowerCase() === viewer
+	      }
+
+	      function chatOperationId() {
+	        const uuid = globalThis.crypto?.randomUUID?.()
+	        return uuid || `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+	      }
+
+	      function chatParticipantDirectoryEntry(email) {
+	        const key = String(email || '').trim().toLowerCase()
+	        if (!key) return null
+	        return desktopChatParticipantDirectory.get(key) || null
+	      }
+
+	      function chatPersonDisplayName(email) {
+	        const key = String(email || '').trim().toLowerCase()
+	        if (!key) return 'someone'
+	        const viewer = String(authedUser?.email || '').trim().toLowerCase()
+	        if (key === viewer) return String(authedUser?.name || '').trim() || key.split('@')[0]
+	        const entry = chatParticipantDirectoryEntry(key)
+	        return String(entry?.name || '').trim() || key.split('@')[0]
+	      }
+
+	      function chatFirstNameOf(name) {
+	        return String(name || '').trim().split(/\s+/)[0] || 'someone'
+	      }
+
+	      function chatPersonFirstName(email) {
+	        return chatFirstNameOf(chatPersonDisplayName(email))
+	      }
+
+	      // shared avatar disc: the portrait when the viewer's own account or the
+	      // directory has one, otherwise the caller's fallback text (initials,
+	      // Scout's sparkle, a dot) — used by member chips, clusters, the
+	      // members popover and the desktop message/rail avatars
+	      function chatAvatarDiscNode(email, className, fallbackText) {
+	        const avatar = bfEl('span', className)
+	        avatar.setAttribute('aria-hidden', 'true')
+	        const key = String(email || '').trim().toLowerCase()
+	        const viewer = String(authedUser?.email || '').trim().toLowerCase()
+	        const avatarDataURL = key && key === viewer
+	          ? String(authedUser?.avatarDataURL || '')
+	          : String(chatParticipantDirectoryEntry(key)?.avatarDataURL || '')
+	        if (avatarDataURL) {
+	          const image = document.createElement('img')
+	          image.src = avatarDataURL
+	          image.alt = ''
+	          avatar.appendChild(image)
+	        } else {
+	          avatar.textContent = String((typeof fallbackText === 'function' ? fallbackText() : fallbackText) ?? '')
+	        }
+	        return avatar
+	      }
+
+	      function chatPersonAvatarNode(email, className = 'chat-member-avatar') {
+	        const key = String(email || '').trim().toLowerCase()
+	        return chatAvatarDiscNode(key, className, () => (key ? chatPeerInitials(chatPersonDisplayName(key)) : '·'))
+	      }
+
+	      function chatGroupDefaultTitle(memberEmails) {
+	        const names = (Array.isArray(memberEmails) ? memberEmails : []).map(chatPersonFirstName)
+	        if (!names.length) return 'group'
+	        return names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} +${names.length - 3}`
+	      }
+
+	      // sidebar cluster for a group row: up to three faces (others first) + "+N"
+	      function chatThreadAvatarClusterNode(thread) {
+	        const viewer = String(authedUser?.email || '').trim().toLowerCase()
+	        const members = chatThreadMemberEmails(thread)
+	        const others = members.filter(email => email !== viewer)
+	        const pool = others.length ? others : members
+	        const faces = pool.slice(0, 3)
+	        const extra = Math.max(0, pool.length - faces.length)
+	        const cluster = bfEl('span', 'chat-thread-item__cluster')
+	        faces.forEach(email => cluster.appendChild(chatPersonAvatarNode(email)))
+	        if (!faces.length) cluster.appendChild(chatPersonAvatarNode(''))
+	        if (extra > 0) cluster.appendChild(bfEl('span', 'chat-thread-item__cluster-more', `+${extra}`))
+	        return cluster
+	      }
+
+	      // directory candidates for the member picker — people only, never the
+	      // viewer, never someone already chosen/excluded; prefix match on name,
+	      // handle, email or any word of the name
+	      function chatMemberPickerCandidates(query, excluded) {
+	        const viewer = String(authedUser?.email || '').trim().toLowerCase()
+	        const q = String(query || '').trim().toLowerCase()
+	        const seen = new Set()
+	        const out = []
+	        for (const candidate of desktopChatMentionCandidates) {
+	          if (String(candidate?.kind || 'person').toLowerCase() !== 'person') continue
+	          const email = String(candidate?.email || '').trim().toLowerCase()
+	          if (!email || email === viewer || seen.has(email) || excluded?.has(email)) continue
+	          const name = String(candidate?.name || '').trim()
+	          const handle = String(candidate?.handle || '').trim()
+	          const haystacks = [name, handle, email, email.split('@')[0], ...name.split(/\s+/)].map(value => value.toLowerCase())
+	          if (q && !haystacks.some(value => value.startsWith(q))) continue
+	          seen.add(email)
+	          out.push({ ...candidate, email, name: name || email.split('@')[0] })
+	        }
+	        return out
+	      }
+
+	      // chips + type-ahead over the participants directory. Returns a small
+	      // api ({ selected, reset, focus, listOpen }); the listbox is the glass
+	      // popover recipe; ↑/↓ steer, Enter/Tab choose, Backspace on an empty
+	      // field pops the last chip, Escape closes the list.
+	      function createChatMemberPicker(root, options = {}) {
+	        if (!root) return null
+	        const state = { selected: [], matches: [], activeIndex: 0, open: false }
+	        root.replaceChildren()
+	        const chips = bfEl('span', 'chat-member-picker__chips')
+	        const input = document.createElement('input')
+	        input.type = 'text'
+	        input.className = 'chat-member-picker__input'
+	        input.autocomplete = 'off'
+	        input.placeholder = options.placeholder || 'add people…'
+	        input.setAttribute('aria-label', options.label || 'Add people')
+	        input.setAttribute('role', 'combobox')
+	        input.setAttribute('aria-autocomplete', 'list')
+	        input.setAttribute('aria-expanded', 'false')
+	        const list = bfEl('div', 'chat-member-picker__list')
+	        list.id = `${root.id || 'chatMemberPicker'}List`
+	        list.setAttribute('role', 'listbox')
+	        list.setAttribute('aria-label', 'People')
+	        list.hidden = true
+	        input.setAttribute('aria-controls', list.id)
+	        root.append(chips, input, list)
+	        const excluded = () => new Set([
+	          ...(typeof options.exclude === 'function' ? options.exclude() : []),
+	          ...state.selected
+	        ].map(email => String(email || '').trim().toLowerCase()).filter(Boolean))
+	        const notify = () => {
+	          if (typeof options.onChange === 'function') options.onChange(state.selected.slice())
+	        }
+	        const closeList = () => {
+	          state.open = false
+	          state.matches = []
+	          list.hidden = true
+	          input.setAttribute('aria-expanded', 'false')
+	        }
+	        const renderChips = () => {
+	          chips.replaceChildren(...state.selected.map(email => {
+	            const chip = bfEl('span', 'chat-member-chip')
+	            chip.dataset.email = email
+	            chip.append(chatPersonAvatarNode(email), bfEl('span', 'chat-member-chip__name', chatPersonDisplayName(email)))
+	            const remove = bfEl('button', 'chat-member-chip__remove', '×')
+	            remove.type = 'button'
+	            remove.setAttribute('aria-label', `Remove ${chatPersonDisplayName(email)}`)
+	            remove.addEventListener('click', () => {
+	              state.selected = state.selected.filter(candidate => candidate !== email)
+	              renderChips()
+	              notify()
+	              input.focus()
+	            })
+	            chip.appendChild(remove)
+	            return chip
+	          }))
+	        }
+	        const choose = candidate => {
+	          const email = String(candidate?.email || '').trim().toLowerCase()
+	          if (!email || state.selected.includes(email)) return
+	          state.selected.push(email)
+	          input.value = ''
+	          closeList()
+	          renderChips()
+	          notify()
+	          input.focus()
+	        }
+	        const renderList = () => {
+	          list.replaceChildren()
+	          if (!state.matches.length) {
+	            list.appendChild(bfEl('div', 'chat-member-picker__empty', desktopChatParticipantDirectoryLoaded ? 'no one matches' : 'loading people…'))
+	          }
+	          state.matches.forEach((candidate, index) => {
+	            const option = bfEl('button', 'chat-member-picker__option')
+	            option.type = 'button'
+	            option.setAttribute('role', 'option')
+	            option.setAttribute('aria-selected', String(index === state.activeIndex))
+	            option.classList.toggle('is-active', index === state.activeIndex)
+	            option.append(chatPersonAvatarNode(candidate.email), bfEl('span', 'chat-member-picker__option-name', String(candidate.name || candidate.email)))
+	            option.appendChild(bfEl('span', 'chat-member-picker__option-hint', String(candidate.roleTitle || '').trim() || String(candidate.email || '')))
+	            // mousedown would blur the field and close the list before the
+	            // click lands — swallow it so the click can complete the choice
+	            option.addEventListener('mousedown', event => event.preventDefault())
+	            option.addEventListener('click', () => choose(candidate))
+	            list.appendChild(option)
+	          })
+	          list.hidden = false
+	          state.open = true
+	          input.setAttribute('aria-expanded', 'true')
+	        }
+	        const update = () => {
+	          if (!desktopChatParticipantDirectoryLoaded) {
+	            const pending = ensureDesktopChatParticipantDirectory()
+	            if (pending?.then) pending.then(() => { if (document.activeElement === input) update() })
+	          }
+	          state.matches = chatMemberPickerCandidates(input.value, excluded()).slice(0, 8)
+	          state.activeIndex = Math.min(state.activeIndex, Math.max(0, state.matches.length - 1))
+	          renderList()
+	        }
+	        input.addEventListener('input', () => {
+	          state.activeIndex = 0
+	          update()
+	        })
+	        input.addEventListener('focus', update)
+	        input.addEventListener('blur', () => window.setTimeout(closeList, 0))
+	        input.addEventListener('keydown', event => {
+	          if (event.key === 'Escape') {
+	            if (state.open) {
+	              event.preventDefault()
+	              event.stopPropagation()
+	              closeList()
+	            }
+	            return
+	          }
+	          if (event.key === 'Backspace' && !input.value && state.selected.length) {
+	            event.preventDefault()
+	            state.selected.pop()
+	            renderChips()
+	            notify()
+	            update()
+	            return
+	          }
+	          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+	            event.preventDefault()
+	            if (!state.open) {
+	              update()
+	              return
+	            }
+	            if (!state.matches.length) return
+	            const step = event.key === 'ArrowDown' ? 1 : state.matches.length - 1
+	            state.activeIndex = (state.activeIndex + step) % state.matches.length
+	            renderList()
+	            return
+	          }
+	          if ((event.key === 'Enter' || event.key === 'Tab') && state.open && state.matches.length) {
+	            event.preventDefault()
+	            event.stopPropagation()
+	            choose(state.matches[state.activeIndex] || state.matches[0])
+	          }
+	        })
+	        root.addEventListener('click', event => {
+	          if (event.target === root || event.target === chips) input.focus()
+	        })
+	        return {
+	          selected: () => state.selected.slice(),
+	          reset: () => {
+	            state.selected = []
+	            input.value = ''
+	            closeList()
+	            renderChips()
+	            notify()
+	          },
+	          focus: () => input.focus(),
+	          listOpen: () => state.open,
+	          input
+	        }
+	      }
+
+	      function setGroupCreateOpen(open) {
+	        if (!chatGroupCreate) return
+	        chatGroupCreate.hidden = !open
+	        chatNewGroup?.setAttribute('aria-expanded', open ? 'true' : 'false')
+	        if (!open) {
+	          chatGroupMemberPicker?.reset()
+	          if (chatGroupName) chatGroupName.value = ''
+	          return
+	        }
+	        setChannelCreateOpen(false)
+	        if (!chatGroupMemberPicker) {
+	          chatGroupMemberPicker = createChatMemberPicker(chatGroupMembers, {
+	            placeholder: 'add people…',
+	            label: 'Group members',
+	            onChange: selected => {
+	              if (chatGroupCreateGo) chatGroupCreateGo.disabled = !selected.length
+	            }
+	          })
+	        }
+	        void ensureDesktopChatParticipantDirectory()
+	        if (chatGroupCreateGo) chatGroupCreateGo.disabled = true
+	        if (chatGroupName) {
+	          chatGroupName.value = ''
+	          chatGroupName.focus()
+	        }
+	      }
+
+	      // POST the human-group create contract with a fresh operationId (the
+	      // server replays idempotently on 200) and land in the new conversation
+	      async function createHumanGroupOnServer(title, memberEmails) {
+	        const generation = chatThreadsGeneration
+	        const account = String(authedUser?.email || '').trim().toLowerCase()
+	        const result = await postAuthJSON('/assistant/chat-threads', {
+	          title,
+	          conversationKind: 'human_group',
+	          memberEmails,
+	          operationId: chatOperationId()
+	        })
+	        if (!result.ok) {
+	          throw new Error(result.data?.error || 'could not create group')
+	        }
+	        if (generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').trim().toLowerCase()) return null
+	        const thread = upsertScoutChatThread(result.data?.thread, { select: false })
+	        if (thread?.id) {
+	          selectScoutChatThread(thread.id)
+	          setMobileChatView('convo')
+	        }
+	        return thread
+	      }
+
+	      // the first plain channel — where a viewer lands after being removed
+	      function chatThreadFirstChannelId() {
+	        const channel = scoutChatThreads.find(thread => chatThreadIsChannel(thread) && !chatThreadIsHumanGroup(thread) && !privateRiffThread(thread))
+	        return String(channel?.id || fallbackScoutThreadIdForScope() || '')
+	      }
+
+	      // in-place row patch (members, notification level) + the renders that
+	      // read it; never touches messages
+	      function applyChatThreadPatch(threadId, patch = {}) {
+	        const id = String(threadId || '')
+	        const index = scoutChatThreads.findIndex(thread => String(thread?.id || '') === id)
+	        if (index < 0) return null
+	        scoutChatThreads[index] = { ...scoutChatThreads[index], ...patch }
+	        renderChatAgentThreads()
+	        if (activeScoutThreadId === id) syncChatConvoHeader()
+	        return scoutChatThreads[index]
+	      }
+
+	      // D3: an inbound thread payload whose memberEmails excludes the viewer
+	      // means they were removed — drop the row; an active one falls back to
+	      // the first channel
+	      function dropChatThreadForViewer(threadId, options = {}) {
+	        const id = String(threadId || '')
+	        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === id)
+	        if (!thread) return
+	        scoutChatThreads = scoutChatThreads.filter(candidate => String(candidate?.id || '') !== id)
+	        chatTypingByThread.delete(id)
+	        chatReadMarkerSent.delete(id)
+	        if (activeScoutThreadId === id) {
+	          closeChatHeaderPopovers()
+	          renderChatAgentThreads()
+	          const fallback = chatThreadFirstChannelId()
+	          if (fallback) {
+	            selectScoutChatThread(fallback)
+	          } else {
+	            activeScoutThreadId = ''
+	            renderChatAgentThreads()
+	            renderActiveScoutThread()
+	          }
+	        } else {
+	          renderChatAgentThreads()
+	        }
+	        renderOfficeRecentThreads()
+	        if (options.toast !== false) showToast({ text: `you were removed from ${chatThreadDisplayTitle(thread)}`, kind: 'note' })
+	      }
+
+	      // D3: PATCH the member contract. Optimistic — the row and popover move
+	      // first and roll back on any error; the 409 (would drop below two
+	      // humans) surfaces the server's own message.
+	      async function patchChatThreadMembers(threadId, changes = {}) {
+	        const id = String(threadId || '')
+	        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === id)
+	        if (!thread || !authedUser) return false
+	        const normalize = email => String(email || '').trim().toLowerCase()
+	        const add = Array.from(new Set((Array.isArray(changes.add) ? changes.add : []).map(normalize).filter(Boolean)))
+	        const remove = Array.from(new Set((Array.isArray(changes.remove) ? changes.remove : []).map(normalize).filter(Boolean)))
+	        if (!add.length && !remove.length) return false
+	        const previous = chatThreadMemberEmails(thread)
+	        const optimistic = [...previous.filter(email => !remove.includes(email)), ...add.filter(email => !previous.includes(email))]
+	        add.forEach(email => chatMembersPending.add(email))
+	        remove.forEach(email => chatMembersPending.add(email))
+	        applyChatThreadPatch(id, { memberEmails: optimistic })
+	        renderChatConvoMembers()
+	        try {
+	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(id)}/members`, {
+	            method: 'PATCH',
+	            headers: { 'Content-Type': 'application/json' },
+	            body: JSON.stringify({ add, remove })
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok) {
+	            const serverMessage = String(payload?.error || payload?.message || '').trim()
+	            const fallback = response.status === 409
+	              ? 'a group needs at least two people'
+	              : response.status === 403
+	                ? 'only the owner can change members'
+	                : 'could not update members'
+	            throw new Error(serverMessage || fallback)
+	          }
+	          const serverThread = payload?.thread || {}
+	          const patch = { memberEmails: Array.isArray(serverThread.memberEmails) ? serverThread.memberEmails : optimistic }
+	          if (serverThread.conversationKind) patch.conversationKind = serverThread.conversationKind
+	          if (serverThread.updatedAt) patch.updatedAt = serverThread.updatedAt
+	          applyChatThreadPatch(id, patch)
+	          const text = add.length && !remove.length
+	            ? `added ${add.map(chatPersonFirstName).join(', ')}`
+	            : remove.length && !add.length
+	              ? `removed ${remove.map(chatPersonFirstName).join(', ')}`
+	              : 'members updated'
+	          showToast({ text, kind: 'done' })
+	          return true
+	        } catch (error) {
+	          applyChatThreadPatch(id, { memberEmails: previous })
+	          showToast({ text: error?.message || 'could not update members', kind: 'error' })
+	          return false
+	        } finally {
+	          add.forEach(email => chatMembersPending.delete(email))
+	          remove.forEach(email => chatMembersPending.delete(email))
+	          renderChatConvoMembers()
+	        }
+	      }
+
+	      // shared open/close for the header popovers: outside pointerdown and
+	      // Escape close, focus lands inside on open and returns to the trigger
+	      // on Escape; opening one closes the others
+	      function chatHeaderPopoverController(wrap, trigger, popover, options = {}) {
+	        if (!wrap || !trigger || !popover) return null
+	        let bound = false
+	        const onOutsidePointerDown = event => {
+	          if (!wrap.contains(event.target)) close()
+	        }
+	        const onKeydown = event => {
+	          if (event.key !== 'Escape') return
+	          event.preventDefault()
+	          event.stopPropagation()
+	          close({ restoreFocus: true })
+	        }
+	        const close = ({ restoreFocus = false } = {}) => {
+	          if (popover.hidden) return
+	          popover.hidden = true
+	          popover.classList.remove('chat-convo-popover--flip')
+	          trigger.setAttribute('aria-expanded', 'false')
+	          if (bound) {
+	            document.removeEventListener('pointerdown', onOutsidePointerDown, true)
+	            document.removeEventListener('keydown', onKeydown, true)
+	            bound = false
+	          }
+	          if (typeof options.onClose === 'function') options.onClose()
+	          if (restoreFocus) trigger.focus({ preventScroll: true })
+	        }
+	        const open = () => {
+	          chatHeaderPopoverControllers.forEach(other => { if (other !== controller) other.close() })
+	          if (typeof options.onOpen === 'function') options.onOpen()
+	          popover.hidden = false
+	          trigger.setAttribute('aria-expanded', 'true')
+	          // keep the panel on-screen when its trigger sits near the right edge
+	          const rect = popover.getBoundingClientRect()
+	          if (rect.right > window.innerWidth - 12) popover.classList.add('chat-convo-popover--flip')
+	          if (!bound) {
+	            bound = true
+	            window.setTimeout(() => {
+	              if (bound) {
+	                document.addEventListener('pointerdown', onOutsidePointerDown, true)
+	                document.addEventListener('keydown', onKeydown, true)
+	              }
+	            }, 0)
+	          }
+	          // must-run: a macrotask, never rAF (rAF does not fire in a hidden pane)
+	          window.setTimeout(() => {
+	            if (popover.hidden) return
+	            const target = (typeof options.focusTarget === 'function' && options.focusTarget()) || popover.querySelector('button, input')
+	            target?.focus?.({ preventScroll: true })
+	          }, 0)
+	        }
+	        trigger.addEventListener('click', event => {
+	          event.stopPropagation()
+	          if (popover.hidden) open()
+	          else close()
+	        })
+	        const controller = { open, close, isOpen: () => !popover.hidden }
+	        chatHeaderPopoverControllers.push(controller)
+	        return controller
+	      }
+
+	      function closeChatHeaderPopovers() {
+	        chatHeaderPopoverControllers.forEach(controller => controller.close())
+	      }
+
+	      // D3: the members popover — avatar + name per member, owner marked in
+	      // mono, × per non-owner row and an add row only for the owner
+	      function renderChatConvoMembers() {
+	        if (!chatConvoMembers) return
+	        const thread = selectedScoutChatThread()
+	        const show = Boolean(thread?.id) && !chatRenameActive && !privateRiffThread(thread) &&
+	          (chatThreadIsHumanGroup(thread) || chatThreadHasExplicitMembers(thread))
+	        chatConvoMembers.hidden = !show
+	        if (!show) {
+	          // only this control's popover — the bell menu stays open
+	          chatConvoMembersController?.close()
+	          return
+	        }
+	        const members = chatThreadMemberEmails(thread)
+	        const owner = String(thread.ownerEmail || '').trim().toLowerCase()
+	        const ordered = [...members.filter(email => email === owner), ...members.filter(email => email !== owner)]
+	        const viewerOwns = chatThreadViewerIsOwner(thread)
+	        const count = members.length
+	        if (chatConvoMembersCount) chatConvoMembersCount.textContent = String(count)
+	        if (chatConvoMembersOpen) chatConvoMembersOpen.setAttribute('aria-label', `${count} ${count === 1 ? 'person' : 'people'} · members`)
+	        if (chatConvoMembersList) {
+	          chatConvoMembersList.replaceChildren(...ordered.map(email => {
+	            const row = bfEl('div', 'chat-convo-member')
+	            row.dataset.email = email
+	            row.classList.toggle('is-pending', chatMembersPending.has(email))
+	            row.append(chatPersonAvatarNode(email), bfEl('span', 'chat-convo-member__name', chatPersonDisplayName(email)))
+	            if (email === owner) {
+	              row.appendChild(bfEl('span', 'chat-convo-member__owner', 'owner'))
+	            } else if (viewerOwns) {
+	              const remove = bfEl('button', 'chat-convo-member__remove', '×')
+	              remove.type = 'button'
+	              remove.disabled = chatMembersPending.has(email)
+	              remove.setAttribute('aria-label', `Remove ${chatPersonDisplayName(email)} from ${chatThreadDisplayTitle(thread)}`)
+	              remove.title = 'remove'
+	              remove.addEventListener('click', () => void patchChatThreadMembers(thread.id, { remove: [email] }))
+	              row.appendChild(remove)
+	            }
+	            return row
+	          }))
+	        }
+	        if (chatConvoMembersAdd) chatConvoMembersAdd.hidden = !viewerOwns
+	        if (viewerOwns && !chatMembersAddPicker && chatConvoMembersPicker) {
+	          chatMembersAddPicker = createChatMemberPicker(chatConvoMembersPicker, {
+	            placeholder: 'add people…',
+	            label: 'Add members',
+	            exclude: () => chatThreadMemberEmails(selectedScoutChatThread()),
+	            onChange: selected => {
+	              if (chatConvoMembersAddGo) chatConvoMembersAddGo.disabled = !selected.length
+	            }
+	          })
+	        }
+	      }
+
+	      // ---------- D6: per-conversation notification level ----------
+
+	      const chatNotificationLevels = ['all', 'mentions', 'none']
+
+	      function normalizeChatNotificationLevel(value) {
+	        const level = String(value || '').trim().toLowerCase()
+	        return chatNotificationLevels.includes(level) ? level : ''
+	      }
+
+	      // S2: notificationLevel is the one source of truth on the client —
+	      // index rows omit it at the default ("all"); the server's `muted` is
+	      // ignored and derived as level !== 'all' wherever it is needed
+	      function chatThreadMuteLevel(thread) {
+	        return normalizeChatNotificationLevel(thread?.notificationLevel) || 'all'
+	      }
+
+	      // the read marker this tab has posted is newer than any row that does
+	      // not echo it yet; the level is this tab's while its mute POST flies
+	      function chatThreadViewerStateForMerge(row) {
+	        const id = String(row?.id || '')
+	        const state = {}
+	        const sent = chatReadMarkerSent.get(id)
+	        if (!sent || String(row?.lastReadMessageId || '') === sent) {
+	          state.unreadCount = row?.unreadCount
+	          state.lastReadMessageId = row?.lastReadMessageId
+	        }
+	        if (!chatNotifyPending.has(id)) state.notificationLevel = normalizeChatNotificationLevel(row?.notificationLevel) || 'all'
+	        return state
+	      }
+
+	      // viewer-scoped keys the thread GET carries beside the thread body
+	      function chatThreadViewerStateFromPayload(payload, threadId = payload?.thread?.id) {
+	        const id = String(threadId || '')
+	        const state = {}
+	        const sent = chatReadMarkerSent.get(id)
+	        if (typeof payload?.lastReadMessageId === 'string' && (!sent || payload.lastReadMessageId === sent)) {
+	          state.lastReadMessageId = payload.lastReadMessageId
+	        }
+	        if (!chatNotifyPending.has(id)) {
+	          const level = normalizeChatNotificationLevel(payload?.notificationLevel)
+	          if (level) state.notificationLevel = level
+	        }
+	        return state
+	      }
+
+	      function chatThreadMutedGlyphNode(thread) {
+	        const level = chatThreadMuteLevel(thread)
+	        if (level === 'all') return null
+	        const glyph = bfEl('span', 'chat-thread-item__muted')
+	        glyph.setAttribute('role', 'img')
+	        glyph.setAttribute('aria-label', level === 'none' ? 'muted' : 'mentions only')
+	        glyph.title = level === 'none' ? 'muted' : 'mentions only'
+	        glyph.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"></path><path d="m4 4 16 16"></path></svg>'
+	        return glyph
+	      }
+
+	      function renderChatConvoNotify() {
+	        if (!chatConvoNotify) return
+	        const thread = selectedScoutChatThread()
+	        const show = Boolean(thread?.id) && !chatRenameActive && !privateRiffThread(thread)
+	        chatConvoNotify.hidden = !show
+	        if (!show) return
+	        const level = chatThreadMuteLevel(thread)
+	        if (chatConvoNotifyOpen) {
+	          chatConvoNotifyOpen.dataset.muted = level === 'all' ? 'false' : 'true'
+	          chatConvoNotifyOpen.setAttribute('aria-label', level === 'all'
+	            ? 'Notifications · all messages'
+	            : level === 'mentions' ? 'Notifications · mentions only' : 'Notifications · muted')
+	        }
+	        chatConvoNotifyMenu?.querySelectorAll('[data-notify-level]').forEach(option => {
+	          option.setAttribute('aria-checked', String(option.dataset.notifyLevel === level))
+	        })
+	      }
+
+	      async function setChatThreadNotificationLevel(threadId, level) {
+	        const id = String(threadId || '')
+	        const next = normalizeChatNotificationLevel(level)
+	        const thread = scoutChatThreads.find(candidate => String(candidate?.id || '') === id)
+	        if (!thread || !next || !authedUser) return false
+	        const previous = { notificationLevel: thread.notificationLevel }
+	        // while the POST flies, polls and hydrations keep this optimistic level
+	        chatNotifyPending.add(id)
+	        applyChatThreadPatch(id, { notificationLevel: next })
+	        try {
+	          const result = await postAuthJSON('/assistant/threads/mute', { threadId: id, level: next })
+	          if (!result.ok) {
+	            throw new Error(result.data?.error || 'could not update notifications')
+	          }
+	          const confirmed = normalizeChatNotificationLevel(result.data?.level) || next
+	          chatNotifyPending.delete(id)
+	          applyChatThreadPatch(id, { notificationLevel: confirmed })
+	          return true
+	        } catch (error) {
+	          chatNotifyPending.delete(id)
+	          applyChatThreadPatch(id, previous)
+	          showToast({ text: error?.message || 'could not update notifications', kind: 'error' })
+	          return false
+	        }
+	      }
+
+	      // ---------- D4: server read markers ----------
+
+	      function chatThreadNewestMessageId(thread) {
+	        const messages = Array.isArray(thread?.messages) ? thread.messages : []
+	        for (let index = messages.length - 1; index >= 0; index -= 1) {
+	          const id = String(messages[index]?.id || '')
+	          if (id) return id
+	        }
+	        return ''
+	      }
+
+	      function chatConversationIsVisible() {
+	        return (appShell?.dataset.tool || '') === 'chat' &&
+	          document.visibilityState !== 'hidden' &&
+	          (desktopChatLayoutQuery.matches || mobileChatView === 'convo')
+	      }
+
+	      // the seam anchors on the server marker when the marked message is in
+	      // the loaded window; the device-local lastSeen map is the fallback
+	      function chatThreadPriorSeenAt(thread) {
+	        if (!thread?.id) return ''
+	        const lastRead = String(thread.lastReadMessageId || '')
+	        if (lastRead) {
+	          const messages = Array.isArray(thread.messages) ? thread.messages : []
+	          const marker = messages.find(message => String(message?.id || '') === lastRead)
+	          if (marker?.createdAt) return String(marker.createdAt)
+	        }
+	        return String(chatThreadSeenMap()[String(thread.id)] || '')
+	      }
+
+	      // after a tail render / append / scroll: when the newest message is in
+	      // view, advance the server marker (debounced; unchanged ids skip)
+	      function noteScoutChatTailInView() {
+	        if (!authedUser || !activeScoutThreadId) return
+	        // must-run: a macrotask after the render commits, never rAF
+	        window.setTimeout(() => {
+	          const thread = selectedScoutChatThread()
+	          if (!thread?.id || thread.messagesLoaded !== true || !chatConversationIsVisible()) return
+	          if (!scoutChatThread || !scoutChatIsNearBottom()) return
+	          scheduleChatThreadReadMarker(thread)
+	        }, 0)
+	      }
+
+	      function scheduleChatThreadReadMarker(thread) {
+	        const threadId = String(thread?.id || '')
+	        const messageId = chatThreadNewestMessageId(thread)
+	        if (!threadId) return
+	        // a fast A→B→C switch posts all three: another thread's pending
+	        // marker flushes the moment a different thread comes into view,
+	        // whether or not that thread needs a marker of its own
+	        if (chatReadMarkerPending && chatReadMarkerPending.threadId !== threadId) {
+	          window.clearTimeout(chatReadMarkerTimer)
+	          void flushChatThreadReadMarker()
+	        }
+	        if (!messageId) return
+	        if (chatReadMarkerSent.get(threadId) === messageId) return
+	        if (String(thread.lastReadMessageId || '') === messageId && !(Number(thread.unreadCount) > 0)) return
+	        chatReadMarkerPending = { threadId, messageId }
+	        window.clearTimeout(chatReadMarkerTimer)
+	        chatReadMarkerTimer = window.setTimeout(flushChatThreadReadMarker, 400)
+	      }
+
+	      async function flushChatThreadReadMarker() {
+	        chatReadMarkerTimer = 0
+	        const pending = chatReadMarkerPending
+	        chatReadMarkerPending = null
+	        if (!pending || !authedUser) return
+	        if (chatReadMarkerSent.get(pending.threadId) === pending.messageId) return
+	        chatReadMarkerSent.set(pending.threadId, pending.messageId)
+	        // the row reflects the read immediately; the next index poll confirms
+	        const index = scoutChatThreads.findIndex(thread => String(thread?.id || '') === pending.threadId)
+	        if (index >= 0) {
+	          const current = scoutChatThreads[index]
+	          if (String(current.lastReadMessageId || '') !== pending.messageId || Number(current.unreadCount) > 0) {
+	            scoutChatThreads[index] = { ...current, lastReadMessageId: pending.messageId, unreadCount: 0 }
+	            renderChatAgentThreads()
+	          }
+	        }
+	        try {
+	          const result = await postAuthJSON('/assistant/threads/read', { threadId: pending.threadId, lastReadMessageId: pending.messageId })
+	          if (!result.ok) chatReadMarkerSent.delete(pending.threadId)
+	        } catch {
+	          chatReadMarkerSent.delete(pending.threadId)
+	        }
+	      }
+
+	      // ---------- D5: typing presence ----------
+
+	      function chatTypingSend(threadId, typing) {
+	        let socket = null
+	        try {
+	          socket = officeWs?.readyState === WebSocket.OPEN ? officeWs : null
+	        } catch {
+	          socket = null
+	        }
+	        if (!socket) return
+	        try {
+	          socket.send(JSON.stringify({ event: 'chat_typing', data: JSON.stringify({ threadId, typing }) }))
+	        } catch {
+	          // a failed write means the socket is dying — onclose reconnects
+	        }
+	      }
+
+	      // typing:true at most once per 3s while the composer has text;
+	      // typing:false on send / clear / blur / thread switch (for the thread
+	      // the true went to, whatever is selected now)
+	      function sendChatTypingSignal(typing) {
+	        if (typing) {
+	          const thread = selectedScoutChatThread()
+	          const threadId = String(thread?.id || '')
+	          if (!threadId || !authedUser || !chatThreadIsChannel(thread) || privateRiffThread(thread)) return
+	          const now = Date.now()
+	          if (chatTypingActive && chatTypingThreadId === threadId && now - chatTypingSentAt < 3000) return
+	          if (chatTypingActive && chatTypingThreadId && chatTypingThreadId !== threadId) chatTypingSend(chatTypingThreadId, false)
+	          chatTypingActive = true
+	          chatTypingThreadId = threadId
+	          chatTypingSentAt = now
+	          chatTypingSend(threadId, true)
+	          return
+	        }
+	        if (!chatTypingActive) return
+	        const previousId = chatTypingThreadId
+	        chatTypingActive = false
+	        chatTypingThreadId = ''
+	        chatTypingSentAt = 0
+	        if (previousId) chatTypingSend(previousId, false)
+	      }
+
+	      // inbound chat_typing: never the viewer, never Scout; entries expire
+	      // 4s after the last typing:true
+	      function handleChatTypingEvent(payload) {
+	        const threadId = String(payload?.threadId || '')
+	        const email = String(payload?.email || '').trim().toLowerCase()
+	        if (!threadId || !email || !authedUser) return
+	        if (email === String(authedUser.email || '').trim().toLowerCase()) return
+	        const name = String(payload?.name || '').trim()
+	        if (!name || name.toLowerCase() === 'scout') return
+	        let entries = chatTypingByThread.get(threadId)
+	        if (payload?.typing) {
+	          if (!entries) {
+	            entries = new Map()
+	            chatTypingByThread.set(threadId, entries)
+	          }
+	          entries.set(email, { name, expiresAt: Date.now() + 4000 })
+	        } else if (entries) {
+	          entries.delete(email)
+	          if (!entries.size) chatTypingByThread.delete(threadId)
+	        }
+	        renderChatTypingPresence()
+	      }
+
+	      function chatTypingLabel(names) {
+	        if (names.length === 1) return `${names[0]} is typing…`
+	        if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`
+	        return `${names.length} people are typing…`
+	      }
+
+	      function renderChatTypingPresence() {
+	        if (!scoutChatTyping) return
+	        window.clearTimeout(chatTypingExpiryTimer)
+	        chatTypingExpiryTimer = 0
+	        const now = Date.now()
+	        let nextExpiry = Infinity
+	        for (const [threadId, entries] of chatTypingByThread) {
+	          for (const [email, entry] of entries) {
+	            if (entry.expiresAt <= now) entries.delete(email)
+	            else nextExpiry = Math.min(nextExpiry, entry.expiresAt)
+	          }
+	          if (!entries.size) chatTypingByThread.delete(threadId)
+	        }
+	        if (nextExpiry !== Infinity) {
+	          chatTypingExpiryTimer = window.setTimeout(renderChatTypingPresence, Math.max(50, nextExpiry - now + 10))
+	        }
+	        const entries = chatTypingByThread.get(String(activeScoutThreadId || ''))
+	        const names = entries ? Array.from(entries.values()).map(entry => chatFirstNameOf(entry.name)) : []
+	        if (!names.length) {
+	          scoutChatTyping.hidden = true
+	          if (scoutChatTypingText) scoutChatTypingText.textContent = ''
+	          return
+	        }
+	        const stick = scoutChatThread ? scoutChatIsNearBottom() : false
+	        if (scoutChatTypingText) scoutChatTypingText.textContent = chatTypingLabel(names)
+	        scoutChatTyping.hidden = false
+	        // the row takes height from the log; a reader at the live edge stays there
+	        if (stick) scoutChatThread.scrollTop = scoutChatThread.scrollHeight
+	      }
+
+	      // ---------- D8: message search ----------
+
+	      const chatSearchMinChars = 2
+	      const chatSearchDebounceMs = 250
+	      const chatSearchLimit = 20
+	      // how far back the opener pages (80 messages a page) for an old hit
+	      const chatSearchHistoryPageCap = 5
+	      // validation is measured in code points, like the server does
+	      const chatSearchMaxChars = 200
+	      const chatSearchUnavailableCopy = 'search unavailable · showing titles only'
+	      const chatSearchValidationCopy = 'query too long · showing titles only'
+
+	      // '' | 'results' (server rows replace the lists) | 'unavailable'
+	      // (an honest notice above the local title filter)
+	      function chatSearchMode() {
+	        return String(chatToolSection?.dataset.chatSearch || '')
+	      }
+
+	      function chatSearchIsActive() {
+	        return chatSearchMode() === 'results'
+	      }
+
+	      function setChatSearchMode(mode) {
+	        const next = mode === true ? 'results' : mode === 'results' || mode === 'unavailable' ? mode : ''
+	        if (chatToolSection) {
+	          if (next) chatToolSection.dataset.chatSearch = next
+	          else delete chatToolSection.dataset.chatSearch
+	        }
+	        if (chatSearchResultsEl) chatSearchResultsEl.hidden = !next
+	      }
+
+	      // one quiet line above the local title filter — the server could not
+	      // answer, or the query is not one it will accept
+	      function showChatSearchNotice(copy) {
+	        chatSearchResults = []
+	        chatSearchActiveIndex = 0
+	        if (chatSearchResultsEl) {
+	          const notice = bfEl('p', 'chat-search-results__empty chat-search-results__notice', copy)
+	          notice.setAttribute('role', 'status')
+	          chatSearchResultsEl.replaceChildren(notice)
+	        }
+	        setChatSearchMode('unavailable')
+	      }
+
+	      function showChatSearchUnavailable() {
+	        showChatSearchNotice(chatSearchUnavailableCopy)
+	      }
+
+	      // drop the pending/in-flight search and put the section lists back
+	      function clearChatSearch() {
+	        chatSearchGeneration += 1
+	        window.clearTimeout(chatSearchTimer)
+	        chatSearchTimer = 0
+	        if (chatSearchController) {
+	          try { chatSearchController.abort() } catch { /* already settled */ }
+	          chatSearchController = null
+	        }
+	        chatSearchResults = []
+	        chatSearchActiveIndex = 0
+	        chatSearchQuery = ''
+	        chatSearchResultsEl?.replaceChildren()
+	        chatSearchResultsEl?.removeAttribute('aria-busy')
+	        setChatSearchMode(false)
+	      }
+
+	      // fewer than two characters keep the local title/preview filter; at
+	      // two or more the server search runs on a 250ms trailing debounce
+	      function syncChatSearch() {
+	        const query = String(chatThreadSearch?.value || '').trim()
+	        const length = [...query].length
+	        if (length < chatSearchMinChars) {
+	          if (chatSearchMode() || chatSearchTimer || chatSearchController) clearChatSearch()
+	          return
+	        }
+	        if (length > chatSearchMaxChars) {
+	          // over the server's limit: no request, the quiet validation line
+	          chatSearchGeneration += 1
+	          window.clearTimeout(chatSearchTimer)
+	          chatSearchTimer = 0
+	          if (chatSearchController) {
+	            try { chatSearchController.abort() } catch { /* already settled */ }
+	            chatSearchController = null
+	          }
+	          showChatSearchNotice(chatSearchValidationCopy)
+	          return
+	        }
+	        window.clearTimeout(chatSearchTimer)
+	        chatSearchTimer = window.setTimeout(() => {
+	          chatSearchTimer = 0
+	          void runChatSearch(query)
+	        }, chatSearchDebounceMs)
+	      }
+
+	      async function runChatSearch(query) {
+	        if (!authedUser) return
+	        const generation = ++chatSearchGeneration
+	        if (chatSearchController) {
+	          try { chatSearchController.abort() } catch { /* already settled */ }
+	        }
+	        const controller = typeof AbortController === 'function' ? new AbortController() : null
+	        chatSearchController = controller
+	        chatSearchResultsEl?.setAttribute('aria-busy', 'true')
+	        try {
+	          const response = await fetch(`/assistant/chat-search?q=${encodeURIComponent(query)}&limit=${chatSearchLimit}`, {
+	            cache: 'no-store',
+	            signal: controller?.signal
+	          })
+	          const payload = await response.json().catch(() => ({}))
+	          if (generation !== chatSearchGeneration) return
+	          if (!response.ok) {
+	            // 400 is the server refusing the query (validation), anything
+	            // else is the search being unavailable
+	            if (response.status === 400) showChatSearchNotice(chatSearchValidationCopy)
+	            else showChatSearchUnavailable()
+	            return
+	          }
+	          chatSearchQuery = String(payload?.query || query)
+	          chatSearchResults = Array.isArray(payload?.results) ? payload.results : []
+	          chatSearchActiveIndex = 0
+	          renderChatSearchResults()
+	          setChatSearchMode(true)
+	        } catch (error) {
+	          if (error?.name === 'AbortError' || generation !== chatSearchGeneration) return
+	          showChatSearchUnavailable()
+	        } finally {
+	          if (chatSearchController === controller) chatSearchController = null
+	          if (generation === chatSearchGeneration) chatSearchResultsEl?.removeAttribute('aria-busy')
+	        }
+	      }
+
+	      // the sidebar's leading glyph — 'channel' (#), 'group' (avatar
+	      // cluster) or 'private' (Scout sparkle) — one node builder shared by
+	      // thread rows, search hits and the conversations group
+	      function chatThreadIconKind(thread) {
+	        return chatThreadIsHumanGroup(thread) ? 'group' : chatThreadIsChannel(thread) ? 'channel' : 'private'
+	      }
+
+	      function chatThreadIconNode(kind, thread) {
+	        const icon = bfEl('span', 'chat-thread-item__icon')
+	        icon.setAttribute('aria-hidden', 'true')
+	        if (kind === 'group') {
+	          icon.classList.add('chat-thread-item__icon--cluster')
+	          icon.appendChild(chatThreadAvatarClusterNode(thread))
+	        } else {
+	          icon.innerHTML = chatThreadGlyphMarkup(kind === 'channel' ? 'channel' : 'private')
+	        }
+	        return icon
+	      }
+
+	      function chatThreadGlyphMarkup(kind) {
+	        if (kind === 'channel') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16"></path><path d="M4 15h16"></path><path d="M10 3 8 21"></path><path d="M16 3l-2 18"></path></svg>'
+	        return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
+	      }
+
+	      function chatSearchResultThread(result) {
+	        const id = String(result?.threadId || '')
+	        return scoutChatThreads.find(thread => String(thread?.id || '') === id) || null
+	      }
+
+	      function chatSearchGlyphNode(result) {
+	        const thread = chatSearchResultThread(result)
+	        const conversationKind = String(result?.conversationKind || thread?.conversationKind || '').toLowerCase()
+	        const visibility = String(result?.visibility || thread?.visibility || '').toLowerCase()
+	        const kind = conversationKind === 'human_group' ? 'group' : visibility === 'public' ? 'channel' : 'private'
+	        return chatThreadIconNode(kind, thread || { memberEmails: [result?.authorEmail] })
+	      }
+
+	      // the local title/preview filter, the same haystack the sidebar rows use
+	      function chatThreadMatchesQuery(thread, query) {
+	        const q = String(query || '').trim().toLowerCase()
+	        if (!q) return true
+	        return `${chatThreadDisplayTitle(thread)} ${chatThreadDisplayPreview(thread)}`.toLowerCase().includes(q)
+	      }
+
+	      // conversations whose name/preview match — channels, groups, private —
+	      // listed above the message hits so a name search is never hidden
+	      function chatSearchConversationMatches(query) {
+	        const q = String(query || '').trim().toLowerCase()
+	        if (!q) return []
+	        const ordered = [
+	          ...scoutChatThreads.filter(thread => chatThreadIsChannel(thread) && !chatThreadIsHumanGroup(thread)),
+	          ...scoutChatThreads.filter(thread => chatThreadIsHumanGroup(thread)),
+	          ...scoutChatThreads.filter(thread => !chatThreadIsChannel(thread) && !privateRiffThread(thread))
+	        ]
+	        return ordered.filter(thread => chatThreadMatchesQuery(thread, q))
+	      }
+
+	      // the flat keyboard order: conversations first, then message hits
+	      function chatSearchEntries() {
+	        return [
+	          ...chatSearchConversationMatches(chatSearchQuery).map(thread => ({ kind: 'thread', thread })),
+	          ...chatSearchResults.map(result => ({ kind: 'message', result }))
+	        ]
+	      }
+
+	      function chatSearchGroupHead(label) {
+	        const head = bfEl('p', 'chat-search-results__head', label)
+	        head.setAttribute('role', 'presentation')
+	        return head
+	      }
+
+	      async function openChatSearchEntry(entry) {
+	        if (!entry) return
+	        if (entry.kind === 'thread') {
+	          if (entry.thread?.id) {
+	            selectScoutChatThread(entry.thread.id)
+	            setMobileChatView('convo')
+	          }
+	          return
+	        }
+	        await openChatSearchResult(entry.result)
+	      }
+
+	      // DOM-built snippet: every case-insensitive hit of the query wears
+	      // <mark>; never innerHTML over server text
+	      // length-preserving lowercase: a unit whose lowercase is not exactly one
+	      // unit (U+0130 → "i̇") keeps its original, so indexOf/slice offsets
+	      // into the original text stay aligned
+	      function chatSearchFoldCase(text) {
+	        let folded = ''
+	        for (let index = 0; index < text.length; index += 1) {
+	          const unit = text[index]
+	          const lower = unit.toLowerCase()
+	          folded += lower.length === 1 ? lower : unit
+	        }
+	        return folded
+	      }
+
+	      function appendChatSearchSnippet(target, snippet, query) {
+	        const text = String(snippet || '')
+	        const needle = chatSearchFoldCase(String(query || '').trim())
+	        if (!needle) {
+	          target.textContent = text
+	          return
+	        }
+	        const lower = chatSearchFoldCase(text)
+	        let cursor = 0
+	        let index = lower.indexOf(needle)
+	        while (index >= 0) {
+	          if (index > cursor) target.appendChild(document.createTextNode(text.slice(cursor, index)))
+	          const mark = document.createElement('mark')
+	          mark.className = 'chat-search-result__mark'
+	          mark.textContent = text.slice(index, index + needle.length)
+	          target.appendChild(mark)
+	          cursor = index + needle.length
+	          index = lower.indexOf(needle, cursor)
+	        }
+	        if (cursor < text.length) target.appendChild(document.createTextNode(text.slice(cursor)))
+	      }
+
+	      function chatSearchResultNode(result, index) {
+	        const row = bfEl('button', 'chat-search-result')
+	        row.type = 'button'
+	        row.setAttribute('role', 'option')
+	        row.dataset.threadId = String(result?.threadId || '')
+	        row.dataset.messageId = String(result?.messageId || '')
+	        row.dataset.searchIndex = String(index)
+	        row.setAttribute('aria-selected', String(index === chatSearchActiveIndex))
+	        row.classList.toggle('is-active', index === chatSearchActiveIndex)
+	        const thread = chatSearchResultThread(result)
+	        const title = thread ? chatThreadDisplayTitle(thread) : String(result?.threadTitle || 'conversation')
+	        const author = String(result?.authorName || '').trim() || chatPersonDisplayName(result?.authorEmail)
+	        const when = chatThreadTimeLabel(result?.createdAt)
+	        const body = bfEl('span', 'chat-search-result__body')
+	        const head = bfEl('span', 'chat-search-result__row')
+	        head.append(
+	          bfEl('span', 'chat-search-result__title', title),
+	          bfEl('span', 'chat-search-result__meta', when ? `${author} · ${when}` : author)
+	        )
+	        const snippet = bfEl('span', 'chat-search-result__snippet')
+	        appendChatSearchSnippet(snippet, result?.snippet, chatSearchQuery)
+	        body.append(head, snippet)
+	        row.append(chatSearchGlyphNode(result), body)
+	        row.addEventListener('focus', () => setChatSearchActiveIndex(index, { scroll: false }))
+	        row.addEventListener('click', () => void openChatSearchResult(result))
+	        return row
+	      }
+
+	      function renderChatSearchResults() {
+	        if (!chatSearchResultsEl) return
+	        const entries = chatSearchEntries()
+	        // "no messages match" only when neither group has anything
+	        if (!entries.length) {
+	          chatSearchResultsEl.replaceChildren(bfEl('p', 'chat-search-results__empty', 'no messages match'))
+	          return
+	        }
+	        const nodes = []
+	        const conversations = entries.filter(entry => entry.kind === 'thread')
+	        const messages = entries.filter(entry => entry.kind === 'message')
+	        let position = 0
+	        if (conversations.length) {
+	          nodes.push(chatSearchGroupHead('conversations'))
+	          conversations.forEach(entry => {
+	            const index = position
+	            const row = chatThreadRowNode(entry.thread, '')
+	            row.dataset.searchIndex = String(index)
+	            row.classList.toggle('is-active', index === chatSearchActiveIndex)
+	            row.addEventListener('focus', () => setChatSearchActiveIndex(index, { scroll: false }))
+	            nodes.push(row)
+	            position += 1
+	          })
+	        }
+	        if (messages.length) {
+	          nodes.push(chatSearchGroupHead('messages'))
+	          messages.forEach(entry => {
+	            nodes.push(chatSearchResultNode(entry.result, position))
+	            position += 1
+	          })
+	        }
+	        chatSearchResultsEl.replaceChildren(...nodes)
+	      }
+
+	      function setChatSearchActiveIndex(index, options = {}) {
+	        const rows = chatSearchResultsEl ? Array.from(chatSearchResultsEl.querySelectorAll('[data-search-index]')) : []
+	        if (!rows.length) return
+	        chatSearchActiveIndex = Math.max(0, Math.min(index, rows.length - 1))
+	        rows.forEach((row, rowIndex) => {
+	          const active = rowIndex === chatSearchActiveIndex
+	          row.classList.toggle('is-active', active)
+	          if (row.getAttribute('role') === 'option') row.setAttribute('aria-selected', String(active))
+	        })
+	        if (options.scroll !== false) rows[chatSearchActiveIndex]?.scrollIntoView?.({ block: 'nearest' })
+	      }
+
+	      // make sure the hit is in the loaded window: wait for the tail, then
+	      // page back through history (capped) until the id is present
+	      async function ensureScoutChatMessageLoaded(threadId, messageId) {
+	        const id = String(threadId || '')
+	        const target = String(messageId || '')
+	        const current = () => scoutChatThreads.find(thread => String(thread?.id || '') === id) || null
+	        const loaded = () => {
+	          const messages = current()?.messages
+	          return Array.isArray(messages) && messages.some(message => String(message?.id || '') === target)
+	        }
+	        const pendingTail = scoutChatThreadRequests.get(id)
+	        if (pendingTail) await pendingTail
+	        else if (current()?.messagesLoaded !== true) await hydrateScoutChatThread(id)
+	        if (loaded()) return true
+	        for (let page = 0; page < chatSearchHistoryPageCap; page += 1) {
+	          const thread = current()
+	          if (!thread?.history?.hasEarlier || !thread.history.nextBeforeMessageId) break
+	          const inflight = scoutChatHistoryRequests.get(id)
+	          const merged = inflight ? await inflight : await loadEarlierScoutChatMessages(id)
+	          if (!merged) break
+	          if (loaded()) return true
+	        }
+	        return loaded()
+	      }
+
+	      function scoutChatMessageNodeById(messageId) {
+	        const escaped = selectorEscape(String(messageId || ''))
+	        return scoutChatThread?.querySelector(`.scout-chat-msg[data-message-id="${escaped}"]`) ||
+	          scoutChatThread?.querySelector(`[data-message-id="${escaped}"]`) || null
+	      }
+
+	      // scroll the message into view with a brief ring; a reply hit lands on
+	      // its root when the timeline only projects roots
+	      function revealScoutChatMessage(messageId) {
+	        const id = String(messageId || '')
+	        let node = scoutChatMessageNodeById(id)
+	        if (!node) {
+	          // progressive navigation projects only the tail first — commit the
+	          // full bounded window so an older record has a node to land on
+	          renderActiveScoutThread()
+	          node = scoutChatMessageNodeById(id)
+	        }
+	        if (!node) {
+	          const message = (selectedScoutChatThread()?.messages || []).find(entry => String(entry?.id || '') === id)
+	          const rootId = String(message?.replyTo?.rootMessageId || message?.replyTo?.messageId || '')
+	          if (rootId && rootId !== id) node = scoutChatMessageNodeById(rootId)
+	        }
+	        if (!node) return false
+	        cancelScoutChatOwnSendTailPin()
+	        node.scrollIntoView({ block: 'center', behavior: reducedMotion?.matches ? 'auto' : 'smooth' })
+	        node.classList.remove('is-search-hit')
+	        void node.offsetWidth
+	        node.classList.add('is-search-hit')
+	        window.setTimeout(() => node.classList.remove('is-search-hit'), 1900)
+	        return true
+	      }
+
+	      async function openChatSearchResult(result) {
+	        const threadId = String(result?.threadId || '')
+	        const messageId = String(result?.messageId || '')
+	        if (!threadId) return
+	        if (activeScoutThreadId !== threadId) selectScoutChatThread(threadId)
+	        setMobileChatView('convo')
+	        if (!messageId) return
+	        const found = await ensureScoutChatMessageLoaded(threadId, messageId)
+	        if (String(activeScoutThreadId || '') !== threadId) return
+	        if (!found || !revealScoutChatMessage(messageId)) {
+	          showToast({ text: 'message is older than the loaded history', kind: 'note' })
+	        }
+	      }
+
+	      // ---------- wiring ----------
+
+	      chatConvoMembersController = chatHeaderPopoverController(chatConvoMembers, chatConvoMembersOpen, chatConvoMembersPopover, {
+	        onOpen: renderChatConvoMembers,
+	        // The add-picker is a singleton: clear its chips on every close so a
+	        // selection started in one group can never be added to another.
+	        onClose: () => chatMembersAddPicker?.reset(),
+	        focusTarget: () => chatConvoMembersPopover?.querySelector('.chat-member-picker__input, .chat-convo-member__remove')
+	      })
+	      chatConvoNotifyController = chatHeaderPopoverController(chatConvoNotify, chatConvoNotifyOpen, chatConvoNotifyMenu, {
+	        onOpen: renderChatConvoNotify,
+	        focusTarget: () => chatConvoNotifyMenu?.querySelector('[aria-checked="true"]')
+	      })
+	      chatConvoNotifyMenu?.querySelectorAll('[data-notify-level]').forEach(option => {
+	        option.addEventListener('click', () => {
+	          const thread = selectedScoutChatThread()
+	          chatConvoNotifyController?.close({ restoreFocus: true })
+	          if (thread?.id) void setChatThreadNotificationLevel(thread.id, option.dataset.notifyLevel)
+	        })
+	      })
+	      chatConvoNotifyMenu?.addEventListener('keydown', event => {
+	        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+	        const options = Array.from(chatConvoNotifyMenu.querySelectorAll('[data-notify-level]'))
+	        if (!options.length) return
+	        event.preventDefault()
+	        const index = options.indexOf(document.activeElement)
+	        const step = event.key === 'ArrowDown' ? 1 : options.length - 1
+	        options[(Math.max(index, 0) + step) % options.length].focus()
+	      })
+	      chatConvoMembersAddGo?.addEventListener('click', async () => {
+	        const thread = selectedScoutChatThread()
+	        const picked = chatMembersAddPicker ? chatMembersAddPicker.selected() : []
+	        if (!thread?.id || !picked.length) return
+	        chatMembersAddPicker.reset()
+	        await patchChatThreadMembers(thread.id, { add: picked })
+	      })
+	      scoutChatThread?.addEventListener('scroll', () => {
+	        if (scoutChatIsNearBottom()) noteScoutChatTailInView()
+	      }, { passive: true })
+	      document.addEventListener('visibilitychange', () => {
+	        if (document.visibilityState === 'visible') noteScoutChatTailInView()
+	      })
 
 	      // D7 — server defaults that the first message's auto-name replaces;
 	      // presented as the design's `new thread` placeholder until then
@@ -70708,12 +73042,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          }
 	        })
 
-	        const icon = document.createElement('span')
-	        icon.className = 'chat-thread-item__icon'
-	        icon.setAttribute('aria-hidden', 'true')
-	        icon.innerHTML = isChannel
-	          ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h16"></path><path d="M4 15h16"></path><path d="M10 3 8 21"></path><path d="M16 3l-2 18"></path></svg>'
-	          : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"></path><path d="M19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z"></path></svg>'
+	        // W1 D1: a group row leads with its people (max 3 faces + "+N");
+	        // channels keep the #, private threads the Scout sparkle
+	        const icon = chatThreadIconNode(chatThreadIconKind(thread), thread)
 
 	        const body = document.createElement('span')
 	        body.className = 'chat-thread-item__body'
@@ -70732,16 +73063,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          time.textContent = isBonfireChat ? '' : chatThreadTimeLabel(thread.updatedAt || thread.createdAt)
 	          time.hidden = isBonfireChat
 	        }
+	        // W1 D6: a muted row wears a quiet bell-slash beside its time
+	        const mutedGlyph = chatThreadMutedGlyphNode(thread)
 	        if (!active && chatThreadHasUnread(thread)) {
 	          const unreadDot = document.createElement('span')
 	          unreadDot.className = 'chat-thread-item__unread-dot'
 	          unreadDot.setAttribute('aria-label', 'unread activity')
 	          row.append(unreadDot, titleEl)
 	          if (strideTag) row.appendChild(strideTag)
+	          if (mutedGlyph) row.appendChild(mutedGlyph)
 	          row.appendChild(time)
 	        } else {
 	          row.appendChild(titleEl)
 	          if (strideTag) row.appendChild(strideTag)
+	          if (mutedGlyph) row.appendChild(mutedGlyph)
 	          row.appendChild(time)
 	        }
 	        const previewEl = document.createElement('span')
@@ -70790,8 +73125,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // own always-visible section (channels · whole office / private · you +
 	        // Scout). The per-row search filter (chat-thread-item--hidden) still
 	        // spans both lists.
-	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread))
+	        // W1 D1: human groups are public-visibility rows but leave the channel
+	        // bucket for their own section (channels · groups · private); their
+	        // rows wear the member avatar cluster
+	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread)).filter(thread => !chatThreadIsHumanGroup(thread))
+	        const groups = scoutChatThreads.filter(thread => chatThreadIsHumanGroup(thread))
 	        channels.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)))
+	        if (groups.length) void ensureDesktopChatParticipantDirectory()
 	        // A channel Riff is a contextual workspace, not a private-chat row.
 	        // It remains durable and directly addressable, but the channel guitar
 	        // is its canonical doorway so repeated Riffs never flood this list.
@@ -70807,7 +73147,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatChannelsEmpty) {
 	          chatChannelsEmpty.hidden = channels.length > 0
 	        }
+	        if (chatGroupsEmpty) {
+	          chatGroupsEmpty.hidden = groups.length > 0
+	        }
 	        chatChannelThreads?.replaceChildren(...channels.map(thread => chatThreadRowNode(thread, q)))
+	        chatGroupThreads?.replaceChildren(...groups.map(thread => chatThreadRowNode(thread, q)))
 	        chatAgentThreads.replaceChildren(...privates.map(thread => chatThreadRowNode(thread, q)))
 	      }
 
@@ -70875,15 +73219,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        resetScoutChatProjectContext({ reload: true })
 	        // opening a thread cancels an in-flight rename (design §7.6)
 	        chatRenameActive = false
-	        // Desktop captures the prior marker during render so it can place an
-	        // honest unread boundary before advancing the marker. The protected
-	        // compact/mobile path keeps its established eager behavior.
-	        if (!desktopChatLayoutQuery.matches) {
-	          markChatThreadSeen(selectedScoutChatThread())
-	        }
+	        // W1 D4: every layout captures the prior marker during render so the
+	        // unread seam is honest on phones too; the render pass advances the
+	        // device-local marker and the server marker follows once the newest
+	        // message is in view (noteScoutChatTailInView).
+	        sendChatTypingSignal(false)
+	        closeChatHeaderPopovers()
 	        hideScoutChatThinking()
 		syncChatThreadSelection(nextThreadId)
 	        renderActiveScoutThread({ forceBottom: true, progressiveNavigation: true })
+	        renderChatTypingPresence()
 		const selected = selectedScoutChatThread()
 		if (selected?.messagesLoaded === true) {
 		  scoutChatNavigationTailThreadId = ''
@@ -70918,8 +73263,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (chatConvoMeta) {
 	          const isTeam = chatThreadIsTeam(thread)
+	          const groupCount = chatThreadMemberEmails(thread).length
 	          chatConvoMeta.textContent = thread?.riff
 	            ? `your riff · #${thread.riff.sourceTitle || 'channel'}`
+	            : chatThreadIsHumanGroup(thread)
+	            ? `group · ${groupCount} ${groupCount === 1 ? 'person' : 'people'}`
 	            : isChannel
 	            ? (isTeam ? 'public · everyone in the office' : 'project · members only')
 	            : 'private'
@@ -70928,10 +73276,19 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const isTeam = chatThreadIsTeam(thread)
 	          const scope = !isChannel ? 'private' : isTeam ? 'pinned · Stride' : 'project channel'
 	          const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'
-	          chatConvoScope.textContent = scope
-	          chatConvoPolicy.textContent = policy
-	          chatConvoContext.setAttribute('aria-label', `${scope}; ${policy}`)
+	          // W1 D1: a human group's eyebrow counts its people
+	          const groupCount = chatThreadIsHumanGroup(thread) ? chatThreadMemberEmails(thread).length : 0
+	          const scopeText = chatThreadIsHumanGroup(thread) ? 'group' : scope
+	          const policyText = chatThreadIsHumanGroup(thread)
+	            ? `${groupCount} ${groupCount === 1 ? 'person' : 'people'} · shared memory`
+	            : policy
+	          chatConvoScope.textContent = scopeText
+	          chatConvoPolicy.textContent = policyText
+	          chatConvoContext.setAttribute('aria-label', `${scopeText}; ${policyText}`)
 	        }
+	        // W1 D3/D6: header tools follow the selected conversation
+	        renderChatConvoMembers()
+	        renderChatConvoNotify()
 	        if (scoutChatThread) {
 	          scoutChatThread.setAttribute('aria-label', thread?.riff
 	            ? `Your private Riff for ${thread.riff.sourceTitle || 'this channel'}`
@@ -71710,9 +74067,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  syncDesktopOpenChatContext()
 		  return
 		}
-	        const priorSeenAt = desktopChatLayoutQuery.matches && thread?.id
-	          ? String(chatThreadSeenMap()[String(thread.id)] || '')
-	          : ''
+	        // W1 D4: server marker first (lastReadMessageId), device-local map
+	        // as the fallback — and no desktop-only gate, phones get the seam
+	        const priorSeenAt = chatThreadPriorSeenAt(thread)
 	        if (thread && (appShell.dataset.tool || '') === 'chat') {
 	          // The open conversation stays read while its updates stream in.
 	          markChatThreadSeen(thread)
@@ -71851,6 +74208,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        } else {
 	          scoutChatThread.dataset.projectionState = 'complete'
 	        }
+	        // W1 D4: the tail just rendered — if its newest message is in view,
+	        // the server read marker advances (debounced)
+	        noteScoutChatTailInView()
 	        }, options)
       }
 
@@ -72398,6 +74758,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        } finally {
 	          scoutChatThread.style.overflowAnchor = priorOverflowAnchor
 	        }
+	        // W1 D4: an appended message the reader is looking at is read
+	        noteScoutChatTailInView()
 	        return true
 	      }
 
@@ -72612,10 +74974,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      const desktopChatReplyTopologyCache = new WeakMap()
-	      const desktopChatParticipantDirectory = new Map()
-	      let desktopChatMentionCandidates = []
+	      // desktopChatParticipantDirectory / desktopChatMentionCandidates /
+	      // desktopChatParticipantDirectoryLoaded are declared with the early
+	      // chat state (S3 TDZ hygiene)
 	      let desktopChatParticipantDirectoryPromise = null
-	      let desktopChatParticipantDirectoryLoaded = false
 	      let desktopChatParticipantDirectoryViewer = ''
 	      let desktopChatParticipantDirectoryGeneration = 0
 
@@ -72706,6 +75068,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            desktopChatParticipantDirectoryLoaded = true
 	            syncDesktopOpenChatContext()
 	            if (mentionComposerInput) updateMentionAutocomplete(mentionComposerInput)
+	            // W1 D1/D3: group rows and the members popover render names and
+	            // portraits from this directory — repaint once it lands
+	            if (scoutChatThreads.some(thread => chatThreadHasExplicitMembers(thread))) {
+	              renderChatAgentThreads()
+	              syncChatConvoHeader()
+	            }
 	          })
 	          .catch(() => {})
 	          .finally(() => {
@@ -72718,29 +75086,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function desktopChatAvatarNode(message, className = 'chat-context-card__avatar') {
-	        const avatar = document.createElement('span')
-	        avatar.className = className
-	        avatar.setAttribute('aria-hidden', 'true')
 	        const role = String(message?.role || '').toLowerCase()
 	        const email = String(message?.authorEmail || '').trim().toLowerCase()
-	        const selfEmail = String(authedUser?.email || '').trim().toLowerCase()
 	        const agent = role === 'assistant' || role === 'scout' || role === 'error'
 	        const author = desktopChatAuthorLabel(message)
-	        const directoryEntry = desktopChatParticipantDirectory.get(email)
-	        const avatarDataURL = email && email === selfEmail
-	          ? String(authedUser?.avatarDataURL || '')
-	          : String(directoryEntry?.avatarDataURL || '')
-	        if (avatarDataURL) {
-	          const image = document.createElement('img')
-	          image.src = avatarDataURL
-	          image.alt = ''
-	          avatar.appendChild(image)
-	        } else {
-	          avatar.textContent = agent
-	            ? (String(author).toLowerCase() === 'scout' ? '✦' : chatPeerInitials(author))
-	            : chatPeerInitials(author === 'You' ? scoutChatSelfHandle() : author)
-	        }
-	        return avatar
+	        return chatAvatarDiscNode(email, className, () => (agent
+	          ? (String(author).toLowerCase() === 'scout' ? '✦' : chatPeerInitials(author))
+	          : chatPeerInitials(author === 'You' ? scoutChatSelfHandle() : author)))
 	      }
 
 	      function desktopChatMessageIsOwn(thread, message) {

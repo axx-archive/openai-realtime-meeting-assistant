@@ -387,3 +387,93 @@ func TestThreadReadMarkerLookupToleratesAMissingStore(t *testing.T) {
 		t.Fatalf("corrupt store returned %+v, want zero marker", got)
 	}
 }
+
+// Mute state rides the list rows the way unread state does: per-viewer, from
+// the same lookup the exact-thread GET uses, and absent at the default so an
+// untouched thread's index JSON is unchanged.
+func TestScoutChatThreadsIndexCarriesMuteStateAfterMutePost(t *testing.T) {
+	setupAuthTestEnv(t)
+	t.Setenv("THREAD_READ_MARKERS_PATH", filepath.Join(t.TempDir(), "markers.json"))
+	t.Setenv("THREAD_MUTES_PATH", filepath.Join(t.TempDir(), "mutes.json"))
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	thread, err := kanbanApp.createScoutChatThread("tim@shareability.com", "Tim", "team", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexRow := func(viewer string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads?view=index", nil)
+		for _, cookie := range loginAs(t, viewer, "B0NFIRE!") {
+			request.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantChatThreadsHandler(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("index as %s status=%d body=%s", viewer, recorder.Code, recorder.Body.String())
+		}
+		var payload struct {
+			Threads []map[string]any `json:"threads"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range payload.Threads {
+			if row["id"] == thread.ID {
+				return row
+			}
+		}
+		t.Fatalf("index as %s is missing thread %s", viewer, thread.ID)
+		return nil
+	}
+	postMute := func(viewer, body string) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/assistant/threads/mute", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		for _, cookie := range loginAs(t, viewer, "B0NFIRE!") {
+			request.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantThreadMuteHandler(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("mute status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	}
+	assertAbsent := func(row map[string]any, who string) {
+		t.Helper()
+		if _, ok := row["muted"]; ok {
+			t.Fatalf("%s: default row carries muted: %#v", who, row)
+		}
+		if _, ok := row["notificationLevel"]; ok {
+			t.Fatalf("%s: default row carries notificationLevel: %#v", who, row)
+		}
+	}
+
+	assertAbsent(indexRow("aj@shareability.com"), "before mute")
+
+	postMute("aj@shareability.com", `{"threadId":"`+thread.ID+`","muted":true}`)
+	row := indexRow("aj@shareability.com")
+	if row["muted"] != true || row["notificationLevel"] != threadNotificationMentions {
+		t.Fatalf("muted index row=%#v, want muted:true notificationLevel:mentions", row)
+	}
+	if !threadMuted("", "aj@shareability.com", thread.ID) || threadNotificationLevel("", "aj@shareability.com", thread.ID) != threadNotificationMentions {
+		t.Fatal("index row disagrees with the per-thread GET lookup")
+	}
+	// The full projection carries the same keys.
+	for _, full := range kanbanApp.scoutChatThreadsView("aj@shareability.com", false, 100) {
+		if full["id"] == thread.ID && (full["muted"] != true || full["notificationLevel"] != threadNotificationMentions) {
+			t.Fatalf("full view row=%#v, want mute state", full)
+		}
+	}
+	// Per-viewer: the owner's row is untouched by AJ's mute.
+	assertAbsent(indexRow("tim@shareability.com"), "other viewer")
+
+	postMute("aj@shareability.com", `{"threadId":"`+thread.ID+`","level":"none"}`)
+	if row := indexRow("aj@shareability.com"); row["muted"] != true || row["notificationLevel"] != threadNotificationNone {
+		t.Fatalf("none-level index row=%#v", row)
+	}
+	postMute("aj@shareability.com", `{"threadId":"`+thread.ID+`","muted":false}`)
+	assertAbsent(indexRow("aj@shareability.com"), "after unmute")
+}

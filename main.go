@@ -1131,6 +1131,7 @@ func main() {
 	http.HandleFunc("/assistant/giphy/search", assistantGiphySearchHandler)
 	http.HandleFunc("/assistant/giphy/import", assistantGiphyImportHandler)
 	http.HandleFunc("/assistant/chat-participants", assistantChatParticipantsHandler)
+	http.HandleFunc("/assistant/chat-search", assistantChatSearchHandler)
 	http.HandleFunc("/assistant/transcribe", assistantTranscribeHandler)
 	http.HandleFunc("/assistant/threads", assistantThreadsHandler)
 	http.HandleFunc("/assistant/threads/follow-up", assistantThreadFollowUpHandler)

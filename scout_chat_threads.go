@@ -84,25 +84,25 @@ func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Reques
 	return payload, nil
 }
 
-// Chat has two surface modes with an optional explicit project membership:
+// Chat has two storage visibilities with optional explicit membership:
 //
 //   - private = the owner + Scout, and NOBODY else. Enforced on every read by
 //     scoutChatThreadsSnapshot and scoutChatThreadByID (a non-owner is denied
 //     unless the thread is public).
 //   - public with no MemberEmails = an office channel every signed-in user can
 //     read and post to.
-//   - public with MemberEmails = a shared project thread only those exact
-//     members can read, receive live events for, or post to.
+//   - public with MemberEmails = a shared project or named human-group thread
+//     only those exact members can read, receive live events for, or post to.
 //
-// There are deliberately NO human-to-human 1:1 DMs: the office is the shared
-// surface, so "message a person privately" routes through a public #channel
-// (with an @mention) or through each person's own private Scout. The "dm"
-// alias accepted by startChatAsUser therefore resolves to the REQUESTER'S OWN
-// Scout thread — it never opens a cross-user private channel. Team ratification
-// pending; the code already behaves this way and these constants pin it.
+// There are deliberately NO implicit human-to-human 1:1 DMs. A named human
+// group is an explicit exact-member conversation with at least two humans. The
+// "dm" alias accepted by startChatAsUser still resolves to the REQUESTER'S OWN
+// Scout thread — it never opens a cross-user private channel.
 const (
-	scoutChatVisibilityPrivate = "private"
-	scoutChatVisibilityPublic  = "public"
+	scoutChatVisibilityPrivate                  = "private"
+	scoutChatVisibilityPublic                   = "public"
+	scoutChatConversationKindHumanGroup         = "human_group"
+	scoutChatHumanGroupMaxMembersIncludingOwner = 32
 )
 
 // normalizeScoutChatVisibility maps any stored/submitted value onto the two
@@ -117,6 +117,13 @@ func normalizeScoutChatVisibility(value string) string {
 
 func scoutChatThreadVisibility(thread scoutChatThreadRecord) string {
 	return normalizeScoutChatVisibility(thread.Visibility)
+}
+
+func scoutChatThreadConversationKind(thread scoutChatThreadRecord) string {
+	if thread.Riff != nil || strings.EqualFold(strings.TrimSpace(thread.ConversationKind), "channel_riff") {
+		return "channel_riff"
+	}
+	return strings.ToLower(strings.TrimSpace(thread.ConversationKind))
 }
 
 func canonicalScoutChatMemberEmails(ownerEmail string, values []string) []string {
@@ -138,6 +145,25 @@ func canonicalScoutChatMemberEmails(ownerEmail string, values []string) []string
 		return nil
 	}
 	return members
+}
+
+func validateScoutChatHumanGroupMembers(ownerEmail string, values []string) ([]string, error) {
+	members := canonicalScoutChatMemberEmails(ownerEmail, values)
+	if len(members) < 2 {
+		return nil, fmt.Errorf("a human group requires at least one other registered human member")
+	}
+	if len(members) > scoutChatHumanGroupMaxMembersIncludingOwner {
+		return nil, fmt.Errorf("a human group supports at most %d members", scoutChatHumanGroupMaxMembersIncludingOwner)
+	}
+	for _, member := range members {
+		if accountStore().findUser(member) == nil {
+			// Keep this deliberately non-enumerating. The caller learns only that
+			// the requested set is invalid, never which account does or does not
+			// exist.
+			return nil, fmt.Errorf("one or more requested members are not registered human accounts")
+		}
+	}
+	return members, nil
 }
 
 func scoutChatThreadMemberEmails(thread scoutChatThreadRecord) []string {
@@ -868,7 +894,8 @@ type scoutChatThreadRecord struct {
 	OwnerEmail string `json:"ownerEmail"`
 	CreatedBy  string `json:"createdBy,omitempty"`
 	Visibility string `json:"visibility,omitempty"`
-	// MemberEmails narrows a public thread to an explicit project membership.
+	// MemberEmails narrows a public thread to an explicit project or human-group
+	// membership.
 	// An empty list preserves the existing organization-wide channel contract;
 	// a non-empty list is canonicalized and always includes the owner. Keeping
 	// the distinction on the durable thread avoids inventing a second chat
@@ -1137,11 +1164,13 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		payload := struct {
-			Title          string                   `json:"title"`
-			Visibility     string                   `json:"visibility"`
-			Intake         string                   `json:"intake"`
-			OperationID    string                   `json:"operationId"`
-			OpeningMessage *scoutHomeOpeningMessage `json:"openingMessage"`
+			Title            string                   `json:"title"`
+			Visibility       string                   `json:"visibility"`
+			ConversationKind string                   `json:"conversationKind"`
+			MemberEmails     []string                 `json:"memberEmails"`
+			Intake           string                   `json:"intake"`
+			OperationID      string                   `json:"operationId"`
+			OpeningMessage   *scoutHomeOpeningMessage `json:"openingMessage"`
 		}{}
 		if r.Body != nil {
 			// A 4,000-rune opening can exceed 16 KiB after JSON escaping (for
@@ -1149,6 +1178,36 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 			// envelope above the validated character contract.
 			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
 				writeAuthError(w, http.StatusBadRequest, "could not read chat thread request")
+				return
+			}
+		}
+		conversationKind := strings.ToLower(strings.TrimSpace(payload.ConversationKind))
+		if conversationKind != "" && conversationKind != scoutChatConversationKindHumanGroup {
+			writeAuthError(w, http.StatusBadRequest, "conversationKind is unsupported")
+			return
+		}
+		if conversationKind == "" && len(payload.MemberEmails) > 0 {
+			writeAuthError(w, http.StatusBadRequest, "memberEmails requires conversationKind human_group")
+			return
+		}
+		var groupMembers []string
+		if conversationKind == scoutChatConversationKindHumanGroup {
+			if payload.OpeningMessage != nil || strings.TrimSpace(payload.Intake) != "" {
+				writeAuthError(w, http.StatusBadRequest, "human groups cannot be combined with openingMessage or intake")
+				return
+			}
+			if visibility := strings.TrimSpace(payload.Visibility); visibility != "" && !strings.EqualFold(visibility, scoutChatVisibilityPublic) {
+				writeAuthError(w, http.StatusBadRequest, "human groups use exact-member visibility")
+				return
+			}
+			if strings.TrimSpace(payload.Title) == "" {
+				writeAuthError(w, http.StatusBadRequest, "a human group title is required")
+				return
+			}
+			var memberErr error
+			groupMembers, memberErr = validateScoutChatHumanGroupMembers(user.Email, payload.MemberEmails)
+			if memberErr != nil {
+				writeAuthError(w, http.StatusBadRequest, memberErr.Error())
 				return
 			}
 		}
@@ -1180,7 +1239,13 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			threadID := "scout-chat-create-" + digestBrainString(normalizeAccountEmail(user.Email) + "\x00" + operationID)[:24]
-			thread, created, err = kanbanApp.ensureScoutChatThread(threadID, user.Email, user.Name, payload.Title, payload.Visibility, nil)
+			if conversationKind == scoutChatConversationKindHumanGroup {
+				thread, created, err = kanbanApp.ensureScoutChatThreadWithKind(threadID, user.Email, user.Name, payload.Title, scoutChatVisibilityPublic, groupMembers, conversationKind)
+			} else {
+				thread, created, err = kanbanApp.ensureScoutChatThread(threadID, user.Email, user.Name, payload.Title, payload.Visibility, nil)
+			}
+		} else if conversationKind == scoutChatConversationKindHumanGroup {
+			thread, err = kanbanApp.createScoutChatHumanGroupThread(user.Email, user.Name, payload.Title, groupMembers)
 		} else {
 			thread, err = kanbanApp.createScoutChatThread(user.Email, user.Name, payload.Title, payload.Visibility)
 		}
@@ -1596,6 +1661,36 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		thread, err := kanbanApp.setScoutChatThreadArchived(user.Email, threadID, archived)
 		if err != nil {
 			writeScoutChatThreadError(w, err)
+			return
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": scoutChatThreadMutationView(thread)})
+		return
+	}
+
+	if len(parts) == 2 && parts[1] == "members" && r.Method == http.MethodPatch {
+		// D2 (STRIDE v2.0 Wave 1): owner-only membership edit for human groups
+		// and member-scoped project threads. The body is a small add/remove
+		// delta; the server computes the canonical set and fans the metadata
+		// event out to prior AND new members so a removed member's client can
+		// drop the row.
+		payload := struct {
+			Add    []string `json:"add"`
+			Remove []string `json:"remove"`
+		}{}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read membership update")
+			return
+		}
+		thread, err := kanbanApp.updateScoutChatThreadMembers(user.Email, threadID, payload.Add, payload.Remove)
+		if err != nil {
+			switch {
+			case errors.Is(err, errScoutChatThreadMembershipForbidden):
+				writeAuthError(w, http.StatusForbidden, err.Error())
+			case errors.Is(err, errScoutChatHumanGroupTooSmall):
+				writeAuthError(w, http.StatusConflict, err.Error())
+			default:
+				writeScoutChatThreadError(w, err)
+			}
 			return
 		}
 		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "thread": scoutChatThreadMutationView(thread)})
@@ -2090,8 +2185,8 @@ func scoutChatThreadMutationView(thread scoutChatThreadRecord) map[string]any {
 		"preview":    thread.Preview,
 		"table":      thread.Table,
 	}
-	if thread.Riff != nil || thread.ConversationKind == "channel_riff" {
-		row["conversationKind"] = "channel_riff"
+	if conversationKind := scoutChatThreadConversationKind(thread); conversationKind != "" {
+		row["conversationKind"] = conversationKind
 	}
 	if members := scoutChatThreadMemberEmails(thread); len(members) > 0 {
 		row["memberEmails"] = members
@@ -2307,11 +2402,20 @@ func (app *kanbanBoardApp) createScoutChatThread(ownerEmail string, createdBy st
 	return app.createScoutChatThreadRecord(fmt.Sprintf("scout-chat-%d", now.UnixNano()), ownerEmail, createdBy, title, visibility, nil, now)
 }
 
+func (app *kanbanBoardApp) createScoutChatHumanGroupThread(ownerEmail string, createdBy string, title string, memberEmails []string) (scoutChatThreadRecord, error) {
+	now := time.Now().UTC()
+	return app.createScoutChatThreadRecordWithKind(fmt.Sprintf("scout-chat-%d", now.UnixNano()), ownerEmail, createdBy, title, scoutChatVisibilityPublic, memberEmails, scoutChatConversationKindHumanGroup, now)
+}
+
 // ensureScoutChatThread creates one operation-derived thread or returns the
 // exact prior record. A retry with different authority-bearing fields fails
 // closed instead of manufacturing a second project/direct thread after a
 // crash between thread persistence and STRIDE product persistence.
 func (app *kanbanBoardApp) ensureScoutChatThread(threadID string, ownerEmail string, createdBy string, title string, visibility string, memberEmails []string) (scoutChatThreadRecord, bool, error) {
+	return app.ensureScoutChatThreadWithKind(threadID, ownerEmail, createdBy, title, visibility, memberEmails, "")
+}
+
+func (app *kanbanBoardApp) ensureScoutChatThreadWithKind(threadID string, ownerEmail string, createdBy string, title string, visibility string, memberEmails []string, conversationKind string) (scoutChatThreadRecord, bool, error) {
 	if app == nil || app.memory == nil {
 		return scoutChatThreadRecord{}, false, fmt.Errorf("chat thread memory is unavailable")
 	}
@@ -2325,6 +2429,13 @@ func (app *kanbanBoardApp) ensureScoutChatThread(threadID string, ownerEmail str
 
 	ownerEmail = normalizeAccountEmail(ownerEmail)
 	visibility = normalizeScoutChatVisibility(visibility)
+	conversationKind = strings.ToLower(strings.TrimSpace(conversationKind))
+	if conversationKind != "" && conversationKind != scoutChatConversationKindHumanGroup {
+		return scoutChatThreadRecord{}, false, fmt.Errorf("conversation kind is unsupported")
+	}
+	if conversationKind == scoutChatConversationKindHumanGroup {
+		visibility = scoutChatVisibilityPublic
+	}
 	title = firstNonEmptyString(strings.TrimSpace(title), map[string]string{
 		scoutChatVisibilityPrivate: "Scout",
 		scoutChatVisibilityPublic:  "team channel",
@@ -2333,21 +2444,28 @@ func (app *kanbanBoardApp) ensureScoutChatThread(threadID string, ownerEmail str
 	if visibility != scoutChatVisibilityPublic {
 		members = nil
 	}
+	if conversationKind == scoutChatConversationKindHumanGroup && (len(members) < 2 || len(members) > scoutChatHumanGroupMaxMembersIncludingOwner) {
+		return scoutChatThreadRecord{}, false, fmt.Errorf("human group membership is invalid")
+	}
 	for _, entry := range app.memory.snapshot(0) {
 		if entry.Kind != meetingMemoryKindScoutChat || entry.ID != threadID {
 			continue
 		}
 		existing, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || normalizeAccountEmail(existing.OwnerEmail) != ownerEmail || existing.Title != title || scoutChatThreadVisibility(existing) != visibility || strings.Join(scoutChatThreadMemberEmails(existing), "\x00") != strings.Join(members, "\x00") || existing.Table || existing.Intake != "" || existing.ArchivedAt != "" {
+		if !ok || normalizeAccountEmail(existing.OwnerEmail) != ownerEmail || existing.Title != title || scoutChatThreadVisibility(existing) != visibility || scoutChatThreadConversationKind(existing) != conversationKind || strings.Join(scoutChatThreadMemberEmails(existing), "\x00") != strings.Join(members, "\x00") || existing.Table || existing.Intake != "" || existing.ArchivedAt != "" {
 			return scoutChatThreadRecord{}, false, fmt.Errorf("thread identity already exists with different authority")
 		}
 		return existing, false, nil
 	}
-	thread, err := app.createScoutChatThreadRecord(threadID, ownerEmail, createdBy, title, visibility, members, time.Now().UTC())
+	thread, err := app.createScoutChatThreadRecordWithKind(threadID, ownerEmail, createdBy, title, visibility, members, conversationKind, time.Now().UTC())
 	return thread, err == nil, err
 }
 
 func (app *kanbanBoardApp) createScoutChatThreadRecord(threadID string, ownerEmail string, createdBy string, title string, visibility string, memberEmails []string, now time.Time) (scoutChatThreadRecord, error) {
+	return app.createScoutChatThreadRecordWithKind(threadID, ownerEmail, createdBy, title, visibility, memberEmails, "", now)
+}
+
+func (app *kanbanBoardApp) createScoutChatThreadRecordWithKind(threadID string, ownerEmail string, createdBy string, title string, visibility string, memberEmails []string, conversationKind string, now time.Time) (scoutChatThreadRecord, error) {
 	if app == nil || app.memory == nil {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat thread memory is unavailable")
 	}
@@ -2358,9 +2476,19 @@ func (app *kanbanBoardApp) createScoutChatThreadRecord(threadID string, ownerEma
 	}
 	createdBy = canonicalRoomActorName(createdBy)
 	visibility = normalizeScoutChatVisibility(visibility)
+	conversationKind = strings.ToLower(strings.TrimSpace(conversationKind))
+	if conversationKind != "" && conversationKind != scoutChatConversationKindHumanGroup {
+		return scoutChatThreadRecord{}, fmt.Errorf("conversation kind is unsupported")
+	}
+	if conversationKind == scoutChatConversationKindHumanGroup {
+		visibility = scoutChatVisibilityPublic
+	}
 	memberEmails = canonicalScoutChatMemberEmails(ownerEmail, memberEmails)
 	if visibility != scoutChatVisibilityPublic {
 		memberEmails = nil
+	}
+	if conversationKind == scoutChatConversationKindHumanGroup && (len(memberEmails) < 2 || len(memberEmails) > scoutChatHumanGroupMaxMembersIncludingOwner) {
+		return scoutChatThreadRecord{}, fmt.Errorf("human group membership is invalid")
 	}
 	defaultTitle := "Scout"
 	defaultPreview := "new chat thread"
@@ -2368,16 +2496,20 @@ func (app *kanbanBoardApp) createScoutChatThreadRecord(threadID string, ownerEma
 		defaultTitle = "team channel"
 		defaultPreview = "new team channel"
 	}
+	if conversationKind == scoutChatConversationKindHumanGroup {
+		defaultPreview = "new group"
+	}
 	thread := scoutChatThreadRecord{
-		ID:           threadID,
-		Title:        firstNonEmptyString(strings.TrimSpace(title), defaultTitle),
-		Preview:      defaultPreview,
-		OwnerEmail:   ownerEmail,
-		CreatedBy:    createdBy,
-		Visibility:   visibility,
-		MemberEmails: memberEmails,
-		CreatedAt:    now.Format(time.RFC3339Nano),
-		UpdatedAt:    now.Format(time.RFC3339Nano),
+		ID:               threadID,
+		Title:            firstNonEmptyString(strings.TrimSpace(title), defaultTitle),
+		Preview:          defaultPreview,
+		ConversationKind: conversationKind,
+		OwnerEmail:       ownerEmail,
+		CreatedBy:        createdBy,
+		Visibility:       visibility,
+		MemberEmails:     memberEmails,
+		CreatedAt:        now.Format(time.RFC3339Nano),
+		UpdatedAt:        now.Format(time.RFC3339Nano),
 	}
 	entryText, err := encodeScoutChatThread(thread)
 	if err != nil {
@@ -7519,6 +7651,9 @@ func scoutChatThreadEventPayload(thread scoutChatThreadRecord) map[string]any {
 		"visibility": scoutChatThreadVisibility(thread),
 		"updatedAt":  thread.UpdatedAt,
 	}
+	if conversationKind := scoutChatThreadConversationKind(thread); conversationKind != "" {
+		payload["conversationKind"] = conversationKind
+	}
 	if members := scoutChatThreadMemberEmails(thread); len(members) > 0 {
 		payload["memberEmails"] = members
 	}
@@ -7726,6 +7861,139 @@ func (app *kanbanBoardApp) renameScoutChatThread(viewerEmail string, threadID st
 	return thread, nil
 }
 
+// Membership sentinel errors for updateScoutChatThreadMembers. The handler maps
+// these two onto exact statuses (403 / 409); every other failure rides the
+// shared writeScoutChatThreadError mapping (404 not found, 409 archived, 400
+// otherwise).
+var (
+	errScoutChatThreadMembershipUnsupported = errors.New("thread has no explicit membership")
+	errScoutChatThreadMembershipForbidden   = errors.New("only the thread owner can change membership")
+	errScoutChatHumanGroupTooSmall          = errors.New("a human group needs at least one other member")
+	errScoutChatMembershipNoChange          = errors.New("add or remove is required")
+)
+
+// updateScoutChatThreadMembers applies an add/remove delta to a human group
+// or a member-scoped (project) public thread through the same per-thread lock
+// + re-read + save discipline as rename. Only the thread owner may change
+// membership, and the owner is never removable (canonicalization always
+// re-adds them). Private threads and organization-wide channels have no
+// explicit membership and fail closed. A delta that leaves the canonical set
+// unchanged is a no-op success — nothing is saved or fanned out.
+//
+// Registration is validated with the same deliberately non-enumerating error
+// as creation: the caller learns only that the requested set is invalid, never
+// which address is or is not an account.
+func (app *kanbanBoardApp) updateScoutChatThreadMembers(viewerEmail string, threadID string, add []string, remove []string) (scoutChatThreadRecord, error) {
+	if app == nil || app.memory == nil {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat threads are unavailable")
+	}
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	threadID = strings.TrimSpace(threadID)
+	addSet := map[string]bool{}
+	for _, value := range add {
+		if email := normalizeAccountEmail(value); email != "" {
+			addSet[email] = true
+		}
+	}
+	removeSet := map[string]bool{}
+	for _, value := range remove {
+		if email := normalizeAccountEmail(value); email != "" {
+			removeSet[email] = true
+		}
+	}
+	if len(addSet) == 0 && len(removeSet) == 0 {
+		return scoutChatThreadRecord{}, errScoutChatMembershipNoChange
+	}
+
+	lock := app.scoutChatThreadLock(threadID)
+	lock.Lock()
+	defer lock.Unlock()
+
+	// scoutChatThreadByID is viewer-scoped: an outsider gets the same opaque
+	// "not found" as every other thread route, never a membership hint.
+	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
+	if err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	kind := scoutChatThreadConversationKind(thread)
+	humanGroup := kind == scoutChatConversationKindHumanGroup
+	projectScoped := kind == "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && len(thread.MemberEmails) > 0
+	if !humanGroup && !projectScoped {
+		return scoutChatThreadRecord{}, errScoutChatThreadMembershipUnsupported
+	}
+	owner := normalizeAccountEmail(thread.OwnerEmail)
+	if owner != viewerEmail {
+		return scoutChatThreadRecord{}, errScoutChatThreadMembershipForbidden
+	}
+	if thread.ArchivedAt != "" {
+		return scoutChatThreadRecord{}, fmt.Errorf("chat thread is archived")
+	}
+
+	prior := scoutChatThreadMemberEmails(thread)
+	next := make([]string, 0, len(prior)+len(addSet))
+	for _, member := range prior {
+		if member == owner || !removeSet[member] {
+			next = append(next, member)
+		}
+	}
+	for email := range addSet {
+		if !removeSet[email] {
+			next = append(next, email)
+		}
+	}
+	next = canonicalScoutChatMemberEmails(owner, next)
+	if strings.Join(prior, "\x00") == strings.Join(next, "\x00") {
+		return thread, nil
+	}
+	if humanGroup {
+		if len(next) < 2 {
+			return scoutChatThreadRecord{}, errScoutChatHumanGroupTooSmall
+		}
+		validated, validateErr := validateScoutChatHumanGroupMembers(owner, next)
+		if validateErr != nil {
+			return scoutChatThreadRecord{}, validateErr
+		}
+		next = validated
+	} else {
+		if len(next) > scoutChatHumanGroupMaxMembersIncludingOwner {
+			return scoutChatThreadRecord{}, fmt.Errorf("a project thread supports at most %d members", scoutChatHumanGroupMaxMembersIncludingOwner)
+		}
+		for _, member := range next {
+			if accountStore().findUser(member) == nil {
+				return scoutChatThreadRecord{}, fmt.Errorf("one or more requested members are not registered human accounts")
+			}
+		}
+	}
+
+	thread.MemberEmails = next
+	thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := app.saveScoutChatThread(thread); err != nil {
+		return scoutChatThreadRecord{}, err
+	}
+	// Membership is an audience change for continuity exactly like archive.
+	if _, _, continuityErr := app.rebuildConversationContinuity(thread, "audience_change"); continuityErr != nil {
+		log.Errorf("ConversationContinuity audience rebuild unavailable: %v", continuityErr)
+	}
+	// Previously committed source episodes carry an audience snapshot. Refresh
+	// it exactly as archive/restore does so they follow the new roster instead
+	// of failing closed for everyone.
+	app.reconcileConversationSourceEpisodeAuthority(thread)
+	// Current members receive the full roster; an ejected member receives only
+	// a minimal removal notice — never the post-removal roster.
+	deliverScoutChatThreadMetadata(thread)
+	current := map[string]bool{}
+	for _, member := range next {
+		current[member] = true
+	}
+	for _, member := range prior {
+		if current[member] {
+			continue
+		}
+		sendKanbanEventToUser(member, "chat_thread", map[string]any{"id": thread.ID, "removed": true, "title": thread.Title})
+	}
+	return thread, nil
+}
+
 func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadID string, archived bool) (scoutChatThreadRecord, error) {
 	// Same per-thread mutex as rename and message commits — an unlocked
 	// read-modify-write here could interleave with a concurrent rename and
@@ -7870,6 +8138,8 @@ func decodeScoutChatThreadEntry(entry meetingMemoryEntry) (scoutChatThreadRecord
 	thread.MemberEmails = canonicalScoutChatMemberEmails(thread.OwnerEmail, thread.MemberEmails)
 	if thread.Riff != nil {
 		thread.ConversationKind = "channel_riff"
+	} else {
+		thread.ConversationKind = scoutChatThreadConversationKind(thread)
 	}
 	if thread.Visibility != scoutChatVisibilityPublic {
 		thread.MemberEmails = nil
@@ -7880,7 +8150,7 @@ func decodeScoutChatThreadEntry(entry meetingMemoryEntry) (scoutChatThreadRecord
 func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 	title := strings.TrimSpace(thread.Title)
 	preview := strings.TrimSpace(thread.Preview)
-	if thread.Riff != nil || thread.ConversationKind == "channel_riff" {
+	if scoutChatThreadConversationKind(thread) == "channel_riff" {
 		// Navigation metadata is intentionally body- and source-title-free. The
 		// exact thread GET reauthorizes the channel before exposing its title or any
 		// episode body.
@@ -7906,8 +8176,8 @@ func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 		"messageActivity": "[]",
 		"messageCount":    strconv.Itoa(len(thread.Messages)),
 	}
-	if thread.Riff != nil || thread.ConversationKind == "channel_riff" {
-		metadata["conversationKind"] = "channel_riff"
+	if conversationKind := scoutChatThreadConversationKind(thread); conversationKind != "" {
+		metadata["conversationKind"] = conversationKind
 	}
 	// Home recommendation synthesis reads this compact, body-minimized record
 	// from metadata only. It is regenerated at every thread persistence boundary

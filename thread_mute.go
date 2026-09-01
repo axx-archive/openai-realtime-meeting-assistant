@@ -105,12 +105,39 @@ func setThreadNotificationLevel(tenantID, userEmail, threadID, level string) err
 }
 
 func threadNotificationLevel(tenantID, userEmail, threadID string) string {
+	return threadNotificationLevelFromMutes(snapshotThreadMuteStore().Mutes, userEmail, threadID)
+}
+
+// threadNotificationLevelsFor builds one viewer's threadID -> level map in a
+// single pass over the mute snapshot; list views use it instead of a lookup
+// per row. Only non-default levels are present.
+func threadNotificationLevelsFor(mutes []threadMuteRecord, userEmail string) map[string]string {
+	userEmail = normalizeAccountEmail(userEmail)
+	levels := map[string]string{}
+	if userEmail == "" {
+		return levels
+	}
+	for _, record := range mutes {
+		if record.UserEmail != userEmail || record.ThreadID == "" {
+			continue
+		}
+		if level := normalizeThreadNotificationLevel(firstNonEmptyString(record.Level, threadNotificationMentions)); level != threadNotificationAll {
+			levels[record.ThreadID] = level
+		}
+	}
+	return levels
+}
+
+// threadNotificationLevelFromMutes is the one lookup behind both the
+// per-thread GET (threadNotificationLevel) and the thread-list projections,
+// which snapshot the store once per list instead of once per row.
+func threadNotificationLevelFromMutes(mutes []threadMuteRecord, userEmail, threadID string) string {
 	userEmail = normalizeAccountEmail(userEmail)
 	threadID = strings.TrimSpace(threadID)
 	if userEmail == "" || threadID == "" {
 		return threadNotificationAll
 	}
-	for _, record := range snapshotThreadMuteStore().Mutes {
+	for _, record := range mutes {
 		if record.UserEmail == userEmail && record.ThreadID == threadID {
 			return normalizeThreadNotificationLevel(firstNonEmptyString(record.Level, threadNotificationMentions))
 		}

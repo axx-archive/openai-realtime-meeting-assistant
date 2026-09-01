@@ -170,6 +170,67 @@ func chatMentionNames(text string) []string {
 	return names
 }
 
+// chatMentionTargetEmails resolves the @-handles in authored text to
+// registered account emails, first-appearance order, deduped. Roster
+// canonicalization stays the first try so @aj / @Tim resolve exactly as before;
+// any other handle is matched against the registered-account directory using
+// the same handle rule chatMentionCandidates advertises (chatMentionHandle over
+// accountDisplayName), so a non-seed teammate who shows up in @-completion is
+// also reachable by the notification path.
+func chatMentionTargetEmails(text string) []string {
+	tokens := parseChatMentionTokens(text)
+	if len(tokens) == 0 {
+		return nil
+	}
+	var directory map[string]string
+	seen := map[string]struct{}{}
+	emails := []string{}
+	for _, mention := range tokens {
+		email := ""
+		if name := canonicalParticipantName(mention.handle); name != "" {
+			email = participantEmail(name)
+		}
+		if email == "" {
+			if directory == nil {
+				directory = chatMentionDirectoryHandles()
+			}
+			email = directory[mention.handle]
+		}
+		if email == "" {
+			continue
+		}
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		emails = append(emails, email)
+	}
+	return emails
+}
+
+// chatMentionDirectoryHandles maps lowercased mention handles to registered
+// account emails. accountEmails lists seeds first, so a seed always wins a
+// handle collision with a later-registered account.
+func chatMentionDirectoryHandles() map[string]string {
+	store := accountStore()
+	handles := map[string]string{}
+	for _, raw := range store.accountEmails() {
+		user := store.findUser(raw)
+		if user == nil {
+			continue
+		}
+		handle := strings.ToLower(chatMentionHandle(accountDisplayName(user)))
+		if handle == "" {
+			continue
+		}
+		if _, taken := handles[handle]; taken {
+			continue
+		}
+		handles[handle] = normalizeAccountEmail(user.Email)
+	}
+	return handles
+}
+
 func isChatMentionNameRune(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
@@ -342,8 +403,7 @@ func (app *kanbanBoardApp) notifyScoutChatTargets(thread scoutChatThreadRecord, 
 			}
 		}
 	}
-	for _, name := range chatMentionNames(message.Text) {
-		email := participantEmail(name)
+	for _, email := range chatMentionTargetEmails(message.Text) {
 		if email == "" || email == authorEmail || !scoutChatThreadAllowsViewer(thread, email) {
 			continue
 		}

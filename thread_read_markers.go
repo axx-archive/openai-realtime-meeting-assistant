@@ -154,6 +154,20 @@ func lookupThreadReadMarker(tenantID, userEmail, threadID string) threadReadMark
 	return threadReadMarker{}
 }
 
+// attachThreadNotificationState adds the viewer's per-thread mute state to a
+// list row, computed from the same store lookup the exact-thread GET uses
+// (threadMuted / threadNotificationLevel). Both keys are omitted at the
+// default (level "all", not muted) so index-row JSON is byte-identical for
+// every thread the viewer has not touched. Per-viewer, so never on the record.
+func attachThreadNotificationState(row map[string]any, levels map[string]string, threadID string) {
+	level := levels[strings.TrimSpace(threadID)]
+	if level == "" || level == threadNotificationAll {
+		return
+	}
+	row["muted"] = true
+	row["notificationLevel"] = level
+}
+
 // scoutChatThreadsView renders the thread list for one viewer.
 //
 // unreadCount is PER-VIEWER and must never become a field on
@@ -173,6 +187,7 @@ func (app *kanbanBoardApp) scoutChatThreadsView(viewerEmail string, includeArchi
 	// One store read for the whole list. Calling lookupThreadReadMarker per
 	// thread would re-read and re-decode the file once per row.
 	markers := snapshotThreadReadStore().Markers
+	levels := threadNotificationLevelsFor(snapshotThreadMuteStore().Mutes, viewerEmail)
 	markerFor := func(threadID string) threadReadMarker {
 		want := threadReadMarker{UserEmail: viewerEmail, ThreadID: threadID}
 		for _, marker := range markers {
@@ -203,6 +218,7 @@ func (app *kanbanBoardApp) scoutChatThreadsView(viewerEmail string, includeArchi
 		row["unreadCount"] = threadUnreadCount(thread.Messages, marker.ReadAt, viewerEmail)
 		// The client anchors its "new messages" divider on this.
 		row["lastReadMessageId"] = marker.LastReadMessageID
+		attachThreadNotificationState(row, levels, thread.ID)
 		view = append(view, row)
 	}
 	return view
@@ -227,6 +243,7 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexView(viewerEmail string, include
 func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail string, includeArchived bool, limit int, entries []meetingMemoryEntry) []map[string]any {
 	viewerEmail = normalizeAccountEmail(viewerEmail)
 	markers := snapshotThreadReadStore().Markers
+	levels := threadNotificationLevelsFor(snapshotThreadMuteStore().Mutes, viewerEmail)
 	markerFor := func(threadID string) threadReadMarker {
 		want := threadReadMarker{UserEmail: viewerEmail, ThreadID: threadID}
 		for _, marker := range markers {
@@ -320,6 +337,7 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail stri
 		}
 		row["unreadCount"] = threadUnreadCount(activity, marker.ReadAt, viewerEmail)
 		row["lastReadMessageId"] = marker.LastReadMessageID
+		attachThreadNotificationState(row, levels, entry.ID)
 		if messageCount, err := strconv.Atoi(strings.TrimSpace(entry.Metadata["messageCount"])); err == nil && messageCount >= 0 {
 			row["messageCount"] = messageCount
 		}

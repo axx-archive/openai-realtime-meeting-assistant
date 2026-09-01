@@ -25,7 +25,7 @@ func scoutChatTypingEventPayload(app *kanbanBoardApp, sessionUser *userAccount, 
 	return map[string]any{
 		"threadId":      thread.ID,
 		"email":         normalizeAccountEmail(identity.Email),
-		"name":          participantNameForAccount(identity),
+		"name":          accountDisplayName(identity),
 		"avatarDataURL": identity.AvatarDataURL,
 		"typing":        typing,
 	}, nil

@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -19,25 +20,64 @@ func chatMentionHandle(name string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(name)), "-")
 }
 
+// accountDisplayName is the one human display-name rule for registered
+// accounts: the roster name for a seeded account, else the account's own name,
+// else the email local-part. Not participantNameForAccount, which
+// canonicalizes through the fixed meetingParticipantNames roster and returns
+// "" for anyone else.
+func accountDisplayName(user *userAccount) string {
+	if user == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(participantNameForEmail(user.Email)); name != "" {
+		return name
+	}
+	if name := strings.Join(strings.Fields(user.Name), " "); name != "" {
+		return name
+	}
+	email := normalizeAccountEmail(user.Email)
+	if at := strings.Index(email, "@"); at > 0 {
+		return email[:at]
+	}
+	return email
+}
+
+// chatMentionCandidates lists Scout plus every registered human account
+// except the viewer. It reads the account store, not the seeded roster, so a
+// person added after the seed list still shows up in @-completion (D7). Scout
+// stays first; people are sorted by display name (roster name when the account
+// is a seed, otherwise the account's own name) so the picker is stable across
+// devices regardless of store insertion order.
 func chatMentionCandidates(viewerEmail string) []chatMentionCandidate {
 	viewerEmail = normalizeAccountEmail(viewerEmail)
 	candidates := []chatMentionCandidate{{Name: "Scout", Handle: "Scout", RoleTitle: "Chief of staff", Kind: "scout"}}
-	for _, seed := range seededAccounts {
-		email := normalizeAccountEmail(seed.Email)
-		if email == "" || email == viewerEmail {
+	store := accountStore()
+	people := make([]chatMentionCandidate, 0, len(seededAccounts))
+	seen := map[string]bool{}
+	for _, raw := range store.accountEmails() {
+		email := normalizeAccountEmail(raw)
+		if email == "" || email == viewerEmail || seen[email] {
 			continue
 		}
-		name := strings.TrimSpace(participantNameForEmail(email))
+		seen[email] = true
+		user := store.findUser(email)
+		if user == nil {
+			continue
+		}
+		name := accountDisplayName(user)
 		if name == "" {
 			continue
 		}
-		avatarDataURL := ""
-		if user := accountStore().findUser(email); user != nil {
-			avatarDataURL = user.AvatarDataURL
-		}
-		candidates = append(candidates, chatMentionCandidate{Name: name, Handle: chatMentionHandle(name), Email: email, Kind: "person", AvatarDataURL: avatarDataURL})
+		people = append(people, chatMentionCandidate{Name: name, Handle: chatMentionHandle(name), Email: email, Kind: "person", AvatarDataURL: user.AvatarDataURL})
 	}
-	return candidates
+	sort.SliceStable(people, func(i, j int) bool {
+		left, right := strings.ToLower(people[i].Name), strings.ToLower(people[j].Name)
+		if left != right {
+			return left < right
+		}
+		return people[i].Email < people[j].Email
+	})
+	return append(candidates, people...)
 }
 
 // chatMentionCandidatesForViewer extends the human directory with the
