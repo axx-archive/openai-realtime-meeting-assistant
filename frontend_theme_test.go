@@ -106,3 +106,41 @@ func TestIndexRoomThemeTokens(t *testing.T) {
 		t.Error("room canvas metadata must use theme-aware text color")
 	}
 }
+
+func TestIndexDarkThemeUsesNativeParityBlackCanvas(t *testing.T) {
+	html := readIndexForTheme(t)
+	darkStart := strings.Index(html, "[data-theme=\"dark\"] {")
+	if darkStart == -1 {
+		t.Fatal("dark theme block missing")
+	}
+	darkEnd := strings.Index(html[darkStart:], "\n      }")
+	if darkEnd == -1 {
+		t.Fatal("dark theme block is not bounded")
+	}
+	dark := html[darkStart : darkStart+darkEnd]
+	for _, want := range []string{
+		"--bg-app: #000000;",
+		"--surface-1: #050506;",
+		"--surface-2: #0A0A0C;",
+		"--surface-3: #141416;",
+		"--glass-chrome: rgba(8, 8, 10, 0.82);",
+		"--glass-panel: rgba(8, 8, 10, 0.62);",
+	} {
+		if !strings.Contains(dark, want) {
+			t.Errorf("native-parity dark ramp missing %q", want)
+		}
+	}
+
+	for _, selector := range []string{
+		`[data-theme="dark"] #chatTool .chat-threads`,
+		`[data-theme="dark"] #chatTool .chat-conversation`,
+		`[data-theme="dark"] #chatTool .chat-convo-head`,
+	} {
+		if !strings.Contains(html, selector) {
+			t.Errorf("dark chat structural black override missing %q", selector)
+		}
+	}
+	if !strings.Contains(html, `background: var(--bg-app);`) {
+		t.Error("dark chat structural panes must use the true-black app canvas")
+	}
+}

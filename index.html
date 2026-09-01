@@ -400,9 +400,12 @@
         --bg-app: #000000;              /* true black */
         --bg-room-canvas: #000000;
         --bg-stage: #000000;
-        --surface-1: #101012;
-        --surface-2: #161619;
-        --surface-3: #1E1E23;
+        /* Native-parity black ramp: the canvas and structural chrome stay
+           truly black. Elevation comes from tight neutral lifts and hairlines,
+           not broad charcoal fields. */
+        --surface-1: #050506;
+        --surface-2: #0A0A0C;
+        --surface-3: #141416;
         --surface-flood: var(--glass-chrome);
 
         /* ink ladder · dark — same contract as light.
@@ -456,13 +459,13 @@
         /* The same 3% orange wash the light ground carries, so the brand hue
            enters both themes the same quiet way. */
         --backdrop-ambient:
-          radial-gradient(1100px 700px at 12% -10%, rgba(255, 255, 255, 0.05), transparent 60%),
+          radial-gradient(1100px 700px at 12% -10%, rgba(255, 255, 255, 0.018), transparent 60%),
           radial-gradient(900px 600px at 105% 15%, rgba(255, 90, 25, 0.03), transparent 55%),
           #000000;
 
         /* ---------- glass.css · DARK ---------- */
-        --glass-chrome: rgba(24, 24, 27, 0.55);
-        --glass-panel: rgba(18, 18, 20, 0.45);
+        --glass-chrome: rgba(8, 8, 10, 0.82);
+        --glass-panel: rgba(8, 8, 10, 0.62);
         --glass-border: rgba(255, 255, 255, 0.13);
         --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.12);
         --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.50);
@@ -17749,6 +17752,19 @@
           background: color-mix(in srgb, var(--surface-1) 88%, transparent);
           backdrop-filter: blur(18px);
           -webkit-backdrop-filter: blur(18px);
+        }
+
+        /* Dark desktop chat is one continuous black canvas. Selected rows,
+           controls, and media cards still use the surface ramp for affordance,
+           but structural panes do not read as stacked gray slabs. */
+        [data-theme="dark"] #chatTool,
+        [data-theme="dark"] #chatTool .chat-threads,
+        [data-theme="dark"] #chatTool .chat-conversation,
+        [data-theme="dark"] #chatTool .chat-convo-head,
+        [data-theme="dark"] #chatTool .chat-context-rail,
+        [data-theme="dark"] #chatTool .chat-context-rail__head,
+        [data-theme="dark"] #chatTool .chat-context-reply {
+          background: var(--bg-app);
         }
 
         #chatTool .chat-convo-head__title {
