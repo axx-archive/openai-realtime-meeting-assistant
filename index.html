@@ -46330,10 +46330,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
             // Global mousemove for dragging
             'document.addEventListener("mousemove",function(e){' +
             'if(!dragState)return;' +
-            'var dx=(e.clientX-dragState.startX)/scale;' +
-            'var dy=(e.clientY-dragState.startY)/scale;' +
-            'if(Math.abs(dx)>3||Math.abs(dy)>3)dragState.moved=true;' +
+            // Check threshold in SCREEN space (raw pixels), not stage space
+            'var screenDx=e.clientX-dragState.startX;' +
+            'var screenDy=e.clientY-dragState.startY;' +
+            'if(Math.abs(screenDx)>5||Math.abs(screenDy)>5)dragState.moved=true;' +
             'if(dragState.moved){' +
+            // Convert to stage space only for positioning
+            'var dx=screenDx/scale;' +
+            'var dy=screenDy/scale;' +
             'setTranslate(dragState.el,dragState.origX+dx,dragState.origY+dy);' +
             '}' +
             '});' +
@@ -46382,10 +46386,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
             'if(!touchDrag)return;' +
             'var t=e.touches[0];if(!t)return;' +
             'e.preventDefault();' +
-            'var dx=(t.clientX-touchDrag.startX)/scale;' +
-            'var dy=(t.clientY-touchDrag.startY)/scale;' +
-            'if(Math.abs(dx)>3||Math.abs(dy)>3)touchDrag.moved=true;' +
+            // Check threshold in SCREEN space (raw pixels), not stage space
+            'var screenDx=t.clientX-touchDrag.startX;' +
+            'var screenDy=t.clientY-touchDrag.startY;' +
+            'if(Math.abs(screenDx)>5||Math.abs(screenDy)>5)touchDrag.moved=true;' +
             'if(touchDrag.moved){' +
+            // Convert to stage space only for positioning
+            'var dx=screenDx/scale;' +
+            'var dy=screenDy/scale;' +
             'setTranslate(touchDrag.el,touchDrag.origX+dx,touchDrag.origY+dy);' +
             '}' +
             '},{passive:false});' +
@@ -46665,54 +46673,41 @@ Wrap the entire export in one code block. After the code block, say whether the 
             return state.originalHtml
           }
           
+          // Start from original doc structure
           const newDoc = parser.parseFromString(state.originalHtml, 'text/html')
           const newSlides = Array.from(newDoc.querySelectorAll('.pg, .slide, section'))
 
+          // Replace each slide with its edited version (includes text edits AND transform positions)
           state.slides.forEach((slide, slideIdx) => {
             if (!newSlides[slideIdx]) return
-            const slideEl = newSlides[slideIdx]
+            const origSlideEl = newSlides[slideIdx]
             
-            // Only update elements that actually changed
-            slide.elements.forEach(el => {
-              if (el.type === 'text' && el.originalEl) {
-                const origText = el.originalEl.textContent?.trim()
-                const newText = el.content?.trim()
-                // Only modify if text actually changed
-                if (origText !== newText) {
-                  // Find the matching element in the new doc by walking the same path
-                  const origTag = el.originalEl.tagName.toLowerCase()
-                  const textEls = Array.from(slideEl.querySelectorAll(origTag))
-                  for (const newEl of textEls) {
-                    if (newEl.textContent?.trim() === origText) {
-                      // Preserve inner HTML structure if possible
-                      if (newEl.children.length === 0) {
-                        newEl.textContent = el.content
-                      } else {
-                        // Has child elements - update first text node only
-                        const walker = newDoc.createTreeWalker(newEl, NodeFilter.SHOW_TEXT)
-                        const textNode = walker.nextNode()
-                        if (textNode) textNode.textContent = el.content
-                      }
-                      break
-                    }
-                  }
-                }
+            // Parse the updated slide HTML (from iframe edits via postMessage)
+            const slideDoc = parser.parseFromString('<div>' + slide.outerHTML + '</div>', 'text/html')
+            const updatedSlideEl = slideDoc.body.querySelector('.pg, .slide, section')
+            
+            if (updatedSlideEl) {
+              // Replace the original slide with the updated one
+              origSlideEl.innerHTML = updatedSlideEl.innerHTML
+              // Copy any style changes (includes transform from drag)
+              if (updatedSlideEl.getAttribute('style')) {
+                origSlideEl.setAttribute('style', updatedSlideEl.getAttribute('style'))
               }
-            })
+            }
             
-            // Add any new elements that were created in the editor
+            // Add any new elements that were created via the toolbar
             slide.elements.forEach(el => {
               if (!el.originalEl) {
                 if (el.type === 'text') {
                   const newEl = newDoc.createElement(el.tag || 'p')
                   newEl.textContent = el.content
                   newEl.style.cssText = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;font-size:${el.fontSize}px;z-index:${el.zIndex || 100};color:#fff`
-                  slideEl.appendChild(newEl)
+                  origSlideEl.appendChild(newEl)
                 } else if (el.type === 'image' && el.src) {
                   const newEl = newDoc.createElement('img')
                   newEl.src = el.src
                   newEl.style.cssText = `position:absolute;left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;object-fit:cover;z-index:${el.zIndex || 100}`
-                  slideEl.appendChild(newEl)
+                  origSlideEl.appendChild(newEl)
                 }
               }
             })
