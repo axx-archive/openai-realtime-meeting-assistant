@@ -414,4 +414,5 @@ public extension Notification.Name {
     static let strideGoForward = Notification.Name("co.thebonfire.stride.command.forward")
     static let strideOpenInBrowser = Notification.Name("co.thebonfire.stride.command.open-in-browser")
     static let strideCheckForUpdates = Notification.Name("co.thebonfire.stride.command.check-for-updates")
+    static let strideToggleSidebar = Notification.Name("co.thebonfire.stride.command.toggle-sidebar")
 }

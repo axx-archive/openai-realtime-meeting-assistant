@@ -1,8 +1,9 @@
-STRIDE native room preview — build 21
+STRIDE native room preview — build 22
 
-This is the same STRIDE Mac app, not a separate product. Build 21 keeps the
+This is the same STRIDE Mac app, not a separate product. Build 22 keeps the
 current shell and web experience, includes build 19's opt-in native meeting
-media path, and refines the shell wordmark and full-screen chrome.
+media path, and replaces the system split-panel treatment with a coherent
+STRIDE desktop layout in both windowed and full-screen modes.
 
 Install
 

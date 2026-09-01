@@ -14,6 +14,7 @@ public struct MeetingAssistMacRootView: View {
     @State private var surface = MeetingAssistMacSurface.web
     @State private var nativeMediaNotice: String?
     @State private var isFullScreen = false
+    @State private var isSidebarVisible = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
@@ -62,6 +63,9 @@ public struct MeetingAssistMacRootView: View {
             .onReceive(NotificationCenter.default.publisher(for: .strideCheckForUpdates)) { _ in
                 updates.checkForUpdates()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .strideToggleSidebar)) { _ in
+                toggleSidebar()
+            }
             .onChange(of: nativeRoom.lifecycle) { previous, current in
                 nativeLifecycleChanged(from: previous, to: current)
             }
@@ -79,22 +83,24 @@ public struct MeetingAssistMacRootView: View {
     }
 
     private var shell: some View {
-        NavigationSplitView {
-            MacSidebar(
-                session: session,
-                updates: updates,
-                isNativeMediaSelected: surface == .nativeMedia,
-                isFullScreen: isFullScreen,
-                canOpenNativeMedia: !session.shellState.isInRoom,
-                onSelectWorkspace: openWebWorkspace,
-                onOpenNativeMedia: requestNativeMediaSurface
-            )
-                .navigationSplitViewColumnWidth(min: 184, ideal: 218, max: 260)
-        } detail: {
+        HStack(spacing: 0) {
+            if isSidebarVisible {
+                MacSidebar(
+                    session: session,
+                    updates: updates,
+                    isNativeMediaSelected: surface == .nativeMedia,
+                    isFullScreen: isFullScreen,
+                    canOpenNativeMedia: !session.shellState.isInRoom,
+                    onSelectWorkspace: openWebWorkspace,
+                    onOpenNativeMedia: requestNativeMediaSurface
+                )
+                .frame(width: 218)
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+
             detailSurface
-                .navigationSplitViewColumnWidth(min: 640, ideal: 1_000)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationSplitViewStyle(.balanced)
         .tint(ember)
         .preferredColorScheme(.dark)
         .background(shellBlack)
@@ -103,6 +109,14 @@ public struct MeetingAssistMacRootView: View {
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    toggleSidebar()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .help(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+                .accessibilityLabel(isSidebarVisible ? "Hide Sidebar" : "Show Sidebar")
+
                 Button {
                     session.goBack()
                 } label: {
@@ -121,6 +135,12 @@ public struct MeetingAssistMacRootView: View {
                 .disabled(surface != .web || !session.canGoForward)
                 .accessibilityLabel("Go forward")
             }
+        }
+    }
+
+    private func toggleSidebar() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            isSidebarVisible.toggle()
         }
     }
 

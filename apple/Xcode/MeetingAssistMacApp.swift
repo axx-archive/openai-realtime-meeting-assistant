@@ -14,6 +14,13 @@ struct MeetingAssistMacApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
+            CommandGroup(replacing: .sidebar) {
+                Button("Toggle Sidebar") {
+                    NotificationCenter.default.post(name: .strideToggleSidebar, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
+            }
+
             CommandMenu("Workspace") {
                 Button("Home") {
                     NotificationCenter.default.post(name: .strideGoHome, object: nil)
