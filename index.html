@@ -791,12 +791,23 @@
       .tool-rail__tool:active {
         transform: scale(var(--press-scale));
       }
-      /* active tool = a quiet surface well (kit ToolRail: surface-3 + line-1 + ink) */
+      /* active tool = the brand accent on a quiet ember well (AJ 2026-09-01,
+         matching the PD1 rail's active treatment) */
       .tool-rail__tool[aria-pressed="true"] {
-        background: var(--surface-3);
-        border-color: var(--line-1);
-        color: var(--text-1);
+        background: color-mix(in srgb, var(--ember) 10%, transparent);
+        border-color: transparent;
+        color: var(--ember-text);
         box-shadow: none;
+      }
+      /* arrival pop — the icon lands with a one-beat spring when its tool
+         becomes current (runs on the zeroed tokens under reduced motion) */
+      .tool-rail__tool[aria-pressed="true"] svg {
+        animation: rail-icon-pop var(--dur-slow) var(--ease-spring) 1;
+      }
+      @keyframes rail-icon-pop {
+        0% { transform: scale(0.8); }
+        55% { transform: scale(1.14); }
+        100% { transform: scale(1); }
       }
       .tool-rail__tool[disabled] {
         opacity: 0.4;
@@ -991,11 +1002,22 @@
         overflow: visible;
         transition: opacity var(--dur-med) var(--ease);
       }
-      /* The signal mark (ember/aperture) — the icon, not the wordmark */
+      /* The signal mark (ember/aperture) — the icon, not the wordmark.
+         At rest it holds the wordmark's graphite-per-ground (canon §1a), not
+         the full-contrast foreground: a white capsule on true black read as a
+         blob, not a mark. Presence still shifts it to --text-1 via
+         .is-listening/.is-wake below — value, never hue. */
+      .topbar__mark {
+        color: #54545C;
+      }
+      [data-theme="dark"] .topbar__mark {
+        color: #77777D;
+      }
       .topbar__mark-signal {
         width: 24px;
         height: 24px;
-        color: var(--text-1);
+        color: inherit;
+        transition: color var(--dur-med) var(--ease);
       }
       .topbar__mark-signal path {
         fill: currentColor;
@@ -1041,13 +1063,20 @@
       }
 
       /* Wordmark in topbar LEFT of org switcher — AJ + Design Critic lock 2026-08-17.
-         Black on light, orange on dark. */
+         Black on light, orange on dark. Sized up a step (AJ 2026-09-01: the
+         name deserved more presence than a 12px whisper), with a quiet
+         brightness lift when the pointer greets it. */
       .topbar__brand-wordmark {
         display: block;
-        width: 44px;
-        height: 12px;
+        width: 56px;
+        height: 15px;
         background: var(--wordmark-image) no-repeat center / contain;
         flex: 0 0 auto;
+        transition: filter var(--dur-med) var(--ease), transform var(--dur-med) var(--ease-spring);
+      }
+      .topbar__brand-lockup:hover .topbar__brand-wordmark {
+        filter: brightness(1.12);
+        transform: translateY(-0.5px);
       }
 
       .topbar__brand-lockup.is-listening .topbar__brand-wordmark {
@@ -1101,7 +1130,27 @@
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .topbar__organization-chevron { width: 12px; height: 12px; flex: 0 0 auto; color: var(--text-3); transition: transform var(--dur-fast) var(--ease); }
+      /* the workspace wears its initial — a small tile that gives the org a
+         face even while there is only one of them */
+      .topbar__organization-badge {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        flex: 0 0 auto;
+        border-radius: 7px;
+        background: linear-gradient(160deg, var(--accent), color-mix(in srgb, var(--accent) 78%, var(--ember)));
+        color: var(--on-accent);
+        font: 600 11px/1 var(--font-sans);
+        letter-spacing: 0;
+      }
+      .topbar__organization-badge:empty { display: none; }
+      /* the chevron earns its place on approach — a lone org needs no
+         standing invitation to switch */
+      .topbar__organization-chevron { width: 12px; height: 12px; flex: 0 0 auto; color: var(--text-3); opacity: 0; translate: -2px 0; transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), translate var(--dur-fast) var(--ease); }
+      .topbar__organization:hover .topbar__organization-chevron,
+      .topbar__organization:focus-visible .topbar__organization-chevron,
+      .topbar__organization[aria-expanded="true"] .topbar__organization-chevron { opacity: 1; translate: 0 0; }
       .topbar__organization[aria-expanded="true"] .topbar__organization-chevron { transform: rotate(180deg); }
 
       .topbar__organization-menu {
@@ -1117,6 +1166,16 @@
         box-shadow: var(--glass-highlight), 0 18px 52px rgb(0 0 0 / 0.16);
         backdrop-filter: blur(24px) saturate(1.08);
         -webkit-backdrop-filter: blur(24px) saturate(1.08);
+        transform-origin: top left;
+        transition-property: opacity, transform;
+        transition-duration: var(--dur-fast), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring);
+      }
+      @starting-style {
+        .topbar__organization-menu:not([hidden]) {
+          opacity: 0;
+          transform: translateY(-4px) scale(0.95);
+        }
       }
       .topbar__organization-menu[hidden] { display: none; }
       .topbar__organization-menu-items { display: grid; gap: 3px; }
@@ -1493,11 +1552,13 @@
         box-shadow: var(--glass-highlight), var(--glass-shadow);
         color: var(--text-1);
         transform-origin: bottom left;
-        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        transition-property: opacity, transform;
+        transition-duration: var(--dur-fast), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring);
       }
 
       @starting-style {
-        .account-menu:not([hidden]) { opacity: 0; transform: scale(0.96); }
+        .account-menu:not([hidden]) { opacity: 0; transform: translateY(4px) scale(0.94); }
       }
 
       .account-menu[hidden] {
@@ -4949,6 +5010,11 @@
         animation: bf-fade var(--dur-med) var(--ease);
       }
 
+      /* the window arrives as a sheet — scrim fades, panel springs up a step */
+      .settings-region.visible .settings-panel {
+        animation: bf-sheetin var(--dur-slow) var(--ease-spring) both;
+      }
+
       @keyframes bf-fade {
         from { opacity: 0; }
       }
@@ -5084,6 +5150,23 @@
         color: var(--text-1);
       }
 
+      /* current-section tick — a small ink bar that springs open beside the
+         active item (scale, so no layout shift on the inactive rows) */
+      .settings-nav__item::before {
+        content: "";
+        flex: none;
+        width: 3px;
+        height: 16px;
+        margin-right: 2px;
+        border-radius: 2px;
+        background: var(--accent);
+        transform: scaleY(0);
+        transition: transform var(--dur-med) var(--ease-spring);
+      }
+      .settings-nav__item[aria-current="true"]::before {
+        transform: scaleY(1);
+      }
+
       .settings-body {
         display: grid;
         gap: var(--sp-5);
@@ -5098,6 +5181,19 @@
         gap: var(--sp-5);
         align-content: start;
         min-width: 0;
+      }
+
+      /* pane switch — the incoming section settles up from a step below */
+      .settings-body > section[data-settings-section] {
+        transition-property: opacity, transform;
+        transition-duration: var(--dur-med);
+        transition-timing-function: var(--ease);
+      }
+      @starting-style {
+        .settings-body > section[data-settings-section]:not([hidden]) {
+          opacity: 0;
+          transform: translateY(8px);
+        }
       }
 
       .settings-body > section[data-settings-section][hidden] {
@@ -5170,6 +5266,12 @@
       .noise-mode-option input:checked + .noise-mode-control {
         border-color: var(--accent);
         background: radial-gradient(circle at 50% 50%, var(--accent) 0 34%, transparent 40%), var(--surface-1);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+      .noise-mode-control {
+        transition-property: border-color, background, box-shadow;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
 
       .noise-mode-option input:focus-visible + .noise-mode-control {
@@ -7892,7 +7994,26 @@
         text-align: left;
         cursor: pointer;
       }
+      .home-continuity__row {
+        transition-property: background-color, transform;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .home-continuity__row:hover {
+        background: color-mix(in srgb, var(--surface-2) 66%, transparent);
+        transform: translateX(2px);
+      }
+      .home-continuity__row:active { transform: scale(0.985); }
       .home-continuity__row:hover .home-continuity__title { color: var(--ember-text); }
+      .home-continuity__arrow {
+        transition-property: transform, color;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
+      }
+      .home-continuity__row:hover .home-continuity__arrow {
+        transform: translateX(3px);
+        color: var(--text-1);
+      }
       .home-continuity__copy { min-width: 0; display: grid; gap: 2px; }
       .home-continuity__eyebrow { color: var(--text-3); font: var(--type-label); letter-spacing: var(--track-label); }
       .home-continuity__title,
@@ -9269,6 +9390,13 @@
       }
       .agent-tool__inner.studio-projects {
         width: min(1480px, 100%);
+        /* Three known rows. Leftover height belongs to the workspace — without
+           this the stretched grid poured it into the launcher row, opening a
+           dead band between "installed apps" and the library (and, at other
+           paints, letting the launcher ghost through the translucent
+           workspace). */
+        grid-template-rows: auto auto minmax(0, 1fr);
+        align-content: start;
       }
       /* Installed apps — the Work tab's launcher row. Sits between the
          header and the library so the studios are visible before any work
@@ -9701,7 +9829,11 @@
           height: 100%;
           min-height: 0;
           align-self: stretch;
-          grid-template-rows: auto minmax(0, 1fr);
+          /* head · installed-apps launcher · workspace. This template predates
+             the launcher row; with only two tracks the 1fr landed on the
+             launcher, stretching it and shoving the workspace into an implicit
+             overflow row (the "hidden buttons / ghost launcher" bug). */
+          grid-template-rows: auto auto minmax(0, 1fr);
         }
         .studio-projects__workspace {
           min-height: 0;
@@ -11453,6 +11585,15 @@
         outline-offset: -1px;
         border-radius: var(--r-lg, 12px);
         background: var(--surface-2);
+        transition-property: transform;
+        transition-duration: var(--dur-slow);
+        transition-timing-function: var(--ease);
+      }
+
+      /* the zoom-in cursor promises depth — the frame answers with a quiet
+         push-in on hover (the preview clips it, so layout never moves) */
+      .scout-chat-image__preview:hover .scout-chat-image__img {
+        transform: scale(1.02);
       }
 
       [data-theme="dark"] .scout-chat-image__img {
@@ -13700,6 +13841,9 @@
         display: flex;
         flex-direction: column;
         background: var(--bg-app);
+        /* No enter motion on the deck shell: the phone-touch contract pins a
+           zero-animation first frame (immediate editing beats theater here).
+           Depth lives in the canvas lift; motion lives in the thumbnails. */
       }
       .deck-editor[hidden] { display: none; }
       .deck-editor__toolbar {
@@ -13946,7 +14090,16 @@
         cursor: pointer;
         border: 2px solid transparent;
         background: #000;
-        transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+        transition-property: border-color, box-shadow, transform;
+        transition-duration: var(--dur-fast), var(--dur-fast), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease), var(--ease-spring);
+      }
+      .deck-editor__thumb:hover {
+        transform: translateY(-1px) scale(1.015);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+      }
+      .deck-editor__thumb:active {
+        transform: scale(var(--press-scale));
       }
       .deck-editor__thumb-stage {
         position: absolute;
@@ -13993,7 +14146,12 @@
         aspect-ratio: 16 / 9;
         background: var(--deck-background, #111);
         border-radius: var(--r-md);
-        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+        /* the slide is the lit object in the room — layered lift over the
+           work-well, one hairline to hold its edge on any background */
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.08),
+          0 2px 6px rgba(0, 0, 0, 0.10),
+          0 18px 48px rgba(0, 0, 0, 0.22);
         overflow: hidden;
         touch-action: none;
         user-select: none;
@@ -14671,6 +14829,14 @@
         display: grid;
         grid-template-rows: 58px minmax(0, 1fr);
         background: var(--bg-app);
+        transition-property: opacity;
+        transition-duration: var(--dur-med);
+        transition-timing-function: var(--ease);
+      }
+      @starting-style {
+        .document-editor:not([hidden]) {
+          opacity: 0;
+        }
       }
       .document-editor__toolbar {
         display: grid;
@@ -17042,6 +17208,17 @@
           -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
           backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
           box-shadow: 0 0 0 1px var(--glass-border), 0 16px 38px rgba(0, 0, 0, 0.22);
+          transform-origin: top right;
+          transition-property: opacity, transform, display;
+          transition-duration: var(--dur-fast), var(--dur-med), var(--dur-med);
+          transition-timing-function: var(--ease), var(--ease-spring), var(--ease);
+          transition-behavior: allow-discrete;
+        }
+        @starting-style {
+          #chatTool .desktop-chat-more__menu:not([hidden]) {
+            opacity: 0;
+            transform: translateY(-5px) scale(0.92);
+          }
         }
 
         #chatTool .desktop-chat-more__menu[hidden] {
@@ -18164,7 +18341,11 @@
         }
         #chatTool .desktop-chat-interactions[data-has-reactions="false"] {
           position: absolute;
-          top: -18px;
+          /* fully above the stack, overlapping its top edge by 6px — clear of
+             the bubble text, but with no dead gap that would break the
+             :hover chain on the way up to the pill */
+          top: auto;
+          bottom: calc(100% - 6px);
           right: -8px;
           margin: 0;
           opacity: 0;
@@ -18243,6 +18424,67 @@
           -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
           backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
           box-shadow: 0 0 0 1px var(--glass-border), 0 12px 30px rgba(0, 0, 0, 0.2);
+          transform-origin: top right;
+          transition-property: opacity, transform, display;
+          transition-duration: var(--dur-fast), var(--dur-med), var(--dur-med);
+          transition-timing-function: var(--ease), var(--ease-spring), var(--ease);
+          transition-behavior: allow-discrete;
+        }
+        @starting-style {
+          #chatTool .desktop-chat-reaction-picker__menu:not([hidden]) {
+            opacity: 0;
+            transform: translateY(-5px) scale(0.86);
+          }
+        }
+
+        /* ── chat motion & iconography (design evolution) ──
+           The action pill speaks in drawn marks, not words; a fresh message
+           settles in with a spring; a taken reaction pops. Every animation
+           here is either JS-gated on prefers-reduced-motion or runs on the
+           zeroed --dur tokens. */
+        #chatTool .desktop-chat-actions button .chat-action-mark,
+        #chatTool .desktop-chat-reaction-picker > button .chat-action-mark {
+          width: 16px;
+          height: 16px;
+          flex: none;
+          stroke-width: 1.8;
+          transition-property: transform;
+          transition-duration: var(--dur-fast);
+          transition-timing-function: var(--ease-spring);
+        }
+        #chatTool .desktop-chat-actions button:hover .chat-action-mark,
+        #chatTool .desktop-chat-reaction-picker > button:hover .chat-action-mark {
+          transform: scale(1.12) translateY(-0.5px);
+        }
+        #chatTool .desktop-chat-actions button:active,
+        #chatTool .desktop-chat-reaction-picker > button:active {
+          transform: scale(var(--press-scale));
+        }
+
+        #chatTool .scout-chat-msg.is-entering {
+          animation: chat-msg-in 380ms var(--ease-spring) both;
+        }
+        @keyframes chat-msg-in {
+          from {
+            opacity: 0;
+            transform: translateY(14px) scale(0.985);
+            filter: blur(4px);
+          }
+          to {
+            opacity: 1;
+            transform: none;
+            filter: none;
+          }
+        }
+
+        #chatTool .desktop-chat-reactions button.is-popping,
+        #chatTool .desktop-chat-reaction-picker__menu button.is-popping {
+          animation: chat-reaction-pop 340ms var(--ease-spring);
+        }
+        @keyframes chat-reaction-pop {
+          0% { transform: scale(0.7); }
+          45% { transform: scale(1.22); }
+          100% { transform: scale(1); }
         }
 
         /* Desktop ownership actions live in the same Slack-like More menu as
@@ -18300,14 +18542,17 @@
         }
 
         #chatTool .desktop-chat-link-preview:hover {
+          transform: translateY(-2px);
           box-shadow:
             0 0 0 1px rgba(0, 0, 0, 0.1),
             0 2px 4px -1px rgba(0, 0, 0, 0.08),
-            0 10px 24px rgba(0, 0, 0, 0.07);
+            0 14px 32px rgba(0, 0, 0, 0.09);
         }
 
         [data-theme="dark"] #chatTool .desktop-chat-link-preview:hover {
-          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+          box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.14),
+            0 14px 32px rgba(0, 0, 0, 0.45);
         }
 
         #chatTool .desktop-chat-link-preview__copy {
@@ -21615,9 +21860,41 @@
         width: 100%;
         height: 100%;
         object-fit: cover;
-        outline: 1px solid rgba(255, 255, 255, 0.1);
+        outline: 1px solid rgba(0, 0, 0, 0.1);
         outline-offset: -1px;
+        transition-property: transform, opacity;
+        transition-duration: var(--dur-slow), var(--dur-med);
+        transition-timing-function: var(--ease);
       }
+      [data-theme="dark"] .file-tile__image {
+        outline-color: rgba(255, 255, 255, 0.1);
+      }
+      .file-tile__image.is-loading {
+        opacity: 0;
+      }
+      .file-tile:hover .file-tile__image {
+        transform: scale(1.04);
+      }
+
+      /* the preview well takes the file family's hue at a whisper, so a
+         mixed folder reads by colour before it reads by label */
+      .file-tile[data-kind="pdf"] .file-tile__preview {
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--danger) 9%, var(--surface-3)), color-mix(in srgb, var(--danger) 4%, var(--surface-2)));
+      }
+      .file-tile[data-kind="pdf"] .file-tile__icon { color: var(--danger-text); }
+      /* deck = warm amber, doc = info blue, pdf = red — existing state hues at
+         a whisper, never ember (earned-only) and never green (live-only) */
+      .file-tile[data-kind="deck"] .file-tile__preview {
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--warn) 10%, var(--surface-3)), color-mix(in srgb, var(--warn) 4%, var(--surface-2)));
+      }
+      .file-tile[data-kind="deck"] .file-tile__icon { color: var(--warn-text); }
+      .file-tile[data-kind="doc"] .file-tile__preview {
+        background:
+          linear-gradient(135deg, color-mix(in srgb, var(--info) 9%, var(--surface-3)), color-mix(in srgb, var(--info) 4%, var(--surface-2)));
+      }
+      .file-tile[data-kind="doc"] .file-tile__icon { color: var(--info-text); }
 
       .file-tile__icon {
         position: relative;
@@ -21810,12 +22087,16 @@
         display: flex;
         flex-direction: column;
         padding: 5px;
-        background: var(--surface-3);
-        border: 1px solid var(--line-1);
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        border: 1px solid var(--glass-border);
         border-radius: var(--r-md);
-        box-shadow: var(--shadow-2);
+        box-shadow: var(--glass-highlight), var(--shadow-2);
         transform-origin: top left;
-        transition: opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
+        transition-property: opacity, transform;
+        transition-duration: var(--dur-fast), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring);
       }
 
       .files-row .files-folder-menu,
@@ -25136,6 +25417,18 @@
         transition: opacity 180ms var(--ease) 320ms, visibility 0s linear 320ms;
       }
 
+      /* the lobby card itself rises as the surface reveals — an interruptible
+         transition, so a reconnect flap that re-hides it never snaps */
+      @media (prefers-reduced-motion: no-preference) {
+        .room-empty .lobby__panel {
+          transform: translateY(14px) scale(0.99);
+          transition: transform 420ms var(--ease-spring) 320ms;
+        }
+        #appShell[data-tool="room"]:not(.is-in-room) #hearthStage .room-empty .lobby__panel {
+          transform: none;
+        }
+      }
+
       #appShell[data-tool="room"]:not(.is-in-room) #hearthStage .hearth-center {
         visibility: hidden;
       }
@@ -25154,13 +25447,16 @@
         font: 600 14px var(--font-sans);
         letter-spacing: 0;
         cursor: pointer;
-        transition: transform var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease);
+        transition-property: transform, opacity, box-shadow;
+        transition-duration: var(--dur-fast);
+        transition-timing-function: var(--ease);
       }
       .lobby__center > .room-empty__join { width: 100%; }
 
       @media (hover: hover) and (pointer: fine) {
         .room-empty__join:hover:not([disabled]) {
-          opacity: 0.88;
+          transform: translateY(-1px);
+          box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
         }
       }
 
@@ -25203,9 +25499,10 @@
         -webkit-backdrop-filter: var(--glass-blur);
         box-shadow: var(--lob-panel-shadow);
       }
-      @media (prefers-reduced-motion: no-preference) {
-        .lobby__panel { animation: bf-rise-in 480ms var(--ease) both; }
-      }
+      /* the one-shot bf-rise-in keyframe retired here: with fill:both its
+         final frame pinned transform forever and the reveal transition above
+         could never move the panel. The transition covers every entry to the
+         rooms tool, not just the first paint. */
       .lobby__center {
         order: 1;
         display: flex;
@@ -25617,7 +25914,9 @@
         box-shadow: 0 0 0 3px var(--accent-soft);
         border-color: var(--accent);
       }
-      /* filters popover — 280px, anchored to the right of the button */
+      /* filters popover — 280px, anchored to the right of the button.
+         Glass at 94% so nothing behind it can garble the labels, with the
+         shared spring enter every floating panel now carries. */
       .greenroom__filters {
         position: absolute;
         top: 0;
@@ -25631,9 +25930,22 @@
         align-items: center;
         gap: 12px;
         border-radius: var(--r-xl);
-        border: 1px solid var(--line-1);
-        background: var(--surface-1);
-        box-shadow: var(--shadow-2, 0 18px 44px rgba(0, 0, 0, 0.4));
+        border: 1px solid var(--glass-border);
+        background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+        -webkit-backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        backdrop-filter: var(--glass-blur-chrome) saturate(1.25);
+        box-shadow: var(--glass-highlight), var(--shadow-2, 0 18px 44px rgba(0, 0, 0, 0.4));
+        transform-origin: top right;
+        transition-property: opacity, transform, display;
+        transition-duration: var(--dur-fast), var(--dur-med), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring), var(--ease);
+        transition-behavior: allow-discrete;
+      }
+      @starting-style {
+        .greenroom__filters:not([hidden]) {
+          opacity: 0;
+          transform: translateX(6px) scale(0.94);
+        }
       }
       .greenroom__filters[hidden] { display: none; }
       .greenroom__filters-label {
@@ -25666,7 +25978,18 @@
         border-radius: var(--r-full);
         background: linear-gradient(135deg, #d69b7a 0%, #7d94b0 100%);
         box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
-        transition: box-shadow var(--dur-fast) var(--ease);
+        transition-property: box-shadow, transform;
+        transition-duration: var(--dur-fast), var(--dur-med);
+        transition-timing-function: var(--ease), var(--ease-spring);
+      }
+      .greenroom__swatch:hover .greenroom__swatch-fill {
+        transform: scale(1.1) translateY(-1px);
+      }
+      .greenroom__swatch:active .greenroom__swatch-fill {
+        transform: scale(var(--press-scale));
+      }
+      .greenroom__swatch.is-selected .greenroom__swatch-fill {
+        transform: scale(1.06);
       }
       .greenroom__swatch[data-look="bonfire-warm"] .greenroom__swatch-fill { filter: sepia(0.22) saturate(1.2); }
       .greenroom__swatch[data-look="studio"] .greenroom__swatch-fill { filter: contrast(1.1) saturate(1.08); }
@@ -33637,11 +33960,19 @@
       .pd1-primary-nav__item:active { transform: scale(var(--press-scale)); }
       /* Active state: icon itself carries the signal via stroke weight and color.
          Stroke jumps from 1.8 to 2.2 — noticeable but not heavy. */
+      /* Active destination speaks in the brand accent — AJ 2026-09-01: "the
+         active tab should be ember." --ember-text keeps it readable on the
+         putty ground (raw Stride Orange measures ~2:1 there); on true black
+         the token resolves to Stride Orange itself. A 10% ember well under it
+         keeps the state legible for color-blind users via value, not hue
+         alone (plus the 2.2 stroke). */
       .pd1-primary-nav__item[aria-current="page"] {
-        color: var(--text-1);
+        color: var(--ember-text);
+        background: color-mix(in srgb, var(--ember) 10%, transparent);
       }
       .pd1-primary-nav__item[aria-current="page"] > svg {
         stroke-width: 2.2;
+        animation: rail-icon-pop var(--dur-slow) var(--ease-spring) 1;
       }
       .pd1-primary-nav__external-wrap {
         position: relative;
@@ -34380,6 +34711,7 @@
           <span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>
           <span class="topbar__identity-divider" aria-hidden="true"></span>
           <button id="topbarOrganizationSwitcher" class="topbar__organization" type="button" aria-label="Choose organization" aria-haspopup="menu" aria-expanded="false">
+            <span id="topbarOrganizationBadge" class="topbar__organization-badge" aria-hidden="true"></span>
             <strong id="topbarOrganizationName" class="topbar__organization-name">Organizations</strong>
             <svg class="topbar__organization-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 4.5 3 3 3-3"></path></svg>
           </button>
@@ -37137,6 +37469,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       // the settings sheet head, and the chat stacked navigator
       const phoneLayoutQuery = window.matchMedia('(max-width: 640px), (max-height: 500px) and (hover: none) and (pointer: coarse)')
       const desktopChatLayoutQuery = window.matchMedia('(min-width: 861px)')
+      // One shared reduced-motion query. Several call sites already read
+      // `reducedMotion?.matches`; without this binding each of those lines was
+      // a latent ReferenceError waiting on its first execution.
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
       // P2-3: re-entrancy guard so a popstate-driven view change (OS back /
       // edge-swipe) never re-pushes the entry it is currently unwinding.
       let chatHistoryPopping = false
@@ -42589,7 +42925,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
       }
 
       function studioProjectKindLabel(kind) {
-        return kind === 'presentation' ? 'Presentation' : 'Research report'
+        return kind === 'presentation' ? 'Presentation' : 'Document'
       }
 
       function studioProjectRelativeTime(raw) {
@@ -42754,7 +43090,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 
 	  function studioProjectResultCapabilityCopy(project) {
 		const result = project?.result || {}
-		const noun = project?.kind === 'presentation' ? 'presentation' : 'research report'
+		const noun = project?.kind === 'presentation' ? 'presentation' : 'document'
 		const capabilities = [`${result.canEdit === true ? 'Editable' : 'View-only'} ${noun}`]
 		if (project?.kind === 'presentation' && result.canPresent === true) capabilities.push('Present')
 		if (result.canExport === true) capabilities.push(project?.kind === 'presentation' ? 'PowerPoint and PDF' : 'PDF')
@@ -43264,19 +43600,38 @@ Wrap the entire export in one code block. After the code block, say whether the 
       })
       studioNewWithScout?.addEventListener('click', startStudioProjectWithScout)
 
-      /* Installed-apps launcher. New reuses the Scout brief that is how work
-         is actually created today — neither studio has a blank-create path
-         (/artifacts/document is GET/PATCH only and the copy endpoints require
-         a source artifact), so seeding the brief is the honest wiring rather
-         than a button that opens an editor which cannot save. Open filters the
-         library in place; Drive hands off to the file-backed copies. */
+      /* Installed-apps launcher. New mints a blank artifact through the
+         studio's own create route and opens the editor on it directly —
+         no chat detour. Open filters the library in place; Drive hands off
+         to the file-backed copies. */
+      async function createBlankStudioProject(kind) {
+        const isDocument = kind === 'document'
+        const url = isDocument ? '/artifacts/document/new' : '/artifacts/deck/new'
+        let payload
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          })
+          payload = await response.json().catch(() => ({}))
+          if (!response.ok || !payload?.artifact?.id) throw new Error(payload?.error || 'Could not create it')
+        } catch (error) {
+          showToast({ text: error?.message || 'Could not create it', kind: 'error' })
+          return
+        }
+        studioProjectFilter = kind
+        void loadStudioProjects({ force: true })
+        const title = payload.artifact.title || (isDocument ? 'Untitled document' : 'Untitled presentation')
+        if (isDocument) void openDocumentStudio(payload.artifact.id, title)
+        else void openDeckStudio(payload.artifact.id, title)
+      }
       document.querySelectorAll('[data-studio-app-action]').forEach(button => {
         button.addEventListener('click', () => {
           const kind = button.dataset.studioAppKind === 'document' ? 'document' : 'presentation'
           const action = button.dataset.studioAppAction
           if (action === 'new') {
-            studioProjectFilter = kind
-            void startStudioProjectWithScout()
+            void createBlankStudioProject(kind)
             return
           }
           if (action === 'drive') {
@@ -71960,7 +72315,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const priorOverflowAnchor = scoutChatThread.style.overflowAnchor
 	        scoutChatThread.style.overflowAnchor = 'none'
 	        try {
-	          const trimmed = appendScoutChatNode(scoutChatMessageRecordNode(message), { protectedNode: viewport?.anchor })
+	          const entering = scoutChatMessageRecordNode(message)
+	          if (!reducedMotion?.matches) {
+	            entering.classList.add('is-entering')
+	            entering.addEventListener('animationend', () => entering.classList.remove('is-entering'), { once: true })
+	          }
+	          const trimmed = appendScoutChatNode(entering, { protectedNode: viewport?.anchor })
 	          syncDesktopActiveWorkIndicator()
 	          updateChatThreadItem(thread?.preview || message?.text || 'chat thread', thread?.updatedAt || message?.createdAt)
 	          if (trimmed > 0 && viewport?.anchor && !viewport.followBottom) {
@@ -72334,8 +72694,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      function desktopChatMoreMenuControl({ label = 'More actions', onEdit, onProject, onDelete, onRegenerate } = {}) {
 	        const { onShareAll, onShareReply } = arguments[0] || {}
 	        const wrap = bfEl('span', 'desktop-chat-more')
-	        const trigger = bfEl('button', 'chat-context-card__message-action', '•••')
+	        const trigger = bfEl('button', 'chat-context-card__message-action', '')
+	        trigger.appendChild(strideChatActionIcon('more'))
 	        trigger.type = 'button'
+	        trigger.title = label
 	        trigger.setAttribute('aria-label', label)
 	        trigger.setAttribute('aria-haspopup', 'menu')
 	        trigger.setAttribute('aria-expanded', 'false')
@@ -72662,6 +73024,38 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return grouped
 	      }
 
+	      /* Chat action iconography — stride-mark stroke glyphs (1.8, round
+	         caps) replacing the text-label pill. Each button keeps its
+	         accessible name; the drawing carries the meaning. */
+	      function strideChatActionIcon(name) {
+	        const paths = {
+	          react: ['M12 21a9 9 0 1 1 9-9', 'M8.6 14a4.2 4.2 0 0 0 6.8 0', 'M9 9.6h.01', 'M15 9.6h.01', 'M19 16v6', 'M16 19h6'],
+	          reply: ['M9 16l-5-5 5-5', 'M4 11h9.5a6.5 6.5 0 0 1 6.5 6.5V20'],
+	          riff: ['M6 8h8', 'M10 16h8'],
+	          more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
+	        }
+	        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+	        svg.setAttribute('class', 'stride-mark chat-action-mark')
+	        svg.setAttribute('viewBox', '0 0 24 24')
+	        svg.setAttribute('width', '16')
+	        svg.setAttribute('height', '16')
+	        svg.setAttribute('aria-hidden', 'true')
+	        ;(paths[name] || []).forEach(value => {
+	          const path = document.createElementNS(svg.namespaceURI, 'path')
+	          path.setAttribute('d', value)
+	          svg.appendChild(path)
+	        })
+	        return svg
+	      }
+
+	      function popDesktopChatReaction(button) {
+	        if (!button || reducedMotion?.matches) return
+	        button.classList.remove('is-popping')
+	        void button.offsetWidth
+	        button.classList.add('is-popping')
+	        button.addEventListener('animationend', () => button.classList.remove('is-popping'), { once: true })
+	      }
+
 	      function prepareDesktopChatReactionButton(button, message, emoji, summary, options = {}) {
 	        button.type = 'button'
 	        button.dataset.chatReactionMessageId = String(message?.id || '')
@@ -72678,6 +73072,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        button.addEventListener('click', () => {
 	          const next = button.getAttribute('aria-pressed') !== 'true'
+	          if (next) popDesktopChatReaction(button)
 	          updateDesktopChatReaction(message.id, emoji, next, { contextOnly: options.contextOnly })
 	        })
 	        return button
@@ -72685,8 +73080,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function desktopChatReactionPickerControl(message, grouped, options = {}) {
 	        const picker = bfEl('span', 'desktop-chat-reaction-picker')
-	        const trigger = bfEl('button', options.contextOnly ? 'chat-context-card__message-action' : '', '☺︎')
+	        const trigger = bfEl('button', options.contextOnly ? 'chat-context-card__message-action' : '', options.contextOnly ? '☺︎' : '')
+	        if (!options.contextOnly) trigger.appendChild(strideChatActionIcon('react'))
 	        trigger.type = 'button'
+	        trigger.title = 'Add reaction'
 	        trigger.setAttribute('aria-label', 'Add reaction')
 	        trigger.setAttribute('aria-haspopup', 'true')
 	        trigger.setAttribute('aria-expanded', 'false')
@@ -74344,14 +74741,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (message.id && kind !== 'error' && messageActionsReady) {
 	          const actions = bfEl('div', 'desktop-chat-actions')
 	          actions.setAttribute('aria-label', 'Message actions')
-	          const replyButton = bfEl('button', '', 'reply')
+	          const replyButton = bfEl('button', '', '')
+	          replyButton.appendChild(strideChatActionIcon('reply'))
 	          replyButton.type = 'button'
+	          replyButton.title = 'Reply in thread'
 	          replyButton.setAttribute('aria-label', 'Reply in thread')
 	          replyButton.addEventListener('click', () => openDesktopMessageContext(message, replyButton))
 	          actions.appendChild(desktopChatReactionPickerControl(message, groupedReactions))
 	          if (chatThreadIsChannel(selectedScoutChatThread())) {
-	            const riffButton = bfEl('button', '', 'riff')
+	            const riffButton = bfEl('button', '', '')
+	            riffButton.appendChild(strideChatActionIcon('riff'))
 	            riffButton.type = 'button'
+	            riffButton.title = 'Riff with Scout'
 	            riffButton.setAttribute('aria-label', 'Riff with Scout from this message')
 	            riffButton.addEventListener('click', () => void openPrivateRiff(message.id, riffButton))
 	            actions.appendChild(riffButton)
@@ -74413,8 +74814,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const suffix = button.dataset.chatReactionSummary === 'true' ? `; ${summary.count} total` : ''
 	          button.setAttribute('aria-label', `${summary.mine ? 'Remove' : 'Add'} ${emoji} reaction${suffix}`)
 	          if (button.dataset.chatReactionSummary === 'true') {
+	            const priorCount = Number(button.dataset.chatReactionCount || 0)
 	            button.textContent = `${emoji} ${summary.count}`
 	            button.hidden = summary.count === 0
+	            button.dataset.chatReactionCount = String(summary.count)
+	            if (summary.count > priorCount) popDesktopChatReaction(button)
 	            button.title = summary.names.length ? summary.names.join(', ') : `${summary.count} reaction${summary.count === 1 ? '' : 's'}`
 	          }
 	        })
@@ -84426,6 +84830,18 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         }
       }
 
+      /* One word per file family — drives the tinted preview well on grid
+         tiles so a folder of mixed work reads at a glance. */
+      function fileTileKind(file) {
+        const mime = String(file?.mime || '')
+        const name = String(file?.name || '')
+        if (mime.startsWith('image/')) return 'image'
+        if (mime === 'application/pdf' || /\.pdf$/i.test(name)) return 'pdf'
+        if (file?.origin === 'deliverable' && mime === 'text/html') return 'deck'
+        if (file?.origin === 'deliverable' || mime === 'text/markdown' || mime.startsWith('text/') || /\.(md|markdown|txt|docx?)$/i.test(name)) return 'doc'
+        return 'file'
+      }
+
       function filesRowIconSvg(file) {
         // deliverables read as documents, not downloads: Lucide file-text for
         // markdown reports, Lucide presentation for html decks
@@ -85161,6 +85577,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       function fileTileNode(file) {
         const tile = document.createElement('article')
         tile.className = 'file-tile'
+        tile.dataset.kind = fileTileKind(file)
         wireFileDragSource(tile, file)
 
         const preview = document.createElement('div')
@@ -85175,6 +85592,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           image.alt = ''
           image.loading = 'lazy'
           image.decoding = 'async'
+          if (!image.complete) {
+            image.classList.add('is-loading')
+            image.addEventListener('load', () => image.classList.remove('is-loading'), { once: true })
+            image.addEventListener('error', () => image.classList.remove('is-loading'), { once: true })
+          }
           preview.appendChild(image)
         }
         preview.appendChild(icon)
@@ -90558,6 +90980,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           const current = organizations.find(item => item?.detail?.isCurrent) || organizations[0]
           const currentLabel = String(current?.title || 'Organization unavailable')
           label.textContent = currentLabel
+          const badge = document.getElementById('topbarOrganizationBadge')
+          if (badge) {
+            const initial = current?.title ? String(current.title).trim().charAt(0).toUpperCase() : '·'
+            badge.textContent = initial
+          }
           window.__strideCurrentOrganizationLabel = currentLabel
           renderSettings()
         }

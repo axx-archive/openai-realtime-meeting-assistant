@@ -258,20 +258,29 @@ func studioLegacyProjectCandidate(entry meetingMemoryEntry) (string, bool) {
 		return "", false
 	}
 	metadata := entry.Metadata
+	source := strings.TrimSpace(metadata["source"])
 	if entry.Kind != meetingMemoryKindOSArtifact || strings.TrimSpace(metadata["goalParentId"]) != "" ||
-		strings.TrimSpace(metadata["processStage"]) != "" || strings.TrimSpace(metadata["source"]) != "scout_thread" {
+		strings.TrimSpace(metadata["processStage"]) != "" ||
+		!oneOf(source, "scout_thread", studioBlankSourceDocument, studioBlankSourceDeck) {
 		return "", false
 	}
 	mode := strings.ToLower(strings.TrimSpace(metadata["mode"]))
 	threadID := strings.TrimSpace(metadata["threadId"])
 	switch artifactType(entry) {
 	case artifactTypeHTMLDeck:
-		threadedPresentation := threadID != "" && oneOf(mode, "artifacts", "presentation", "deck", "slides")
-		nativeNamedCopy := threadID == "" && mode == "artifacts" && validBlobRef(strings.TrimSpace(metadata[deckSceneRefMetadataKey])) &&
+		threadedPresentation := source == "scout_thread" && threadID != "" && oneOf(mode, "artifacts", "presentation", "deck", "slides")
+		nativeNamedCopy := source == "scout_thread" && threadID == "" && mode == "artifacts" &&
+			validBlobRef(strings.TrimSpace(metadata[deckSceneRefMetadataKey])) &&
 			strings.TrimSpace(metadata["copiedFromArtifactId"]) != ""
-		return studioProjectKindPresentation, threadedPresentation || nativeNamedCopy
+		// A studio-native blank create is server-owned identity the same way a
+		// named copy is: its scene ref was minted by the deck boundary.
+		nativeBlank := source == studioBlankSourceDeck && threadID == "" &&
+			validBlobRef(strings.TrimSpace(metadata[deckSceneRefMetadataKey]))
+		return studioProjectKindPresentation, threadedPresentation || nativeNamedCopy || nativeBlank
 	case artifactTypeMarkdown:
-		return studioProjectKindDocument, threadID != "" && oneOf(mode, "research", "document", "report")
+		threaded := source == "scout_thread" && threadID != "" && oneOf(mode, "research", "document", "report")
+		nativeBlank := source == studioBlankSourceDocument && threadID == ""
+		return studioProjectKindDocument, threaded || nativeBlank
 	default:
 		return "", false
 	}

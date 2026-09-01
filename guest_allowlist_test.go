@@ -241,6 +241,8 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/artifacts/blob":                                {handler: artifactBlobHandler, memberGated: true},
 		"/artifacts/deck":                                {handler: deckEditorHandler, memberGated: true},
 		"/artifacts/deck/copies":                         {handler: deckEditorCopyHandler, memberGated: true},
+		"/artifacts/deck/new":                            {handler: deckEditorNewHandler, memberGated: true},
+		"/artifacts/document/new":                        {handler: documentEditorNewHandler, memberGated: true},
 		"/artifacts/document":                            {handler: documentEditorHandler, memberGated: true},
 		"/artifacts/final-export-capability":             {handler: authoredResultFinalExportCapabilityHandler, memberGated: true},
 		"/artifacts/document/copies":                     {handler: documentEditorCopyHandler, memberGated: true},

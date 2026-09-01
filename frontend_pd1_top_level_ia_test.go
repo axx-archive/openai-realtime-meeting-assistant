@@ -285,7 +285,9 @@ const server = http.createServer((req, res) => {
     organizationText: document.getElementById('topbarOrganizationSwitcher').innerText.trim(),
     organizationChildCount: document.getElementById('topbarOrganizationSwitcher').children.length,
   }));
-  assert.deepEqual(shellChrome, {railWidth:56,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:2});
+  // The switcher wears the workspace's initial as an aria-hidden badge tile
+  // (design evolution 2026-09-01), so the closed chooser is badge + name + chevron.
+  assert.deepEqual(shellChrome, {railWidth:56,navInsideRail:true,navInsideHeader:false,organizationText:'S\nSynthetic Lab',organizationChildCount:3});
   await page.click('#topbarOrganizationSwitcher');
   await page.waitForFunction(() => !document.getElementById('topbarOrganizationMenu').hidden && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2);
   assert.equal(await page.locator('#topbarOrganizationMenu').evaluate(el => !el.hidden), true);
@@ -530,7 +532,7 @@ const server = http.createServer((req, res) => {
       replyTo:{messageId:root.id,authorName:root.authorName,text:root.text.slice(0,120)},
     }))];
   },longMessage);
-  const replyTrigger=page.locator('[data-message-id="message-long-prose"] .desktop-chat-actions button').filter({hasText:'reply'});
+  const replyTrigger=page.locator('[data-message-id="message-long-prose"] .desktop-chat-actions button[aria-label="Reply in thread"]');
   await replyTrigger.evaluate(button => { button.dataset.testThreadTrigger='true'; });
   await replyTrigger.click();
   await page.waitForFunction(() => !document.getElementById('chatContextRail').hidden);

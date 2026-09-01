@@ -2512,7 +2512,10 @@ func (app *kanbanBoardApp) authorizedScoutChatResultArtifact(ctx context.Context
 // deliverable from process receipts and goal children. Internal stages may be
 // complete Markdown too, but they belong only in the parent activity ledger.
 func scoutChatStandaloneTerminalResult(result meetingMemoryEntry, ref *scoutChatThreadRef) bool {
-	if ref == nil || strings.TrimSpace(result.Metadata["source"]) != "scout_thread" || strings.TrimSpace(result.Metadata["goalParentId"]) != "" {
+	// Studio-native blank creates carry a server-minted identity of their own;
+	// they are terminal results the same way a finished thread deliverable is.
+	if ref == nil || !oneOf(strings.TrimSpace(result.Metadata["source"]), "scout_thread", studioBlankSourceDocument, studioBlankSourceDeck) ||
+		strings.TrimSpace(result.Metadata["goalParentId"]) != "" {
 		return false
 	}
 	status := strings.ToLower(strings.TrimSpace(firstNonEmptyString(result.Metadata["threadStatus"], result.Metadata["status"])))
