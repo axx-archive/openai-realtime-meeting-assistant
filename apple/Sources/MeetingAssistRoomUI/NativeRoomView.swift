@@ -111,9 +111,18 @@ public struct NativeRoomView: View {
             RoomStatusBadge(state: model.lifecycle)
             Text("STRIDE")
                 .font(.largeTitle.bold())
-            Text("Native media · Local QA")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+            #if os(macOS)
+                Text("Native room preview")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text("Joins the same live room as web and iOS. Web media stays off while this room is active.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            #else
+                Text("Native media · Local QA")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            #endif
         }
         .accessibilityElement(children: .combine)
     }

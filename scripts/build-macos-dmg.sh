@@ -75,7 +75,7 @@ trap cleanup EXIT
 
 ditto "$app_path" "$stage_dir/STRIDE.app"
 ditto "$notices_path" "$stage_dir/ThirdPartyNotices.txt"
-ditto "$qa_readme_path" "$stage_dir/Local QA Read Me.txt"
+ditto "$qa_readme_path" "$stage_dir/Native Room Preview Read Me.txt"
 ln -s /Applications "$stage_dir/Applications"
 
 dmg_path="$output_dir/STRIDE-$version.dmg"

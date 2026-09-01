@@ -30,6 +30,54 @@ public struct MeetingAssistMacRootView: View {
     }
 
     public var body: some View {
+        shell
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoHome)) { _ in
+                openWebWorkspace(.home)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoRooms)) { _ in
+                openWebWorkspace(.rooms)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoConversations)) { _ in
+                openWebWorkspace(.conversations)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoWork)) { _ in
+                openWebWorkspace(.work)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoDrive)) { _ in
+                openWebWorkspace(.drive)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideReload)) { _ in
+                session.reload()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoBack)) { _ in
+                session.goBack()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideGoForward)) { _ in
+                session.goForward()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideOpenInBrowser)) { _ in
+                session.openCurrentPageInBrowser()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .strideCheckForUpdates)) { _ in
+                updates.checkForUpdates()
+            }
+            .onChange(of: nativeRoom.lifecycle) { previous, current in
+                nativeLifecycleChanged(from: previous, to: current)
+            }
+            .alert(
+                "Native media",
+                isPresented: Binding(
+                    get: { nativeMediaNotice != nil },
+                    set: { if !$0 { nativeMediaNotice = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { nativeMediaNotice = nil }
+            } message: {
+                Text(nativeMediaNotice ?? "")
+            }
+    }
+
+    private var shell: some View {
         NavigationSplitView {
             MacSidebar(
                 session: session,
@@ -49,6 +97,8 @@ public struct MeetingAssistMacRootView: View {
         .preferredColorScheme(.dark)
         .background(shellBlack)
         .background(WindowChromeConfigurator())
+        .toolbarBackground(shellBlack, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button {
@@ -69,50 +119,6 @@ public struct MeetingAssistMacRootView: View {
                 .disabled(surface != .web || !session.canGoForward)
                 .accessibilityLabel("Go forward")
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoHome)) { _ in
-            openWebWorkspace(.home)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoRooms)) { _ in
-            openWebWorkspace(.rooms)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoConversations)) { _ in
-            openWebWorkspace(.conversations)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoWork)) { _ in
-            openWebWorkspace(.work)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoDrive)) { _ in
-            openWebWorkspace(.drive)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideReload)) { _ in
-            session.reload()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoBack)) { _ in
-            session.goBack()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideGoForward)) { _ in
-            session.goForward()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideOpenInBrowser)) { _ in
-            session.openCurrentPageInBrowser()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .strideCheckForUpdates)) { _ in
-            updates.checkForUpdates()
-        }
-        .onChange(of: nativeRoom.lifecycle) { previous, current in
-            nativeLifecycleChanged(from: previous, to: current)
-        }
-        .alert(
-            "Native media",
-            isPresented: Binding(
-                get: { nativeMediaNotice != nil },
-                set: { if !$0 { nativeMediaNotice = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { nativeMediaNotice = nil }
-        } message: {
-            Text(nativeMediaNotice ?? "")
         }
     }
 
@@ -394,7 +400,7 @@ private struct MacSidebar: View {
                         }
                     }
 
-                    Text("Local QA")
+                    Text("Native room preview")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.7)
                         .textCase(.uppercase)
@@ -404,13 +410,13 @@ private struct MacSidebar: View {
                         .padding(.bottom, 2)
 
                     SidebarUtilityButton(
-                        title: "Native media",
+                        title: "Native room",
                         systemImage: "waveform.badge.mic",
                         accent: isNativeMediaSelected ? ember : nil,
                         action: onOpenNativeMedia
                     )
                     .disabled(!canOpenNativeMedia)
-                    .help(canOpenNativeMedia ? "Open the native media room" : "Leave the web meeting before switching media owner")
+                    .help(canOpenNativeMedia ? "Join the live room with native Mac media" : "Leave the web meeting before switching media owner")
                 }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 14)
@@ -475,14 +481,11 @@ private struct MacSidebar: View {
 
     private var brand: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
-                StrideSignalMark()
-                Text("stride")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                    .foregroundStyle(ember)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("STRIDE")
+            Image("StrideWordmark")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 68, height: 18, alignment: .leading)
+                .accessibilityLabel("STRIDE")
 
             Button {
                 session.perform(.organizationSettings)
@@ -853,20 +856,6 @@ private struct SidebarPressButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.96 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
-    }
-}
-
-private struct StrideSignalMark: View {
-    private let ember = Color(red: 1, green: 90 / 255, blue: 25 / 255)
-
-    var body: some View {
-        HStack(spacing: -1) {
-            Circle().fill(ember)
-            Circle().fill(.white.opacity(0.70))
-            Circle().fill(.white.opacity(0.42))
-        }
-        .frame(width: 30, height: 12)
-        .accessibilityHidden(true)
     }
 }
 

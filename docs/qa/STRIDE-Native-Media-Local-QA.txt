@@ -1,8 +1,8 @@
-STRIDE native media local QA — build 19
+STRIDE native room preview — build 20
 
-This is the same STRIDE Mac app, not a separate product. Build 19 keeps the
-build 18 shell and web experience, and adds an opt-in native meeting media path
-inside that app.
+This is the same STRIDE Mac app, not a separate product. Build 20 keeps the
+current shell and web experience, includes build 19's opt-in native meeting
+media path, and refines the shell wordmark and full-screen titlebar.
 
 Install
 
@@ -18,16 +18,24 @@ Install
 
 Two-person meeting check
 
-1. Both testers open build 19 and sign in normally.
-2. Before joining, choose Native Media (Local QA). Media ownership cannot be
-   changed during a call; leave first if you need to use WebKit fallback.
+1. Both testers open build 20 and sign in normally.
+2. Before joining, choose Native room under Native room preview. This is a real
+   participant in the same live room as web and iOS; it is not a mock or a
+   separate room. Media ownership cannot be changed during a call, so leave
+   first if you need to use WebKit fallback.
 3. Join the same room and confirm exactly two seats, one local capture owner per
    Mac, two-way audio, two-way video, mute/camera sync, and clean seat removal
    after leaving.
-4. Repeat once with the WebKit media path as the A/B baseline. Do not treat a
-   listening preference alone as proof of improved quality.
+4. Repeat once with the ordinary Rooms/WebKit media path as the A/B baseline.
+   Do not treat a listening preference alone as proof of improved quality.
 5. If native initialization fails before joining, leave Native Media disabled
    and use the existing WebKit path. Do not switch media owners mid-call.
+
+Video effects
+
+- The WebKit path has STRIDE's existing video looks and background blur.
+- Native room preview does not yet implement app-controlled background looks
+  or blur. This is a truthful limitation, not a hidden or disabled control.
 
 Useful recovery checks
 
