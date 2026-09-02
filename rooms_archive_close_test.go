@@ -126,27 +126,44 @@ func TestArchivedRoomRejectsMemberAndGuestWhileDurableCloseRetriesBeforeTeardown
 		t.Fatalf("rejected admissions changed live seats to %d", got)
 	}
 
+	// The retry timer runs closeRoomForArchive on its own goroutine. It closes
+	// the record FIRST and only then runs the rest of the chain — seat
+	// teardown, memory rotation, auto-archive, follow-through flush,
+	// finalization publication — all of which write into the isolated data
+	// dir. Seeing the record closed proves the retry persisted; it does not
+	// prove the chain finished, so asserting seats here (or returning and
+	// letting TempDir cleanup race those writes) is a window, not a fact.
+	// closeRoomForArchive holds the meetingLifecycleMu write lock from before
+	// the record closes until its last defer runs, so once the record is seen
+	// closed, taking that lock joins the whole chain deterministically.
+	var closed meetingRecord
 	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		closed, found := app.meetings.recordByID(record.ID)
+	for {
+		var found bool
+		closed, found = app.meetings.recordByID(record.ID)
 		if found && closed.EndedAt != "" {
-			if closed.EndedReason != meetingEndedReasonRoomClosed {
-				t.Fatalf("retried close reason=%q, want room_closed", closed.EndedReason)
-			}
-			if got := app.activeParticipantCount(room.ID); got != 0 {
-				t.Fatalf("durable close completed but left %d seats", got)
-			}
-			app.meetings.mu.Lock()
-			calls := persistCalls
-			app.meetings.mu.Unlock()
-			if calls < 2 {
-				t.Fatalf("close settled without retrying persistence: calls=%d", calls)
-			}
-			return
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("durably archived room remained open after bounded close retry")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("durably archived room remained open after bounded close retry")
+	app.meetingLifecycleMu.Lock()
+	app.meetingLifecycleMu.Unlock()
+
+	if closed.EndedReason != meetingEndedReasonRoomClosed {
+		t.Fatalf("retried close reason=%q, want room_closed", closed.EndedReason)
+	}
+	if got := app.activeParticipantCount(room.ID); got != 0 {
+		t.Fatalf("durable close completed but left %d seats", got)
+	}
+	app.meetings.mu.Lock()
+	calls := persistCalls
+	app.meetings.mu.Unlock()
+	if calls < 2 {
+		t.Fatalf("close settled without retrying persistence: calls=%d", calls)
+	}
 }
 
 func TestBootResumesNamedRoomCloseFromDurableArchivedFlag(t *testing.T) {
@@ -179,6 +196,11 @@ func TestBootResumesNamedRoomCloseFromDurableArchivedFlag(t *testing.T) {
 			if closed.EndedReason != meetingEndedReasonRoomClosed {
 				t.Fatalf("boot close reason=%q, want room_closed", closed.EndedReason)
 			}
+			// Boot resumes the close on its own goroutine; join the rest of
+			// the chain (it write-locks meetingLifecycleMu until its last
+			// defer) so no writer outlives the test into TempDir cleanup.
+			restarted.meetingLifecycleMu.Lock()
+			restarted.meetingLifecycleMu.Unlock()
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -275,6 +297,11 @@ func TestArchiveHandlerRunsRoomCloseChain(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// The record closes before the seats are torn down; join the rest of the
+	// chain (it write-locks meetingLifecycleMu until its last defer) so the
+	// seat assertion has no window and no writer outlives the test.
+	kanbanApp.meetingLifecycleMu.Lock()
+	kanbanApp.meetingLifecycleMu.Unlock()
 	if got := kanbanApp.activeParticipantCount(room.ID); got != 0 {
 		t.Fatalf("archive left %d seats occupied, want 0", got)
 	}
