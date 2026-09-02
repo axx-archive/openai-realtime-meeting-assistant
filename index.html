@@ -72499,8 +72499,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      // pill, the deliverables drawer) belongs to the conversation it was
 	      // armed in. A new thread or a thread switch drops it — the chip must
 	      // never ride into a manually created private thread.
-	      function clearScoutFollowUpTargetForThreadSwitch() {
+	      function clearScoutFollowUpTargetForThreadSwitch(nextThreadId) {
 	        if (!scoutFollowUpTarget) return
+	        // a target armed FOR the thread being opened stays armed (its own
+	        // conversation); anything else is dropped
+	        if (scoutFollowUpTarget.threadId && scoutFollowUpTarget.threadId === String(nextThreadId || '')) return
 	        scoutFollowUpTarget = null
 	        renderScoutFollowUpTarget()
 	      }
@@ -79113,7 +79116,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			  // Drive refs are picked for one conversation; never carry them across.
 			  clearPendingScoutContextRefsForThreadSwitch()
 			  // neither does an armed follow-up target
-			  clearScoutFollowUpTargetForThreadSwitch()
+			  clearScoutFollowUpTargetForThreadSwitch(nextThreadId)
 			}
 	        // A side reply is authority-bound to the thread that opened it.
 	        // Never leave that composer visible after navigation: its submit

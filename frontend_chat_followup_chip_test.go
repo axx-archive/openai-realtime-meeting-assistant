@@ -111,11 +111,11 @@ func TestIndexChatEmptyThreadHasNoHeroCard(t *testing.T) {
 
 func TestIndexChatFollowUpClearedOnThreadSwitch(t *testing.T) {
 	html := readIndexHTMLForFollowUpChip(t)
-	clear := functionBody(html, "function clearScoutFollowUpTargetForThreadSwitch()")
+	clear := functionBody(html, "function clearScoutFollowUpTargetForThreadSwitch(nextThreadId)")
 	if clear == "" {
 		t.Fatal("could not extract clearScoutFollowUpTargetForThreadSwitch")
 	}
-	requireAllFollowUp(t, clear, "clearScoutFollowUpTargetForThreadSwitch", "scoutFollowUpTarget = null", "renderScoutFollowUpTarget()")
+	requireAllFollowUp(t, clear, "clearScoutFollowUpTargetForThreadSwitch", "scoutFollowUpTarget = null", "renderScoutFollowUpTarget()", "scoutFollowUpTarget.threadId === String(nextThreadId || '')) return")
 	sel := functionBody(html, "function selectScoutChatThread(id)")
 	if sel == "" {
 		t.Fatal("could not extract selectScoutChatThread")
@@ -124,7 +124,7 @@ func TestIndexChatFollowUpClearedOnThreadSwitch(t *testing.T) {
 	branch := functionBody(sel, "if (nextThreadId !== activeScoutThreadId)")
 	requireAllFollowUp(t, branch, "thread-switch branch",
 		"clearPendingScoutContextRefsForThreadSwitch()",
-		"clearScoutFollowUpTargetForThreadSwitch()",
+		"clearScoutFollowUpTargetForThreadSwitch(nextThreadId)",
 	)
 	// a manually created new thread goes through the same seam
 	fresh := functionBody(html, "async function startNewScoutThread()")

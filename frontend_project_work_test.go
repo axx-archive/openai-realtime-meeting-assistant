@@ -85,7 +85,7 @@ const server=http.createServer((req,res)=>{
  await correctionDialog.getByRole('button',{name:'Cancel',exact:true}).click();
  await regenerate.click();
  await page.waitForFunction(()=>!document.getElementById('scoutFollowUpTarget').hidden&&document.getElementById('scoutChatInput').value.includes('Research the durable creator-economy evidence'));
- assert.match(await page.locator('#scoutFollowUpTarget').textContent(),/follow-up/);
+ assert.match(await page.locator('#scoutFollowUpTarget').textContent(),/follow(ing|-)\s?up/i); // follow-up chip copy, hotfix 249
  assert.equal(await page.evaluate(()=>document.activeElement?.id),'scoutChatInput');
  assert.equal(saveBodies.length,0);assert.equal(correctionBodies.length,0);assert.equal(filesLoads,0);
  await browser.close();server.close();
