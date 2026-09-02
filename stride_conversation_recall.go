@@ -405,6 +405,11 @@ type currentCompanyConversationSource struct {
 // either lands first and makes validation fail closed, or waits until the
 // already-authorized private answer is durably committed.
 func (app *kanbanBoardApp) lockCurrentCompanyConversationSources(principal RecallPrincipal, destinationThreadID string, contextEntries []meetingMemoryEntry) ([]currentCompanyConversationSource, func(), error) {
+	// The lock is taken after the provider returns. Any channel edit already
+	// stamped at or before this instant landed outside the critical section the
+	// lock guards, so a frozen brain transcript row that disagrees with it is
+	// historical drift rather than a concurrent change.
+	startedAt := time.Now().UTC()
 	sourceEntries := make([]meetingMemoryEntry, 0, len(contextEntries))
 	threadSet := map[string]bool{}
 	for _, entry := range contextEntries {
@@ -465,6 +470,13 @@ func (app *kanbanBoardApp) lockCurrentCompanyConversationSources(principal Recal
 		thread := threads[threadID]
 		messageIndex := scoutChatMessageIndex(thread, messageID)
 		if messageIndex < 0 {
+			if entry.Kind == meetingMemoryKindTranscript {
+				// Ingestion files a transcript row only on the commit path, so a
+				// message deleted afterwards leaves its row behind forever. The row
+				// never becomes a current chip; drop it instead of failing the answer.
+				log.Infof("company source lock: dropping transcript row for deleted message thread=%s message=%s", threadID, messageID)
+				continue
+			}
 			return fail()
 		}
 		message := thread.Messages[messageIndex]
@@ -489,13 +501,20 @@ func (app *kanbanBoardApp) lockCurrentCompanyConversationSources(principal Recal
 				scoutChatAuthorName(&userAccount{Email: message.AuthorEmail, Name: message.AuthorName}),
 				channelBrainTranscriptBody(thread, source, message.Text),
 			)
-			if !recallEntryScopeAllowed(expectedMetadata, principal) || entry.Text != expectedText || !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
+			if !recallEntryScopeAllowed(expectedMetadata, principal) || !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 				return fail()
 			}
 			for _, field := range []string{"source", "threadId", "messageId", "channelTitle", "sourceThreadId", "sourceTitle", "visibility", "ownerEmail", "memberEmails"} {
 				if strings.TrimSpace(entry.Metadata[field]) != strings.TrimSpace(expectedMetadata[field]) {
 					return fail()
 				}
+			}
+			if entry.Text != expectedText {
+				if historicalTranscriptEdit(message, startedAt) {
+					log.Infof("company source lock: dropping transcript row for edited message thread=%s message=%s editedAt=%s", threadID, messageID, strings.TrimSpace(message.EditedAt))
+					continue
+				}
+				return fail()
 			}
 			continue
 		}
@@ -529,6 +548,26 @@ func (app *kanbanBoardApp) lockCurrentCompanyConversationSources(principal Recal
 		})
 	}
 	return current, release, nil
+}
+
+// historicalTranscriptEdit reports whether a stored channel transcript row may
+// disagree with its message because of an edit that landed before the source
+// lock began. Ingestion files transcript rows only when a message is committed
+// and the edit path merely stamps EditedAt, so an edited message leaves its
+// brain row frozen at the original text. An edit stamped at or before
+// startedAt is therefore historical drift, not a change concurrent with the
+// lock's critical section. An unstamped mismatch stays unexplained and must
+// still fail closed.
+func historicalTranscriptEdit(message scoutChatMessageRecord, startedAt time.Time) bool {
+	editedAt := strings.TrimSpace(message.EditedAt)
+	if editedAt == "" {
+		return false
+	}
+	parsed, err := time.Parse(time.RFC3339, editedAt)
+	if err != nil || parsed.IsZero() {
+		return false
+	}
+	return !parsed.After(startedAt)
 }
 
 func conversationRecallBody(thread scoutChatThreadRecord, message scoutChatMessageRecord, author string, createdAt time.Time) string {

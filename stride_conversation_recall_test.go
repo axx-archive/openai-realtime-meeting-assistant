@@ -1074,3 +1074,199 @@ func strideConversationProjectionForTest(t *testing.T, runtime *STRIDERuntime, e
 	}
 	return found
 }
+
+// storedChannelTranscriptForTest returns the durable brain transcript row that
+// channel ingestion filed for one message, or fails the test.
+func storedChannelTranscriptForTest(t *testing.T, app *kanbanBoardApp, threadID, messageID string) meetingMemoryEntry {
+	t.Helper()
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindTranscript, 0) {
+		if entry.Metadata["source"] == transcriptSourceChannel && entry.Metadata["threadId"] == threadID && entry.Metadata["messageId"] == messageID {
+			return entry
+		}
+	}
+	t.Fatalf("channel ingestion transcript missing for thread=%s message=%s", threadID, messageID)
+	return meetingMemoryEntry{}
+}
+
+// TestLockCurrentCompanyConversationSourcesToleratesHistoricalChannelDrift pins
+// the production shape behind "I couldn't answer safely because a company
+// source changed": channel ingestion files a transcript row only when a message
+// is committed, the edit path merely stamps EditedAt, and a delete leaves the
+// row behind. The recency lanes hand those frozen rows to every private
+// question, so historical drift must be dropped instead of failing the whole
+// answer closed, while unexplained drift, concurrent edits, metadata changes,
+// and archived threads keep failing.
+func TestLockCurrentCompanyConversationSourcesToleratesHistoricalChannelDrift(t *testing.T) {
+	const (
+		originalText = "Launch notes: the Mercury kickoff is Tuesday at nine."
+		editedText   = "Launch notes: the Mercury kickoff moved to Wednesday at ten."
+	)
+	type harness struct {
+		fixture       strideCoworkerTestFixture
+		channel       scoutChatThreadRecord
+		message       scoutChatMessageRecord
+		privateThread scoutChatThreadRecord
+		transcript    meetingMemoryEntry
+		principal     RecallPrincipal
+	}
+	setup := func(t *testing.T, suffix string, useTable bool) harness {
+		t.Helper()
+		fixture := newSTRIDECoworkerTestFixture(t)
+		channel := fixture.table
+		if !useTable {
+			var created bool
+			var err error
+			channel, created, err = fixture.app.ensureScoutChatThread(
+				"historical-drift-"+suffix, fixture.user.Email, scoutChatAuthorName(fixture.user),
+				"Launch notes", scoutChatVisibilityPublic, nil,
+			)
+			if err != nil || !created {
+				t.Fatalf("create channel: created=%v err=%v", created, err)
+			}
+		}
+		message := scoutChatMessageRecord{
+			ID: "historical-drift-message-" + suffix, Kind: "message", Role: "user", Text: originalText,
+			CreatedAt:  time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
+			AuthorName: scoutChatAuthorName(fixture.user), AuthorEmail: fixture.user.Email,
+		}
+		if _, err := fixture.app.commitScoutChatThreadMessages(fixture.user.Email, channel.ID, message); err != nil {
+			t.Fatal(err)
+		}
+		privateThread, err := fixture.app.createScoutChatThread(fixture.user.Email, "AJ", "Historical drift "+suffix, scoutChatVisibilityPrivate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transcript := storedChannelTranscriptForTest(t, fixture.app, channel.ID, message.ID)
+		if !strings.Contains(transcript.Text, originalText) {
+			t.Fatalf("ingested transcript row does not carry the original text: %q", transcript.Text)
+		}
+		return harness{fixture: fixture, channel: channel, message: message, privateThread: privateThread, transcript: transcript, principal: recallPrincipalForUser(fixture.user)}
+	}
+	editMessage := func(t *testing.T, h harness) {
+		t.Helper()
+		updated := editedText
+		_, edited, err := h.fixture.app.editScoutChatThreadMessage(context.Background(), h.fixture.user, h.channel.ID, h.message.ID, &updated, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if edited.Text != editedText || strings.TrimSpace(edited.EditedAt) == "" {
+			t.Fatalf("edit did not replace the text and stamp EditedAt: %+v", edited)
+		}
+		if _, err := time.Parse(time.RFC3339, edited.EditedAt); err != nil {
+			t.Fatalf("EditedAt is not RFC3339: %q", edited.EditedAt)
+		}
+	}
+	lock := func(t *testing.T, h harness) ([]currentCompanyConversationSource, error) {
+		t.Helper()
+		current, release, err := h.fixture.app.lockCurrentCompanyConversationSources(h.principal, h.privateThread.ID, []meetingMemoryEntry{h.transcript})
+		if err == nil {
+			release()
+		}
+		return current, err
+	}
+
+	for _, useTable := range []bool{true, false} {
+		label := "dynamic_channel"
+		if useTable {
+			label = "bonfire_chat_table"
+		}
+		t.Run("edited_before_lock_"+label, func(t *testing.T) {
+			h := setup(t, "edit-"+label, useTable)
+			editMessage(t, h)
+			// The production premise: the edit path never re-files the brain row,
+			// so the durable transcript stays frozen at the original text.
+			if after := storedChannelTranscriptForTest(t, h.fixture.app, h.channel.ID, h.message.ID); after.Text != h.transcript.Text {
+				t.Fatalf("premise changed: the edit re-filed the brain transcript row: before=%q after=%q", h.transcript.Text, after.Text)
+			}
+			current, err := lock(t, h)
+			if err != nil {
+				t.Fatalf("historically edited transcript row failed the private answer closed: %v", err)
+			}
+			if len(current) != 0 {
+				t.Fatalf("dropped transcript row was minted as a current source: %+v", current)
+			}
+		})
+	}
+
+	t.Run("deleted_after_ingestion", func(t *testing.T) {
+		h := setup(t, "delete", false)
+		if _, err := h.fixture.app.deleteScoutChatThreadMessageWithContext(context.Background(), h.fixture.user, h.channel.ID, h.message.ID); err != nil {
+			t.Fatal(err)
+		}
+		thread, _, err := h.fixture.app.scoutChatThreadByID(h.fixture.user.Email, h.channel.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if scoutChatMessageIndex(thread, h.message.ID) >= 0 {
+			t.Fatalf("delete left the message in the thread: %+v", thread.Messages)
+		}
+		current, err := lock(t, h)
+		if err != nil {
+			t.Fatalf("deleted-message transcript row failed the private answer closed: %v", err)
+		}
+		if len(current) != 0 {
+			t.Fatalf("dropped transcript row was minted as a current source: %+v", current)
+		}
+	})
+
+	t.Run("unexplained_or_concurrent_drift_still_fails", func(t *testing.T) {
+		for _, stamp := range []struct{ label, editedAt string }{
+			{"empty_edited_at", ""},
+			{"unparseable_edited_at", "yesterday"},
+			{"edited_after_lock_start", time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)},
+		} {
+			t.Run(stamp.label, func(t *testing.T) {
+				h := setup(t, "drift-"+stamp.label, false)
+				threadLock := h.fixture.app.scoutChatThreadLock(h.channel.ID)
+				threadLock.Lock()
+				thread, _, err := h.fixture.app.scoutChatThreadByID(h.fixture.user.Email, h.channel.ID)
+				if err == nil {
+					index := scoutChatMessageIndex(thread, h.message.ID)
+					thread.Messages[index].Text = editedText
+					thread.Messages[index].EditedAt = stamp.editedAt
+					thread.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+					err = h.fixture.app.saveScoutChatThread(thread)
+				}
+				threadLock.Unlock()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if current, err := lock(t, h); err == nil {
+					t.Fatalf("text drift with EditedAt=%q reauthorized a stale transcript row: %+v", stamp.editedAt, current)
+				}
+			})
+		}
+	})
+
+	t.Run("renamed_channel_still_fails", func(t *testing.T) {
+		for _, alsoEdited := range []bool{false, true} {
+			label := "rename_only"
+			if alsoEdited {
+				label = "rename_and_historical_edit"
+			}
+			t.Run(label, func(t *testing.T) {
+				h := setup(t, "rename-"+label, false)
+				if alsoEdited {
+					editMessage(t, h)
+				}
+				if _, err := h.fixture.app.renameScoutChatThread(h.fixture.user.Email, h.channel.ID, "Launch notes renamed"); err != nil {
+					t.Fatal(err)
+				}
+				if current, err := lock(t, h); err == nil {
+					t.Fatalf("channelTitle drift reauthorized a stale transcript row: %+v", current)
+				}
+			})
+		}
+	})
+
+	t.Run("archived_channel_still_fails", func(t *testing.T) {
+		h := setup(t, "archive", false)
+		editMessage(t, h)
+		if _, err := h.fixture.app.setScoutChatThreadArchived(h.fixture.user.Email, h.channel.ID, true); err != nil {
+			t.Fatal(err)
+		}
+		if current, err := lock(t, h); err == nil {
+			t.Fatalf("archived channel reauthorized a transcript row: %+v", current)
+		}
+	})
+}
