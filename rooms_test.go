@@ -18,6 +18,13 @@ func setupRoomsTestEnv(t *testing.T) []*http.Cookie {
 	t.Helper()
 	setupAuthTestEnv(t)
 	t.Setenv("BONFIRE_ROOMS_PATH", filepath.Join(t.TempDir(), "rooms.json"))
+	// Room archive/restore route through kanbanApp (archiveNamedRoom returns
+	// ErrMeetingRecordStore on a nil receiver), so every handler test gets its
+	// own isolated app instead of relying on whatever an earlier test left
+	// in the package global.
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
 	return loginAs(t, "aj@shareability.com", "B0NFIRE!")
 }
 
