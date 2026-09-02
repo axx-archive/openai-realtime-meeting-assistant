@@ -49,8 +49,14 @@ func TestIndexDesignedDropdown(t *testing.T) {
 		// the click resolves from its host. If these go, Safari regresses to
 		// the system popup while every Chromium check stays green.
 		"pointer-events: none;",
-		"function resolveStrideSelect(target)",
+		"function resolveStrideSelect(target, press)",
 		"target.closest(':has(> select)')",
+		// A composite host (a form holding the select AND other fields) never
+		// hijacks a press on a sibling control; the select opens from its own
+		// box only. Regression: the lobby schedule form's title/datetime
+		// fields opened the room dropdown instead of taking focus.
+		"if (control && control !== host && host.contains(control)) return null",
+		"if (composite && !strideSelectPressInside(qualified, press)) continue",
 	} {
 		if !strings.Contains(index, wiring) {
 			t.Fatalf("the designed dropdown contract is not wired: missing %q", wiring)

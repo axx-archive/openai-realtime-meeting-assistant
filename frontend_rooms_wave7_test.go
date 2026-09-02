@@ -297,3 +297,69 @@ func TestIndexRoomsWave7RecordPlaybackAndRecapCard(t *testing.T) {
 	)
 	requireAllWave7(t, card, "recap card thread link", "openScoutChatThread(spec.threadId)")
 }
+
+// Production bug (AJ, 2026-09-01): a click on the schedule form's title or
+// datetime field opened the room dropdown instead of taking focus. The
+// designed-dropdown enhancer resolved the whole <form> as the select's host
+// (`:has(> select)`) and preventDefault()ed the mousedown. The fix is in
+// resolveStrideSelect: a press on a sibling control never resolves, and in a
+// composite host the select opens from its own box only. This pin holds the
+// form-level seam and the time-zone hint beside the datetime input.
+func TestIndexRoomsWave7ScheduleFormFieldsTakeFocus(t *testing.T) {
+	html := readIndexHTMLForWave7(t)
+	resolve := functionBody(html, "function resolveStrideSelect(target, press)")
+	if resolve == "" {
+		t.Fatal("could not extract resolveStrideSelect")
+	}
+	requireAllWave7(t, resolve, "resolveStrideSelect",
+		"const control = target.closest(strideSelectSiblingControls)",
+		"if (control && control !== host && host.contains(control)) return null",
+		"const composite = selects.length > 1 || host.querySelector(strideSelectSiblingControls) !== null",
+		"if (composite && !strideSelectPressInside(qualified, press)) continue",
+	)
+	requireAllWave7(t, html, "sibling controls",
+		"const strideSelectSiblingControls = 'input, textarea, button, a[href],",
+		"function strideSelectPressInside(select, press)",
+		"const select = resolveStrideSelect(event.target, event)",
+	)
+	// no form-level focus steal: the schedule form wires the open toggle,
+	// cancel, submit, chips and Escape — never a click/mousedown/pointerdown
+	// on the form itself, and never a select focus or showPicker()
+	wire := functionBody(html, "function wireLobbySchedule()")
+	if wire == "" {
+		t.Fatal("could not extract wireLobbySchedule")
+	}
+	for _, forbidden := range []string{"els.form.addEventListener('click'", "els.form.addEventListener('mousedown'", "els.form.addEventListener('pointerdown'", "els.room.focus(", "showPicker("} {
+		if strings.Contains(wire, forbidden) {
+			t.Errorf("wireLobbySchedule must not steal focus at the form level: found %q", forbidden)
+		}
+	}
+	start := functionBody(html, "function startLobbySchedule(meeting = null)")
+	if strings.Contains(start, "els.room?.focus(") || strings.Contains(start, "els.room.focus(") {
+		t.Error("startLobbySchedule must focus the title, never the room select")
+	}
+	requireAllWave7(t, start, "startLobbySchedule", "els.title?.focus()", "syncLobbyScheduleZone()")
+	// the time-zone hint: mono, beside the datetime input, short name + UTC
+	// offset from Intl; the row's aria-label names the zone; the wire value
+	// still posts UTC through the one local→RFC 3339 conversion
+	requireAllWave7(t, html, "zone hint markup",
+		`<div id="lobbyScheduleStartRow" class="lobby__start" role="group" aria-label="Starts at (local time)">`,
+		`<span id="lobbyScheduleZone" class="lobby__zone"`,
+		".lobby__zone {", "font: 500 11px var(--font-mono);",
+	)
+	zone := functionBody(html, "function lobbyScheduleZoneLabel(at = Date.now())")
+	requireAllWave7(t, zone, "lobbyScheduleZoneLabel",
+		"new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date)",
+		"part.type === 'timeZoneName'",
+		"-date.getTimezoneOffset()",
+		"return `${short} · ${utc}`",
+	)
+	sync := functionBody(html, "function syncLobbyScheduleZone()")
+	requireAllWave7(t, sync, "syncLobbyScheduleZone",
+		"row?.setAttribute('aria-label', `Starts at (${label})`)",
+		"els.start?.setAttribute('aria-label', `Starts at (${label})`)",
+	)
+	requireAllWave7(t, wire, "zone follows the picked date", "els.start?.addEventListener('input', syncLobbyScheduleZone)")
+	submit := functionBody(html, "async function submitLobbySchedule(event)")
+	requireAllWave7(t, submit, "still posts UTC", "startsAt: new Date(startMs).toISOString()")
+}

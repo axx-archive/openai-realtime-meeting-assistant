@@ -18246,6 +18246,46 @@
 	        letter-spacing: var(--track-label);
 	      }
 
+	      /* the armed follow-up: mono eyebrow · title (a button that opens the
+	         deliverable) · dismiss — a composer chip, never a feed card */
+	      .scout-followup-chip__eyebrow {
+	        flex: none;
+	        font: 500 10.5px var(--font-mono);
+	        letter-spacing: var(--track-label);
+	        text-transform: uppercase;
+	        color: var(--text-3);
+	      }
+
+	      .scout-followup-chip__sep {
+	        flex: none;
+	        color: var(--text-3);
+	      }
+
+	      .scout-followup-chip__title {
+	        min-width: 0;
+	        overflow: hidden;
+	        text-overflow: ellipsis;
+	        white-space: nowrap;
+	        padding: 0;
+	        border: 0;
+	        background: transparent;
+	        color: var(--text-1);
+	        font: var(--type-label);
+	        letter-spacing: var(--track-label);
+	        cursor: pointer;
+	      }
+
+	      .scout-followup-chip__title:hover {
+	        text-decoration: underline;
+	        text-underline-offset: 2px;
+	      }
+
+	      .scout-followup-chip__title:focus-visible {
+	        outline: 2px solid var(--ring);
+	        outline-offset: 2px;
+	        border-radius: 4px;
+	      }
+
 	      .scout-followup-chip__clear {
 	        width: 24px;
 	        height: 24px;
@@ -29622,6 +29662,18 @@
       }
       .lobby__select option { color: #111114; background: #fff; }
       .lobby__input--mono { font: 500 12.5px var(--font-mono); }
+      /* the datetime input speaks the browser's wall clock — the zone hint
+         beside it (short name · UTC offset, a machine fact → mono) says which */
+      .lobby__start { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .lobby__start .lobby__input { flex: 1 1 auto; }
+      .lobby__zone {
+        flex: none;
+        font: 500 11px var(--font-mono);
+        letter-spacing: var(--track-label);
+        color: var(--ink-3);
+        white-space: nowrap;
+      }
+      .lobby__zone:empty { display: none; }
       .lobby__chips { display: flex; gap: 6px; }
       .lobby__chip {
         flex: 1;
@@ -39236,7 +39288,10 @@
                     <form id="lobbyScheduleForm" class="lobby__form lobby__schedule-form" hidden aria-label="Schedule a meeting">
                       <select id="lobbyScheduleRoom" class="lobby__input lobby__select" aria-label="Room"></select>
                       <input id="lobbyScheduleTitle" class="lobby__input" type="text" placeholder="meeting title" maxlength="120" autocomplete="off" aria-label="Title">
-                      <input id="lobbyScheduleStart" class="lobby__input lobby__input--mono" type="datetime-local" aria-label="Starts at (local time)">
+                      <div id="lobbyScheduleStartRow" class="lobby__start" role="group" aria-label="Starts at (local time)">
+                        <input id="lobbyScheduleStart" class="lobby__input lobby__input--mono" type="datetime-local" aria-label="Starts at (local time)">
+                        <span id="lobbyScheduleZone" class="lobby__zone" title="Times are entered in your time zone"></span>
+                      </div>
                       <div id="lobbyScheduleDuration" class="lobby__chips" role="radiogroup" aria-label="Duration">
                         <button type="button" class="lobby__chip" role="radio" aria-checked="false" data-minutes="15" tabindex="-1">15m</button>
                         <button type="button" class="lobby__chip" role="radio" aria-checked="true" data-minutes="30">30m</button>
@@ -72440,6 +72495,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        renderPendingScoutContextRefs()
 	      }
 
+	      // An armed follow-up (Work hub "Ask for changes", a card's feedback
+	      // pill, the deliverables drawer) belongs to the conversation it was
+	      // armed in. A new thread or a thread switch drops it — the chip must
+	      // never ride into a manually created private thread.
+	      function clearScoutFollowUpTargetForThreadSwitch() {
+	        if (!scoutFollowUpTarget) return
+	        scoutFollowUpTarget = null
+	        renderScoutFollowUpTarget()
+	      }
+
 	      function renderPendingScoutContextRefs() {
 	        if (!scoutChatContextRefs) return
 	        scoutChatContextRefs.hidden = pendingScoutContextRefs.length === 0
@@ -72956,19 +73021,46 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return chip
 	        }
 	        if (scoutFollowUpTarget) {
-	          const query = String(scoutFollowUpTarget.query || '').trim()
+	          const target = scoutFollowUpTarget
+	          const query = String(target.query || '').trim()
 	          // a dropped deliverable carries an explicit label (its title); a
 	          // research node falls back to its mode + query as before.
-	          const targetName = String(scoutFollowUpTarget.label || assistantToolLabelText(scoutFollowUpTarget.mode))
-	          const targetSuffix = scoutFollowUpTarget.label ? '' : (query ? ` · ${query.slice(0, 48)}` : '')
-	          scoutFollowUpTargetEl.appendChild(armedChip(
-	            `follow-up → ${targetName} v${scoutFollowUpTarget.version}${targetSuffix}`,
-	            'Clear follow-up target',
-	            () => {
-	              scoutFollowUpTarget = null
-	              renderScoutFollowUpTarget()
-	            }
-	          ))
+	          const targetName = String(target.label || assistantToolLabelText(target.mode))
+	          const targetSuffix = target.label ? '' : (query ? ` · ${query.slice(0, 48)}` : '')
+	          // a compact chip row above the composer — "Following up on ·
+	          // <title> · ×" — never a hero card in the message area; the
+	          // deliverable stays one click away through its title
+	          const chip = document.createElement('span')
+	          chip.className = 'scout-followup-chip scout-followup-chip--target'
+	          chip.dataset.artifactId = String(target.artifactId || '')
+	          const eyebrow = document.createElement('span')
+	          eyebrow.className = 'scout-followup-chip__eyebrow'
+	          eyebrow.textContent = 'Following up on'
+	          const sep = document.createElement('span')
+	          sep.className = 'scout-followup-chip__sep'
+	          sep.setAttribute('aria-hidden', 'true')
+	          sep.textContent = '·'
+	          const title = document.createElement('button')
+	          title.type = 'button'
+	          title.className = 'scout-followup-chip__title'
+	          title.textContent = `${targetName}${targetSuffix}`
+	          title.title = `Open ${targetName} (v${target.version})`
+	          title.setAttribute('aria-label', `Following up on ${targetName} v${target.version} — open it`)
+	          title.addEventListener('click', () => {
+	            if (target.artifactId) openArtifactStage(target.artifactId, targetName)
+	          })
+	          const clear = document.createElement('button')
+	          clear.type = 'button'
+	          clear.className = 'scout-followup-chip__clear'
+	          clear.setAttribute('aria-label', 'Clear follow-up target')
+	          clear.title = 'clear'
+	          clear.replaceChildren(strideIcon('close', { size: 12 }))
+	          clear.addEventListener('click', () => {
+	            scoutFollowUpTarget = null
+	            renderScoutFollowUpTarget()
+	          })
+	          chip.append(eyebrow, sep, title, clear)
+	          scoutFollowUpTargetEl.appendChild(chip)
 	        }
 	        if (scoutChatReplyTarget) {
 	          scoutFollowUpTargetEl.appendChild(armedChip(
@@ -79020,6 +79112,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			  closeSentMessageProjectCorrection({ restoreFocus: false })
 			  // Drive refs are picked for one conversation; never carry them across.
 			  clearPendingScoutContextRefsForThreadSwitch()
+			  // neither does an armed follow-up target
+			  clearScoutFollowUpTargetForThreadSwitch()
 			}
 	        // A side reply is authority-bound to the thread that opened it.
 	        // Never leave that composer visible after navigation: its submit
@@ -79196,7 +79290,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function clearScoutChatThreadNodes() {
-	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-image, .scout-chat-image-pending, .scout-studio-receipt-group, .scout-studio-receipt, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-history-loading, .scout-chat-history-control, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
+	        // every top-level feed node — a result card left out of this list
+	        // survives the rebuild and leaks into the next thread (the empty
+	        // new thread showed the previous thread's document card under the
+	        // starters; AJ, 2026-09-01)
+	        scoutChatThread.querySelectorAll('.scout-chat-msg, .scout-chat-system, .scout-chat-research, .scout-chat-work-card, .scout-chat-work-record, .scout-chat-deck-result, .scout-chat-document-result, .scout-chat-structured-result, .scout-chat-image, .scout-chat-image-pending, .scout-studio-receipt-group, .scout-studio-receipt, .runlog, .scout-chat-daybreak, .desktop-chat-unread, .scout-choices, .scout-proposal-card, .manifest-card, .scout-chat-loading, .scout-chat-history-loading, .scout-chat-history-control, .scout-chat-empty, .scout-starters, .private-riff-checkpoint--conversation, .private-riff-episode').forEach(node => node.remove())
 	      }
 
 	      /* §1/§2/§3 render-pass state — var, not let: renderActiveScoutThread can
@@ -101609,6 +101707,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           cancelLobbySchedule()
           els.open.focus()
         })
+        // the zone hint follows the picked date (DST); the value still posts UTC
+        els.start?.addEventListener('input', syncLobbyScheduleZone)
+        els.start?.addEventListener('change', syncLobbyScheduleZone)
       }
 
       function setLobbyScheduleDuration(minutes) {
@@ -101637,6 +101738,40 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         return date.getTime()
       }
 
+      // "CDT · UTC−5" for the moment the picked start falls on (DST can move
+      // the offset between now and the meeting). The short name comes from
+      // Intl; a browser that only knows "GMT-5" collapses to the offset.
+      function lobbyScheduleZoneLabel(at = Date.now()) {
+        const date = new Date(Number.isFinite(at) ? at : Date.now())
+        const offsetMinutes = -date.getTimezoneOffset()
+        const abs = Math.abs(offsetMinutes)
+        const hours = Math.floor(abs / 60)
+        const minutes = abs % 60
+        const utc = offsetMinutes === 0
+          ? 'UTC'
+          : `UTC${offsetMinutes > 0 ? '+' : '−'}${hours}${minutes ? `:${String(minutes).padStart(2, '0')}` : ''}`
+        let short = ''
+        try {
+          const parts = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(date)
+          short = String(parts.find(part => part.type === 'timeZoneName')?.value || '').trim()
+        } catch { short = '' }
+        if (!short || short === 'UTC' || /^(GMT|UTC)[+-−]/.test(short)) return utc
+        return `${short} · ${utc}`
+      }
+
+      function syncLobbyScheduleZone() {
+        const els = lobbyScheduleElements()
+        const zone = document.getElementById('lobbyScheduleZone')
+        const row = document.getElementById('lobbyScheduleStartRow')
+        if (!zone) return
+        const startLocal = String(els.start?.value || '').trim()
+        const startMs = startLocal ? new Date(startLocal).getTime() : NaN
+        const label = lobbyScheduleZoneLabel(Number.isFinite(startMs) ? startMs : Date.now())
+        zone.textContent = label
+        row?.setAttribute('aria-label', `Starts at (${label})`)
+        els.start?.setAttribute('aria-label', `Starts at (${label})`)
+      }
+
       function startLobbySchedule(meeting = null) {
         const els = lobbyScheduleElements()
         if (!els.form || !els.open) return
@@ -101661,6 +101796,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           els.start.value = lobbyScheduleLocalInputValue(startMs)
           els.start.min = lobbyScheduleLocalInputValue(Date.now())
         }
+        syncLobbyScheduleZone()
         setLobbyScheduleDuration(Number(meeting?.durationMinutes) || 30)
         if (els.attendees) {
           const self = lobbyScheduleSelf()
@@ -104203,22 +104339,43 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         /* With pointer-events off, the mousedown target is the select's HOST,
            not the select — walk to the nearest ancestor with a direct select
            child and qualify that. A click on the field label opens the panel
-           too, which the native control never offered. */
-        function resolveStrideSelect(target) {
+           too, which the native control never offered.
+           The host walk is for LABEL-sized wrappers. A host that also holds
+           other controls (the lobby schedule <form>: room select + title +
+           datetime + duration chips) is composite — there a press counts for
+           the select only when it lands inside the select's own box, and a
+           press on a sibling control never resolves at all. Without this the
+           form-level host hijacked every field: preventDefault() on the
+           mousedown stole the input's focus and the room dropdown opened
+           instead (AJ, 2026-09-01). */
+        const strideSelectSiblingControls = 'input, textarea, button, a[href], [contenteditable]:not([contenteditable="false"]), [role="radio"], [role="button"], [role="option"], [role="textbox"], [role="combobox"]'
+        function resolveStrideSelect(target, press) {
           const direct = strideSelectFor(target)
           if (direct) return direct
           if (!(target instanceof Element)) return null
           const host = target.closest(':has(> select)')
           if (!host) return null
-          for (const candidate of host.querySelectorAll(':scope > select')) {
+          const control = target.closest(strideSelectSiblingControls)
+          if (control && control !== host && host.contains(control)) return null
+          const selects = host.querySelectorAll(':scope > select')
+          const composite = selects.length > 1 || host.querySelector(strideSelectSiblingControls) !== null
+          for (const candidate of selects) {
             const qualified = strideSelectFor(candidate)
-            if (qualified) return qualified
+            if (!qualified) continue
+            if (composite && !strideSelectPressInside(qualified, press)) continue
+            return qualified
           }
           return null
         }
 
+        function strideSelectPressInside(select, press) {
+          if (!press || !Number.isFinite(press.clientX) || !Number.isFinite(press.clientY)) return false
+          const rect = select.getBoundingClientRect()
+          return press.clientX >= rect.left && press.clientX <= rect.right && press.clientY >= rect.top && press.clientY <= rect.bottom
+        }
+
         document.addEventListener('mousedown', event => {
-          const select = resolveStrideSelect(event.target)
+          const select = resolveStrideSelect(event.target, event)
           if (openState && !openState.panel.contains(event.target)) {
             const wasOpenFor = openState.select
             closeStrideSelect(false)
