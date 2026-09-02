@@ -579,6 +579,22 @@ var attachmentUploadSafeMimes = map[string]bool{
 	"application/pdf": true,
 	"text/plain":      true,
 	"text/markdown":   true,
+	// Hotfix gen 249 (AJ: "users should be able to send videos and photos"):
+	// phone/desktop video containers are stored and rendered inline
+	// (<video> over the session-gated blob route) but NEVER forwarded to a
+	// model — attachmentModelSafeMimes / openAIAttachmentModelSafeMimes stay
+	// image+PDF(+text), so a video degrades to its name/size/duration line.
+	"video/mp4":       true,
+	"video/quicktime": true,
+	"video/webm":      true,
+}
+
+// attachmentVideoMimes are the upload-safe video containers. They are
+// container-checked (ISO BMFF `ftyp` box / EBML header), never decoded.
+var attachmentVideoMimes = map[string]bool{
+	"video/mp4":       true,
+	"video/quicktime": true,
+	"video/webm":      true,
 }
 
 var attachmentModelSafeMimes = map[string]bool{
@@ -616,9 +632,29 @@ func canonicalAttachmentUploadMime(header string) string {
 		return "image/jpeg"
 	case "application/x-pdf":
 		return "application/pdf"
+	case "video/x-m4v", "video/mpeg4":
+		return "video/mp4"
+	case "video/x-quicktime", "video/mov":
+		return "video/quicktime"
 	default:
 		return mime
 	}
+}
+
+// sniffAttachmentVideoMime recognizes the upload-safe video containers from
+// their leading bytes: an ISO BMFF `ftyp` box (QuickTime brands → quicktime,
+// anything else → mp4) or a WebM/Matroska EBML header.
+func sniffAttachmentVideoMime(data []byte) string {
+	if len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp")) {
+		if bytes.HasPrefix(data[8:12], []byte("qt")) {
+			return "video/quicktime"
+		}
+		return "video/mp4"
+	}
+	if len(data) >= 4 && bytes.Equal(data[:4], []byte{0x1A, 0x45, 0xDF, 0xA3}) {
+		return "video/webm"
+	}
+	return ""
 }
 
 func detectedAttachmentUploadMime(data []byte) string {
@@ -630,6 +666,11 @@ func detectedAttachmentUploadMime(data []byte) string {
 	// toolchain. The strict RIFF/WEBP validator remains the authority.
 	if validateAttachmentBytes("image/webp", data) == nil {
 		return "image/webp"
+	}
+	// Native pickers hand .mov/.mp4 over as application/octet-stream often
+	// enough that the container sniff is the fallback authority for video.
+	if video := sniffAttachmentVideoMime(data); video != "" && validateAttachmentBytes(video, data) == nil {
+		return video
 	}
 	return ""
 }
@@ -773,11 +814,14 @@ func assistantAttachmentUploadHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "could not authorize attachment upload")
 		return
 	}
+	width, height := attachmentImageDimensions(meta.Mime, data)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":             true,
 		"ref":            ref,
 		"mime":           meta.Mime,
 		"size":           meta.Size,
+		"width":          width,
+		"height":         height,
 		"sourceId":       grant.SourceID,
 		"sourceRevision": grant.SourceRevision,
 	})
@@ -882,6 +926,21 @@ func validateAttachmentBytes(mime string, data []byte) error {
 			return fmt.Errorf("invalid text attachment")
 		}
 		return nil
+	case "video/mp4", "video/quicktime":
+		// ISO BMFF: the first box must be `ftyp`; a QuickTime brand may travel
+		// as either declared mime (browsers disagree), any other brand is mp4.
+		if len(data) < 12 || !bytes.Equal(data[4:8], []byte("ftyp")) {
+			return fmt.Errorf("invalid video container")
+		}
+		if mime == "video/mp4" && bytes.HasPrefix(data[8:12], []byte("qt")) {
+			return fmt.Errorf("invalid video container")
+		}
+		return nil
+	case "video/webm":
+		if len(data) < 4 || !bytes.Equal(data[:4], []byte{0x1A, 0x45, 0xDF, 0xA3}) {
+			return fmt.Errorf("invalid video container")
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported attachment type")
 	}
@@ -889,6 +948,57 @@ func validateAttachmentBytes(mime string, data []byte) error {
 		return fmt.Errorf("invalid or oversized image dimensions")
 	}
 	return nil
+}
+
+// attachmentImageDimensions reports a validated raster image's pixel size
+// (0,0 for anything it cannot read cheaply). The feed reserves the card's
+// aspect box from these before the bytes land, so a row of GIFs/photos never
+// stacks as empty slivers while the blobs download (AJ, 2026-09-02).
+func attachmentImageDimensions(mime string, data []byte) (int, int) {
+	var (
+		config image.Config
+		err    error
+	)
+	switch mime {
+	case "image/png":
+		config, err = png.DecodeConfig(bytes.NewReader(data))
+	case "image/jpeg":
+		config, err = jpeg.DecodeConfig(bytes.NewReader(data))
+	case "image/gif":
+		config, err = gif.DecodeConfig(bytes.NewReader(data))
+	case "image/webp":
+		return webpDimensions(data)
+	default:
+		return 0, 0
+	}
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return 0, 0
+	}
+	return config.Width, config.Height
+}
+
+// webpDimensions reads the canvas size from a VP8 / VP8L / VP8X chunk header
+// without a decoder; unknown layouts report 0,0 (the card then reserves a
+// generic box instead of an exact aspect).
+func webpDimensions(data []byte) (int, int) {
+	if len(data) < 30 || !bytes.Equal(data[:4], []byte("RIFF")) || !bytes.Equal(data[8:12], []byte("WEBP")) {
+		return 0, 0
+	}
+	switch string(data[12:16]) {
+	case "VP8X":
+		width := 1 + int(data[24]) | int(data[25])<<8 | int(data[26])<<16
+		height := 1 + int(data[27]) | int(data[28])<<8 | int(data[29])<<16
+		return width, height
+	case "VP8L":
+		bits := uint32(data[21]) | uint32(data[22])<<8 | uint32(data[23])<<16 | uint32(data[24])<<24
+		return int(bits&0x3FFF) + 1, int((bits>>14)&0x3FFF) + 1
+	case "VP8 ":
+		if len(data) < 30 {
+			return 0, 0
+		}
+		return int(data[26]) | int(data[27]&0x3F)<<8, int(data[28]) | int(data[29]&0x3F)<<8
+	}
+	return 0, 0
 }
 
 // blobStatForRef is the cheap existence + mime check for a ref: one os.Stat

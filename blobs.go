@@ -31,6 +31,7 @@ package main
 // KEYLESS: pure disk, no model calls, no sidecar — nothing here degrades.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -839,6 +840,9 @@ var blobInlineSafeMimes = map[string]bool{
 	// Wave 7 Meeting Record playback: non-script-capable media containers.
 	"video/webm": true,
 	"audio/webm": true,
+	// Hotfix gen 249: chat video attachments play inline (<video controls>).
+	"video/mp4":       true,
+	"video/quicktime": true,
 }
 
 var artifactBlobAfterReadProbe func(string)
@@ -929,6 +933,14 @@ func artifactBlobHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", blobCacheControl)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, blobDownloadFilename(r.URL.Query().Get("name"), ref)))
+	if strings.HasPrefix(meta.Mime, "video/") || strings.HasPrefix(meta.Mime, "audio/") {
+		// Media elements (Safari above all) refuse to play a source whose
+		// server ignores Range; ServeContent answers 206 byte ranges, keeps
+		// the ETag/Cache-Control already set, and honors If-Range/If-None-Match.
+		// The immutable ref carries no useful modtime, so none is passed.
+		http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
+		return
+	}
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	if _, err := w.Write(data); err != nil {
 		log.Errorf("Failed to serve blob %s: %v", ref, err)

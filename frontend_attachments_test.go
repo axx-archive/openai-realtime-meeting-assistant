@@ -33,9 +33,15 @@ func TestIndexAttachmentUploadWiring(t *testing.T) {
 		"payload.sourceRevision = data.sourceRevision || ''",
 		// the exact model-safe allowlist, mirroring attachments.go
 		"function scoutChatFileUploadable(type)",
-		"['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type)",
-		// client size caps: PDFs 25MB (the server cap), images 8MB
-		"type === 'application/pdf' ? 25 * 1024 * 1024 : 8 * 1024 * 1024",
+		"['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type) || scoutChatVideoUploadable(type)",
+		// hotfix gen 249: the phone/desktop video containers ride the same upload
+		"function scoutChatVideoUploadable(type)",
+		"['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'].includes(String(type || '').toLowerCase())",
+		// client size caps: PDFs and videos 25MB (the server cap), images 8MB
+		"type === 'application/pdf' || scoutChatVideoUploadable(type) ? 25 * 1024 * 1024 : 8 * 1024 * 1024",
+		// a video's duration/frame size are probed locally and ride the payload
+		"Object.assign(payload, await scoutChatProbeVideoFile(file))",
+		"payload.width = Number(data.width)",
 		// failure degrades to today's name-only chip, never a blocked send
 		"upload failed — sending the name only",
 		"is too large — sending the name only",
@@ -89,7 +95,7 @@ func TestIndexAttachmentRenderWiring(t *testing.T) {
 	// The ref branches live inside scoutChatFilesNode. Image previews stay in the
 	// app's accessible lightbox; non-images that open a tab keep noopener.
 	start := strings.Index(html, "function scoutChatFilesNode(files)")
-	end := strings.Index(html, "function scoutChatFileMeta(file)")
+	end := strings.Index(html, "function scoutChatFileMeta(file, { compact = false } = {})")
 	if start < 0 || end < 0 || end <= start {
 		t.Fatal("cannot scope scoutChatFilesNode")
 	}

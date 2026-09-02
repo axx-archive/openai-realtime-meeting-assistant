@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -256,6 +257,14 @@ type scoutChatFileAttachment struct {
 	Mime           string `json:"mime,omitempty"`
 	SourceID       string `json:"sourceId,omitempty"`
 	SourceRevision string `json:"sourceRevision,omitempty"`
+	// Layout hints only (hotfix gen 249): pixel size of an image/video and a
+	// video's duration in seconds. The feed reserves the card's aspect box
+	// from them before the bytes land and the model line prints the
+	// duration; sanitizeScoutChatFiles bounds them and clears them for any
+	// non-media mime. They are never authority for anything else.
+	Width    int     `json:"width,omitempty"`
+	Height   int     `json:"height,omitempty"`
+	Duration float64 `json:"duration,omitempty"`
 }
 
 type scoutChatThreadRef struct {
@@ -8408,6 +8417,7 @@ func (app *kanbanBoardApp) sanitizeScoutChatFiles(ctx context.Context, user *use
 				return nil, fmt.Errorf("attachment is unavailable; attach the file again")
 			}
 		}
+		width, height, duration := sanitizeScoutChatFileMediaHints(mime, file)
 		cleaned = append(cleaned, scoutChatFileAttachment{
 			Name:           name,
 			Kind:           kind,
@@ -8417,6 +8427,9 @@ func (app *kanbanBoardApp) sanitizeScoutChatFiles(ctx context.Context, user *use
 			Mime:           mime,
 			SourceID:       strings.TrimSpace(file.SourceID),
 			SourceRevision: strings.TrimSpace(file.SourceRevision),
+			Width:          width,
+			Height:         height,
+			Duration:       duration,
 		})
 	}
 	return cleaned, nil
@@ -8621,6 +8634,41 @@ func (app *kanbanBoardApp) scoutChatHistoryForViewer(viewerEmail string, thread 
 	return scoutChatHistoryFromThread(app.projectScoutChatThreadForViewer(viewerEmail, thread))
 }
 
+// sanitizeScoutChatFileMediaHints bounds the client's layout hints: pixel
+// dimensions for a ref'd image or video (1..12000), duration seconds for a
+// video only (0..24h). Anything else — a bare name chip, a PDF, a text file —
+// carries no hints at all.
+func sanitizeScoutChatFileMediaHints(mime string, file scoutChatFileAttachment) (int, int, float64) {
+	isImage := strings.HasPrefix(mime, "image/")
+	isVideo := attachmentVideoMimes[mime]
+	if !isImage && !isVideo {
+		return 0, 0, 0
+	}
+	width, height := file.Width, file.Height
+	if width < 1 || height < 1 || width > 12_000 || height > 12_000 {
+		width, height = 0, 0
+	}
+	duration := 0.0
+	if isVideo && file.Duration > 0 && file.Duration <= 86_400 && !math.IsNaN(file.Duration) && !math.IsInf(file.Duration, 0) {
+		duration = math.Round(file.Duration*10) / 10
+	}
+	return width, height, duration
+}
+
+// scoutChatFileDurationLabel prints a video's length the way the feed does
+// ("0:42", "12:05", "1:03:10"); empty when unknown.
+func scoutChatFileDurationLabel(seconds float64) string {
+	if seconds <= 0 {
+		return ""
+	}
+	total := int(math.Round(seconds))
+	hours, minutes, secs := total/3600, (total%3600)/60, total%60
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, secs)
+	}
+	return fmt.Sprintf("%d:%02d", minutes, secs)
+}
+
 func scoutChatMessageModelText(message scoutChatMessageRecord) string {
 	text := strings.TrimSpace(message.Text)
 	parts := make([]string, 0, len(message.Files)+1)
@@ -8638,6 +8686,15 @@ func scoutChatMessageModelText(message scoutChatMessageRecord) string {
 		}
 		if file.Size > 0 {
 			metaParts = append(metaParts, fmt.Sprintf("%d bytes", file.Size))
+		}
+		// A video never reaches a model as bytes (attachmentModelSafeMimes);
+		// its length is the one fact worth a few tokens.
+		if attachmentVideoMimes[strings.ToLower(strings.TrimSpace(file.Mime))] {
+			if label := scoutChatFileDurationLabel(file.Duration); label != "" {
+				metaParts = append(metaParts, "video "+label)
+			} else {
+				metaParts = append(metaParts, "video")
+			}
 		}
 		meta := strings.Join(metaParts, ", ")
 		metaSuffix := ""

@@ -383,6 +383,7 @@ func assistantGiphyImportHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "GIF could not be authorized")
 		return
 	}
-	file := scoutChatFileAttachment{Name: name, Kind: "gif", Size: meta.Size, Ref: ref, Mime: meta.Mime, SourceID: grant.SourceID, SourceRevision: grant.SourceRevision}
+	width, height := attachmentImageDimensions("image/gif", data)
+	file := scoutChatFileAttachment{Name: name, Kind: "gif", Size: meta.Size, Ref: ref, Mime: meta.Mime, SourceID: grant.SourceID, SourceRevision: grant.SourceRevision, Width: width, Height: height}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "file": file})
 }

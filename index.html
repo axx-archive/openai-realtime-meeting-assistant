@@ -17975,6 +17975,96 @@
         object-fit: contain;
       }
 
+      /* Hotfix gen 249: media cards reserve their box before the bytes land.
+         --media-aspect (w / h) comes from the stored dimensions; the width is
+         the smaller of "max height × aspect" and the column, so the frame is
+         exactly the image's shape and nothing below it moves on decode. */
+      .scout-chat-file--image.is-loading,
+      .scout-chat-file--image.is-broken {
+        background:
+          linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.08) 50%, transparent 70%) 0 0 / 200% 100%,
+          var(--surface-3);
+      }
+      .scout-chat-file--image.is-loading:not(.scout-chat-file--gif-held) {
+        animation: scout-chat-file-shimmer 1.4s linear infinite;
+      }
+      @keyframes scout-chat-file-shimmer { to { background-position: -200% 0, 0 0; } }
+      @media (prefers-reduced-motion: reduce) {
+        .scout-chat-file--image.is-loading { animation: none; }
+      }
+      .scout-chat-file--image.is-loading:not(.scout-chat-file--sized) {
+        min-width: 160px;
+        min-height: 120px;
+      }
+      .scout-chat-file--image.is-loading .scout-chat-file__thumb { opacity: 0; }
+      .scout-chat-file--image.is-loading .scout-chat-image__expand { visibility: hidden; }
+      .scout-chat-file--sized {
+        --chat-media-max-h: 180px;
+        /* percentage-free on purpose: a shrink-to-fit bubble resolves a % width
+           against an unloaded <img> as 0, which is exactly the collapsed sliver
+           this rule exists to prevent — the column cap is a viewport length */
+        --chat-media-max-w: calc(100vw - 96px);
+        box-sizing: border-box;
+        width: min(calc(var(--chat-media-max-h) * var(--media-aspect)), var(--chat-media-max-w));
+        max-width: none;
+        aspect-ratio: var(--media-aspect);
+        height: auto;
+        max-height: none;
+      }
+      .scout-chat-file--sized .scout-chat-file__thumb {
+        width: 100%;
+        height: 100%;
+        max-height: none;
+        object-fit: cover;
+      }
+      .scout-chat-file__gif-play {
+        position: absolute;
+        inset: auto 8px 8px auto;
+        padding: 6px 10px;
+        border-radius: var(--r-full);
+        background: rgba(0, 0, 0, 0.62);
+        color: #fff;
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        cursor: pointer;
+      }
+      .scout-chat-file--gif-held .scout-chat-file__thumb { opacity: 0; }
+      .scout-chat-file--video {
+        --media-aspect: 16 / 9;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        width: min(420px, 100%);
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        border-radius: 14px;
+        background: var(--surface-2);
+      }
+      .scout-chat-file__video {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: var(--media-aspect);
+        max-height: min(60vh, 480px);
+        background: #000;
+        object-fit: contain;
+      }
+      .scout-chat-file__caption {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        min-width: 0;
+        padding: 8px 12px 10px;
+        /* an own-message stack is right-aligned; the caption reads left */
+        text-align: left;
+      }
+      .scout-chat-file__caption .scout-chat-file__name {
+        max-width: 100%;
+      }
+
+
 	      .scout-chat-pending-files {
 	        flex: none;
 	        display: flex;
@@ -21734,6 +21824,33 @@
           border-radius: 16px;
           object-fit: contain;
         }
+
+        /* the desktop frame's min-height: 0 above must not collapse a
+           loading frame that has no stored dimensions */
+        #chatTool .scout-chat-file--image.is-loading:not(.scout-chat-file--sized) {
+          min-width: 160px;
+          min-height: 120px;
+        }
+        #chatTool .scout-chat-file--sized {
+          --chat-media-max-h: 300px;
+          --chat-media-max-w: var(--desktop-chat-image-preview-measure);
+          width: min(calc(var(--chat-media-max-h) * var(--media-aspect)), var(--chat-media-max-w));
+          max-width: none;
+          max-height: none;
+        }
+        #chatTool .scout-chat-file--sized .scout-chat-file__thumb {
+          width: 100%;
+          height: 100%;
+          max-height: none;
+          object-fit: cover;
+        }
+        #chatTool .scout-chat-file--video {
+          width: min(var(--desktop-chat-image-preview-measure), 100%);
+          min-height: 0;
+          padding: 0;
+          border-radius: 16px;
+        }
+
 
         #chatTool .scout-chat-image__img {
           width: 100%;
@@ -71548,6 +71665,27 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			return { ...row, ...current, ...viewerState, messagesLoaded: true }
 		  }
 		  if (current && revisionOrder === 0) return { ...row, ...current, ...viewerState, messagesLoaded: current.messagesLoaded === true }
+		  // Hotfix gen 249 (AJ: "clicking on conversations ... still feels
+		  // laggy"): a newer index row used to DROP the messages this tab had
+		  // already loaded, so the next click on a busy channel showed the
+		  // "Loading conversation" skeleton until the whole tail round-trip
+		  // returned. Keep the loaded tail as a STALE projection instead — it
+		  // renders instantly on the next click while hydrateScoutChatThread
+		  // reconciles against the server (keyed by message id, no re-render
+		  // when nothing changed).
+		  if (current?.messagesLoaded === true && Array.isArray(current.messages)) {
+			return {
+			  ...current,
+			  ...row,
+			  ...viewerState,
+			  messages: current.messages,
+			  history: current.history,
+			  historyWindowEndMessageId: current.historyWindowEndMessageId || '',
+			  historyWindowEndAt: current.historyWindowEndAt || '',
+			  messagesLoaded: true,
+			  messagesStale: true
+			}
+		  }
 		  return { ...row, ...viewerState, messagesLoaded: false, messages: undefined }
 		})
 	      }
@@ -71565,11 +71703,59 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		return `/assistant/chat-threads/${encodeURIComponent(threadId)}?${params.toString()}`
 	      }
 
+	      // Keyed projection identity: the thread id, every message id with its
+	      // render key (content hash), and the history seam. Two projections
+	      // with the same key paint identically, so a hydration that returns
+	      // exactly what is already on screen never rebuilds the feed.
+	      function scoutChatThreadProjectionKey(thread) {
+		if (!thread?.id) return ''
+		const messages = Array.isArray(thread.messages) ? thread.messages : []
+		const history = thread.history || {}
+		return `${thread.id}|${messages.length}|${messages.map(message => `${message?.id || ''}:${scoutChatMessageRenderKey(message)}`).join(',')}|${history.hasEarlier ? 1 : 0}:${history.nextBeforeMessageId || ''}|${thread.historyWindowEndMessageId || ''}`
+	      }
+	      var scoutChatRenderedProjectionKey = ''
+
+	      // Warm the tail before the click lands (hover / focus on a row, or
+	      // idle time after the index loads) so the first open of a channel
+	      // renders from memory. Rendering stays gated on activeScoutThreadId
+	      // inside hydrateScoutChatThread, so a prefetch never paints.
+	      function prefetchScoutChatThread(threadId) {
+		const id = String(threadId || '')
+		if (!authedUser || !id || navigator.connection?.saveData) return
+		const existing = scoutChatThreads.find(thread => String(thread?.id || '') === id)
+		if (!existing || (existing.messagesLoaded === true && existing.messagesStale !== true)) return
+		if (scoutChatThreadRequests.has(id)) return
+		void hydrateScoutChatThread(id)
+	      }
+	      var scoutChatIdlePrefetchHandle = 0
+	      function scheduleScoutChatIdlePrefetch() {
+		if (!authedUser || scoutChatIdlePrefetchHandle || navigator.connection?.saveData) return
+		const schedule = window.requestIdleCallback || (callback => window.setTimeout(callback, 400))
+		scoutChatIdlePrefetchHandle = schedule(() => {
+		  scoutChatIdlePrefetchHandle = 0
+		  if (!authedUser || (appShell.dataset.tool || '') !== 'chat') return
+		  // the first rows of the channel/group lists — the ones a click lands on
+		  const candidates = scoutChatThreads
+			.filter(thread => chatThreadIsChannel(thread) && !privateRiffThread(thread) && !thread?.archivedAt)
+			.filter(thread => thread.messagesLoaded !== true || thread.messagesStale === true)
+			.slice(0, 4)
+		  let index = 0
+		  const next = () => {
+			if (index >= candidates.length || !authedUser) return
+			const id = String(candidates[index]?.id || '')
+			index += 1
+			if (!id) { next(); return }
+			Promise.resolve(scoutChatThreadRequests.get(id) || hydrateScoutChatThread(id)).finally(() => window.setTimeout(next, 0))
+		  }
+		  next()
+		}, { timeout: 4000 })
+	      }
+
 	      async function hydrateScoutChatThread(threadId) {
 		const id = String(threadId || '')
 		if (!authedUser || !id) return null
 		const existing = scoutChatThreads.find(thread => String(thread?.id || '') === id)
-		if (existing?.messagesLoaded === true) return existing
+		if (existing?.messagesLoaded === true && existing.messagesStale !== true) return existing
 		if (scoutChatThreadRequests.has(id)) return scoutChatThreadRequests.get(id)
 		const generation = chatThreadsGeneration
 		const account = String(authedUser.email || '').toLowerCase()
@@ -71615,10 +71801,25 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 			  return current
 			}
 			scoutChatHydrationRetries.delete(id)
-			scoutChatThreads[index] = { ...current, ...hydrated }
+			// A stale projection merges the fresh tail over what it already
+			// holds (earlier pages the reader loaded survive); a cold row takes
+			// the tail whole.
+			scoutChatThreads[index] = current?.messagesStale === true && Array.isArray(current.messages)
+			  ? { ...mergeScoutChatMutationPage(current, hydrated, hydrated.history), messagesStale: false }
+			  : { ...current, ...hydrated, messagesStale: false }
 			if (activeScoutThreadId === id) {
 			  const forceBottom = scoutChatNavigationTailThreadId === id
-			  renderActiveScoutThread({ forceBottom, progressiveNavigation: forceBottom })
+			  const unchanged = scoutChatRenderedProjectionKey !== '' &&
+				scoutChatRenderedProjectionKey === scoutChatThreadProjectionKey(scoutChatThreads[index]) &&
+				!scoutChatThread.querySelector('.scout-chat-loading')
+			  // keyed reconciliation: identical projection → keep the painted
+			  // feed (and its in-flight progressive head); only the read marker
+			  // re-checks
+			  if (unchanged) {
+				noteScoutChatTailInView()
+			  } else {
+				renderActiveScoutThread({ forceBottom, progressiveNavigation: forceBottom })
+			  }
 			  if (forceBottom) {
 			    scoutChatNavigationTailThreadId = ''
 			    beginScoutChatOwnSendTailPin({ reason: 'navigation' })
@@ -71898,6 +72099,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  // the one bounded detail request as it advances to the conversation.
 		  const conversationVisible = desktopChatLayoutQuery.matches || mobileChatView === 'convo'
 		  if (!presentationFixture && activeScoutThreadId && conversationVisible) void hydrateScoutChatThread(activeScoutThreadId)
+		  if (!presentationFixture && conversationVisible) scheduleScoutChatIdlePrefetch()
 	        } catch {
 	          // Persistent chat can refresh again; keep the current in-memory view.
 	        } finally {
@@ -72820,12 +73022,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // message payload. Any failure degrades to today's name-only chip.
 	        const type = String(file?.type || '').toLowerCase()
 	        if (file && scoutChatFileUploadable(type)) {
-	          // client caps mirror the server: images 8MB, PDFs 25MB
-	          const cap = type === 'application/pdf' ? 25 * 1024 * 1024 : 8 * 1024 * 1024
+	          // client caps mirror the server: images 8MB, PDFs and videos 25MB
+	          const cap = type === 'application/pdf' || scoutChatVideoUploadable(type) ? 25 * 1024 * 1024 : 8 * 1024 * 1024
 	          if (file.size > cap) {
 	            showToast({ text: `${payload.name} is too large — sending the name only`, kind: 'note' })
 	            return payload
 	          }
+	          // a video's size and length are read from the file itself before
+	          // the bytes go up — the feed reserves the card from them and the
+	          // model line prints the duration (the bytes never reach a model)
+	          if (scoutChatVideoUploadable(type)) Object.assign(payload, await scoutChatProbeVideoFile(file))
 	          try {
 		            const destinationId = String(activeScoutThreadId || '')
 		            if (!destinationId) {
@@ -72845,6 +73051,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		              payload.mime = data.mime || type
 		              payload.sourceId = data.sourceId || ''
 		              payload.sourceRevision = data.sourceRevision || ''
+		              // the server decoded the image header: the card's aspect box
+		              if (Number(data.width) > 0 && Number(data.height) > 0) {
+		                payload.width = Number(data.width)
+		                payload.height = Number(data.height)
+		              }
 		            }
 	          } catch {
 	            showToast({ text: `${payload.name} upload failed — sending the name only`, kind: 'note' })
@@ -72862,9 +73073,60 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function scoutChatFileUploadable(type) {
-	        // mirrors the server's model-safe allowlist (attachments.go)
-	        return ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type)
+	        // mirrors the server's upload-safe allowlist (attachments.go)
+	        return ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/pdf'].includes(type) || scoutChatVideoUploadable(type)
 	      }
+
+	      // Hotfix gen 249 (AJ: "users should be able to send videos and
+	      // photos"): the phone/desktop video containers the server stores and
+	      // the feed plays inline; never forwarded to a model.
+	      function scoutChatVideoUploadable(type) {
+	        return ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v'].includes(String(type || '').toLowerCase())
+	      }
+
+	      // Reads a local video's duration and frame size through a detached
+	      // <video preload="metadata">; resolves {} within 1.5s if the browser
+	      // cannot decode the container (the card then reserves 16:9).
+	      function scoutChatProbeVideoFile(file) {
+	        return new Promise(resolve => {
+	          let url = ''
+	          try { url = URL.createObjectURL(file) } catch { resolve({}); return }
+	          const probe = document.createElement('video')
+	          probe.preload = 'metadata'
+	          probe.muted = true
+	          let done = false
+	          const finish = hints => {
+	            if (done) return
+	            done = true
+	            window.clearTimeout(timer)
+	            probe.removeAttribute('src')
+	            try { probe.load() } catch { /* detached */ }
+	            try { URL.revokeObjectURL(url) } catch { /* already gone */ }
+	            resolve(hints)
+	          }
+	          const timer = window.setTimeout(() => finish({}), 1500)
+	          probe.addEventListener('loadedmetadata', () => {
+	            const hints = {}
+	            if (Number.isFinite(probe.duration) && probe.duration > 0) hints.duration = Math.round(probe.duration * 10) / 10
+	            if (probe.videoWidth > 0 && probe.videoHeight > 0) { hints.width = probe.videoWidth; hints.height = probe.videoHeight }
+	            finish(hints)
+	          }, { once: true })
+	          probe.addEventListener('error', () => finish({}), { once: true })
+	          probe.src = url
+	        })
+	      }
+
+	      // "0:42", "12:05", "1:03:10" — the feed's and the model line's clock
+	      function scoutChatDurationLabel(seconds) {
+	        const total = Math.round(Number(seconds) || 0)
+	        if (total <= 0) return ''
+	        const hours = Math.floor(total / 3600)
+	        const minutes = Math.floor((total % 3600) / 60)
+	        const secs = total % 60
+	        const pad = value => String(value).padStart(2, '0')
+	        return hours > 0 ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`
+	      }
+
 
 	      function scoutChatFileLooksReadable(file) {
 	        const type = String(file?.type || '').toLowerCase()
@@ -78892,6 +79154,9 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        item.tabIndex = 0
 	        item.setAttribute('aria-pressed', active ? 'true' : 'false')
 	        item.classList.toggle('chat-thread-item--hidden', Boolean(q && !haystack.includes(q)))
+	        // the tail starts loading on hover/focus, ~100-300ms before the click
+	        item.addEventListener('pointerenter', () => prefetchScoutChatThread(thread.id), { passive: true })
+	        item.addEventListener('focus', () => prefetchScoutChatThread(thread.id))
 	        item.addEventListener('click', () => {
 	          selectScoutChatThread(thread.id)
 	          setMobileChatView('convo')
@@ -79591,10 +79856,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          finishScoutChatProgressiveProjection(job)
 	          return
 	        }
-	        job.frame = window.requestAnimationFrame(() => {
-	          job.timer = window.setTimeout(() => runScoutChatProgressiveProjectionChunk(job), 0)
-	        })
+	        // The head assembles into a hidden stage — there is nothing to paint
+	        // between chunks, so the next chunk waits one macrotask (input and a
+	        // pending paint still run first) instead of a whole animation frame.
+	        job.frame = 0
+	        job.timer = window.setTimeout(() => runScoutChatProgressiveProjectionChunk(job), 0)
 	      }
+
 
 	      function startScoutChatProgressiveProjection(thread, messages, tailStart, firstUnreadIndex, status) {
 	        cancelScoutChatProgressiveProjection()
@@ -79977,6 +80245,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // this pass re-mounts only the ones this thread's messages (or its
 	        // own ghost launches) own; nothing typed inside them is lost
 	        scoutChatThread.querySelectorAll('.goalcard').forEach(node => node.remove())
+	        scoutChatRenderedProjectionKey = ''
 	        if (thread && thread.messagesLoaded !== true) {
 		  syncChatConvoHeader()
 		  renderScoutChatDestination()
@@ -80129,6 +80398,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        } else {
 	          scoutChatThread.dataset.projectionState = 'complete'
 	        }
+	        scoutChatRenderedProjectionKey = scoutChatThreadProjectionKey(thread)
 	        // W1 D4: the tail just rendered — if its newest message is in view,
 	        // the server read marker advances (debounced)
 	        noteScoutChatTailInView()
@@ -83609,25 +83879,55 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          return
 	        }
 
-	        let previewRequest = desktopChatPreviewCache.get(url)
-	        if (!previewRequest) {
-	          previewRequest = fetch(`/assistant/link-preview?url=${encodeURIComponent(url)}`, {
-	            credentials: 'same-origin',
-	            cache: 'force-cache',
-	            headers: { 'Accept': 'application/json' }
-	          }).then(async response => {
-	            const payload = await response.json().catch(() => ({}))
-	            if (!response.ok || !payload?.preview) {
-	              throw new Error('preview unavailable')
-	            }
-	            return payload.preview
-	          })
-	          desktopChatPreviewCache.set(url, previewRequest)
-	        }
-	        previewRequest
-	          .then(preview => renderDesktopChatLinkPreview(card, url, preview))
-	          .catch(() => renderDesktopChatLinkPreviewFallback(card, url))
+	        // Hotfix gen 249: the metadata round-trip (a server-side fetch of
+	        // the linked page) starts only once the card is near the viewport —
+	        // a channel switch used to fan out one request per linked message
+	        // in the whole tail. Fetches only: the <img> tags stay eager.
+	        deferDesktopChatCardFetch(card, () => {
+	          let previewRequest = desktopChatPreviewCache.get(url)
+	          if (!previewRequest) {
+	            previewRequest = fetch(`/assistant/link-preview?url=${encodeURIComponent(url)}`, {
+	              credentials: 'same-origin',
+	              cache: 'force-cache',
+	              headers: { 'Accept': 'application/json' }
+	            }).then(async response => {
+	              const payload = await response.json().catch(() => ({}))
+	              if (!response.ok || !payload?.preview) {
+	                throw new Error('preview unavailable')
+	              }
+	              return payload.preview
+	            })
+	            desktopChatPreviewCache.set(url, previewRequest)
+	          }
+	          previewRequest
+	            .then(preview => renderDesktopChatLinkPreview(card, url, preview))
+	            .catch(() => renderDesktopChatLinkPreviewFallback(card, url))
+	        })
 	      }
+
+	      // Runs `start` the first time `card` comes within ~800px of the
+	      // viewport (a card built into the hidden progressive stage waits until
+	      // it is moved into the feed). Without IntersectionObserver it runs now.
+	      var desktopChatCardFetchObserver = null
+	      var desktopChatCardFetchStarters = null
+	      function deferDesktopChatCardFetch(card, start) {
+	        if (typeof IntersectionObserver !== 'function' || !card) { start(); return }
+	        desktopChatCardFetchStarters = desktopChatCardFetchStarters || new WeakMap()
+	        if (!desktopChatCardFetchObserver) {
+	          desktopChatCardFetchObserver = new IntersectionObserver(entries => {
+	            for (const entry of entries) {
+	              if (!entry.isIntersecting) continue
+	              const run = desktopChatCardFetchStarters.get(entry.target)
+	              desktopChatCardFetchObserver.unobserve(entry.target)
+	              desktopChatCardFetchStarters.delete(entry.target)
+	              if (run) run()
+	            }
+	          }, { rootMargin: '800px 0px' })
+	        }
+	        desktopChatCardFetchStarters.set(card, start)
+	        desktopChatCardFetchObserver.observe(card)
+	      }
+
 
 	      function desktopChatDirectImageURL(url) {
 	        let parsed
@@ -86601,21 +86901,84 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           // card 085: ref'd images render inline — /artifacts/blob is
           // session-gated (the same-origin cookie rides the <img> fetch)
           // and immutable-cached, so re-opens cost one conditional request
+	          const mediaWidth = Number(file?.width || 0)
+	          const mediaHeight = Number(file?.height || 0)
+	          const mediaSized = mediaWidth > 0 && mediaHeight > 0
 	          if (blobHref && mime.startsWith('image/')) {
 	            const frame = document.createElement('button')
 	            frame.className = 'scout-chat-file scout-chat-file--image'
-		            frame.classList.toggle('scout-chat-file--gif', mime === 'image/gif')
+		            const isGif = mime === 'image/gif'
+		            frame.classList.toggle('scout-chat-file--gif', isGif)
 	            frame.type = 'button'
-		            frame.setAttribute('aria-label', `Expand ${file.name || (mime === 'image/gif' ? 'GIF' : 'image')}`)
+		            frame.setAttribute('aria-label', `Expand ${file.name || (isGif ? 'GIF' : 'image')}`)
 	            const img = document.createElement('img')
 	            img.className = 'scout-chat-file__thumb'
 	            img.alt = file.name || 'image attachment'
-	            bfChatImage(img, blobHref)
+	            // Hotfix gen 249 (AJ: GIFs "all stacked and you can't see them
+	            // until you click"): the frame reserves its aspect box from the
+	            // stored dimensions BEFORE the bytes land, so a row of GIFs/photos
+	            // never collapses to blank slivers while the blobs download; a
+	            // frame without dimensions holds a generic loading box instead.
+	            if (mediaSized) {
+	              frame.classList.add('scout-chat-file--sized')
+	              frame.style.setProperty('--media-aspect', `${mediaWidth} / ${mediaHeight}`)
+	              img.width = mediaWidth
+	              img.height = mediaHeight
+	            }
+	            frame.classList.add('is-loading')
+	            img.addEventListener('load', () => frame.classList.remove('is-loading'), { once: true })
+	            img.addEventListener('error', () => { frame.classList.remove('is-loading'); frame.classList.add('is-broken') }, { once: true })
+	            // plan 019: only under reduced motion does a GIF wait for a tap;
+	            // everywhere else it animates the moment it arrives
+	            const holdGifStill = isGif && Boolean(reducedMotion?.matches)
+	            if (!holdGifStill) bfChatImage(img, blobHref)
 	            frame.addEventListener('click', () => openScoutChatImagePreview(blobHref, img.alt))
 	            frame.append(img, bfEl('span', 'scout-chat-image__expand', 'expand'))
+	            if (holdGifStill) {
+	              frame.classList.add('scout-chat-file--gif-held')
+	              const play = bfEl('span', 'scout-chat-file__gif-play', 'GIF · tap to play')
+	              play.setAttribute('role', 'button')
+	              play.tabIndex = 0
+	              play.setAttribute('aria-label', 'Play GIF')
+	              const release = event => {
+	                event.preventDefault()
+	                event.stopPropagation()
+	                bfChatImage(img, blobHref)
+	                frame.classList.remove('scout-chat-file--gif-held')
+	                play.remove()
+	              }
+	              play.addEventListener('click', release)
+	              play.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') release(event) })
+	              frame.appendChild(play)
+	            }
 	            wrap.appendChild(frame)
             return
           }
+	          // Hotfix gen 249: a ref'd video plays inline over the same
+	          // session-gated blob route (byte ranges for Safari); the bytes
+	          // never reach a model — only the name/size/duration line does.
+	          if (blobHref && mime.startsWith('video/')) {
+	            const figure = document.createElement('figure')
+	            figure.className = 'scout-chat-file scout-chat-file--video'
+	            if (mediaSized) figure.style.setProperty('--media-aspect', `${mediaWidth} / ${mediaHeight}`)
+	            const video = document.createElement('video')
+	            video.className = 'scout-chat-file__video'
+	            video.controls = true
+	            video.preload = 'metadata'
+	            video.playsInline = true
+	            video.setAttribute('playsinline', '')
+	            video.setAttribute('aria-label', file.name || 'video attachment')
+	            if (mediaSized) { video.width = mediaWidth; video.height = mediaHeight }
+	            video.src = blobHref
+	            const caption = document.createElement('figcaption')
+	            caption.className = 'scout-chat-file__caption'
+	            const name = bfEl('span', 'scout-chat-file__name', file.name || 'video')
+	            const meta = bfEl('span', 'scout-chat-file__meta', scoutChatFileMeta(file, { compact: true }))
+	            caption.append(name, meta)
+	            figure.append(video, caption)
+	            wrap.appendChild(figure)
+	            return
+	          }
           // ref'd PDFs open the browser's viewer in a new tab; plain files
           // keep the inert chip
           const chip = document.createElement(blobHref ? 'a' : 'div')
@@ -86656,7 +87019,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return `/artifacts/blob?ref=${encodeURIComponent(ref)}&name=${encodeURIComponent(name || 'file')}`
 	      }
 
-	      function scoutChatFileMeta(file) {
+	      function scoutChatFileMeta(file, { compact = false } = {}) {
 	        const mime = String(file?.mime || file?.kind || '').toLowerCase()
 	        const type = mime === 'application/pdf'
 	          ? 'PDF'
@@ -86664,10 +87027,13 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? 'GIF'
 	            : mime.startsWith('image/')
 	              ? 'image'
-	              : String(file?.kind || 'file').replace(/^application\//, '').toUpperCase()
-	        const revision = file?.sourceRevision ? `revision ${file.sourceRevision}` : ''
-	        const source = file?.sourceId ? 'authorized source' : ''
-	        return [type, scoutChatFileSizeLabel(file?.size), revision, source].filter(Boolean).join(' · ')
+	              : mime.startsWith('video/')
+	                ? 'video'
+	                : String(file?.kind || 'file').replace(/^application\//, '').toUpperCase()
+	        const duration = mime.startsWith('video/') ? scoutChatDurationLabel(file?.duration) : ''
+	        const revision = !compact && file?.sourceRevision ? `revision ${file.sourceRevision}` : ''
+	        const source = !compact && file?.sourceId ? 'authorized source' : ''
+	        return [type, duration, scoutChatFileSizeLabel(file?.size), revision, source].filter(Boolean).join(' · ')
 	      }
 
 	      function scoutChatFileSizeLabel(size) {
