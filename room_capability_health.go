@@ -17,6 +17,8 @@ type roomOperationalPointers struct {
 	mixer           bool
 	lane            *meetingTranscriptionLane
 	scout           *roomRealtimeBundle
+	scoutInvited    bool
+	scoutMode       string
 }
 
 // roomOperationalCapabilityRows keeps live-call truth room-scoped. It does
@@ -40,6 +42,7 @@ func roomOperationalCapabilityRows(app *kanbanBoardApp, now time.Time, providerR
 			roomID: normalizeRoomID(roomID), sittingID: state.mediaSittingID, mediaGeneration: state.mediaGen,
 			participants: len(state.participants), recording: state.recordingEnabled,
 			media: state.mediaActor != nil, mixer: state.mixer != nil, lane: lane, scout: state.realtime,
+			scoutInvited: state.scoutInvited, scoutMode: state.scoutMode,
 		})
 	}
 	app.mu.Unlock()
@@ -136,10 +139,26 @@ func roomOperationalCapabilityRows(app *kanbanBoardApp, now time.Time, providerR
 			scout["status"] = "degraded"
 			scout["provider"] = providerOpenAI
 		}
+		if pointer.scoutInvited {
+			scout["invited"] = true
+			scout["mode"] = pointer.scoutMode
+			if pointer.scoutMode == roomScoutModeText {
+				// A chat-only seat has no voice runtime by design; the voice
+				// row stays whatever the lane truthfully is, and the text
+				// seat reports below.
+				scout["voiceSeat"] = false
+			}
+		}
 		if scout["status"] == "degraded" && active {
 			degraded = append(degraded, "rooms."+pointer.roomID+".scout")
 		}
 		row["scout"] = scout
+		// Wave 6 D7: the chat-only Scout seat is reported separately from the
+		// voice lane. It needs only the typed provider path; the voice
+		// qualification gate never demotes it.
+		scoutText := currentRoomScoutTextAvailability().snapshot()
+		scoutText["invited"] = pointer.scoutInvited && pointer.scoutMode == roomScoutModeText
+		row["scoutText"] = scoutText
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool { return asString(rows[i]["roomId"]) < asString(rows[j]["roomId"]) })

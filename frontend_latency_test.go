@@ -300,9 +300,9 @@ func TestIndexWave14PolishMarkers(t *testing.T) {
 
 	// Genuinely top-level artifacts: CSS rules, DOM ids, module-scope consts.
 	for _, want := range []string{
-		".t-empty-poetry {",    // #15 CSS
-		"tray-slide-out 220ms", // #12 CSS
-		"pkg-card-sweep 640ms", // #6 CSS
+		".t-empty-poetry {",             // #15 CSS
+		"tray-slide-out var(--dur-med)", // #12 CSS (plan 013: hover/keystroke on --dur-fast; token residue)
+		"pkg-card-sweep 640ms",          // #6 CSS
 		"const lastPackageStages = new Map()",
 		"const WAKE_WORD_ARMING_KEY = 'bonfire.wakeword.arming.v1'",
 		"id=\"wakeWordArming\"",
@@ -571,11 +571,16 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		"#appShell.is-in-room ~ .os-assistant",
 		"--shell-topbar-height: 0px;",
 		`id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden`,
-		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
+		// AJ ratified 2026-09-02 (wordmark back, no flame): the rail's top slot
+		// is the organization button and #brandMark is the Stride wordmark inside
+		// it; the id stays for the Scout presence classes.
+		`id="brandMark" class="topbar__mark" aria-hidden="true"`,
 		".tool-rail:hover,",
 		".tool-rail__label",
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button"`,
-		`id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false"`,
+		// AJ 2026-09-02: bell top-right, status only when not ready, theme in Settings — the pinned
+		// id rides the three-way light / dark / system control in Settings → Appearance
+		`id="themeToggle" class="noise-mode-group theme-mode-group"`,
 		`id="profileDisplayName" type="text" autocomplete="name"`,
 		`id="profileAvatarInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden`,
 		"async function saveAccountProfile(event)",
@@ -794,11 +799,15 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 	if !strings.Contains(html, `data-pd1-destination="Conversations" aria-label="Conversations"`) {
 		t.Fatal("the Conversations destination should remain visible while meeting records stay available through its compatibility route")
 	}
-	if !strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false"`) {
-		t.Fatal("left rail theme toggle should be visible at the bottom of the rail")
+	// AJ 2026-09-02: bell top-right, status only when not ready, theme in Settings
+	if !strings.Contains(html, `id="themeToggle" class="noise-mode-group theme-mode-group"`) || !strings.Contains(html, `<input type="radio" name="themeMode" value="system">`) {
+		t.Fatal("the theme switch lives in Settings → Appearance as a three-way light / dark / system control")
 	}
-	if strings.Contains(html, `id="themeToggle" class="tool-rail__tool tool-rail__theme" type="button" aria-label="Switch theme" aria-pressed="false" hidden`) {
-		t.Fatal("left rail theme toggle should not be hidden")
+	if strings.Contains(html, `class="tool-rail__tool tool-rail__theme"`) {
+		t.Fatal("the rail must not carry a theme toggle any more")
+	}
+	if !strings.Contains(html, `id="notificationBell" class="topbar__notify tool-rail__bell"`) {
+		t.Fatal("the notification bell lives in the topbar's right edge")
 	}
 	if !strings.Contains(html, `id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`) {
 		t.Fatal("prototype rail should expose account settings at the bottom")
@@ -901,7 +910,7 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 	html := string(rawHTML)
 	for _, want := range []string{
 		`id="toolRail" class="tool-rail" aria-label="Application navigation" aria-hidden="true" inert hidden`,
-		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
+		`id="brandMark" class="topbar__mark" aria-hidden="true"`,
 		"top: 50%;",
 		"inset: 0 auto 0 0;",
 		"border-right: 1px solid var(--line-1);",
@@ -919,8 +928,10 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		".tool-rail__tool:focus-visible .tool-rail__label {",
 		"transition-delay: 350ms;",
 		"#appShell.is-authed .workspace",
-		"padding-left: 56px;",
-		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
+		// AJ ratified the wide labelled rail 2026-09-02: one token (--rail-width,
+		// 56px slim / 168px labelled) drives the shell offset, not a literal.
+		"padding-left: var(--rail-width, 56px);",
+		`id="brandMark" class="topbar__mark" aria-hidden="true"`,
 		`data-pd1-destination="Video" aria-label="Rooms"`,
 		`data-pd1-destination="Conversations" aria-label="Conversations"`,
 		`id="accountMenuButton" class="tool-rail__tool tool-rail__account-button" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="User settings"`,
@@ -959,8 +970,9 @@ func TestIndexAccountMenuAndFloatingRailInteractionsAreWired(t *testing.T) {
 		"#appShell.is-authed .workspace",
 		"padding-bottom: max(96px, calc(var(--sp-2) + env(safe-area-inset-bottom)));",
 		".tool-rail__theme svg",
-		"transform: translate(-50%, -50%) scale(0.25);",
-		"filter: blur(4px);",
+		// plan 013: hover/keystroke on --dur-fast; token residue — sun/moon rest at
+		// scale(0.9) with no blur filter (composite-only crossfade)
+		"transform: translate(-50%, -50%) scale(0.9);",
 		"bottom: calc(76px + env(safe-area-inset-bottom));",
 		"#appShell.is-in-room:not(.is-board-expanded) ~ .account-menu",
 		"bottom: calc(186px + env(safe-area-inset-bottom));",
@@ -1023,7 +1035,9 @@ func TestToolRailFloatingIslandAnchorsStayViewportSafe(t *testing.T) {
 	for _, want := range []string{
 		"#appShell.is-authed {",
 		"--shell-topbar-height: 60px;",
-		"padding-left: 56px;",
+		// AJ ratified the wide labelled rail 2026-09-02: one token (--rail-width,
+		// 56px slim / 168px labelled) drives the shell offset, not a literal.
+		"padding-left: var(--rail-width, 56px);",
 		"#appShell.is-authed .topbar {",
 		"display: flex;",
 	} {
@@ -2728,7 +2742,7 @@ func TestIndexStrideRenameAndAgentToken(t *testing.T) {
 
 	// The rename surfaces (labels only).
 	for _, want := range []string{
-		`id="brandMark" class="topbar__mark" role="img" aria-label="Stride"`,
+		`id="brandMark" class="topbar__mark" aria-hidden="true"`,
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page"`,
 		`aria-label="Back to Stride"`,
 		`id="officeTool" class="office-tool" aria-label="Stride"`,

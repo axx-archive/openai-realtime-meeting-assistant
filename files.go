@@ -32,6 +32,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -75,6 +76,253 @@ const (
 	assistantFileNameMaxLen = 160
 )
 
+// Per-file ACL, versions, trash and quota (STRIDE v2 Wave 5 D1/D2/D5/D6/D9).
+// The policy lives on the kind=file metadata row and is read through
+// authorizeFileEntry, the Files-surface analogue of the artifact
+// ObjectAuthorizer: handlers authorize the body-free metadata header with an
+// ACLAction before any Text or bytes are projected.
+const (
+	fileVisibilityPrivate = "private"
+	fileVisibilityCompany = "company"
+	fileVisibilityPeople  = "people"
+
+	// fileTrashRetention is how long a trashed upload stays restorable before
+	// the daily sweep hard-deletes its row (blob GC is a separate, later sweep).
+	fileTrashRetention      = 30 * 24 * time.Hour
+	fileTrashSweepInterval  = 24 * time.Hour
+	fileTrashSweepBootDelay = 10 * time.Minute
+
+	driveQuotaBytesEnv     = "DRIVE_QUOTA_BYTES"
+	driveQuotaBytesDefault = int64(20) << 30
+)
+
+var (
+	errFileAccessForbidden   = errors.New("only the uploader can change who this file is shared with")
+	errFileGrantUnregistered = errors.New("one or more people are not registered accounts")
+	errFileVisibilityInvalid = errors.New("visibility must be private, company, or people")
+	errFileNotTrashed        = errors.New("file is not in the trash")
+	errFileQuotaExceeded     = errors.New("drive quota exceeded")
+)
+
+// normalizeFileVisibility maps the stored value onto the closed vocabulary.
+// Empty is the legacy (pre-ACL) row and reads as company — exactly today's
+// every-member-sees-every-upload contract. The recall store's own
+// organization/private synonyms (recallEntryScopeAllowed) map onto the same
+// two buckets so a row stamped by that vocabulary reads identically in both
+// lanes; any other value fails closed until it acquires an explicit policy.
+func normalizeFileVisibility(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", fileVisibilityCompany, "organization", "org", "team", "public", "shared":
+		return fileVisibilityCompany, true
+	case fileVisibilityPrivate, "owner":
+		return fileVisibilityPrivate, true
+	case fileVisibilityPeople:
+		return fileVisibilityPeople, true
+	default:
+		return "", false
+	}
+}
+
+func fileEntryVisibility(metadata map[string]string) (string, bool) {
+	return normalizeFileVisibility(metadata["visibility"])
+}
+
+// splitFileEmailList parses a comma-separated email list into normalized,
+// deduplicated, sorted emails (the grants/starredBy encoding).
+func splitFileEmailList(raw string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 4)
+	for _, part := range strings.Split(raw, ",") {
+		email := normalizeAccountEmail(part)
+		if email == "" {
+			continue
+		}
+		if _, dup := seen[email]; dup {
+			continue
+		}
+		seen[email] = struct{}{}
+		out = append(out, email)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func fileGrantEmails(metadata map[string]string) []string {
+	return splitFileEmailList(metadata["grants"])
+}
+
+func fileEntryTrashed(metadata map[string]string) bool {
+	return strings.TrimSpace(metadata["deletedAt"]) != ""
+}
+
+func fileEntrySuperseded(metadata map[string]string) bool {
+	return strings.EqualFold(strings.TrimSpace(metadata["superseded"]), "true")
+}
+
+func fileEntryVersion(metadata map[string]string) int {
+	version, err := strconv.Atoi(strings.TrimSpace(metadata["version"]))
+	if err != nil || version < 1 {
+		return 1
+	}
+	return version
+}
+
+func fileEntryStarredBy(metadata map[string]string, email string) bool {
+	email = normalizeAccountEmail(email)
+	if email == "" {
+		return false
+	}
+	for _, starred := range splitFileEmailList(metadata["starredBy"]) {
+		if starred == email {
+			return true
+		}
+	}
+	return false
+}
+
+// fileGrantsAllowEmail reports whether email is the uploader or a listed
+// grant. It is the people-visibility predicate shared with recall scoping.
+func fileGrantsAllowEmail(metadata map[string]string, email string) bool {
+	email = normalizeAccountEmail(email)
+	if email == "" {
+		return false
+	}
+	if email == normalizeAccountEmail(metadata["uploaderEmail"]) {
+		return true
+	}
+	for _, grant := range fileGrantEmails(metadata) {
+		if grant == email {
+			return true
+		}
+	}
+	return false
+}
+
+// fileEntryReadableByEmail is the pure metadata read policy for the legacy
+// email principal: company → any signed-in member, private → uploader,
+// people → uploader or grant. Unknown visibility fails closed.
+func fileEntryReadableByEmail(metadata map[string]string, email string) bool {
+	visibility, ok := fileEntryVisibility(metadata)
+	if !ok {
+		return false
+	}
+	email = normalizeAccountEmail(email)
+	switch visibility {
+	case fileVisibilityCompany:
+		return email != ""
+	case fileVisibilityPrivate:
+		return email != "" && email == normalizeAccountEmail(metadata["uploaderEmail"])
+	case fileVisibilityPeople:
+		return fileGrantsAllowEmail(metadata, email)
+	}
+	return false
+}
+
+// fileEntryUploadedByViewer is the canonical-aware uploader check: the held
+// person id under a bound tenant principal, the session email otherwise.
+func fileEntryUploadedByViewer(ctx context.Context, viewer *userAccount, metadata map[string]string) bool {
+	if viewer == nil {
+		return false
+	}
+	if principal, canonical := strideE10TenantPrincipalFromContext(ctx); canonical {
+		uploader := strings.TrimSpace(metadata["uploaderPersonId"])
+		return uploader != "" && uploader == principal.PersonID
+	}
+	email := normalizeAccountEmail(viewer.Email)
+	return email != "" && email == normalizeAccountEmail(metadata["uploaderEmail"])
+}
+
+// authorizeFileEntry is the per-file object authorizer. Read actions follow
+// the visibility/grants policy; write and delete stay with the uploader (plus
+// the approval admin in legacy mode, matching folders/rename today); share
+// (manage access) is the uploader's alone. Never widens: a nil viewer, a
+// tenant mismatch, or an unknown visibility is a denial.
+func authorizeFileEntry(ctx context.Context, viewer *userAccount, action ACLAction, entry meetingMemoryEntry) bool {
+	if viewer == nil || entry.Kind != meetingMemoryKindFile {
+		return false
+	}
+	metadata := entry.Metadata
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	if canonical && strings.TrimSpace(metadata["tenantId"]) != principal.TenantID {
+		return false
+	}
+	uploader := fileEntryUploadedByViewer(ctx, viewer, metadata)
+	switch action {
+	case ACLReadMetadata, ACLReadContent:
+		if uploader {
+			return true
+		}
+		visibility, ok := fileEntryVisibility(metadata)
+		if !ok {
+			return false
+		}
+		switch visibility {
+		case fileVisibilityCompany:
+			return normalizeAccountEmail(viewer.Email) != ""
+		case fileVisibilityPeople:
+			return fileGrantsAllowEmail(metadata, viewer.Email)
+		default:
+			return false
+		}
+	case ACLWrite, ACLDelete:
+		if uploader {
+			return true
+		}
+		return !canonical && isArtifactApprovalAdmin(viewer)
+	case ACLShare, ACLManage:
+		return uploader
+	default:
+		return false
+	}
+}
+
+// fileEntryReadableByViewer composes the per-file read ACL with the trash
+// state and, for chat-promoted rows, the exact committed source
+// reauthorization. A service principal (nil viewer, e.g. shared-room Scout)
+// keeps today's contract: live company uploads only.
+func (app *kanbanBoardApp) fileEntryReadableByViewer(ctx context.Context, viewer *userAccount, entry meetingMemoryEntry) bool {
+	if app == nil || entry.Kind != meetingMemoryKindFile {
+		return false
+	}
+	_, promoted, valid := promotedChatFileBindingFromEntry(entry)
+	if viewer == nil {
+		visibility, ok := fileEntryVisibility(entry.Metadata)
+		return ok && visibility == fileVisibilityCompany && !fileEntryTrashed(entry.Metadata) && !promoted
+	}
+	if fileEntryTrashed(entry.Metadata) && !fileEntryUploadedByViewer(ctx, viewer, entry.Metadata) {
+		return false
+	}
+	if !authorizeFileEntry(ctx, viewer, ACLReadContent, entry) {
+		return false
+	}
+	if promoted {
+		if !valid {
+			return false
+		}
+		if _, _, _, authorized := app.promotedChatFileSource(ctx, viewer, entry); !authorized {
+			return false
+		}
+	}
+	return true
+}
+
+// assistantFileEntryForViewer resolves one live kind=file row through the
+// full read discipline (tenant, trash, promoted source, per-file ACL). Share
+// links and other object handlers read Drive rows through this seam only.
+func (app *kanbanBoardApp) assistantFileEntryForViewer(ctx context.Context, viewer *userAccount, fileID string) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || viewer == nil {
+		return meetingMemoryEntry{}, false
+	}
+	entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, strings.TrimSpace(fileID))
+	if !found || fileEntryTrashed(entry.Metadata) || !app.fileEntryReadableByViewer(ctx, viewer, entry) {
+		return meetingMemoryEntry{}, false
+	}
+	return entry, true
+}
+
 // assistantFileRecord is one row of the Files surface, decorated for the
 // client the way decorateArchiveDownloadURLForClient decorates archives.
 type assistantFileRecord struct {
@@ -101,6 +349,29 @@ type assistantFileRecord struct {
 	// offers a destructive control when the current principal may remove this
 	// Drive projection (or the underlying uploaded/chat file).
 	CanDelete bool `json:"canDelete,omitempty"`
+	// CanShare is true only for the uploader: visibility and grants are the
+	// uploader's alone to change (not even the approval admin may widen them).
+	CanShare bool `json:"canShare,omitempty"`
+	// Visibility is the per-file ACL of a direct upload: private (uploader
+	// only), company (every signed-in member — the legacy default), or people
+	// (uploader + Grants). Grants lists the granted account emails.
+	Visibility string   `json:"visibility,omitempty"`
+	Grants     []string `json:"grants,omitempty"`
+	// Starred is per-viewer (metadata starredBy), never shared row state.
+	Starred bool `json:"starred,omitempty"`
+	// DeletedAt marks a trashed row (only rendered under scope=trash).
+	DeletedAt string `json:"deletedAt,omitempty"`
+	// VersionOf/Version/Superseded describe a same-name re-upload chain: the
+	// newest row is the only one in the default list; older rows carry
+	// superseded and are reachable through GET /assistant/files?versionsOf=.
+	VersionOf  string `json:"versionOf,omitempty"`
+	Version    int    `json:"version,omitempty"`
+	Superseded bool   `json:"superseded,omitempty"`
+	// ShareLinkCount is the number of LIVE file share links bound to this
+	// exact row (versions lane only). A link binds the blob it was minted on,
+	// so a superseded version can still be serving a link the Drive list no
+	// longer shows — this is how the client can say so.
+	ShareLinkCount int `json:"shareLinkCount,omitempty"`
 }
 
 // fileBlobDownloadURL builds the session-gated content-addressed download
@@ -198,7 +469,7 @@ func fileRecordFromEntry(entry meetingMemoryEntry) assistantFileRecord {
 	if !entry.CreatedAt.IsZero() {
 		createdAt = entry.CreatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	return assistantFileRecord{
+	row := assistantFileRecord{
 		ID:            entry.ID,
 		Name:          name,
 		Mime:          fileMime,
@@ -210,7 +481,97 @@ func fileRecordFromEntry(entry meetingMemoryEntry) assistantFileRecord {
 		BrainStatus:   brainStatus,
 		DownloadURL:   fileBlobDownloadURL(metadata["blobRef"], name),
 		Previewable:   blobInlineSafeMimes[fileMime],
+		DeletedAt:     strings.TrimSpace(metadata["deletedAt"]),
+		VersionOf:     strings.TrimSpace(metadata["versionOf"]),
+		Version:       fileEntryVersion(metadata),
+		Superseded:    fileEntrySuperseded(metadata),
 	}
+	if visibility, ok := fileEntryVisibility(metadata); ok {
+		row.Visibility = visibility
+		if visibility == fileVisibilityPeople {
+			row.Grants = fileGrantEmails(metadata)
+		}
+	}
+	return row
+}
+
+// decorateFileRowForViewer projects a kind=file entry for one viewer: the
+// per-viewer star, the write/share affordances, and the canonical-mode email
+// redaction the list has always applied.
+func (app *kanbanBoardApp) decorateFileRowForViewer(ctx context.Context, viewer *userAccount, entry meetingMemoryEntry) assistantFileRecord {
+	row := fileRecordFromEntry(entry)
+	if viewer != nil {
+		row.Starred = fileEntryStarredBy(entry.Metadata, viewer.Email)
+		row.CanDelete = authorizeFileEntry(ctx, viewer, ACLDelete, entry)
+		row.CanShare = authorizeFileEntry(ctx, viewer, ACLShare, entry)
+	}
+	if _, canonical := strideE10TenantPrincipalFromContext(ctx); canonical {
+		row.UploaderEmail = ""
+	}
+	return row
+}
+
+/* ---------- "file" socket event projection (review B4) ---------- */
+
+// fileBroadcastRow extracts the decorated Drive row a "file" kanban event
+// carries, when it carries one: the bare row (upload, save, studio copy) or
+// {kind, file: row} (rename, restore). Events without a row ({kind:"deleted",
+// fileId}, {kind:"folders"}, …) return false and fan out unchanged.
+func fileBroadcastRow(data any) (assistantFileRecord, string, bool) {
+	switch payload := data.(type) {
+	case assistantFileRecord:
+		return payload, "", payload.ID != ""
+	case *assistantFileRecord:
+		if payload == nil {
+			return assistantFileRecord{}, "", false
+		}
+		return *payload, "", payload.ID != ""
+	case map[string]any:
+		kind, _ := payload["kind"].(string)
+		switch row := payload["file"].(type) {
+		case assistantFileRecord:
+			return row, kind, row.ID != ""
+		case *assistantFileRecord:
+			if row != nil {
+				return *row, kind, row.ID != ""
+			}
+		}
+	}
+	return assistantFileRecord{}, "", false
+}
+
+// fileBroadcastRowReadableByViewer decides whether one signed-in recipient
+// may see the row a "file" event carries, through the exact seam each origin's
+// list uses: the per-file ACL for a direct upload (private/people rows reach
+// only their uploader/grantees), the artifact ACL for a saved deliverable,
+// thread visibility for a chat attachment. Unknown origins fail closed.
+func (app *kanbanBoardApp) fileBroadcastRowReadableByViewer(ctx context.Context, viewer *userAccount, row assistantFileRecord) bool {
+	if app == nil || app.memory == nil || viewer == nil || strings.TrimSpace(row.ID) == "" {
+		return false
+	}
+	switch row.Origin {
+	case "files":
+		entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, row.ID)
+		return found && app.fileEntryReadableByViewer(ctx, viewer, entry)
+	case "deliverable":
+		_, ok := app.authorizedArtifactForActions(ctx, viewer, firstNonEmptyString(row.ArtifactID, row.ID), ACLReadContent)
+		return ok
+	case "chat":
+		threadID, _, _, parsed := parseChatAttachmentFileID(row.ID)
+		if !parsed {
+			return false
+		}
+		_, _, err := app.scoutChatThreadByID(viewer.Email, threadID)
+		return err == nil
+	}
+	return false
+}
+
+// fileBroadcastTombstone is what a non-reader receives instead of the row: the
+// event kind and the id only — enough for the client's refetch-on-any-file-
+// event, carrying no name, uploader or download URL.
+func fileBroadcastTombstone(kind string, row assistantFileRecord) map[string]any {
+	return map[string]any{"kind": firstNonEmptyString(strings.TrimSpace(kind), "changed"), "id": row.ID, "fileId": row.ID}
 }
 
 // promotedChatFileBinding distinguishes an explicitly promoted chat file from
@@ -418,8 +779,12 @@ func deliverableRecordQualifies(entry meetingMemoryEntry) bool {
 	}
 	source := strings.TrimSpace(metadata["source"])
 	studioShip := source == "packaging_studio_ship" && strings.TrimSpace(metadata["goalId"]) != "" && strings.TrimSpace(metadata["artifactContract"]) != ""
+	// Studio-native blank creates (Document/Deck Studio) are terminal Work
+	// results with a server-minted identity; they save the same way a finished
+	// thread deliverable does.
+	studioNative := oneOf(source, studioBlankSourceDocument, studioBlankSourceDeck) && strings.TrimSpace(metadata["threadId"]) == ""
 	if source != "scout_thread" &&
-		source != "chat_image" && !studioShip &&
+		source != "chat_image" && !studioShip && !studioNative &&
 		strings.TrimSpace(metadata["goalPlan"]) == "" &&
 		!strings.EqualFold(strings.TrimSpace(metadata["goalDeliverable"]), "true") {
 		return false
@@ -481,7 +846,7 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 		deliverableMime = ventureWorkbookMime
 	}
 	var imageAsset *artifactAsset
-	if strings.TrimSpace(metadata["source"]) == "chat_image" {
+	if strings.TrimSpace(metadata["source"]) == "chat_image" || artifactType(entry) == artifactTypeImage {
 		assets := artifactAssets(entry)
 		for index := range assets {
 			if assets[index].Kind == "image" && validBlobRef(assets[index].Ref) {
@@ -491,8 +856,34 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 			}
 		}
 		if imageAsset != nil {
-			name = firstNonEmptyString(strings.TrimSpace(imageAsset.Name), name)
+			name = firstNonEmptyString(strings.TrimSpace(metadata["driveFileName"]), strings.TrimSpace(imageAsset.Name), name)
 			deliverableMime = firstNonEmptyString(strings.TrimSpace(imageAsset.Mime), "image/png")
+		}
+	}
+	// Generic file results (pdf/bundle/file) hand over their exact bytes the
+	// way a workbook does: the first pdf/export asset, else the first asset.
+	var fileAsset *artifactAsset
+	if oneOf(artifactType(entry), artifactTypePDF, artifactTypeBundle, artifactTypeFile) {
+		assets := artifactAssets(entry)
+		for _, preferred := range []bool{true, false} {
+			for index := range assets {
+				if !validBlobRef(assets[index].Ref) || artifactAssetIsPageImage(assets[index]) {
+					continue
+				}
+				if preferred && !oneOf(assets[index].Kind, "pdf", "export") {
+					continue
+				}
+				asset := assets[index]
+				fileAsset = &asset
+				break
+			}
+			if fileAsset != nil {
+				break
+			}
+		}
+		if fileAsset != nil {
+			name = firstNonEmptyString(strings.TrimSpace(metadata["driveFileName"]), strings.TrimSpace(fileAsset.Name), name)
+			deliverableMime = firstNonEmptyString(strings.TrimSpace(fileAsset.Mime), "application/octet-stream")
 		}
 	}
 	createdAt := ""
@@ -520,6 +911,10 @@ func fileDeliverableRecord(entry meetingMemoryEntry) (assistantFileRecord, bool)
 		row.DownloadURL = fileBlobDownloadURL(workbookAsset.Ref, name)
 		row.Previewable = false
 	}
+	if fileAsset != nil {
+		row.DownloadURL = fileBlobDownloadURL(fileAsset.Ref, name)
+		row.Previewable = blobInlineSafeMimes[deliverableMime]
+	}
 	return row, true
 }
 
@@ -532,6 +927,28 @@ func (app *kanbanBoardApp) assistantFilesForUser(viewerEmail string) []assistant
 }
 
 func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewer *userAccount) []assistantFileRecord {
+	return app.assistantFileRowsForPrincipal(ctx, viewer, assistantFileListScope{})
+}
+
+// assistantTrashedFilesForPrincipal lists the caller's own trashed uploads
+// (plus, in legacy mode, the approval admin's view of every trashed row).
+func (app *kanbanBoardApp) assistantTrashedFilesForPrincipal(ctx context.Context, viewer *userAccount) []assistantFileRecord {
+	return app.assistantFileRowsForPrincipal(ctx, viewer, assistantFileListScope{trash: true})
+}
+
+// assistantFileListScope selects which kind=file rows a list projects: the
+// live default (not trashed, newest of each version chain), the trash, or the
+// live set including superseded versions (the versionsOf lane).
+type assistantFileListScope struct {
+	trash             bool
+	includeSuperseded bool
+	// includeTrashed projects live AND trashed rows together (the versions
+	// walk); a trashed row still surfaces only to whoever may read it there —
+	// its uploader — because fileEntryReadableByViewer enforces that.
+	includeTrashed bool
+}
+
+func (app *kanbanBoardApp) assistantFileRowsForPrincipal(ctx context.Context, viewer *userAccount, scope assistantFileListScope) []assistantFileRecord {
 	if app == nil || app.memory == nil {
 		return nil
 	}
@@ -541,26 +958,27 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
 			continue
 		}
-		if _, promoted, valid := promotedChatFileBindingFromEntry(entry); promoted && (!valid || viewer == nil) {
+		if !scope.includeTrashed && fileEntryTrashed(entry.Metadata) != scope.trash {
 			continue
-		} else if promoted {
-			if _, _, _, authorized := app.promotedChatFileSource(ctx, viewer, entry); !authorized {
-				continue
-			}
 		}
-		row := fileRecordFromEntry(entry)
-		if canonical {
-			row.CanDelete = strings.TrimSpace(entry.Metadata["uploaderPersonId"]) == principal.PersonID
-			row.UploaderEmail = ""
-		} else {
-			row.CanDelete = viewer != nil && (isArtifactApprovalAdmin(viewer) || normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(viewer.Email))
+		if !scope.includeSuperseded && fileEntrySuperseded(entry.Metadata) {
+			continue
 		}
-		rows = append(rows, row)
+		// The trash is the owner's: only whoever may delete the row sees it there.
+		if scope.trash && !authorizeFileEntry(ctx, viewer, ACLDelete, entry) {
+			continue
+		}
+		if !app.fileEntryReadableByViewer(ctx, viewer, entry) {
+			continue
+		}
+		rows = append(rows, app.decorateFileRowForViewer(ctx, viewer, entry))
 	}
-	for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
-		if row, ok := fileDeliverableRecord(entry); ok {
-			_, row.CanDelete = authorizedArtifactForActions(ctx, viewer, entry.ID, ACLReadContent, ACLWrite)
-			rows = append(rows, row)
+	if !scope.trash {
+		for _, entry := range app.authorizedFileDeliverableCandidates(ctx, viewer, ACLReadContent) {
+			if row, ok := fileDeliverableRecord(entry); ok {
+				_, row.CanDelete = authorizedArtifactForActions(ctx, viewer, entry.ID, ACLReadContent, ACLWrite)
+				rows = append(rows, row)
+			}
 		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -570,6 +988,264 @@ func (app *kanbanBoardApp) assistantFilesForPrincipal(ctx context.Context, viewe
 		rows = rows[:assistantFilesListLimit]
 	}
 	return rows
+}
+
+// assistantFileVersionsForPrincipal returns the whole same-name version chain
+// that contains fileID, newest first, restricted to rows the viewer may read.
+// Chain EDGES come from every same-tenant row's body-free versionOf id —
+// trashed or not — so a trashed middle version still bridges its neighbours in
+// both directions; the trashed row itself is projected only for its uploader.
+// An anchor the viewer cannot read yields nothing (no chain oracle).
+func (app *kanbanBoardApp) assistantFileVersionsForPrincipal(ctx context.Context, viewer *userAccount, fileID string) []assistantFileRecord {
+	fileID = strings.TrimSpace(fileID)
+	if fileID == "" || app == nil || app.memory == nil {
+		return nil
+	}
+	// One walk of the Drive: chain edges from every same-tenant row, the
+	// viewer's projection only for the rows they may read.
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	visible := map[string]assistantFileRecord{}
+	parents := map[string]string{}
+	children := map[string][]string{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
+			continue
+		}
+		if parent := strings.TrimSpace(entry.Metadata["versionOf"]); parent != "" {
+			parents[entry.ID] = parent
+			children[parent] = append(children[parent], entry.ID)
+		}
+		if app.fileEntryReadableByViewer(ctx, viewer, entry) {
+			visible[entry.ID] = app.decorateFileRowForViewer(ctx, viewer, entry)
+		}
+	}
+	if _, ok := visible[fileID]; !ok {
+		return nil
+	}
+	root := fileID
+	visited := map[string]bool{root: true}
+	for {
+		parent, found := parents[root]
+		if !found || parent == "" || visited[parent] {
+			break
+		}
+		visited[parent] = true
+		root = parent
+	}
+	chain := make([]assistantFileRecord, 0, 4)
+	collected := map[string]bool{root: true}
+	if row, ok := visible[root]; ok {
+		chain = append(chain, row)
+	}
+	for frontier := []string{root}; len(frontier) > 0; {
+		var next []string
+		for _, id := range frontier {
+			for _, child := range children[id] {
+				if collected[child] {
+					continue
+				}
+				collected[child] = true
+				if row, ok := visible[child]; ok {
+					chain = append(chain, row)
+				}
+				next = append(next, child)
+			}
+		}
+		frontier = next
+	}
+	sort.SliceStable(chain, func(i, j int) bool {
+		if chain[i].Version != chain[j].Version {
+			return chain[i].Version > chain[j].Version
+		}
+		return fileRecordTime(chain[i]).After(fileRecordTime(chain[j]))
+	})
+	// A file share link binds the exact blob it was minted on (share_links.go
+	// mintFileShareLink), so a superseded version hidden from the Drive list
+	// can still be serving one. Surface the live count per version so the
+	// client can say so. One side-store read; never an error for the lane.
+	if links, err := loadShareLinks(); err == nil && len(links) > 0 {
+		now := time.Now().UTC()
+		counts := make(map[string]int, len(chain))
+		for _, link := range links {
+			if link.ObjectType == shareLinkObjectTypeFile && shareLinkLive(link, now) {
+				counts[strings.TrimSpace(link.FileID)]++
+			}
+		}
+		for index := range chain {
+			chain[index].ShareLinkCount = counts[chain[index].ID]
+		}
+	}
+	return chain
+}
+
+/* ---------- version chain re-heading (Drive review D2) ---------- */
+
+// fileVersionChainRows returns every kind=file row connected to anchorID
+// through versionOf edges, trashed or not (a trashed middle version still
+// bridges its neighbours), keyed by id. Edges are explicit ids, so a chain
+// never crosses tenants by construction.
+func (app *kanbanBoardApp) fileVersionChainRows(anchorID string) map[string]meetingMemoryEntry {
+	anchorID = strings.TrimSpace(anchorID)
+	if app == nil || app.memory == nil || anchorID == "" {
+		return nil
+	}
+	byID := map[string]meetingMemoryEntry{}
+	neighbours := map[string][]string{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		byID[entry.ID] = entry
+		if parent := strings.TrimSpace(entry.Metadata["versionOf"]); parent != "" {
+			neighbours[entry.ID] = append(neighbours[entry.ID], parent)
+			neighbours[parent] = append(neighbours[parent], entry.ID)
+		}
+	}
+	if _, ok := byID[anchorID]; !ok {
+		return nil
+	}
+	component := map[string]meetingMemoryEntry{}
+	for frontier := []string{anchorID}; len(frontier) > 0; {
+		var next []string
+		for _, id := range frontier {
+			if _, seen := component[id]; seen {
+				continue
+			}
+			entry, ok := byID[id]
+			if !ok {
+				continue
+			}
+			component[id] = entry
+			next = append(next, neighbours[id]...)
+		}
+		frontier = next
+	}
+	return component
+}
+
+// fileVersionChainMaxVersion is the highest version number anywhere in the
+// chain containing prior — trashed and superseded rows included — so a fresh
+// upload always continues the count instead of reusing a trashed version's
+// number.
+func (app *kanbanBoardApp) fileVersionChainMaxVersion(prior meetingMemoryEntry) int {
+	maxVersion := fileEntryVersion(prior.Metadata)
+	for _, entry := range app.fileVersionChainRows(prior.ID) {
+		if version := fileEntryVersion(entry.Metadata); version > maxVersion {
+			maxVersion = version
+		}
+	}
+	return maxVersion
+}
+
+// reconcileFileVersionChain re-heads the chain containing fileID after a
+// trash, restore or purge. Among the chain's untrashed rows the highest
+// version (newest on a tie) is the live head — its superseded/supersededBy
+// stamps cleared so it returns to the default list and to
+// priorFileVersionForUpload — and every other untrashed row is stamped
+// superseded by that head. Trashed rows keep their stamps untouched (a
+// restore reconciles again); versionOf/version never change. Only rows whose
+// stamps actually differ are rewritten.
+func (app *kanbanBoardApp) reconcileFileVersionChain(fileID string) error {
+	component := app.fileVersionChainRows(fileID)
+	if len(component) == 0 {
+		return nil
+	}
+	var head meetingMemoryEntry
+	hasHead := false
+	for _, entry := range component {
+		if fileEntryTrashed(entry.Metadata) {
+			continue
+		}
+		if !hasHead || fileEntryVersion(entry.Metadata) > fileEntryVersion(head.Metadata) ||
+			(fileEntryVersion(entry.Metadata) == fileEntryVersion(head.Metadata) && entry.CreatedAt.After(head.CreatedAt)) {
+			head = entry
+			hasHead = true
+		}
+	}
+	if !hasHead {
+		return nil
+	}
+	for _, entry := range component {
+		if fileEntryTrashed(entry.Metadata) {
+			continue
+		}
+		want := map[string]string{"superseded": "", "supersededBy": ""}
+		if entry.ID != head.ID {
+			want = map[string]string{"superseded": "true", "supersededBy": head.ID}
+		}
+		if strings.TrimSpace(entry.Metadata["superseded"]) == want["superseded"] && strings.TrimSpace(entry.Metadata["supersededBy"]) == want["supersededBy"] {
+			continue
+		}
+		if _, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindFile, entry.ID, entry.Text, want); err != nil {
+			return fmt.Errorf("re-head Drive version chain at %s: %w", entry.ID, err)
+		}
+	}
+	return nil
+}
+
+// priorFileVersionForUpload finds the live row a fresh upload supersedes: the
+// same name, in the same folder, by the same uploader (same tenant). Chat-
+// promoted rows are source-bound and never chain onto a direct upload.
+func (app *kanbanBoardApp) priorFileVersionForUpload(ctx context.Context, viewer *userAccount, name string, folderID string) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || viewer == nil || strings.TrimSpace(name) == "" {
+		return meetingMemoryEntry{}, false
+	}
+	folderID = strings.TrimSpace(folderID)
+	_, assignments := sharedFileFolderStore().snapshot()
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	var newest meetingMemoryEntry
+	found := false
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
+			continue
+		}
+		if strings.TrimSpace(entry.Metadata["name"]) != name || fileEntryTrashed(entry.Metadata) || fileEntrySuperseded(entry.Metadata) {
+			continue
+		}
+		if !fileEntryUploadedByViewer(ctx, viewer, entry.Metadata) {
+			continue
+		}
+		if _, promoted, _ := promotedChatFileBindingFromEntry(entry); promoted {
+			continue
+		}
+		if strings.TrimSpace(assignments[entry.ID]) != folderID {
+			continue
+		}
+		if !found || entry.CreatedAt.After(newest.CreatedAt) {
+			newest = entry
+			found = true
+		}
+	}
+	return newest, found
+}
+
+// searchAssistantFilesForPrincipal narrows an already ACL-scoped row list to
+// the rows whose name or uploader contains the query, OR whose ingested body
+// text matches through the same principal-scoped memory search Scout's file
+// context uses (recallStoreForPrincipal → search). A row the viewer cannot
+// read is never in the input list, so body matches can never leak a name.
+func (app *kanbanBoardApp) searchAssistantFilesForPrincipal(ctx context.Context, viewer *userAccount, rows []assistantFileRecord, query string) []assistantFileRecord {
+	query = strings.TrimSpace(query)
+	if query == "" || app == nil || app.memory == nil {
+		return rows
+	}
+	needle := strings.ToLower(query)
+	matched := map[string]bool{}
+	if viewer != nil {
+		scoped := app.recallStoreForPrincipal(ctx, recallPrincipalForUser(viewer))
+		for _, match := range scoped.search(query, assistantFilesListLimit) {
+			if match.Entry.Kind == meetingMemoryKindFile || match.Entry.Kind == meetingMemoryKindOSArtifact {
+				matched[match.Entry.ID] = true
+			}
+		}
+	}
+	out := make([]assistantFileRecord, 0, len(rows))
+	for _, row := range rows {
+		if strings.Contains(strings.ToLower(row.Name), needle) ||
+			strings.Contains(strings.ToLower(row.UploaderName), needle) ||
+			strings.Contains(strings.ToLower(row.UploaderEmail), needle) ||
+			matched[row.ID] || (row.ArtifactID != "" && matched[row.ArtifactID]) {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 // assistantFileAttachmentSource resolves one Drive row through its native ACL
@@ -664,6 +1340,11 @@ func (app *kanbanBoardApp) assistantFileAttachmentSource(ctx context.Context, vi
 	}
 
 	if entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
+		// Per-file ACL first (D1): a trashed row or one outside the viewer's
+		// visibility/grants never yields an attachment handle.
+		if fileEntryTrashed(entry.Metadata) || !app.fileEntryReadableByViewer(ctx, viewer, entry) {
+			return scoutChatFileAttachment{}, blobMeta{}, "", false
+		}
 		row := fileRecordFromEntry(entry)
 		ref := strings.TrimSpace(entry.Metadata["blobRef"])
 		var promotedThread scoutChatThreadRecord
@@ -796,21 +1477,21 @@ func (app *kanbanBoardApp) assistantFileSourceAllowsDestination(ctx context.Cont
 		}
 		return destinationPrivate && destinationOwner == viewerEmail && normalizeAccountEmail(header.OwnerEmail) == viewerEmail
 	}
-	// True direct uploads retain the existing shared-company Drive contract.
-	// A promoted chat row preserves its source audience and cannot widen a
+	// Direct uploads narrow by their per-file visibility: company rows may go
+	// anywhere, a private row only into its uploader's own private thread, a
+	// people row only where every destination reader holds a grant. A promoted
+	// chat row additionally preserves its source audience and cannot widen a
 	// private/project attachment merely because it now has a Files name.
 	if entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID); found {
-		binding, promoted, valid := promotedChatFileBindingFromEntry(entry)
-		if !promoted {
-			return true
-		}
-		if !valid {
+		if fileEntryTrashed(entry.Metadata) || !app.fileEntryReadableByViewer(ctx, viewer, entry) {
 			return false
 		}
-		if _, _, _, authorized := app.promotedChatFileSource(ctx, viewer, entry); !authorized {
-			return false
+		if binding, promoted, _ := promotedChatFileBindingFromEntry(entry); promoted {
+			if !app.assistantFileSourceAllowsDestination(ctx, viewer, binding.SourceFileID, destination) {
+				return false
+			}
 		}
-		return app.assistantFileSourceAllowsDestination(ctx, viewer, binding.SourceFileID, destination)
+		return fileEntryAudienceAllowsDestination(entry.Metadata, viewerEmail, destination)
 	}
 
 	threadID, _, _, parsed := parseChatAttachmentFileID(fileID)
@@ -848,6 +1529,42 @@ func (app *kanbanBoardApp) assistantFileSourceAllowsDestination(ctx context.Cont
 		}
 	}
 	return true
+}
+
+// fileEntryAudienceAllowsDestination is the per-file audience intersection
+// for Drive-to-chat attachments. Unknown visibility fails closed.
+func fileEntryAudienceAllowsDestination(metadata map[string]string, viewerEmail string, destination scoutChatThreadRecord) bool {
+	visibility, ok := fileEntryVisibility(metadata)
+	if !ok {
+		return false
+	}
+	viewerEmail = normalizeAccountEmail(viewerEmail)
+	destinationPrivate := scoutChatThreadVisibility(destination) == scoutChatVisibilityPrivate
+	destinationOwner := normalizeAccountEmail(destination.OwnerEmail)
+	switch visibility {
+	case fileVisibilityCompany:
+		return true
+	case fileVisibilityPrivate:
+		return destinationPrivate && destinationOwner == viewerEmail && normalizeAccountEmail(metadata["uploaderEmail"]) == viewerEmail
+	case fileVisibilityPeople:
+		if destinationPrivate {
+			return fileGrantsAllowEmail(metadata, destinationOwner)
+		}
+		if scoutChatThreadIsOrganizationPublic(destination) {
+			return false
+		}
+		members := scoutChatThreadMemberEmails(destination)
+		if len(members) == 0 {
+			return false
+		}
+		for _, member := range members {
+			if !fileGrantsAllowEmail(metadata, member) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func (app *kanbanBoardApp) assistantFileAttachmentSourceForDestination(ctx context.Context, viewer *userAccount, fileID string, destination scoutChatThreadRecord) (scoutChatFileAttachment, blobMeta, string, bool) {
@@ -1011,32 +1728,80 @@ func assistantFilesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPatch {
-		assistantFileRename(w, r, user)
+		assistantFilePatch(w, r, user)
 		return
 	}
 
-	rows := kanbanApp.assistantFilesForPrincipal(r.Context(), user)
+	query := r.URL.Query()
+	// ?versionsOf=<id>: the same-name re-upload chain, newest first (D5).
+	if versionsOf := strings.TrimSpace(query.Get("versionsOf")); versionsOf != "" {
+		writeAuthJSON(w, http.StatusOK, map[string]any{
+			"ok":         true,
+			"versionsOf": versionsOf,
+			"files":      kanbanApp.assistantFileVersionsForPrincipal(r.Context(), user, versionsOf),
+		})
+		return
+	}
+	var rows []assistantFileRecord
+	scope := strings.ToLower(strings.TrimSpace(query.Get("scope")))
+	switch scope {
+	case "trash":
+		// The caller's own trashed uploads (D6).
+		rows = kanbanApp.assistantTrashedFilesForPrincipal(r.Context(), user)
+	case "", "live":
+		scope = ""
+		rows = kanbanApp.assistantFilesForPrincipal(r.Context(), user)
+	default:
+		writeAuthError(w, http.StatusBadRequest, "unknown files scope")
+		return
+	}
+	// ?q=: name/uploader/ingested-text search, ACL-scoped (D7).
+	searchQuery := strings.TrimSpace(query.Get("q"))
+	if searchQuery != "" {
+		rows = kanbanApp.searchAssistantFilesForPrincipal(r.Context(), user, rows, searchQuery)
+	}
 	folders := []assistantFileFolderPayload{}
 	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
 		folders = decorateAssistantFileFoldersForTenant(rows, principal.TenantID)
 	} else {
 		folders = decorateAssistantFileFolders(rows)
 	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"ok":      true,
 		"files":   rows,
 		"folders": folders,
-	})
+	}
+	if scope != "" {
+		payload["scope"] = scope
+	}
+	if searchQuery != "" {
+		payload["q"] = searchQuery
+	}
+	writeAuthJSON(w, http.StatusOK, payload)
 }
 
-func assistantFileRename(w http.ResponseWriter, r *http.Request, user *userAccount) {
+// assistantFilePatch serves PATCH /assistant/files:
+//
+//	{id, name?}                                   rename (uploader/admin)
+//	{id, visibility?, grants?: {add?[], remove?[]}} manage access (uploader ONLY → 403 otherwise)
+//	{id, starred?}                                per-viewer star (any reader)
+//
+// Fields compose in one call; the response carries the row as the caller now
+// sees it. A body with none of them keeps the historical rename error.
+func assistantFilePatch(w http.ResponseWriter, r *http.Request, user *userAccount) {
 	payload := struct {
-		ID     string `json:"id"`
-		FileID string `json:"fileId"`
-		Name   string `json:"name"`
+		ID         string  `json:"id"`
+		FileID     string  `json:"fileId"`
+		Name       *string `json:"name"`
+		Visibility *string `json:"visibility"`
+		Grants     *struct {
+			Add    []string `json:"add"`
+			Remove []string `json:"remove"`
+		} `json:"grants"`
+		Starred *bool `json:"starred"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
-		writeAuthError(w, http.StatusBadRequest, "could not read rename request")
+		writeAuthError(w, http.StatusBadRequest, "could not read file update request")
 		return
 	}
 	fileID := firstNonEmptyString(strings.TrimSpace(payload.ID), strings.TrimSpace(payload.FileID))
@@ -1044,23 +1809,283 @@ func assistantFileRename(w http.ResponseWriter, r *http.Request, user *userAccou
 		writeAuthError(w, http.StatusBadRequest, errFileFolderFileID.Error())
 		return
 	}
-	name, err := normalizeAssistantFileName(payload.Name)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, err.Error())
+	if payload.Name == nil && payload.Visibility == nil && payload.Grants == nil && payload.Starred == nil {
+		writeAuthError(w, http.StatusBadRequest, errAssistantFileName.Error())
 		return
 	}
-	row, err := kanbanApp.renameAssistantFileForUser(r.Context(), user, fileID, name)
-	if err != nil {
-		if errors.Is(err, errFileSaveNotFound) {
+	ctx := r.Context()
+
+	// Phase 1 — validate and authorize EVERY sub-update before applying any.
+	// A legacy admin may rename someone else's upload but never widen its
+	// access; a body naming both must fail as a whole, with nothing renamed
+	// and nothing broadcast, instead of renaming first and 403ing second.
+	name := ""
+	if payload.Name != nil {
+		normalized, err := normalizeAssistantFileName(*payload.Name)
+		if err != nil {
+			writeAuthError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		name = normalized
+		if row, writable := authorizedFileRowForMove(ctx, user, fileID); row.ID == "" || !writable {
 			writeAuthError(w, http.StatusNotFound, "file not found")
 			return
 		}
-		log.Errorf("Rename Drive file %s failed: %v", fileID, err)
-		writeAuthError(w, http.StatusInternalServerError, "could not rename the file")
-		return
 	}
-	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "renamed", "file": row})
+	var access *assistantFileAccessUpdate
+	if payload.Visibility != nil || payload.Grants != nil {
+		var add, remove []string
+		if payload.Grants != nil {
+			add, remove = payload.Grants.Add, payload.Grants.Remove
+		}
+		prepared, err := kanbanApp.prepareAssistantFileAccessUpdate(ctx, user, fileID, payload.Visibility, add, remove)
+		if err != nil {
+			status, message := fileAccessErrorStatus(err)
+			if status == http.StatusInternalServerError {
+				log.Errorf("Update Drive file access %s failed: %v", fileID, err)
+			}
+			writeAuthError(w, status, message)
+			return
+		}
+		access = &prepared
+	}
+	if payload.Starred != nil {
+		if _, ok := kanbanApp.assistantFileEntryForViewer(ctx, user, fileID); !ok {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+	}
+
+	// Phase 2 — apply. A rename composed with an access change on a direct
+	// upload (the only row kind manage-access resolves) rides the SAME
+	// metadata rewrite, so the two can never land half-way.
+	var row assistantFileRecord
+	if payload.Name != nil && access != nil {
+		access.updates["name"] = name
+		updated, err := kanbanApp.applyAssistantFileAccessUpdate(ctx, user, *access)
+		if err != nil {
+			log.Errorf("Update Drive file %s failed: %v", fileID, err)
+			writeAuthError(w, http.StatusInternalServerError, "could not update the file")
+			return
+		}
+		row = updated
+		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "renamed", "file": row})
+		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "access", "fileId": fileID})
+	} else {
+		if payload.Name != nil {
+			updated, err := kanbanApp.renameAssistantFileForUser(ctx, user, fileID, name)
+			if err != nil {
+				if errors.Is(err, errFileSaveNotFound) {
+					writeAuthError(w, http.StatusNotFound, "file not found")
+					return
+				}
+				log.Errorf("Rename Drive file %s failed: %v", fileID, err)
+				writeAuthError(w, http.StatusInternalServerError, "could not rename the file")
+				return
+			}
+			row = updated
+			broadcastSignedInKanbanEvent("file", map[string]any{"kind": "renamed", "file": row})
+		}
+		if access != nil {
+			updated, err := kanbanApp.applyAssistantFileAccessUpdate(ctx, user, *access)
+			if err != nil {
+				log.Errorf("Update Drive file access %s failed: %v", fileID, err)
+				writeAuthError(w, http.StatusInternalServerError, "could not update the file")
+				return
+			}
+			row = updated
+			broadcastSignedInKanbanEvent("file", map[string]any{"kind": "access", "fileId": fileID})
+		}
+	}
+	if payload.Starred != nil {
+		updated, err := kanbanApp.setAssistantFileStarredForUser(ctx, user, fileID, *payload.Starred)
+		if err != nil {
+			if errors.Is(err, errFileSaveNotFound) {
+				writeAuthError(w, http.StatusNotFound, "file not found")
+				return
+			}
+			log.Errorf("Star Drive file %s failed: %v", fileID, err)
+			writeAuthError(w, http.StatusInternalServerError, "could not update the file")
+			return
+		}
+		row = updated
+	}
 	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "file": row})
+}
+
+// fileAccessErrorStatus maps manage-access errors onto honest statuses. A
+// missing row and a row the caller may not even read collapse into 404; a
+// readable row whose access the caller may not change is an explicit 403.
+func fileAccessErrorStatus(err error) (int, string) {
+	switch {
+	case errors.Is(err, errFileSaveNotFound):
+		return http.StatusNotFound, "file not found"
+	case errors.Is(err, errFileAccessForbidden):
+		return http.StatusForbidden, errFileAccessForbidden.Error()
+	case errors.Is(err, errFileVisibilityInvalid), errors.Is(err, errFileGrantUnregistered):
+		return http.StatusBadRequest, err.Error()
+	default:
+		return http.StatusInternalServerError, "could not update the file"
+	}
+}
+
+// updateAssistantFileAccessForUser changes a direct upload's visibility and/or
+// grants. Uploader only — the approval admin may delete a row but never widen
+// who reads it. Grants must be registered, enabled accounts (checked one by
+// one, never enumerated back to the caller); the uploader is implicit.
+func (app *kanbanBoardApp) updateAssistantFileAccessForUser(ctx context.Context, user *userAccount, fileID string, visibility *string, add []string, remove []string) (assistantFileRecord, error) {
+	prepared, err := app.prepareAssistantFileAccessUpdate(ctx, user, fileID, visibility, add, remove)
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	return app.applyAssistantFileAccessUpdate(ctx, user, prepared)
+}
+
+// assistantFileAccessUpdate is a fully validated, fully authorized manage-
+// access change that has not been written yet — the PATCH door validates
+// every sub-update first and only then applies (nothing half-lands).
+type assistantFileAccessUpdate struct {
+	entry   meetingMemoryEntry
+	updates map[string]string
+}
+
+// prepareAssistantFileAccessUpdate resolves the row, checks the caller's
+// share authority, normalizes the visibility and grants, and returns the
+// metadata rewrite to apply. It writes nothing.
+func (app *kanbanBoardApp) prepareAssistantFileAccessUpdate(ctx context.Context, user *userAccount, fileID string, visibility *string, add []string, remove []string) (assistantFileAccessUpdate, error) {
+	if app == nil || app.memory == nil || user == nil {
+		return assistantFileAccessUpdate{}, errFileSaveNotFound
+	}
+	entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, strings.TrimSpace(fileID))
+	if !found || fileEntryTrashed(entry.Metadata) || !app.fileEntryReadableByViewer(ctx, user, entry) {
+		return assistantFileAccessUpdate{}, errFileSaveNotFound
+	}
+	if !authorizeFileEntry(ctx, user, ACLShare, entry) {
+		return assistantFileAccessUpdate{}, errFileAccessForbidden
+	}
+	updates := map[string]string{"ownerEmail": normalizeAccountEmail(entry.Metadata["uploaderEmail"])}
+	if visibility != nil {
+		normalized, ok := normalizeFileVisibility(*visibility)
+		if !ok || strings.TrimSpace(*visibility) == "" {
+			return assistantFileAccessUpdate{}, errFileVisibilityInvalid
+		}
+		updates["visibility"] = normalized
+	} else if current, ok := fileEntryVisibility(entry.Metadata); ok {
+		// Stamp the read-time default explicitly once access is being managed.
+		updates["visibility"] = current
+	}
+	uploader := normalizeAccountEmail(entry.Metadata["uploaderEmail"])
+	grants := map[string]struct{}{}
+	for _, existing := range fileGrantEmails(entry.Metadata) {
+		grants[existing] = struct{}{}
+	}
+	for _, raw := range add {
+		email := normalizeAccountEmail(raw)
+		if email == "" || email == uploader {
+			continue
+		}
+		if accountStore().findUser(email) == nil || accountIsDisabled(email) {
+			return assistantFileAccessUpdate{}, errFileGrantUnregistered
+		}
+		grants[email] = struct{}{}
+	}
+	for _, raw := range remove {
+		delete(grants, normalizeAccountEmail(raw))
+	}
+	merged := make([]string, 0, len(grants))
+	for email := range grants {
+		merged = append(merged, email)
+	}
+	sort.Strings(merged)
+	updates["grants"] = strings.Join(merged, ",")
+	return assistantFileAccessUpdate{entry: entry, updates: updates}, nil
+}
+
+// applyAssistantFileAccessUpdate lands a prepared change in one metadata
+// rewrite and returns the row as the caller now sees it.
+func (app *kanbanBoardApp) applyAssistantFileAccessUpdate(ctx context.Context, user *userAccount, prepared assistantFileAccessUpdate) (assistantFileRecord, error) {
+	if app == nil || app.memory == nil || user == nil || prepared.entry.ID == "" {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindFile, prepared.entry.ID, prepared.entry.Text, prepared.updates)
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	if err := app.publishDriveFileSourceEpisode(updated); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
+		log.Errorf("SourceEpisode Drive access publication unavailable: %v", err)
+	}
+	row := app.decorateFileRowForViewer(ctx, user, updated)
+	_, assignments := sharedFileFolderStore().snapshot()
+	row.FolderID = assignments[prepared.entry.ID]
+	return row, nil
+}
+
+// setAssistantFileStarredForUser toggles the caller's own star on a readable
+// row (metadata starredBy is a per-viewer list, never shared row state).
+func (app *kanbanBoardApp) setAssistantFileStarredForUser(ctx context.Context, user *userAccount, fileID string, starred bool) (assistantFileRecord, error) {
+	entry, ok := app.assistantFileEntryForViewer(ctx, user, fileID)
+	if !ok {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	email := normalizeAccountEmail(user.Email)
+	starredBy := make([]string, 0, 4)
+	for _, existing := range splitFileEmailList(entry.Metadata["starredBy"]) {
+		if existing != email {
+			starredBy = append(starredBy, existing)
+		}
+	}
+	if starred && email != "" {
+		starredBy = append(starredBy, email)
+	}
+	sort.Strings(starredBy)
+	updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindFile, entry.ID, entry.Text, map[string]string{"starredBy": strings.Join(starredBy, ",")})
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	row := app.decorateFileRowForViewer(ctx, user, updated)
+	_, assignments := sharedFileFolderStore().snapshot()
+	row.FolderID = assignments[entry.ID]
+	return row, nil
+}
+
+// restoreAssistantFileForUser lifts a trashed upload back into the live list.
+// The row must be readable by the caller through the same seam every other
+// Drive door uses (a trashed row reads only for its uploader) AND deletable —
+// so the legacy approval admin, who may purge but cannot read another
+// member's private upload, gets the same non-enumerating 404 the trash list
+// and restore-by-others already give. The blob never left. Restoring a row
+// re-heads its version chain: if it is the newest untrashed version it
+// becomes the live head again and the interim head is re-superseded.
+func (app *kanbanBoardApp) restoreAssistantFileForUser(ctx context.Context, user *userAccount, fileID string) (assistantFileRecord, error) {
+	if app == nil || app.memory == nil || user == nil {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	entry, found := app.memory.entryByKindAndID(meetingMemoryKindFile, strings.TrimSpace(fileID))
+	if !found || !app.fileEntryReadableByViewer(ctx, user, entry) || !authorizeFileEntry(ctx, user, ACLDelete, entry) {
+		return assistantFileRecord{}, errFileSaveNotFound
+	}
+	if !fileEntryTrashed(entry.Metadata) {
+		return assistantFileRecord{}, errFileNotTrashed
+	}
+	updated, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindFile, entry.ID, entry.Text, map[string]string{
+		"deletedAt": "", "deletedBy": "", relevanceMetadataKey: relevanceActive,
+	})
+	if err != nil {
+		return assistantFileRecord{}, err
+	}
+	if err := app.reconcileFileVersionChain(entry.ID); err != nil {
+		log.Errorf("Drive version chain re-head after restore of %s failed: %v", entry.ID, err)
+	} else if current, ok := app.memory.entryByKindAndID(meetingMemoryKindFile, entry.ID); ok {
+		updated = current
+	}
+	if err := app.publishDriveFileSourceEpisode(updated); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
+		log.Errorf("SourceEpisode Drive restore publication unavailable: %v", err)
+	}
+	row := app.decorateFileRowForViewer(ctx, user, updated)
+	_, assignments := sharedFileFolderStore().snapshot()
+	row.FolderID = assignments[entry.ID]
+	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "restored", "file": row})
+	return row, nil
 }
 
 func normalizeAssistantFileName(raw string) (string, error) {
@@ -1191,13 +2216,11 @@ func (app *kanbanBoardApp) deleteAssistantFileForUser(ctx context.Context, user 
 
 	mode := "deleted"
 	var err error
-	if row.Origin != "chat" {
+	switch row.Origin {
+	case "deliverable":
 		if err := app.revokeAttachmentSourcesForOrigin(fileID); err != nil {
 			return "", err
 		}
-	}
-	switch row.Origin {
-	case "deliverable":
 		artifact, ok := authorizedArtifactForActions(ctx, user, row.ArtifactID, ACLReadContent, ACLWrite)
 		if !ok {
 			return "", errFileSaveNotFound
@@ -1210,27 +2233,408 @@ func (app *kanbanBoardApp) deleteAssistantFileForUser(ctx context.Context, user 
 	case "chat":
 		err = app.deleteChatAttachmentFromDrive(user, fileID)
 	default:
-		var deleted bool
-		var deletedEntry meetingMemoryEntry
-		deletedEntry, deleted, err = app.memory.deleteEntryByID(fileID)
-		if err == nil && !deleted {
+		// Soft delete (D6): the row is stamped deletedAt and hidden from every
+		// list and from recall (relevance=expired rides the single
+		// memoryEntryHiddenFromRecall gate); the blob and folder assignment are
+		// retained so restore is exact. Attachments derived from this file stop
+		// resolving while it is trashed because assistantFileAttachmentSource
+		// refuses trashed rows; the daily sweep revokes them for good at purge.
+		entry, ok := app.memory.entryByKindAndID(meetingMemoryKindFile, fileID)
+		if !ok || fileEntryTrashed(entry.Metadata) {
 			err = errFileSaveNotFound
-		} else if err == nil {
-			if publishErr := app.tombstoneDriveFileSourceEpisode(deletedEntry, time.Now().UTC()); publishErr != nil && !errors.Is(publishErr, ErrSourceEpisodeUnavailable) {
+			break
+		}
+		now := time.Now().UTC()
+		var trashed meetingMemoryEntry
+		trashed, _, err = app.memory.updateEntryWithMetadata(meetingMemoryKindFile, fileID, entry.Text, map[string]string{
+			"deletedAt": now.Format(time.RFC3339Nano), "deletedBy": normalizeAccountEmail(user.Email), relevanceMetadataKey: relevanceExpired,
+		})
+		if err == nil {
+			if publishErr := app.tombstoneDriveFileSourceEpisode(trashed, now); publishErr != nil && !errors.Is(publishErr, ErrSourceEpisodeUnavailable) {
 				log.Errorf("SourceEpisode Drive deletion publication unavailable: %v", publishErr)
 			}
+			// Trashing the head of a version chain must not make the whole
+			// chain vanish: the newest untrashed prior version becomes the
+			// live head again (D2).
+			if chainErr := app.reconcileFileVersionChain(fileID); chainErr != nil {
+				log.Errorf("Drive version chain re-head after trashing %s failed: %v", fileID, chainErr)
+			}
 		}
+		mode = "trashed"
 	}
 	if err != nil {
 		return "", err
 	}
 	// Folder assignments are projections. A persistence failure here can only
 	// leave a harmless dangling id, so it must not resurrect the removed source.
-	if err := moveFileToFolder(fileID, ""); err != nil {
-		log.Errorf("Clear deleted Drive file folder assignment %s failed: %v", fileID, err)
+	// A trashed upload keeps its assignment so restore returns it to its folder.
+	if mode != "trashed" {
+		if err := moveFileToFolder(fileID, ""); err != nil {
+			log.Errorf("Clear deleted Drive file folder assignment %s failed: %v", fileID, err)
+		}
 	}
-	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "deleted", "fileId": fileID})
+	broadcastSignedInKanbanEvent("file", map[string]any{"kind": "deleted", "fileId": fileID, "mode": mode})
 	return mode, nil
+}
+
+// sweepFileTrashOnce hard-deletes every upload trashed longer than
+// fileTrashRetention: attachment grants that originated from it are revoked,
+// the row leaves memory, and its folder assignment is cleared. It then hands
+// off to the weekly blob GC so orphaned bytes are reclaimed behind the purge.
+// Keyless-safe: no provider call anywhere on this path.
+func (app *kanbanBoardApp) sweepFileTrashOnce(now time.Time) int {
+	if app == nil || app.memory == nil {
+		return 0
+	}
+	var expired []meetingMemoryEntry
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		deletedAt := parseRFC3339OrZero(entry.Metadata["deletedAt"])
+		if deletedAt.IsZero() || now.Sub(deletedAt) < fileTrashRetention {
+			continue
+		}
+		expired = append(expired, entry)
+	}
+	purged := len(app.purgeTrashedFileEntries(expired))
+	if purged > 0 {
+		log.Infof("Drive trash sweep purged %d upload(s) trashed longer than %s", purged, fileTrashRetention)
+	}
+	if _, _, err := app.runScheduledBlobSweep(now); err != nil {
+		log.Errorf("Scheduled blob sweep after Drive trash purge failed: %v", err)
+	}
+	return purged
+}
+
+// purgeTrashedFileEntry hard-deletes one trashed upload (the batch form below
+// is the shared path; this is its single-row convenience).
+func (app *kanbanBoardApp) purgeTrashedFileEntry(entry meetingMemoryEntry) bool {
+	return len(app.purgeTrashedFileEntries([]meetingMemoryEntry{entry})) == 1
+}
+
+// purgeTrashedFileEntries is the one hard-delete path for trashed uploads,
+// shared by the daily sweep and the self-service empty-trash door: revoke the
+// attachment grants that originated from each row, splice each row out of its
+// version chain (its children re-point at its parent so a purged middle
+// version never severs the chain), remove every row in ONE store rewrite,
+// then clear the folder assignments. Never touches a live (untrashed) row; a
+// row whose grant revocation fails is left for the next pass. Returns the
+// rows actually removed.
+func (app *kanbanBoardApp) purgeTrashedFileEntries(entries []meetingMemoryEntry) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || len(entries) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Kind != meetingMemoryKindFile || !fileEntryTrashed(entry.Metadata) {
+			continue
+		}
+		if err := app.revokeAttachmentSourcesForOrigin(entry.ID); err != nil {
+			log.Errorf("Drive trash purge could not revoke attachment sources for %s: %v", entry.ID, err)
+			continue
+		}
+		ids = append(ids, entry.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	purging := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		purging[id] = struct{}{}
+	}
+	// Splice: a child of a purged row inherits the purged row's parent (walking
+	// past any parent that is itself being purged). versionOf edges are what
+	// bridge a chain across trashed versions, so they must survive the purge.
+	byID := map[string]meetingMemoryEntry{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		byID[entry.ID] = entry
+	}
+	for _, entry := range byID {
+		if _, gone := purging[entry.ID]; gone {
+			continue
+		}
+		parent := strings.TrimSpace(entry.Metadata["versionOf"])
+		if _, parentGone := purging[parent]; parent == "" || !parentGone {
+			continue
+		}
+		visited := map[string]bool{}
+		for parent != "" && !visited[parent] {
+			visited[parent] = true
+			if _, gone := purging[parent]; !gone {
+				break
+			}
+			parent = strings.TrimSpace(byID[parent].Metadata["versionOf"])
+		}
+		if _, _, err := app.memory.updateEntryWithMetadata(meetingMemoryKindFile, entry.ID, entry.Text, map[string]string{"versionOf": parent}); err != nil {
+			log.Errorf("Drive trash purge could not splice version chain at %s: %v", entry.ID, err)
+		}
+	}
+	removed, err := app.memory.deleteEntriesByIDJournaled(ids, func(current meetingMemoryEntry) bool {
+		return current.Kind == meetingMemoryKindFile && fileEntryTrashed(current.Metadata)
+	})
+	if err != nil {
+		log.Errorf("Drive trash purge could not remove %d row(s): %v", len(ids), err)
+		return nil
+	}
+	for _, entry := range removed {
+		if err := moveFileToFolder(entry.ID, ""); err != nil {
+			log.Errorf("Clear purged Drive file folder assignment %s failed: %v", entry.ID, err)
+		}
+	}
+	return removed
+}
+
+// emptyAssistantFileTrashForUser hard-deletes the caller's OWN trashed
+// uploads now (the 30-day sweep is the default; this is the self-service
+// escape hatch for quota). Returns the purged count and the bytes the Drive's
+// usage actually dropped by (a blob still referenced elsewhere frees nothing).
+// One Drive scan does both jobs: it selects the caller's trashed rows and
+// records, per content-addressed blob, the bytes it holds and how many rows
+// hold it — so the freed bytes are exactly driveUsageForPrincipal's delta
+// without walking the Drive twice more.
+func (app *kanbanBoardApp) emptyAssistantFileTrashForUser(ctx context.Context, user *userAccount) (int, int64) {
+	if app == nil || app.memory == nil || user == nil {
+		return 0, 0
+	}
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	type blobHolders struct {
+		size int64
+		rows int
+	}
+	holders := map[string]*blobHolders{}
+	usageKey := func(entry meetingMemoryEntry) string {
+		key := strings.TrimSpace(entry.Metadata["blobRef"])
+		if !validBlobRef(key) {
+			key = "entry:" + entry.ID
+		}
+		return key
+	}
+	var targets []meetingMemoryEntry
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
+			continue
+		}
+		key := usageKey(entry)
+		holder := holders[key]
+		if holder == nil {
+			holder = &blobHolders{}
+			if size, err := strconv.ParseInt(strings.TrimSpace(entry.Metadata["size"]), 10, 64); err == nil && size > 0 {
+				holder.size = size
+			}
+			holders[key] = holder
+		}
+		holder.rows++
+		if fileEntryTrashed(entry.Metadata) && fileEntryUploadedByViewer(ctx, user, entry.Metadata) {
+			targets = append(targets, entry)
+		}
+	}
+	removed := app.purgeTrashedFileEntries(targets)
+	purgedPerKey := map[string]int{}
+	for _, entry := range removed {
+		purgedPerKey[usageKey(entry)]++
+	}
+	var freed int64
+	for key, count := range purgedPerKey {
+		if holder := holders[key]; holder != nil && holder.rows == count {
+			freed += holder.size
+		}
+	}
+	if len(removed) > 0 {
+		broadcastSignedInKanbanEvent("file", map[string]any{"kind": "trash_emptied", "purged": len(removed)})
+	}
+	return len(removed), freed
+}
+
+// assistantFileEmptyTrashHandler serves POST /assistant/files/trash/empty →
+// {ok, purged, freedBytes}; caller's own trashed rows only.
+func assistantFileEmptyTrashHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := assistantFilesGate(w, r, http.MethodPost, assistantFileEmptyTrashHandler)
+	if !ok {
+		return
+	}
+	purged, freed := kanbanApp.emptyAssistantFileTrashForUser(r.Context(), user)
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "purged": purged, "freedBytes": freed})
+}
+
+// startFileTrashSweeper runs sweepFileTrashOnce daily (first pass shortly
+// after boot so a frequently redeployed droplet still purges on schedule).
+// Same boot-once, keyless, no-app-lock shape as the liveness sweeper.
+func (app *kanbanBoardApp) startFileTrashSweeper() {
+	if app == nil || app.memory == nil {
+		return
+	}
+	go func() {
+		timer := time.NewTimer(fileTrashSweepBootDelay)
+		<-timer.C
+		app.sweepFileTrashOnce(time.Now().UTC())
+		ticker := time.NewTicker(fileTrashSweepInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			app.sweepFileTrashOnce(time.Now().UTC())
+		}
+	}()
+}
+
+// migrateFileVisibilityDefaults is the boot-time stamping migration for D1:
+// every kind=file row with no visibility is stamped company — the read-time
+// default it already receives, now made explicit on disk so later policy
+// changes to the default can never silently re-scope legacy uploads. Rows
+// already stamped are untouched, so a second run writes nothing; the stamped
+// count is the only marker it needs.
+func (app *kanbanBoardApp) migrateFileVisibilityDefaults() int {
+	if app == nil || app.memory == nil {
+		return 0
+	}
+	// Read pass collects ids only; the stamp is ONE locked pass with a single
+	// fsync'd rewrite (an 88 MB store must not be rewritten once per row).
+	targetIDs := make([]string, 0)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if strings.TrimSpace(entry.Metadata["visibility"]) != "" {
+			continue
+		}
+		targetIDs = append(targetIDs, entry.ID)
+	}
+	if len(targetIDs) == 0 {
+		log.Infof("Drive visibility migration stamped 0 unlabeled file row(s) company")
+		return 0
+	}
+	stamped, err := app.memory.updateEntriesWithMetadata(meetingMemoryKindFile, targetIDs, map[string]string{"visibility": fileVisibilityCompany})
+	if err != nil {
+		// Nothing was written; the next boot retries the same idempotent stamp.
+		log.Errorf("Drive visibility migration batch stamp failed: %v", err)
+		return 0
+	}
+	log.Infof("Drive visibility migration stamped %d unlabeled file row(s) company", stamped)
+	return stamped
+}
+
+// driveUsage is the GET /assistant/files/usage payload (D9).
+type driveUsage struct {
+	BytesUsed  int64 `json:"bytesUsed"`
+	FileCount  int   `json:"fileCount"`
+	QuotaBytes int64 `json:"quotaBytes"`
+}
+
+// driveQuotaBytes reads DRIVE_QUOTA_BYTES (default 20 GiB).
+func driveQuotaBytes() int64 {
+	if raw := strings.TrimSpace(os.Getenv(driveQuotaBytesEnv)); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return driveQuotaBytesDefault
+}
+
+// driveUsageForPrincipal sums the Drive's stored bytes (tenant-scoped under a
+// bound principal). Blobs are content-addressed, so the same bytes stored
+// under two rows count once; trashed rows still count because their blob is
+// retained until the purge. fileCount is the live (non-trashed) row count.
+func (app *kanbanBoardApp) driveUsageForPrincipal(ctx context.Context) driveUsage {
+	usage := driveUsage{QuotaBytes: driveQuotaBytes()}
+	if app == nil || app.memory == nil {
+		return usage
+	}
+	principal, canonical := strideE10TenantPrincipalFromContext(ctx)
+	counted := map[string]struct{}{}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
+		if canonical && strings.TrimSpace(entry.Metadata["tenantId"]) != principal.TenantID {
+			continue
+		}
+		if !fileEntryTrashed(entry.Metadata) {
+			usage.FileCount++
+		}
+		key := strings.TrimSpace(entry.Metadata["blobRef"])
+		if !validBlobRef(key) {
+			key = "entry:" + entry.ID
+		}
+		if _, dup := counted[key]; dup {
+			continue
+		}
+		counted[key] = struct{}{}
+		if size, err := strconv.ParseInt(strings.TrimSpace(entry.Metadata["size"]), 10, 64); err == nil && size > 0 {
+			usage.BytesUsed += size
+		}
+	}
+	return usage
+}
+
+// assistantFilesGate is the shared gate stack of the Files doors (method,
+// origin, session, app, tenant binding). It returns the signed-in user only
+// when the caller may proceed on this exact request; on a tenant rebind it
+// re-enters handler with the bound context and the caller must return.
+func assistantFilesGate(w http.ResponseWriter, r *http.Request, method string, handler http.HandlerFunc) (*userAccount, bool) {
+	if r.Method != method {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return nil, false
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return nil, false
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return nil, false
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "files are unavailable")
+		return nil, false
+	}
+	if !strideE10TenantSurfaceUseBound(r.Context(), StrideE10TenantSurfaceDrive) {
+		err := withStrideE10TenantRequestUse(r, StrideE10TenantSurfaceDrive, func(ctx context.Context, _ *StrideE10TenantPrincipal) error {
+			handler(w, r.WithContext(ctx))
+			return nil
+		})
+		if err != nil {
+			writeStrideE10TenantHookError(w, err, "files are unavailable")
+		}
+		return nil, false
+	}
+	return user, true
+}
+
+// assistantFileUsageHandler serves GET /assistant/files/usage (D9).
+func assistantFileUsageHandler(w http.ResponseWriter, r *http.Request) {
+	if _, ok := assistantFilesGate(w, r, http.MethodGet, assistantFileUsageHandler); !ok {
+		return
+	}
+	usage := kanbanApp.driveUsageForPrincipal(r.Context())
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "bytesUsed": usage.BytesUsed, "fileCount": usage.FileCount, "quotaBytes": usage.QuotaBytes,
+	})
+}
+
+// assistantFileRestoreHandler serves POST /assistant/files/restore {id} (D6).
+func assistantFileRestoreHandler(w http.ResponseWriter, r *http.Request) {
+	user, ok := assistantFilesGate(w, r, http.MethodPost, assistantFileRestoreHandler)
+	if !ok {
+		return
+	}
+	payload := struct {
+		ID     string `json:"id"`
+		FileID string `json:"fileId"`
+	}{}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, "could not read restore request")
+		return
+	}
+	fileID := firstNonEmptyString(strings.TrimSpace(payload.ID), strings.TrimSpace(payload.FileID))
+	if fileID == "" {
+		writeAuthError(w, http.StatusBadRequest, errFileFolderFileID.Error())
+		return
+	}
+	row, err := kanbanApp.restoreAssistantFileForUser(r.Context(), user, fileID)
+	if err != nil {
+		switch {
+		case errors.Is(err, errFileSaveNotFound):
+			writeAuthError(w, http.StatusNotFound, "file not found")
+		case errors.Is(err, errFileNotTrashed):
+			writeAuthError(w, http.StatusConflict, errFileNotTrashed.Error())
+		default:
+			log.Errorf("Restore Drive file %s failed: %v", fileID, err)
+			writeAuthError(w, http.StatusInternalServerError, "could not restore the file")
+		}
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "file": row})
 }
 
 func (app *kanbanBoardApp) deleteChatAttachmentFromDrive(user *userAccount, fileID string) error {
@@ -1355,6 +2759,26 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := assistantFileUploadName(header.Filename)
+	// D1: optional visibility (default company); D5: optional folderId so a
+	// same-name re-upload chains inside its folder; D9: the quota is checked
+	// before any bytes land in the blob store.
+	requestedVisibility := strings.TrimSpace(r.FormValue("visibility"))
+	visibility, visibilityOK := normalizeFileVisibility(requestedVisibility)
+	if !visibilityOK {
+		writeAuthError(w, http.StatusBadRequest, errFileVisibilityInvalid.Error())
+		return
+	}
+	folderID := strings.TrimSpace(r.FormValue("folderId"))
+	if !fileFolderWritableFromContext(r.Context(), user, folderID) {
+		writeAuthError(w, fileFolderErrorStatus(errFileFolderNotFound), errFileFolderNotFound.Error())
+		return
+	}
+	if usage := kanbanApp.driveUsageForPrincipal(r.Context()); usage.BytesUsed+int64(len(data)) > usage.QuotaBytes {
+		writeAuthJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+			"error": errFileQuotaExceeded.Error(), "bytesUsed": usage.BytesUsed, "quotaBytes": usage.QuotaBytes,
+		})
+		return
+	}
 	uploadMime := assistantFileUploadMimeFor(header.Header.Get("Content-Type"), name)
 	ref, err := putBlob(data, uploadMime)
 	if err != nil {
@@ -1404,6 +2828,10 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 		"uploaderName":  uploaderName,
 		"origin":        "files",
 		"brainStatus":   brainStatus,
+		"visibility":    visibility,
+		// ownerEmail mirrors the uploader so recall scoping (private/people)
+		// and the office-event owner routing see the same principal.
+		"ownerEmail": normalizeAccountEmail(user.Email),
 	}
 	if principal, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
 		metadata["tenantId"] = principal.TenantID
@@ -1412,20 +2840,69 @@ func assistantFileUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if brainStatus == fileBrainStatusIngested {
 		metadata["ingestedAt"] = now.Format(time.RFC3339Nano)
 	}
+	// D5 versioning: a same-name upload into the same folder by the same
+	// uploader chains onto the live prior row and inherits its access/stars
+	// unless this upload names its own visibility.
+	prior, hasPrior := kanbanApp.priorFileVersionForUpload(r.Context(), user, name, folderID)
+	if hasPrior {
+		metadata["versionOf"] = prior.ID
+		// Continue the chain's count past trashed/superseded versions too: a
+		// re-headed v1 (its v2 in the trash) gets v3 next, never a second v2.
+		metadata["version"] = strconv.Itoa(kanbanApp.fileVersionChainMaxVersion(prior) + 1)
+		if requestedVisibility == "" {
+			if inherited, ok := fileEntryVisibility(prior.Metadata); ok {
+				metadata["visibility"] = inherited
+			}
+		}
+		for _, key := range []string{"grants", "starredBy"} {
+			if value := strings.TrimSpace(prior.Metadata[key]); value != "" {
+				metadata[key] = value
+			}
+		}
+	}
 	entry, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, fmt.Sprintf("file-%d", now.UnixNano()), entryText, metadata)
 	if err != nil {
 		writeAuthError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if folderID != "" {
+		if err := moveFileToFolder(entry.ID, folderID); err != nil {
+			// The folder may disappear after validation. Remove the unannounced
+			// row so the failed upload cannot leave a surprise root entry.
+			if _, deleted, deleteErr := kanbanApp.memory.deleteEntryByID(entry.ID); deleteErr != nil || !deleted {
+				log.Errorf("Upload folder assignment rollback for %s failed: %v", entry.ID, deleteErr)
+			}
+			status, message := fileFolderPublicError(err)
+			writeAuthError(w, status, message)
+			return
+		}
+	}
+	if hasPrior {
+		// The row and its prior are two store rewrites (no multi-entry
+		// transaction exists). Append first so a failed stamp can never leave
+		// the prior pointing at a row that does not exist; if the stamp then
+		// fails, remove the just-appended row (and its folder assignment) and
+		// fail the upload rather than leave two live heads in one chain.
+		if _, _, err := kanbanApp.memory.updateEntryWithMetadata(meetingMemoryKindFile, prior.ID, prior.Text, map[string]string{"superseded": "true", "supersededBy": entry.ID}); err != nil {
+			log.Errorf("Drive version chain stamp %s -> %s failed: %v", prior.ID, entry.ID, err)
+			if folderID != "" {
+				if moveErr := moveFileToFolder(entry.ID, ""); moveErr != nil {
+					log.Errorf("Upload rollback folder assignment clear for %s failed: %v", entry.ID, moveErr)
+				}
+			}
+			if _, deleted, deleteErr := kanbanApp.memory.deleteEntryByID(entry.ID); deleteErr != nil || !deleted {
+				log.Errorf("Upload rollback after version chain stamp failure for %s failed: %v", entry.ID, deleteErr)
+			}
+			writeAuthError(w, http.StatusInternalServerError, "could not record the new file version")
+			return
+		}
+	}
 	if err := kanbanApp.publishDriveFileSourceEpisode(entry); err != nil && !errors.Is(err, ErrSourceEpisodeUnavailable) {
 		log.Errorf("SourceEpisode Drive upload publication unavailable: %v", err)
 	}
 
-	row := fileRecordFromEntry(entry)
-	if _, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
-		row.UploaderEmail = ""
-		row.CanDelete = true
-	}
+	row := kanbanApp.decorateFileRowForViewer(r.Context(), user, entry)
+	row.FolderID = folderID
 	broadcastSignedInKanbanEvent("file", row)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":   true,
@@ -1564,6 +3041,10 @@ func (app *kanbanBoardApp) saveChatAttachmentToFilesBound(ctx context.Context, u
 		"sourceMessageId":    messageID,
 		"sourceFileRevision": strings.TrimSpace(source.SourceRevision),
 		"sourceAttachmentId": strings.TrimSpace(source.SourceID),
+		// A promoted row adds no restriction beyond its source audience; the
+		// source binding above is what keeps a private attachment private.
+		"visibility": fileVisibilityCompany,
+		"ownerEmail": actorEmail,
 	}
 	if principal != nil {
 		metadata["tenantId"] = principal.TenantID
@@ -1858,7 +3339,8 @@ func assistantFileSaveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	broadcastSignedInKanbanEvent("file", row)
 	writeAuthJSON(w, http.StatusOK, map[string]any{
-		"ok":   true,
-		"file": row,
+		"ok":     true,
+		"fileId": row.ID,
+		"file":   row,
 	})
 }

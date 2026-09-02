@@ -109,7 +109,7 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 		`.content-studio-drawer[data-workspace-mode="full"]`,
 		`body:has(#contentStudioDrawer[data-workspace-mode="full"]) #toolRail`,
 		`left: 56px;`,
-		`.pd1-primary-nav__external:active { scale: 0.96; }`,
+		`.pd1-primary-nav__external:active { transform: scale(var(--press-scale)); }`, // plan 011: one press token
 		`.pd1-primary-nav__external-wrap { display: none !important; }`,
 	} {
 		if !strings.Contains(html, want) {

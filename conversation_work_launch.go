@@ -2,12 +2,135 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
 
 type scoutChatMessageCommitter func(...scoutChatMessageRecord) (scoutChatThreadRecord, error)
+
+// workRequestContextRef is one client-declared Drive attachment on a work
+// request (Wave 5 D8): {ref: "file|<id>", sourceId?, sourceRevision?} — the
+// Files-surface ref plus the handle /assistant/attachments/from-file returns.
+// It is DATA the launcher re-authorizes; it never grants anything by itself.
+type workRequestContextRef struct {
+	Ref            string `json:"ref"`
+	SourceID       string `json:"sourceId,omitempty"`
+	SourceRevision string `json:"sourceRevision,omitempty"`
+}
+
+type workRequestContextRefsContextKey struct{}
+
+// errWorkRequestContextRefForbidden is the fail-closed launch refusal for a
+// requested Drive ref the requester may not read into this destination. HTTP
+// doors map it to 403 (workRequestContextRefStatus); nothing is launched.
+var errWorkRequestContextRefForbidden = errors.New("a requested Drive file is not readable by the requester")
+
+const workRequestContextRefsMax = 8
+
+// withWorkRequestContextRefs carries the payload's optional contextRefs from
+// the chat/work-request door into startConversationPrivateWork, the one seam
+// that admits client-declared refs into a launch.
+func withWorkRequestContextRefs(ctx context.Context, refs []workRequestContextRef) context.Context {
+	if len(refs) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, workRequestContextRefsContextKey{}, append([]workRequestContextRef(nil), refs...))
+}
+
+func workRequestContextRefsFromContext(ctx context.Context) []workRequestContextRef {
+	if ctx == nil {
+		return nil
+	}
+	refs, _ := ctx.Value(workRequestContextRefsContextKey{}).([]workRequestContextRef)
+	return refs
+}
+
+// decodeWorkRequestContextRefs parses the optional payload field: a list of
+// {ref, sourceId?, sourceRevision?} objects or bare "file|<id>" strings.
+func decodeWorkRequestContextRefs(raw any) ([]workRequestContextRef, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("contextRefs must be a list")
+	}
+	if len(items) > workRequestContextRefsMax {
+		return nil, fmt.Errorf("at most %d context refs per request", workRequestContextRefsMax)
+	}
+	refs := make([]workRequestContextRef, 0, len(items))
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			refs = append(refs, workRequestContextRef{Ref: strings.TrimSpace(value)})
+		case map[string]any:
+			refs = append(refs, workRequestContextRef{
+				Ref:            strings.TrimSpace(asString(value["ref"])),
+				SourceID:       strings.TrimSpace(asString(value["sourceId"])),
+				SourceRevision: strings.TrimSpace(asString(value["sourceRevision"])),
+			})
+		default:
+			return nil, fmt.Errorf("contextRefs entries must be objects")
+		}
+	}
+	return refs, nil
+}
+
+func workRequestContextRefStatus(err error) int {
+	if errors.Is(err, errWorkRequestContextRefForbidden) {
+		return http.StatusForbidden
+	}
+	return http.StatusInternalServerError
+}
+
+// authorizeWorkRequestContextRefs validates every requested ref through the
+// same resolution /assistant/attachments/from-file uses
+// (assistantFileAttachmentSourceForDestination: per-file ACL, trash, promoted
+// source, audience intersection with the destination thread). A supplied
+// sourceId must be the requester's own Drive-origin grant for that exact file
+// at its current revision. Any failure refuses the whole launch.
+func (app *kanbanBoardApp) authorizeWorkRequestContextRefs(ctx context.Context, user *userAccount, destination scoutChatThreadRecord, requested []workRequestContextRef) ([]string, error) {
+	if len(requested) == 0 {
+		return nil, nil
+	}
+	if app == nil || app.memory == nil || user == nil {
+		return nil, errWorkRequestContextRefForbidden
+	}
+	refs := make([]string, 0, len(requested))
+	for _, item := range requested {
+		ref := strings.TrimSpace(item.Ref)
+		if !strings.HasPrefix(ref, "file|") {
+			return nil, errWorkRequestContextRefForbidden
+		}
+		fileID := strings.TrimSpace(strings.TrimPrefix(ref, "file|"))
+		if fileID == "" {
+			return nil, errWorkRequestContextRefForbidden
+		}
+		_, _, revision, ok := app.assistantFileAttachmentSourceForDestination(ctx, user, fileID, destination)
+		if !ok {
+			return nil, errWorkRequestContextRefForbidden
+		}
+		requestedRevision := strings.TrimSpace(item.SourceRevision)
+		if sourceID := strings.TrimSpace(item.SourceID); sourceID != "" {
+			app.pendingAttachmentUploadsMu.Lock()
+			grant, found := app.pendingAttachmentUploads[sourceID]
+			app.pendingAttachmentUploadsMu.Unlock()
+			if !found || grant.State == attachmentSourceRevoked ||
+				normalizeAccountEmail(grant.OwnerEmail) != normalizeAccountEmail(user.Email) ||
+				strings.TrimSpace(grant.OriginFileID) != fileID || strings.TrimSpace(grant.OriginRevision) != revision ||
+				(requestedRevision != "" && requestedRevision != strings.TrimSpace(grant.SourceRevision)) {
+				return nil, errWorkRequestContextRefForbidden
+			}
+		} else if requestedRevision != "" && requestedRevision != revision {
+			return nil, errWorkRequestContextRefForbidden
+		}
+		refs = append(refs, assistantFileContextRef(fileID))
+	}
+	return canonicalAssistantContextRefs(refs), nil
+}
 
 type conversationWorkProjectionPendingError struct{ err error }
 
@@ -100,6 +223,16 @@ func (app *kanbanBoardApp) startConversationPrivateWork(
 		return nil, fmt.Errorf("private work can start only in a private conversation")
 	}
 	work.ContextRefs = strings.TrimSpace(contextRefs)
+	// Wave 5 D8: client-declared Drive refs on the request are admitted only
+	// after every one re-authorizes for this requester and destination; a
+	// single refusal launches nothing.
+	if requested := workRequestContextRefsFromContext(ctx); len(requested) > 0 {
+		authorized, refErr := app.authorizeWorkRequestContextRefs(ctx, user, thread, requested)
+		if refErr != nil {
+			return nil, refErr
+		}
+		work.ContextRefs = encodeAssistantContextRefs(canonicalAssistantContextRefs(append(decodeAssistantContextRefs(work.ContextRefs), authorized...)))
+	}
 	if strings.TrimSpace(work.AgentID) != "" && work.Kind != conversationWorkWorkstream {
 		return nil, fmt.Errorf("the addressed agent is not admitted for this work; ask Scout to coordinate it or choose an eligible agent capability")
 	}

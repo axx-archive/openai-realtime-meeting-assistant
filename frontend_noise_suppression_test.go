@@ -115,12 +115,16 @@ func TestIndexRelabelsModesAndDefaultsOnDesktop(t *testing.T) {
 	html := string(rawHTML)
 
 	for _, want := range []string{
-		// Relabeled modes: intent, not mechanism.
+		// Relabeled modes: intent, not mechanism. Wave 10's settings pass
+		// re-pinned the two explanations: voice focus now says what it removes
+		// ("keyboard, fan and room noise") instead of how it is chosen, and raw
+		// mic says when to reach for it ("instruments, or when cleanup sounds
+		// wrong") instead of listing the DSP it skips.
 		`voice focus <span class="noise-mode-tag">intelligent</span>`,
-		"no setup, no training",
+		"removes keyboard, fan and room noise. Picks the strongest engine this browser can run — nothing to set up.",
 		"<strong>standard cleanup</strong>",
 		"<strong>raw mic</strong>",
-		"no noise suppression or gain — echo cancellation only.",
+		"nothing applied except echo cancellation. For instruments, or when cleanup sounds wrong.",
 		// Default-on desktop, standard on mobile.
 		"mode: isMobileDevice ? 'standard' : 'voice-focus'",
 	} {

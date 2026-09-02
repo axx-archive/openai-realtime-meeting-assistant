@@ -51,6 +51,10 @@ type openAITextRequest struct {
 	// signature — swapped as a test seam across the whole suite — is untouched.
 	// An empty Seat records as seatUntagged: visible gaps beat invisible ones.
 	Seat string
+	// FallbackReplay is set only by withProviderResilience (provider_breaker.go)
+	// on the one same-provider replay after a classified wire failure. The
+	// usage ledger stamps it as FallbackUsed so cost/provenance stay honest.
+	FallbackReplay bool
 	// Workflow and ServiceTier make routing provenance explicit in the usage
 	// book. JSONSchema enables Responses strict structured output without
 	// changing the responder signature used by existing text callers.
@@ -359,7 +363,10 @@ func callOpenAITextWithBoundedInvocationRetry(ctx context.Context, apiKey string
 	return responder(ctx, apiKey, request)
 }
 
-var createOpenAITextResponse openAITextResponder = createOpenAITextResponseHTTP
+// createOpenAITextResponse is the production text seam. It rides the Wave 9
+// per-seat breaker + same-provider fallback (provider_breaker.go); seats
+// outside providerResilientSeats pass through to the HTTP responder untouched.
+var createOpenAITextResponse openAITextResponder = withProviderResilience(createOpenAITextResponseHTTP)
 
 func meetingBrainModel() string {
 	return defaultMeetingBrainModel
@@ -482,6 +489,7 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 			WireSuccess:          wireSuccess,
 			AcceptedOutput:       accepted,
 			OutputFailureReason:  strings.TrimSpace(reason),
+			FallbackUsed:         request.FallbackReplay,
 		}
 		if usage != nil {
 			cached := usage.InputTokensDetails.CachedTokens

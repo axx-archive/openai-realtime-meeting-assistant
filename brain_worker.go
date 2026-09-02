@@ -79,7 +79,10 @@ func meetingBrainAgent() ambientAgentConfig {
 		// scheduled passes until a member is present (or the close flush).
 		roomScoped:           true,
 		defersWhenGuestsOnly: true,
-		produce:              (*kanbanBoardApp).produceMeetingBrainWriteUp,
+		// Wave 8 D5: chat-filed rows (source=channel|riff) belong to the channel
+		// digest producer; they never ride the meeting brain prompt.
+		inputFilter: meetingSourcedTranscript,
+		produce:     (*kanbanBoardApp).produceMeetingBrainWriteUp,
 	}
 }
 

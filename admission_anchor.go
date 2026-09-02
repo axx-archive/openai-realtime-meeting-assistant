@@ -561,6 +561,12 @@ func (app *kanbanBoardApp) admitParticipantWithAnchorResult(ctx context.Context,
 	}
 	app.mu.Lock()
 	state := app.roomLiveLocked(roomID)
+	// A member rejoin of the exact participant session the host closed this
+	// sitting is refused (members are otherwise free to come back).
+	if err := roomEjectionRefusalLocked(state, "", name, sessionID); err != nil {
+		app.mu.Unlock()
+		return participantAdmissionResult{}, err
+	}
 	if transferExisting {
 		if err := app.validateParticipantTransferAdmissionLocked(state, name); err != nil {
 			app.mu.Unlock()
@@ -606,6 +612,9 @@ func (app *kanbanBoardApp) admitParticipantWithAnchorResult(ctx context.Context,
 		app.scheduleMeetingCoreFinalization(closedPriorMeetingID)
 		return participantAdmissionResult{}, err
 	}
+	// A new session of a host-muted name was never asked to mute and its
+	// audio is not dropped: the roster must not keep claiming the mute.
+	clearHostMuteForNewSessionLocked(state, name)
 	result.meeting = meeting
 	result.meetingChanged = meetingChanged
 	result.retired = append(result.retired, app.retireParticipantSeatsOutsideRoomLocked(name, roomID)...)
@@ -670,6 +679,12 @@ func (app *kanbanBoardApp) admitGuestWithAnchorResult(ctx context.Context, roomI
 		}
 		display = dedupeGuestDisplayNameLocked(state, guestNamePrefix+base)
 	}
+	// A seat the host removed this sitting (same guest link, or the same
+	// display name) is refused before any anchor or meeting side effect.
+	if err := roomEjectionRefusalLocked(state, sessionKey, display, participantSessionID); err != nil {
+		app.mu.Unlock()
+		return participantAdmissionResult{}, err
+	}
 	if err := app.validateParticipantAdmissionLocked(state, display, participantSessionID); err != nil {
 		app.mu.Unlock()
 		return participantAdmissionResult{}, err
@@ -707,6 +722,10 @@ func (app *kanbanBoardApp) admitGuestWithAnchorResult(ctx context.Context, roomI
 	}
 	if err != nil {
 		app.rearmMeetingIdleAfterFailedAdmissionLocked(roomID, state)
+	} else {
+		// A new session of a host-muted name was never asked to mute and its
+		// audio is not dropped: the roster must not keep claiming the mute.
+		clearHostMuteForNewSessionLocked(state, display)
 	}
 	app.mu.Unlock()
 	app.scheduleMeetingCoreFinalization(closedPriorMeetingID)

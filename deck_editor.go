@@ -60,10 +60,14 @@ var (
 )
 
 type deckDocument struct {
-	SchemaVersion int         `json:"schemaVersion"`
-	Width         int         `json:"width"`
-	Height        int         `json:"height"`
-	Slides        []deckSlide `json:"slides"`
+	SchemaVersion int `json:"schemaVersion"`
+	Width         int `json:"width"`
+	Height        int `json:"height"`
+	// Theme is one of the built-in deck themes (deck_theme.go). Scenes stored
+	// before themes existed carry no theme and resolve to graphite on load, so
+	// their #111111-class dark ground is preserved exactly.
+	Theme  deckTheme   `json:"theme"`
+	Slides []deckSlide `json:"slides"`
 }
 
 type deckSlide struct {
@@ -388,6 +392,10 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusNotFound, "deck artifact not found")
 			return
 		}
+		if rawVersion := strings.TrimSpace(r.URL.Query().Get("version")); rawVersion != "" {
+			deckEditorVersionGET(w, artifact, rawVersion)
+			return
+		}
 		deck, imported, importQuality, err := loadDeckDocument(artifact)
 		if err != nil {
 			writeAuthError(w, http.StatusConflict, "deck document is unavailable")
@@ -401,6 +409,7 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		response := map[string]any{
 			"ok": true, "artifact": deckArtifactViewFromEntry(artifact), "deck": deck, "imported": imported, "importQuality": importQuality, "canWrite": canWrite,
 			"qualityState": qualityState, "canPresent": admitted, "canExport": admitted && aclCanExport,
+			"themes": deckThemes(), "layouts": deckLayouts(deck.Theme),
 		}
 		if aclCanWrite && !canWrite {
 			response["writeBlockedReason"] = "legacy deck cannot be edited without losing unrecognized content"
@@ -413,6 +422,7 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		ArtifactID      string       `json:"artifactId"`
 		ExpectedVersion int          `json:"expectedVersion"`
 		Title           string       `json:"title"`
+		RestoredFrom    int          `json:"restoredFrom"`
 		Deck            deckDocument `json:"deck"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, deckDocumentMaxBytes+64<<10)).Decode(&payload); err != nil {
@@ -422,6 +432,11 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 	payload.Title = strings.TrimSpace(payload.Title)
 	if len([]rune(payload.Title)) > 160 {
 		writeAuthError(w, http.StatusBadRequest, "deck name is too long")
+		return
+	}
+	restoredFrom, restoredOK := studioRestoredFromMetadata(payload.RestoredFrom, payload.ExpectedVersion)
+	if !restoredOK {
+		writeAuthError(w, http.StatusBadRequest, "restoredFrom must name an existing prior version")
 		return
 	}
 	artifact, ok := authorizedArtifactForActions(r.Context(), user, strings.TrimSpace(payload.ArtifactID), ACLReadContent, ACLWrite)
@@ -446,8 +461,11 @@ func deckEditorHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Theme values are server-canonical: the client chooses an id, the
+	// catalog supplies the colors, so a stale client palette can never drift.
+	payload.Deck.Theme = resolveDeckTheme(payload.Deck.Theme)
 	title := firstNonEmptyString(payload.Title, strings.TrimSpace(artifact.Metadata["title"]), "Presentation")
-	updated, changed, err := persistDeckDocumentWithTitle(r.Context(), user, artifact, payload.Deck, title, nil)
+	updated, changed, err := persistDeckDocumentWithTitle(r.Context(), user, artifact, payload.Deck, title, map[string]string{artifactRestoredFromMetadataKey: restoredFrom})
 	if err != nil {
 		current, found := kanbanApp.osArtifactByID(artifact.ID)
 		if !found || artifactVersion(current) != payload.ExpectedVersion ||
@@ -733,6 +751,7 @@ func loadDeckDocument(artifact meetingMemoryEntry) (deckDocument, bool, string, 
 		if err := validateDeckDocument(deck, artifactAssetRefSet(artifact)); err != nil {
 			return deckDocument{}, false, "", err
 		}
+		deck.Theme = resolveDeckTheme(deck.Theme)
 		return deck, false, "native", nil
 	}
 	deck, quality := importLegacyDeckDocument(artifact)
@@ -816,6 +835,11 @@ func validateDeckDocument(deck deckDocument, allowedImageRefs map[string]struct{
 	}
 	if len(deck.Slides) < 1 || len(deck.Slides) > deckDocumentMaxSlides {
 		return fmt.Errorf("deck must contain 1-%d slides", deckDocumentMaxSlides)
+	}
+	if id := strings.TrimSpace(deck.Theme.ID); id != "" {
+		if _, known := deckThemeByID(id); !known {
+			return fmt.Errorf("deck theme %q is unknown (use graphite, putty, or ember)", id)
+		}
 	}
 	seenSlides := map[string]struct{}{}
 	seenElements := map[string]struct{}{}
@@ -999,6 +1023,7 @@ func deckImageExtension(mime string) string {
 }
 
 func compileDeckDocumentHTML(deck deckDocument, title string) string {
+	deck = deckWithThemeDefaults(deck)
 	var builder strings.Builder
 	builder.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>")
 	builder.WriteString(html.EscapeString(firstNonEmptyString(strings.TrimSpace(title), "Presentation")))
@@ -1132,7 +1157,7 @@ func deckCSSNumber(value float64) string {
 }
 
 func importLegacyDeckDocument(artifact meetingMemoryEntry) (deckDocument, string) {
-	deck := deckDocument{SchemaVersion: deckDocumentSchemaVersion, Width: deckDocumentWidth, Height: deckDocumentHeight}
+	deck := deckDocument{SchemaVersion: deckDocumentSchemaVersion, Width: deckDocumentWidth, Height: deckDocumentHeight, Theme: resolveDeckTheme(deckTheme{})}
 	doc, err := xhtml.Parse(strings.NewReader(artifact.Text))
 	if err != nil {
 		return defaultImportedDeck(artifact), "approximate"
@@ -1800,7 +1825,7 @@ func legacyNodeTextPreservingWhitespace(node *xhtml.Node) string {
 
 func defaultImportedDeck(artifact meetingMemoryEntry) deckDocument {
 	title := firstNonEmptyString(strings.TrimSpace(artifact.Metadata["title"]), "Presentation")
-	return deckDocument{SchemaVersion: deckDocumentSchemaVersion, Width: deckDocumentWidth, Height: deckDocumentHeight, Slides: []deckSlide{{
+	return deckDocument{SchemaVersion: deckDocumentSchemaVersion, Width: deckDocumentWidth, Height: deckDocumentHeight, Theme: resolveDeckTheme(deckTheme{}), Slides: []deckSlide{{
 		ID: "slide-1", Background: "#101014", Elements: []deckElement{defaultDeckTextElement("text-1", title, 120, 120, 1680, 240, 84, 700)},
 	}}}
 }

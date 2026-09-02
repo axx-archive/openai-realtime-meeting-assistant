@@ -842,3 +842,310 @@ func TestStudioProjectReadyRequiresExactAuthorizedAdmittedResult(t *testing.T) {
 		t.Fatalf("receipt did not inherit exact-result review truth: %+v", projected.StudioProject)
 	}
 }
+
+// seedStudioProjectKindFixtures files one standalone terminal result per Wave 3
+// kind (image, chat image render, sheet, research, artifact) plus two ordinary
+// files that must never classify as Work. Shared with the Files save pins.
+func seedStudioProjectKindFixtures(t *testing.T, app *kanbanBoardApp, owner string, thread scoutChatThreadRecord) map[string]meetingMemoryEntry {
+	t.Helper()
+	base := map[string]string{
+		"source": "scout_thread", "status": codexJobStatusComplete, "threadStatus": codexJobStatusComplete,
+		"originKind": agentThreadOriginPrivateThread, "originId": thread.ID, "visibility": scoutChatVisibilityPrivate,
+		"ownerEmail": owner, "requestedBy": owner,
+	}
+	fixtures := map[string]meetingMemoryEntry{}
+	file := func(key, mode, title, body string, metadata map[string]string) meetingMemoryEntry {
+		t.Helper()
+		entry, appended, err := app.createOSArtifactWithMetadata(mode, title, body, "Scout", metadata)
+		if err != nil || !appended {
+			t.Fatalf("seed %s: appended=%v err=%v", key, appended, err)
+		}
+		if key != "" {
+			fixtures[key] = entry
+		}
+		return entry
+	}
+
+	image := cloneStringMap(base)
+	image["mode"], image["threadId"], image["type"], image["title"] = "artifacts", "kind-image-run", artifactTypeImage, "Campaign hero"
+	image["assets"] = `[{"ref":"` + strings.Repeat("a", 64) + `","mime":"image/png","name":"hero.png","kind":"image"}]`
+	file("image", "artifacts", "Campaign hero", "Generated image artifact.", image)
+
+	chatImage := map[string]string{
+		"type": artifactTypeMarkdown, "source": "chat_image", "imagePrompt": "a lighthouse at dusk", "title": "Lighthouse render",
+		"status": artifactStatusComplete, "published": "false", "originSurface": "chat:" + thread.ID,
+		"visibility": scoutChatVisibilityPrivate, "ownerEmail": owner,
+		"assets": `[{"ref":"` + strings.Repeat("b", 64) + `","mime":"image/png","name":"lighthouse.png","kind":"image"}]`,
+	}
+	file("chatImage", "design", "Lighthouse render", "![Lighthouse render](/artifacts/blob?ref="+strings.Repeat("b", 64)+")", chatImage)
+
+	preview, err := json.Marshal(ventureWorkbookPreview{Version: 1, FileName: "runway-model.xlsx", Mime: ventureWorkbookMime, SheetCount: 2, FormulaCount: 4, InputPolicy: "locked"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet := cloneStringMap(base)
+	sheet["mode"], sheet["threadId"], sheet["type"], sheet["title"] = "artifacts", "kind-sheet-run", artifactTypeWorkbook, "Runway model"
+	sheet["assets"] = `[{"ref":"` + strings.Repeat("c", 64) + `","mime":"` + ventureWorkbookMime + `","name":"runway-model.xlsx","kind":"export"}]`
+	sheet[ventureWorkbookPreviewKey] = string(preview)
+	file("sheet", "artifacts", "Runway model", "Workbook preview body.", sheet)
+
+	research := cloneStringMap(base)
+	research["mode"], research["threadId"], research["type"], research["title"] = "research", "kind-research-run", artifactTypeMarkdown, "Market brief"
+	research["artifactContract"] = "research_brief_v3"
+	file("research", "research", "Market brief", "# Market brief\n\nExecutive summary with evidence.", research)
+
+	pdf := cloneStringMap(base)
+	pdf["mode"], pdf["threadId"], pdf["type"], pdf["title"] = "artifacts", "kind-pdf-run", artifactTypePDF, "Board pack"
+	pdf["assets"] = `[{"ref":"` + strings.Repeat("d", 64) + `","mime":"application/pdf","name":"board-pack.pdf","kind":"pdf"}]`
+	file("artifact", "artifacts", "Board pack", "PDF deliverable receipt.", pdf)
+
+	ordinaryImage := cloneStringMap(image)
+	ordinaryImage["source"], ordinaryImage["threadId"], ordinaryImage["title"] = "ordinary_file", "ordinary-image-run", "Ordinary image file"
+	file("", "artifacts", "Ordinary image file", "Uploaded image.", ordinaryImage)
+	ordinaryUpload := cloneStringMap(pdf)
+	delete(ordinaryUpload, "source")
+	ordinaryUpload["threadId"], ordinaryUpload["title"] = "", "Ordinary upload"
+	file("", "artifacts", "Ordinary upload", "Uploaded pdf.", ordinaryUpload)
+	return fixtures
+}
+
+func TestStudioProjectsAdmitEveryResultKind(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+
+	owner := "aj@shareability.com"
+	thread, err := kanbanApp.createScoutChatThread(owner, "AJ", "Every result kind", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures := seedStudioProjectKindFixtures(t, kanbanApp, owner, thread)
+
+	cookies := loginAs(t, owner, "B0NFIRE!")
+	list := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1", "", cookies, studioProjectsHandler)
+	if list.Code != http.StatusOK {
+		t.Fatalf("Work list=%d body=%s", list.Code, list.Body.String())
+	}
+	var payload struct {
+		Projects []studioProjectView `json:"projects"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Projects) != len(fixtures) || strings.Contains(list.Body.String(), "Ordinary image file") || strings.Contains(list.Body.String(), "Ordinary upload") {
+		t.Fatalf("Work projection=%s", list.Body.String())
+	}
+	byID := map[string]studioProjectView{}
+	for _, project := range payload.Projects {
+		byID[project.ID] = project
+	}
+	expect := func(key, kind, resultType, openAction string) studioProjectView {
+		t.Helper()
+		entry := fixtures[key]
+		project, ok := byID[entry.ID]
+		if !ok || project.Kind != kind || project.Status != studioProjectStatusReady || project.Result == nil ||
+			project.Result.ArtifactID != entry.ID || project.Result.Type != resultType || project.Result.OpenAction != openAction ||
+			project.Result.ReviewManaged || project.Result.Version < 1 || !isHexDigest(project.Result.Digest) {
+			t.Fatalf("%s project=%+v result=%+v", key, project, project.Result)
+		}
+		return project
+	}
+	if image := expect("image", studioProjectKindImage, artifactTypeImage, studioProjectOpenActionImage); image.Result.PrimaryAsset == nil ||
+		image.Result.PrimaryAsset.Ref != strings.Repeat("a", 64) || !strings.Contains(image.Result.DownloadURL, strings.Repeat("a", 64)) {
+		t.Fatalf("image result=%+v", image.Result)
+	}
+	if render := expect("chatImage", studioProjectKindImage, artifactTypeImage, studioProjectOpenActionImage); render.Result.PrimaryAsset == nil ||
+		render.Result.PrimaryAsset.Ref != strings.Repeat("b", 64) || render.RootRunID != fixtures["chatImage"].ID || !render.Result.CanEdit {
+		t.Fatalf("chat image result=%+v", render.Result)
+	}
+	if sheet := expect("sheet", studioProjectKindSheet, artifactTypeWorkbook, studioProjectOpenActionDownload); sheet.Result.Workbook == nil ||
+		sheet.Result.PrimaryAsset == nil || sheet.Result.PrimaryAsset.Name != "runway-model.xlsx" || sheet.Result.DownloadURL == "" {
+		t.Fatalf("sheet result=%+v", sheet.Result)
+	}
+	if research := expect("research", studioProjectKindResearch, artifactTypeMarkdown, studioProjectOpenActionDocument); research.Result.PrimaryAsset != nil || research.Result.DownloadURL != "" {
+		t.Fatalf("research result=%+v", research.Result)
+	}
+	if artifact := expect("artifact", studioProjectKindArtifact, artifactTypePDF, studioProjectOpenActionDownload); artifact.Result.PrimaryAsset == nil ||
+		artifact.Result.PrimaryAsset.Mime != "application/pdf" || artifact.Result.DownloadURL == "" {
+		t.Fatalf("artifact result=%+v", artifact.Result)
+	}
+
+	filtered := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1?kind=sheet", "", cookies, studioProjectsHandler)
+	if filtered.Code != http.StatusOK || !strings.Contains(filtered.Body.String(), fixtures["sheet"].ID) || strings.Contains(filtered.Body.String(), fixtures["image"].ID) {
+		t.Fatalf("kind=sheet filter=%d body=%s", filtered.Code, filtered.Body.String())
+	}
+	if bogus := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1?kind=bogus", "", cookies, studioProjectsHandler); bogus.Code != http.StatusBadRequest {
+		t.Fatalf("kind=bogus=%d body=%s", bogus.Code, bogus.Body.String())
+	}
+}
+
+func TestStudioProjectResultVersionsProjectLineageNewestFirst(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+
+	owner := "aj@shareability.com"
+	thread, err := kanbanApp.createScoutChatThread(owner, "AJ", "Versioned work", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Versioned memo", "# Versioned memo\n\nDraft one.", "Scout", map[string]string{
+		"source": "scout_thread", "mode": "document", "threadId": "versions-run", "type": artifactTypeMarkdown, "title": "Versioned memo",
+		"status": codexJobStatusComplete, "threadStatus": codexJobStatusComplete,
+		"originKind": agentThreadOriginPrivateThread, "originId": thread.ID, "visibility": scoutChatVisibilityPrivate,
+		"ownerEmail": owner, "requestedBy": owner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{"Draft two.", "Draft three.", "Draft four."} {
+		if document, _, err = kanbanApp.updateOSArtifactWithMetadata(document.ID, "", "# Versioned memo\n\n"+body, "AJ", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if artifactVersion(document) != 4 {
+		t.Fatalf("version after three saves=%d metadata=%v", artifactVersion(document), document.Metadata)
+	}
+
+	cookies := loginAs(t, owner, "B0NFIRE!")
+	response := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1?id="+url.QueryEscape(document.ID), "", cookies, studioProjectsHandler)
+	if response.Code != http.StatusOK {
+		t.Fatalf("Work detail=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Project studioProjectView `json:"project"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	result := payload.Project.Result
+	if result == nil || result.Version != 4 || len(result.Versions) != 3 {
+		t.Fatalf("versioned result=%+v", result)
+	}
+	for index, want := range []int{3, 2, 1} {
+		version := result.Versions[index]
+		if version.Version != want || version.At == "" || version.Source == "" || !isHexDigest(version.Digest) {
+			t.Fatalf("versions[%d]=%+v, want version %d with time, source, digest", index, version, want)
+		}
+	}
+	if payload.Project.Result.OpenAction != studioProjectOpenActionDocument {
+		t.Fatalf("document open action=%q", payload.Project.Result.OpenAction)
+	}
+}
+
+func TestStudioProjectsCarryRoomLaunchOrigin(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+
+	owner := "aj@shareability.com"
+	meetingID := kanbanApp.memory.ensureMeetingID(officeRoomID)
+	title := "Room-launched investor memo"
+	root, _, err := kanbanApp.createOSArtifactWithMetadata("research", title, "# "+title, "Scout", map[string]string{
+		"source": "goal_thread", "mode": "goal", "processId": documentReportProcessID,
+		"threadQuery": title, "title": title, "status": "running", "threadStatus": "running", "progressPercent": "42",
+		"originKind": agentThreadOriginRoom, "originId": officeRoomID, "originMeetingId": meetingID,
+		"visibility": scoutChatVisibilityPrivate, "ownerEmail": owner, "requestedBy": owner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := goalPlan{PlanVersion: goalPlanVersion, GoalID: root.ID, Objective: title, CreatedBy: "AJ", RequestedBy: owner, Authority: codexJobAuthorityReadOnly, ProcessID: documentReportProcessID, State: goalStateExecute}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root, _, err = kanbanApp.updateOSArtifactWithMetadata(root.ID, "", root.Text, "Scout", map[string]string{
+		"threadId": root.ID, "goalPlan": string(raw), "currentStage": goalStateExecute,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !studioProjectProjectionRelevantEntry(root) {
+		t.Fatalf("room-launched goal root is not Work-relevant: %v", root.Metadata)
+	}
+
+	cookies := loginAs(t, owner, "B0NFIRE!")
+	response := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1?id="+url.QueryEscape(root.ID), "", cookies, studioProjectsHandler)
+	if response.Code != http.StatusOK {
+		t.Fatalf("room work detail=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Project studioProjectView `json:"project"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	project := payload.Project
+	if project.Kind != studioProjectKindDocument || project.Status != studioProjectStatusRunning || project.Source != nil ||
+		project.Origin == nil || project.Origin.Kind != agentThreadOriginRoom || project.Origin.RoomID != officeRoomID || project.Origin.RoomTitle != officeRoomName {
+		t.Fatalf("room work project=%+v origin=%+v", project, project.Origin)
+	}
+}
+
+func TestStudioProjectStepsFollowGoalPlanSubtasks(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+
+	owner := "aj@shareability.com"
+	thread, err := kanbanApp.createScoutChatThread(owner, "AJ", "Stepped work", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := seedStudioProjectRoot(t, kanbanApp, thread, documentReportProcessID, "Stepped report", goalStateExecute)
+	child, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Stepped report draft", "# Stepped report draft", "Scout", map[string]string{
+		"source": "scout_thread", "mode": "document", "threadId": "stepped-draft-run", "type": artifactTypeMarkdown,
+		"goalParentId": root.ID, "goalDeliverable": "true", "status": codexJobStatusComplete, "threadStatus": codexJobStatusComplete,
+		"originKind": agentThreadOriginPrivateThread, "originId": thread.ID, "visibility": scoutChatVisibilityPrivate,
+		"ownerEmail": owner, "requestedBy": owner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root = updateStudioProjectPlan(t, kanbanApp, root, func(plan *goalPlan) {
+		plan.Subtasks = []goalSubtask{
+			{ID: "brief", Title: "Brief", Role: processRolePanel, Status: subtaskComplete},
+			{ID: "draft", Title: "Draft the report", Role: processRoleWriter, Status: subtaskComplete, ArtifactID: child.ID},
+			{ID: "polish", Title: "Polish", Role: processRoleGate, Status: subtaskRunning},
+		}
+	})
+
+	cookies := loginAs(t, owner, "B0NFIRE!")
+	response := artifactAuthorizationRequest(t, http.MethodGet, "/api/studio-projects/v1?id="+url.QueryEscape(root.ID), "", cookies, studioProjectsHandler)
+	if response.Code != http.StatusOK {
+		t.Fatalf("stepped work detail=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Project studioProjectView `json:"project"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	steps := payload.Project.Steps
+	if payload.Project.Status != studioProjectStatusRunning || len(steps) != 3 {
+		t.Fatalf("stepped project=%+v steps=%+v", payload.Project, steps)
+	}
+	stored, _ := kanbanApp.osArtifactByID(child.ID)
+	want := []studioProjectStepView{
+		{ID: "brief", Label: "Brief", State: studioProjectStepDone},
+		{ID: "draft", Label: "Draft the report", State: studioProjectStepDone, At: stored.CreatedAt.UTC().Format(time.RFC3339Nano)},
+		{ID: "polish", Label: "Polish", State: studioProjectStepRunning},
+	}
+	for index := range want {
+		if steps[index] != want[index] {
+			t.Fatalf("steps[%d]=%+v, want %+v", index, steps[index], want[index])
+		}
+	}
+}

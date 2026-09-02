@@ -286,3 +286,49 @@ func TestPasswordResetTokenFlow(t *testing.T) {
 		t.Fatal("expected expired token to be rejected")
 	}
 }
+
+// Wave 5 D11: the disabled stamp survives a reload, never removes the
+// record, and re-enabling clears it.
+func TestUserStoreDisabledStatePersistsAcrossReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	store, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("newUserAccountStore: %v", err)
+	}
+	stamp := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	account, err := store.setDisabled("tim@shareability.com", true, stamp)
+	if err != nil || !account.disabled() || !account.DisabledAt.Equal(stamp) {
+		t.Fatalf("setDisabled: account=%+v err=%v", account, err)
+	}
+	if _, err := store.setDisabled("nobody@shareability.com", true, stamp); err == nil {
+		t.Fatal("disabling an unknown account must fail")
+	}
+
+	reloaded, err := newUserAccountStore(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	tim := reloaded.findUser("tim@shareability.com")
+	if tim == nil {
+		t.Fatal("disabled account was deleted — the record must persist")
+	}
+	if !tim.disabled() || !tim.DisabledAt.Equal(stamp) {
+		t.Fatalf("disabled stamp lost across reload: %+v", tim.DisabledAt)
+	}
+	if _, ok := reloaded.authenticate("tim@shareability.com", "B0NFIRE!"); ok {
+		t.Fatal("disabled account authenticated with a correct password")
+	}
+	if _, ok := reloaded.authenticateRosterName("Tim", "B0NFIRE!"); ok {
+		t.Fatal("disabled account authenticated by roster name")
+	}
+	if _, err := reloaded.setDisabled("tim@shareability.com", false, stamp); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	if _, ok := reloaded.authenticate("tim@shareability.com", "B0NFIRE!"); !ok {
+		t.Fatal("re-enabled account cannot authenticate")
+	}
+	final, _ := newUserAccountStore(path)
+	if final.findUser("tim@shareability.com").disabled() {
+		t.Fatal("re-enable did not persist")
+	}
+}

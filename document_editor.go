@@ -115,6 +115,10 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusNotFound, "document artifact not found")
 			return
 		}
+		if rawVersion := strings.TrimSpace(r.URL.Query().Get("version")); rawVersion != "" {
+			documentEditorVersionGET(w, artifact, rawVersion)
+			return
+		}
 		_, canWrite := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLWrite)
 		_, canExportAuthority := authorizedArtifactForActions(r.Context(), user, id, ACLReadContent, ACLExport)
 		qualityState, canExport, stable := kanbanApp.authoredResultFinalExportState(artifact)
@@ -130,6 +134,7 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 		ArtifactID      string                 `json:"artifactId"`
 		ExpectedVersion int                    `json:"expectedVersion"`
 		Title           string                 `json:"title"`
+		RestoredFrom    int                    `json:"restoredFrom"`
 		Document        documentStudioDocument `json:"document"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, documentStudioMaxBytes+64<<10)).Decode(&payload); err != nil {
@@ -140,6 +145,13 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 	payload.Title = strings.TrimSpace(payload.Title)
 	if len([]rune(payload.Title)) > 160 || validateDocumentStudioDocument(payload.Document) != nil {
 		writeAuthError(w, http.StatusBadRequest, "document title or body is invalid")
+		return
+	}
+	// Restore is an ordinary save that names the version it re-applied; the
+	// stamp lands on the new revision and clears on the next plain save.
+	restoredFrom, restoredOK := studioRestoredFromMetadata(payload.RestoredFrom, payload.ExpectedVersion)
+	if !restoredOK {
+		writeAuthError(w, http.StatusBadRequest, "restoredFrom must name an existing prior version")
 		return
 	}
 	prior, ok := authorizedArtifactForActions(r.Context(), user, payload.ArtifactID, ACLReadContent, ACLWrite)
@@ -160,7 +172,7 @@ func documentEditorHandler(w http.ResponseWriter, r *http.Request) {
 		var updateErr error
 		updated, changed, updateErr = kanbanApp.memory.updateOSArtifactWithMetadataIfHeaderMatches(
 			header, prior.ID, title, storedBody, user.Name,
-			map[string]string{"type": artifactTypeMarkdown, "documentSchemaVersion": "1", documentStudioEmptyMetadataKey: emptyMarker},
+			map[string]string{"type": artifactTypeMarkdown, "documentSchemaVersion": "1", documentStudioEmptyMetadataKey: emptyMarker, artifactRestoredFromMetadataKey: restoredFrom},
 		)
 		return updateErr
 	})

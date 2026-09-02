@@ -101,8 +101,10 @@ func TestDesktopChatChromeKeepsOneUsefulConversationIdentity(t *testing.T) {
 			t.Errorf("desktop chat chrome contract missing %q", want)
 		}
 	}
-	if !strings.Contains(html, `<span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>`) {
-		t.Fatal("the desktop header should carry the Stride wordmark once")
+	// AJ: org-first shell 2026-09-02 — the desktop header carries no Stride
+	// wordmark; the organization is named in the rail.
+	if strings.Contains(html, `<span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>`) {
+		t.Fatal("the desktop header must not carry the Stride wordmark (org-first shell)")
 	}
 }
 
@@ -158,7 +160,7 @@ func TestDesktopChatInteractionTargetsAndComposerStates(t *testing.T) {
 	for _, want := range []string{
 		"min-width: 40px;",
 		"min-height: 40px;",
-		"transform: scale(0.96);",
+		"transform: scale(var(--press-scale));", // plan 011: one press token
 		"max-height: 148px;",
 		`.stride-dictation-composer[data-dictation-state="recording"] .scout-chat-input`,
 		`.stride-dictation-composer:not([data-dictation-state="idle"]) > .scout-chat-send`,
@@ -302,7 +304,7 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 		".chat-context-card__message-action",
 		"min-width: 40px;",
 		"min-height: 40px;",
-		"transform: scale(0.96);",
+		"transform: scale(var(--press-scale));", // plan 011: one press token
 		"transition-property: color, background-color, transform;",
 	} {
 		if !strings.Contains(css, want) {
@@ -530,10 +532,12 @@ func TestDesktopThreadRepliesStayDiscoverableAndAvatarLed(t *testing.T) {
 		"#chatTool .chat-context-card__avatar",
 		"grid-template-columns: 34px minmax(0, 1fr);",
 		"min-height: 40px;",
-		"transform: scale(0.96);",
+		"transform: scale(var(--press-scale));", // plan 011: one press token
 		"font-variant-numeric: tabular-nums;",
 		"#chatTool .scout-chat-msg__stack",
-		"backdrop-filter: var(--glass-blur-chrome) saturate(1.25);",
+		// Wave 2 moved the reply surfaces onto the shared glass-chrome tier; the
+		// material marker replaces the per-surface filter line.
+		"/* material: .glass-chrome tier */",
 		"radial-gradient(circle at 18% 0%",
 	} {
 		if !strings.Contains(css, want) {
@@ -710,5 +714,29 @@ func TestDesktopNeedsAttentionUsesClosedDurableRecoveryCopy(t *testing.T) {
 	}
 	if strings.Contains(terminal, "plan?.blocker ||") || strings.Contains(terminal, "m.blocker ||") {
 		t.Fatal("goal recovery card still renders an internal blocker verbatim")
+	}
+}
+
+// M6: both chat menus transition `display` with allow-discrete, so their
+// hidden rules must also fade, shrink, and stop hit-testing immediately —
+// otherwise the closed menu sits opaque for the fade-out and swallows the
+// click meant for the message behind it.
+func TestDesktopChatMenusFadeAndStopHitTestingOnClose(t *testing.T) {
+	html := desktopChatQualityHTML(t)
+	for _, selector := range []string{
+		"#chatTool .desktop-chat-more__menu[hidden] {",
+		"#chatTool .desktop-chat-reaction-picker__menu[hidden] {",
+	} {
+		start := strings.LastIndex(html, selector)
+		if start < 0 {
+			t.Fatalf("missing hidden rule %q", selector)
+		}
+		block := html[start:]
+		block = block[:strings.Index(block, "}")]
+		for _, want := range []string{"opacity: 0;", "transform: translateY(-4px) scale(0.96);", "pointer-events: none;"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("%s missing exit target %q", selector, want)
+			}
+		}
 	}
 }

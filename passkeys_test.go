@@ -202,3 +202,34 @@ func TestPasskeyListAndDelete(t *testing.T) {
 		t.Fatalf("expected credential removed, still have %d", len(creds))
 	}
 }
+
+// Wave 5 D11: a disabled account that completes the passkey ceremony gets the
+// same uniform 401 as the password path (never the session-mint 500) and no
+// cookie; re-enabling restores the normal 200 + session.
+func TestPasskeyLoginFinishRefusesDisabledAccountUniformly(t *testing.T) {
+	setupAuthTestEnv(t)
+	store := accountStore()
+	if _, err := store.setDisabled("tim@shareability.com", true, time.Now().UTC()); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	tim := store.findUser("tim@shareability.com")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/passkey/login/finish", nil)
+	recorder := httptest.NewRecorder()
+	completePasskeyLogin(recorder, req, tim, nil)
+	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "passkey sign-in failed") {
+		t.Fatalf("disabled passkey finish status=%d body=%s, want 401 with the uniform message", recorder.Code, recorder.Body.String())
+	}
+	if cookies := recorder.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("disabled passkey finish set cookies: %v", cookies)
+	}
+
+	if _, err := store.setDisabled("tim@shareability.com", false, time.Now().UTC()); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	recorder = httptest.NewRecorder()
+	completePasskeyLogin(recorder, httptest.NewRequest(http.MethodPost, "/auth/passkey/login/finish", nil), tim, nil)
+	if recorder.Code != http.StatusOK || len(recorder.Result().Cookies()) == 0 {
+		t.Fatalf("re-enabled passkey finish status=%d cookies=%d, want 200 with a session cookie", recorder.Code, len(recorder.Result().Cookies()))
+	}
+}

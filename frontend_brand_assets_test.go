@@ -90,8 +90,10 @@ func TestStrideBrandAssetContract(t *testing.T) {
 	if got := strings.Count(index, `<img src="/public/app-icon.png" alt="">`); got != 1 {
 		t.Fatalf("only the sign-in tile should use the Stride Signal app icon, got %d references", got)
 	}
-	if !strings.Contains(index, `<span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>`) {
-		t.Fatal("the authenticated desktop header must carry the quiet Stride wordmark")
+	// AJ: org-first shell 2026-09-02 — the authenticated desktop header carries
+	// no Stride wordmark (login, marketing and About keep it; tokens untouched).
+	if strings.Contains(index, `<span class="topbar__brand-wordmark" role="img" aria-label="Stride"></span>`) {
+		t.Fatal("the authenticated desktop header must not carry the Stride wordmark (org-first shell)")
 	}
 	if strings.Contains(index, `<span class="wordmark topbar__wordmark" aria-hidden="true"></span>`) {
 		t.Fatal("the slim icon rail must not duplicate the Stride wordmark")

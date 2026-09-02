@@ -156,6 +156,17 @@ const (
 	// memory timeline (visibleMeetingMemoryEntries keeps it) — a deliberate note
 	// is timeline-worthy. author/authorCertain metadata records who filed it.
 	meetingMemoryKindNote = "note"
+	// meetingMemoryKindChannelDigest (Wave 8 D5) is the chat-native digest
+	// tier: one cumulative anchored-JSON digest per channel thread (digestKey
+	// = threadId), written ONLY through upsertDigest like the meeting tiers.
+	// Recall-eligible knowledge; superseded generations hide like every digest.
+	meetingMemoryKindChannelDigest = "channel_digest"
+	// meetingMemoryKindChannelDigestPass is the channel-digest worker's per-pass
+	// cursor artifact (the day_digest_pass pattern): carries
+	// throughChannelTranscriptId so a pass that rebuilt nothing still advances.
+	// Pure bookkeeping: UI state, never knowledge; written through
+	// appendAmbientEntry, so it carries NO meetingId and never mints one.
+	meetingMemoryKindChannelDigestPass = "channel_digest_pass"
 	// meetingMemoryKindDeadLetter is the synthesis-abandonment tombstone (memory
 	// study 1.4, gap #9): when the ambient runner dead-letters a head input after
 	// repeated failures (agent_runner.go recordAmbientAgentFailure), a stub
@@ -278,7 +289,19 @@ type artifactVersionRecord struct {
 	At            string `json:"at,omitempty"`
 	BodyBlobRef   string `json:"bodyBlobRef,omitempty"`
 	ContentDigest string `json:"contentDigest,omitempty"`
+	// SceneRef is the superseded Deck Studio scene blob (deckSceneRef
+	// metadata) so a prior deck revision can be reopened exactly; absent on
+	// documents and on records journaled before the studios kept it.
+	SceneRef string `json:"sceneRef,omitempty"`
+	// RestoredFrom is the version this (now superseded) revision was restored
+	// from in a studio history rail, when it was; 0 otherwise.
+	RestoredFrom int `json:"restoredFrom,omitempty"`
 }
+
+// artifactRestoredFromMetadataKey is stamped by a studio PATCH that carries
+// restoredFrom; it names the version whose body the new revision re-applied.
+// Cleared (empty) by every ordinary save.
+const artifactRestoredFromMetadataKey = "restoredFromVersion"
 
 // artifactVersionBlobStore is the seam blobs.go assigns (at init) to persist a
 // superseded body as a content-addressed blob and return its ref. nil — or an
@@ -366,6 +389,10 @@ func bumpArtifactVersionLocked(entry *meetingMemoryEntry, previous meetingMemory
 		EditedBy:      firstNonEmptyString(entry.Metadata["updatedBy"], entry.Metadata["createdBy"]),
 		At:            firstNonEmptyString(entry.Metadata["updatedAt"], entry.CreatedAt.UTC().Format(time.RFC3339Nano)),
 		ContentDigest: artifactCapabilityDigest(previous),
+		SceneRef:      strings.TrimSpace(previous.Metadata[deckSceneRefMetadataKey]),
+	}
+	if restored, err := strconv.Atoi(strings.TrimSpace(previous.Metadata[artifactRestoredFromMetadataKey])); err == nil && restored >= 1 {
+		record.RestoredFrom = restored
 	}
 	if artifactVersionBlobStore != nil {
 		if ref, err := artifactVersionBlobStore(entry.ID, prior, previous.Text); err == nil {
@@ -406,7 +433,11 @@ var lowQualityTranscriptPhrases = map[string]struct{}{
 }
 
 type meetingMemoryStore struct {
-	mu      sync.Mutex
+	// mu is an RWMutex (Wave 8 D10): writers and index maintenance take the
+	// exclusive lock exactly as before; the lexical search lane takes the read
+	// lock and scores entries in place instead of cloning the whole store per
+	// query.
+	mu      sync.RWMutex
 	path    string
 	entries []meetingMemoryEntry
 	seen    map[string]struct{}
@@ -1782,6 +1813,97 @@ func (store *meetingMemoryStore) updateOSArtifactsMetadataBatch(ids []string, me
 	return len(applied), nil
 }
 
+// updateEntriesWithMetadata applies one metadata update to every listed entry
+// of the given kind under ONE lock and ONE fsync'd JSONL rewrite — the
+// kind-generic sibling of updateOSArtifactsMetadataBatch for boot-time stamping
+// migrations (N per-entry updateEntryWithMetadata calls would rewrite the whole
+// store N times). Entries already carrying the values are skipped, so a repeat
+// call changes nothing and writes nothing. Transcript rows keep the fenced
+// per-entry path: their finalization/source-episode leases are not batched.
+func (store *meetingMemoryStore) updateEntriesWithMetadata(kind string, ids []string, metadataUpdates map[string]string) (int, error) {
+	if store == nil {
+		return 0, fmt.Errorf("memory store is unavailable")
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return 0, fmt.Errorf("memory entry kind is required")
+	}
+	if kind == meetingMemoryKindTranscript {
+		return 0, fmt.Errorf("transcript entries must be updated through the fenced per-entry path")
+	}
+	if len(ids) == 0 || len(metadataUpdates) == 0 {
+		return 0, nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	type rollback struct {
+		index int
+		prior meetingMemoryEntry
+	}
+	applied := make([]rollback, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		index, ok := store.entryIndexByID[id]
+		if !ok || index < 0 || index >= len(store.entries) || store.entries[index].Kind != kind {
+			continue
+		}
+		previousEntry := store.entries[index]
+		if kind == meetingMemoryKindOSArtifact {
+			if err := validateArtifactScopeMetadataUpdates(previousEntry.Metadata, metadataUpdates); err != nil {
+				for _, stale := range applied {
+					store.entries[stale.index] = stale.prior
+				}
+				return 0, err
+			}
+		}
+		entry := cloneMemoryEntry(previousEntry)
+		if entry.Metadata == nil {
+			entry.Metadata = map[string]string{}
+		}
+		changed := false
+		for key, value := range metadataUpdates {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			if entry.Metadata[key] != value {
+				entry.Metadata[key] = value
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		store.entries[index] = entry
+		store.rebuildMeetingEntryIndexesIfChangedLocked(previousEntry, entry)
+		applied = append(applied, rollback{index: index, prior: previousEntry})
+	}
+	if len(applied) == 0 {
+		return 0, nil
+	}
+	if err := store.rewriteLocked(true); err != nil {
+		for _, stale := range applied {
+			store.entries[stale.index] = stale.prior
+		}
+		return 0, err
+	}
+	return len(applied), nil
+}
+
 func (store *meetingMemoryStore) updateEntryWithMetadata(kind string, id string, text string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
@@ -2155,7 +2277,14 @@ func (store *meetingMemoryStore) appendEntryForMeetingWithCapture(roomID string,
 	return entry, true, nil
 }
 
+// memoryRewriteProbe is test-only instrumentation counting whole-JSONL
+// rewrites (batch stamps must cost exactly one). Production leaves it nil.
+var memoryRewriteProbe func()
+
 func (store *meetingMemoryStore) rewriteLocked(syncToDisk bool) error {
+	if memoryRewriteProbe != nil {
+		memoryRewriteProbe()
+	}
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)
 	for _, entry := range store.entries {
@@ -2665,6 +2794,31 @@ func (store *meetingMemoryStore) countEntriesOfKindByMetadata(kind, key, value s
 	return count
 }
 
+// entriesOfKindByMetadata returns clones of every entry of kind whose
+// metadata[key] equals value, in store order. It takes only the read lock and
+// clones just the matches, so a hot lookup (the blob route resolving the one
+// or two kind=file rows behind a ref) never copies the whole kind.
+func (store *meetingMemoryStore) entriesOfKindByMetadata(kind, key, value string) []meetingMemoryEntry {
+	if store == nil {
+		return nil
+	}
+	kind = strings.TrimSpace(kind)
+	key = strings.TrimSpace(key)
+	value = strings.TrimSpace(value)
+	if kind == "" || key == "" || value == "" {
+		return nil
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	var matched []meetingMemoryEntry
+	for _, entry := range store.entries {
+		if entry.Kind == kind && strings.TrimSpace(entry.Metadata[key]) == value && !memoryEntryIsMediaSoakCanary(entry) {
+			matched = append(matched, cloneMemoryEntry(entry))
+		}
+	}
+	return matched
+}
+
 // entryByKindAndID looks up a single entry; newest wins if ids ever collide
 // across rewrites.
 func (store *meetingMemoryStore) entryByKindAndID(kind string, id string) (meetingMemoryEntry, bool) {
@@ -2987,7 +3141,7 @@ func (store *meetingMemoryStore) hasDeadLetterForMeeting(meetingID string, spanS
 // recall once superseded (memoryEntryHiddenFromRecall).
 func isMeetingDigestKind(kind string) bool {
 	switch kind {
-	case meetingMemoryKindMeetingDigest, meetingMemoryKindDayDigest, meetingMemoryKindCompanyDigest:
+	case meetingMemoryKindMeetingDigest, meetingMemoryKindDayDigest, meetingMemoryKindCompanyDigest, meetingMemoryKindChannelDigest:
 		return true
 	}
 	return false
@@ -3000,7 +3154,7 @@ func isMeetingDigestKind(kind string) bool {
 // in-flight meeting id across a restart.
 func isAmbientBookkeepingMemoryKind(kind string) bool {
 	switch kind {
-	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass, meetingMemoryKindAmbientReplayPromotion:
+	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindChannelDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass, meetingMemoryKindAmbientReplayPromotion:
 		return true
 	}
 	return isMeetingDigestKind(kind)
@@ -3654,6 +3808,116 @@ func (store *meetingMemoryStore) deleteEntryByID(id string, authorize ...func(me
 	return removed, true, nil
 }
 
+// deleteEntriesByIDJournaled hard-deletes a batch of entries in ONE canonical
+// lifecycle journal batch and ONE log rewrite — deleteEntryByID's contract
+// (journal first, authorize under the lock, rebuild indexes) at batch cost
+// (the Drive trash purge: N rows used to cost N rewrites). It is the
+// journaled sibling of slop_classifier.go's deleteEntriesByID, which is the
+// signal-compaction form and neither journals nor authorizes. Transcripts,
+// OS artifacts and finalization outputs are refused — each has a fenced
+// per-entry path whose hooks this batch deliberately does not replicate. An
+// id that is missing or that authorize rejects is skipped; the removed
+// entries are returned. On a rewrite failure nothing is removed.
+func (store *meetingMemoryStore) deleteEntriesByIDJournaled(ids []string, authorize func(meetingMemoryEntry) bool) ([]meetingMemoryEntry, error) {
+	if store == nil {
+		return nil, fmt.Errorf("memory store is unavailable")
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.indexedEntryCount != len(store.entries) {
+		store.rebuildMeetingEntryIndexesLocked()
+	}
+	type removal struct {
+		index int
+		entry meetingMemoryEntry
+	}
+	removals := make([]removal, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		index, found := store.entryIndexByID[id]
+		if !found || index < 0 || index >= len(store.entries) {
+			continue
+		}
+		current := store.entries[index]
+		switch current.Kind {
+		case meetingMemoryKindOSArtifact:
+			return nil, fmt.Errorf("OS artifacts require the projection-backed delete seam")
+		case meetingMemoryKindTranscript:
+			return nil, fmt.Errorf("transcript entries require the fenced per-entry delete path")
+		}
+		if meetingFinalizationOutputEntry(current) {
+			return nil, fmt.Errorf("finalization outputs require the fenced per-entry delete path")
+		}
+		if authorize != nil && !authorize(cloneMemoryEntry(current)) {
+			continue
+		}
+		removals = append(removals, removal{index: index, entry: cloneMemoryEntry(current)})
+	}
+	if len(removals) == 0 {
+		return nil, nil
+	}
+
+	records := make([]CanonicalLifecycleJournalRecord, 0, len(removals))
+	now := time.Now().UTC()
+	for _, item := range removals {
+		objects, err := canonicalMemoryImportedObjects(item.entry)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, canonicalLifecycleDeletionRecords(objects, now, "memory_deleted")...)
+	}
+	original := append([]meetingMemoryEntry(nil), store.entries...)
+	removedIndexes := make(map[int]struct{}, len(removals))
+	for _, item := range removals {
+		removedIndexes[item.index] = struct{}{}
+	}
+	if err := withCanonicalLifecycleJournalBatch(canonicalDeletedLifecycleJournalPath(), records, func() error {
+		retained := make([]meetingMemoryEntry, 0, len(store.entries)-len(removals))
+		for index, entry := range store.entries {
+			if _, gone := removedIndexes[index]; !gone {
+				retained = append(retained, entry)
+			}
+		}
+		store.entries = retained
+		store.rebuildMeetingEntryIndexesLocked()
+		if err := store.rewriteLocked(false); err != nil {
+			if errors.Is(err, ErrDurableReplaceAmbiguous) {
+				if reloadErr := store.reloadVisibleMemoryGenerationLocked(); reloadErr != nil {
+					return fmt.Errorf("%w; reload visible memory generation: %v", err, reloadErr)
+				}
+				return err
+			}
+			store.entries = original
+			store.rebuildMeetingEntryIndexesLocked()
+			return err
+		}
+		for _, item := range removals {
+			delete(store.seen, item.entry.ID)
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("journal memory batch deletion: %w", err)
+	}
+	removed := make([]meetingMemoryEntry, 0, len(removals))
+	for _, item := range removals {
+		removed = append(removed, item.entry)
+	}
+	return removed, nil
+}
+
 // deleteOSArtifactWithProjection captures the body-free authorization and
 // deletion event under the same lock that removes the artifact. The returned
 // entry supports deletion audit records, but only the opaque projection can
@@ -3790,7 +4054,7 @@ func (store *meetingMemoryStore) recoverJournaledMemoryDeletionsLocked() error {
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete || kind == meetingMemoryKindAmbientReplayPromotion
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindChannelDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete || kind == meetingMemoryKindAmbientReplayPromotion
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {
@@ -3813,11 +4077,6 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	// Pure static map (domain_terms.go) — no model call in the search path.
 	synonymTokens := expandRecallSynonyms(queryTokens)
 
-	store.mu.Lock()
-	entries := cloneMemoryEntries(store.entries)
-	store.mu.Unlock()
-
-	matches := make([]meetingMemoryMatch, 0, len(entries))
 	lowerQuery := strings.ToLower(query)
 	// Item 1.6: match STEMMED query/synonym tokens against the entry's stemmed
 	// token SET rather than raw substrings, so "art" no longer scores against
@@ -3825,12 +4084,18 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 	// "launch" still finds "launched"/"launching". Stem once up front.
 	queryStems := stemMemoryTokens(queryTokens)
 	synonymStems := stemMemoryTokens(synonymTokens)
-	for _, entry := range entries {
+	// Wave 8 D10: score under the READ lock, in place — the old path cloned
+	// every entry (multi-MB artifact bodies included) under the exclusive
+	// mutex on every query. Only the matches are cloned, after scoring.
+	store.mu.RLock()
+	matches := make([]meetingMemoryMatch, 0, 16)
+	for index := range store.entries {
+		entry := &store.entries[index]
 		if isUIStateMemoryKind(entry.Kind) {
 			continue
 		}
 		// quarantined/expired material is forgotten: never a recall candidate.
-		if memoryEntryHiddenFromRecall(entry) {
+		if memoryEntryHiddenFromRecall(*entry) {
 			continue
 		}
 		lowerText := strings.ToLower(entry.Text)
@@ -3867,13 +4132,14 @@ func (store *meetingMemoryStore) search(query string, limit int) []meetingMemory
 			continue
 		}
 		// archived material stays searchable but ranks below active (design §6).
-		if memoryEntryRelevance(entry) == relevanceArchived {
+		if memoryEntryRelevance(*entry) == relevanceArchived {
 			if score -= archivedSearchPenalty; score < 1 {
 				score = 1
 			}
 		}
-		matches = append(matches, meetingMemoryMatch{Entry: entry, Score: score})
+		matches = append(matches, meetingMemoryMatch{Entry: cloneMemoryEntry(*entry), Score: score})
 	}
+	store.mu.RUnlock()
 
 	sort.SliceStable(matches, func(i, j int) bool {
 		if matches[i].Score != matches[j].Score {
@@ -4213,4 +4479,32 @@ func cloneMemoryEntry(entry meetingMemoryEntry) meetingMemoryEntry {
 	}
 
 	return cloned
+}
+
+// earliestVisibleCreatedAt returns the CreatedAt of the oldest entry the
+// snapshot lanes would show (visibleEntriesLocked's exact visibility rule) —
+// under the READ lock and without cloning a single body. Zero when nothing is
+// visible. Recall coverage grades every answer against the store's visible
+// span; cloning the whole store per answer just to read one timestamp was the
+// hot-path cost this replaces. Read-only: it never touches an index.
+func (store *meetingMemoryStore) earliestVisibleCreatedAt() time.Time {
+	if store == nil {
+		return time.Time{}
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	earliest := time.Time{}
+	for _, entry := range store.entries {
+		hidden := memoryEntryHiddenFromRecall(entry)
+		if hidden && store.includeRetainedTranscripts && entry.Kind == meetingMemoryKindTranscript && strings.EqualFold(strings.TrimSpace(entry.Metadata[retainedRawTranscriptMetadataKey]), "true") {
+			hidden = false
+		}
+		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || hidden || entry.CreatedAt.IsZero() {
+			continue
+		}
+		if earliest.IsZero() || entry.CreatedAt.Before(earliest) {
+			earliest = entry.CreatedAt
+		}
+	}
+	return earliest
 }

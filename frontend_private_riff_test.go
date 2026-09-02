@@ -27,13 +27,13 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 		"entryPoint",
 		"Share all to source",
 		"Share this reply to source",
-		"Your Riff · private to you",
-		"Riff privately with Scout…",
+		"Scout · private to you",
+		"Ask Scout privately…",
 		`data-icon="riff"`,
 		"mount(chatContextReplyForm, chatContextReplyInput, 'chat')",
 		`.chat-context-reply__composer:has(> .stride-dictation-composer:not([data-dictation-state="idle"]))`,
 		"Hidden chain-of-thought is not shown.",
-		"Shared by ${message.publication.sharedBy || 'a teammate'} from a private riff",
+		"Shared by ${message.publication.sharedBy || 'a teammate'} from a private Scout thread",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing Private Riff contract %q", want)
@@ -54,13 +54,13 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 	}
 	emptyState := functionBody(html, "function ensureScoutChatEmptyState(")
 	if !strings.Contains(emptyState, "const isRiff = Boolean(thread?.riff)") ||
-		!strings.Contains(emptyState, "Riff from this checkpoint") ||
+		!strings.Contains(emptyState, "Ask Scout from this checkpoint") ||
 		!strings.Contains(emptyState, "if (!isChannel && !isRiff) empty.after(buildScoutStarterRow())") {
 		t.Fatalf("an empty Private Riff must explain the source-bound conversation without offering durable-work starters: %s", emptyState)
 	}
 	checkpoint := functionBody(html, "function privateRiffCheckpointNode(")
 	if strings.Contains(checkpoint, "Update context") || strings.Contains(checkpoint, "will be included when you send") ||
-		!strings.Contains(checkpoint, "Open source") || !strings.Contains(checkpoint, "Riff in Realtime") {
+		!strings.Contains(checkpoint, "Open source") || !strings.Contains(checkpoint, "Talk in Realtime") {
 		t.Fatalf("Private Riff checkpoint must keep the compact source and Realtime actions without the retired freshness lecture: %s", checkpoint)
 	}
 	share := functionBody(html, "function renderPrivateRiffShare(")
@@ -137,7 +137,7 @@ func TestFrontendPrivateRiffIsAChannelWorkspaceNotAPrivateChatRow(t *testing.T) 
 			t.Fatalf("channel guitar and exact-message entry must have distinct episode semantics; missing %q: %s", want, open)
 		}
 	}
-	if !strings.Contains(html, "Your Riff") || !strings.Contains(html, "Current pass") {
+	if !strings.Contains(html, "Scout · private to you") || !strings.Contains(html, "Current pass") {
 		t.Fatal("Riff Space UI must name the stable workspace and current episode")
 	}
 	history := functionBody(html, "function privateRiffHistoryNode(")
@@ -173,8 +173,8 @@ func TestFrontendPrivateRiffHeaderEntryIsCompactAndKeepsItsHitTarget(t *testing.
 		`padding: 0 12px 0 10px;`,
 		`height: 44px;`,
 		`transition-property: background-color, box-shadow, transform;`,
-		`.chat-convo-head__riff:active { transform: scale(0.96); }`,
-		`<span>Riff</span>`,
+		`.chat-convo-head__riff:active { transform: scale(var(--press-scale)); }`, // plan 011: one press token
+		`<span>Scout</span>`,
 		`data-icon="riff"`,
 	} {
 		if !strings.Contains(html, want) {

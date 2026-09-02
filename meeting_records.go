@@ -103,6 +103,8 @@ type meetingRecordIndexItem struct {
 	CommitmentCount int      `json:"commitmentCount"`
 	UnresolvedCount int      `json:"unresolvedCount"`
 	TranscriptCount int      `json:"transcriptCount"`
+	// Recording (Wave 7 D2): the stored media output stage, when one exists.
+	Recording *meetingRecordingOutput `json:"recording,omitempty"`
 }
 
 type meetingRecordDetail struct {
@@ -525,6 +527,7 @@ func newMeetingRecordProjection(record meetingRecord, entries []meetingMemoryEnt
 		StartedAt: record.StartedAt, EndedAt: record.EndedAt, Active: record.EndedAt == "", DurationSeconds: meetingRecordDuration(record, now),
 		Participants: participants, CoverageState: coverage.State, DecisionCount: decisions, CommitmentCount: commitments,
 		UnresolvedCount: unresolved, TranscriptCount: len(projection.segments),
+		Recording: cloneMeetingRecordingOutput(record.Recording),
 	}
 	return projection
 }

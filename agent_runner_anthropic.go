@@ -945,6 +945,18 @@ func (r *anthropicFableRunner) RunJob(ctx context.Context, job AgentJob) (<-chan
 					// The orchestrator's tools ARE the in-process Go functions the
 					// Realtime bridge calls — no new transport.
 					args := decodeToolArgs(block.Input)
+					if block.Name == rememberNoteToolName {
+						if err := authorizeOrchestratorTool(job, block.Name); err != nil {
+							toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))
+							continue
+						}
+						// Wave 8 D1: the remember seam, author-certain as the thread's
+						// requester; thread + tool-use id scope the idempotency id.
+						result, _, toolErr := r.app.rememberNoteTool(args, job.RequestedBy, "agent-thread:"+job.ThreadID+":"+block.ID)
+						content, isError := anthropicToolResultContent(result, toolErr)
+						toolResults = append(toolResults, anthropicToolResultBlock(block.ID, content, isError))
+						continue
+					}
 					if block.Name == "note_for_the_record" {
 						if err := authorizeOrchestratorTool(job, block.Name); err != nil {
 							toolResults = append(toolResults, anthropicToolResultBlock(block.ID, err.Error(), true))

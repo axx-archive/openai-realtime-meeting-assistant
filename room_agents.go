@@ -18,7 +18,27 @@ var (
 	ErrRoomAgentControlAction  = errors.New("room agent control action is invalid")
 	ErrRoomAgentConsentMissing = errors.New("room agent consent is unavailable")
 	ErrRoomScoutVoiceDisabled  = errors.New("room Scout voice has not passed qualification")
+	ErrRoomScoutModeInvalid    = errors.New("room Scout mode must be voice or text")
 )
+
+// Scout seat modes (Wave 6 D7). Voice is the qualified realtime lane; text
+// seats Scout as a chat-only participant answering @Scout through the
+// server-owned room-chat path with no realtime lane and no provider audio.
+const (
+	roomScoutModeVoice = "voice"
+	roomScoutModeText  = "text"
+)
+
+func normalizeRoomScoutMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", roomScoutModeVoice:
+		return roomScoutModeVoice, nil
+	case roomScoutModeText:
+		return roomScoutModeText, nil
+	default:
+		return "", ErrRoomScoutModeInvalid
+	}
+}
 
 // roomAgentParticipant is the server-owned participant projection. Clients do
 // not infer an agent from a track name or an invitation card: the room sitting
@@ -29,6 +49,7 @@ type roomAgentParticipant struct {
 	Name                   string `json:"name"`
 	Kind                   string `json:"kind"`
 	Color                  string `json:"color"`
+	Mode                   string `json:"mode"`
 	Status                 string `json:"status"`
 	VoiceState             string `json:"voiceState"`
 	InvitationID           string `json:"invitationId"`
@@ -166,10 +187,25 @@ func (app *kanbanBoardApp) officeRoomScoutScopeForGeneration(generation uint64) 
 }
 
 func (app *kanbanBoardApp) inviteRoomScout(ctx context.Context, user *userAccount, requestedRoomID string) ([]roomAgentParticipant, error) {
-	if !currentRoomScoutVoiceAvailability().Enabled {
+	return app.inviteRoomScoutWithMode(ctx, user, requestedRoomID, roomScoutModeVoice)
+}
+
+// inviteRoomScoutWithMode seats Scout in one of two modes. Voice is gated by
+// the physical-meeting qualification and every participant's three consent
+// lanes because it opens a provider audio session. Text opens nothing new: it
+// is the same server-owned @Scout room-chat turn members already have, made
+// visible as a roster seat, so it needs only the control scope (a current
+// member in an active, non-listen-only sitting). A text seat upgrades to voice
+// when a qualified voice invite follows; a voice seat already answers text.
+func (app *kanbanBoardApp) inviteRoomScoutWithMode(ctx context.Context, user *userAccount, requestedRoomID string, requestedMode string) ([]roomAgentParticipant, error) {
+	mode, err := normalizeRoomScoutMode(requestedMode)
+	if err != nil {
+		return nil, err
+	}
+	if mode == roomScoutModeVoice && !currentRoomScoutVoiceAvailability().Enabled {
 		return nil, ErrRoomScoutVoiceDisabled
 	}
-	control, err := app.resolveRoomScoutControlScope(ctx, user, requestedRoomID, true)
+	control, err := app.resolveRoomScoutControlScope(ctx, user, requestedRoomID, mode == roomScoutModeVoice)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +223,35 @@ func (app *kanbanBoardApp) inviteRoomScout(ctx context.Context, user *userAccoun
 		state.scoutInvitedAt = now
 		state.scoutInvitedBy = canonicalRoomActorName(user.Name)
 		state.scoutConsentFences = append([]ConsentFence(nil), control.ConsentFences...)
+		state.scoutMode = mode
+		state.scoutLastStatusReason = ""
+		if mode == roomScoutModeText {
+			state.scoutRuntimeStatus = RoomScoutReady
+			state.scoutVoiceState = "off"
+		} else {
+			state.scoutRuntimeStatus = RoomScoutStarting
+			state.scoutVoiceState = "starting"
+		}
+	} else if state.scoutMode == roomScoutModeText && mode == roomScoutModeVoice {
+		// Upgrade the chat-only seat: same invitation, now with the consent
+		// fences the voice lane requires and a starting runtime.
+		state.scoutMode = roomScoutModeVoice
+		state.scoutConsentFences = append([]ConsentFence(nil), control.ConsentFences...)
 		state.scoutRuntimeStatus = RoomScoutStarting
 		state.scoutVoiceState = "starting"
 		state.scoutLastStatusReason = ""
 	}
+	startVoice := state.scoutMode == roomScoutModeVoice
 	apiKey := app.apiKey
 	participants := app.roomAgentParticipantsLocked(control.RoomID, state)
 	app.mu.Unlock()
 
 	broadcastRoomKanbanEvent(control.RoomID, "agent_participants", participants)
+	if !startVoice {
+		// Text mode: no realtime lane, no provider audio. @Scout in room chat
+		// already routes through submitRoomScoutTextMention.
+		return participants, nil
+	}
 	if control.RoomID == officeRoomID {
 		if strings.TrimSpace(apiKey) == "" {
 			app.updateRoomScoutParticipantState(control.RoomID, RoomScoutDegraded, "degraded", "Realtime provider is not configured")
@@ -228,6 +284,7 @@ func (app *kanbanBoardApp) dismissRoomScout(roomID, sittingID, reason string) []
 	state.scoutInvitedAt = time.Time{}
 	state.scoutInvitedBy = ""
 	state.scoutConsentFences = nil
+	state.scoutMode = ""
 	state.scoutRuntimeStatus = RoomScoutClosed
 	state.scoutVoiceState = ""
 	state.scoutLastStatusReason = trimForStorage(reason, 160)
@@ -269,12 +326,43 @@ func (app *kanbanBoardApp) roomAgentParticipantsLocked(roomID string, state *roo
 	if voiceState == "" {
 		voiceState = "starting"
 	}
+	mode := state.scoutMode
+	if mode == "" {
+		mode = roomScoutModeVoice
+	}
+	if mode == roomScoutModeText {
+		// A chat-only seat has no provider session to report on: it is ready
+		// the moment it is seated, and its voice lane is honestly "off".
+		return []roomAgentParticipant{{
+			ID: "scout", Name: scoutParticipantName, Kind: "scout", Color: "#FF6B35", Mode: mode,
+			Status: string(RoomScoutReady), VoiceState: "off", InvitationID: state.scoutInvitationID,
+			InvitedAt: state.scoutInvitedAt.Format(time.RFC3339Nano), InvitedBy: state.scoutInvitedBy,
+			Model: scoutChatModel(), ProviderSessionStarted: false,
+		}}
+	}
 	return []roomAgentParticipant{{
-		ID: "scout", Name: scoutParticipantName, Kind: "scout", Color: "#FF6B35",
+		ID: "scout", Name: scoutParticipantName, Kind: "scout", Color: "#FF6B35", Mode: mode,
 		Status: status, VoiceState: voiceState, InvitationID: state.scoutInvitationID,
 		InvitedAt: state.scoutInvitedAt.Format(time.RFC3339Nano), InvitedBy: state.scoutInvitedBy,
 		Model: realtimeModel(), ProviderSessionStarted: state.scoutRuntimeStatus == RoomScoutReady,
 	}}
+}
+
+// roomScoutModeSnapshot reports the current seat mode ("" when not invited).
+func (app *kanbanBoardApp) roomScoutModeSnapshot(roomID string) string {
+	if app == nil {
+		return ""
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	if !state.scoutInvited {
+		return ""
+	}
+	if state.scoutMode == "" {
+		return roomScoutModeVoice
+	}
+	return state.scoutMode
 }
 
 func (app *kanbanBoardApp) roomAgentParticipantsSnapshot(roomID string) []roomAgentParticipant {
@@ -419,7 +507,7 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusForbidden, "room agent status was not authorized")
 			return
 		}
-		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": kanbanApp.roomAgentParticipantsSnapshot(activeRoomID), "voice": currentRoomScoutVoiceAvailability()})
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": kanbanApp.roomAgentParticipantsSnapshot(activeRoomID), "voice": currentRoomScoutVoiceAvailability(), "scoutText": currentRoomScoutTextAvailability()})
 		return
 	}
 	if !websocketOriginAllowed(r) {
@@ -429,6 +517,9 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		RoomID string `json:"roomId"`
 		Action string `json:"action"`
+		// Mode selects the seat kind on invite: "voice" (default, qualified
+		// realtime lane) or "text" (chat-only, allowed while voice is off).
+		Mode string `json:"mode"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, roomAgentControlBodyLimit))
 	decoder.DisallowUnknownFields()
@@ -441,7 +532,7 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch strings.ToLower(strings.TrimSpace(payload.Action)) {
 	case "invite":
-		agents, err = kanbanApp.inviteRoomScout(r.Context(), user, roomID)
+		agents, err = kanbanApp.inviteRoomScoutWithMode(r.Context(), user, roomID, payload.Mode)
 	case "dismiss":
 		if _, resolveErr := kanbanApp.resolveRoomScoutControlScope(r.Context(), user, roomID, false); resolveErr != nil {
 			err = resolveErr
@@ -457,6 +548,9 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, ErrRoomAgentControlAction) {
 			status = http.StatusBadRequest
 			message = "Choose invite or dismiss for Scout."
+		} else if errors.Is(err, ErrRoomScoutModeInvalid) {
+			status = http.StatusBadRequest
+			message = "Choose voice or text for Scout's seat."
 		} else if errors.Is(err, ErrRoomAgentConsentMissing) {
 			message = "Every current participant must allow microphone capture, transcription, and AI analysis before Scout can join."
 		} else if errors.Is(err, ErrConsentAuthorityUnavailable) {
@@ -469,7 +563,7 @@ func roomScoutControlHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, status, message)
 		return
 	}
-	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": agents, "voice": currentRoomScoutVoiceAvailability()})
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": agents, "voice": currentRoomScoutVoiceAvailability(), "scoutText": currentRoomScoutTextAvailability()})
 }
 
 // rememberRoomAgentTranscript commits provider-authored speech into the same

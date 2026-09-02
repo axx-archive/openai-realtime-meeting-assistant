@@ -456,11 +456,14 @@ func TestShareLinkExpiryRevocationAndApprovalPull(t *testing.T) {
 		t.Fatalf("revoked token status=%d, want 404", recorder.Code)
 	}
 
-	// …and the stranger path is forbidden: a member cannot revoke the
-	// admin's own link.
+	// …and the stranger path is a non-enumerating 404: a member cannot
+	// revoke the admin's own link, and learns nothing about it.
 	adminLink := mintShareLinkForTest(t, artifact.ID, admin)
-	if recorder := shareLinkRequest(t, http.MethodDelete, "/artifacts/share", fmt.Sprintf(`{"id":%q}`, adminLink["id"]), member); recorder.Code != http.StatusForbidden {
-		t.Fatalf("foreign revoke status=%d, want 403", recorder.Code)
+	if recorder := shareLinkRequest(t, http.MethodDelete, "/artifacts/share", fmt.Sprintf(`{"id":%q}`, adminLink["id"]), member); recorder.Code != http.StatusNotFound {
+		t.Fatalf("foreign revoke status=%d, want 404", recorder.Code)
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(adminLink["url"]), "", nil); recorder.Code != http.StatusOK {
+		t.Fatalf("admin link after a foreign revoke attempt status=%d, want 200 (untouched)", recorder.Code)
 	}
 
 	// Approval pull: flip the artifact back to draft — the still-active link
@@ -701,5 +704,196 @@ func TestInternalRenderCallbackAuthAssetAppendAndFlattenLaw(t *testing.T) {
 	updated, _ = kanbanApp.osArtifactByID(deck.ID)
 	if updated.Metadata["renderStatus"] != renderJobStatusComplete || len(artifactAssets(updated)) != 1 {
 		t.Fatalf("replay mutated the artifact: metadata=%v assets=%d", updated.Metadata, len(artifactAssets(updated)))
+	}
+}
+
+// seedShareFile creates a plain Drive upload row (kind=file) bound to a fresh
+// blob, the shape assistantFileUploadHandler writes.
+func seedShareFile(t *testing.T, id string, name string, mime string, body string, uploader string, extra map[string]string) (meetingMemoryEntry, string) {
+	t.Helper()
+	ref, err := putBlob([]byte(body), mime)
+	if err != nil {
+		t.Fatalf("putBlob: %v", err)
+	}
+	metadata := map[string]string{
+		"name": name, "blobRef": ref, "mime": mime, "size": strconv.Itoa(len(body)),
+		"uploaderEmail": uploader, "uploaderName": "Uploader", "origin": "files", "brainStatus": fileBrainStatusStored,
+	}
+	for key, value := range extra {
+		metadata[key] = value
+	}
+	entry, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, id, "File "+name+" uploaded.", metadata)
+	if err != nil {
+		t.Fatalf("append file row: %v", err)
+	}
+	return entry, ref
+}
+
+func mintFileShareLinkForTest(t *testing.T, fileID string, cookies []*http.Cookie) map[string]any {
+	t.Helper()
+	recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q}`, fileID), cookies)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("mint file link status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	link, _ := decodeJSON(t, recorder)["link"].(map[string]any)
+	if link["objectType"] != shareLinkObjectTypeFile || link["fileId"] != fileID || !strings.HasPrefix(fmt.Sprint(link["url"]), "/a/") {
+		t.Fatalf("file link payload=%v, want objectType=file fileId=%s and an /a/ url", link, fileID)
+	}
+	return link
+}
+
+// Wave 5 D3: a plain Drive upload mints a link for its uploader (or a
+// people-visibility grant holder), the public route streams the blob with the
+// row's name, an attachment disposition for non-inline-safe types, ETag = ref
+// and 304 on revalidation; expiry and revocation match artifacts; a trashed
+// or private-and-ungranted row resolves 404; artifact links are untouched.
+func TestShareLinkFileMintResolveExpireRevokeAndAccessLoss(t *testing.T) {
+	admin, member := shareLinkTestEnv(t)
+	joel := loginAs(t, "joel@shareability.com", "B0NFIRE!")
+	file, ref := seedShareFile(t, "file-share-plain", "pitch notes.txt", "text/plain", "quarterly pitch notes", "tim@shareability.com", nil)
+
+	// Signed out: 401. A member who is neither uploader nor grantee: 404
+	// (non-enumerating), even though company visibility lets them read it.
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q}`, file.ID), nil); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out file mint status=%d, want 401", recorder.Code)
+	}
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q}`, file.ID), joel); recorder.Code != http.StatusNotFound {
+		t.Fatalf("non-uploader file mint status=%d body=%s, want 404", recorder.Code, recorder.Body.String())
+	}
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q}`, file.ID), admin); recorder.Code != http.StatusNotFound {
+		t.Fatalf("approval-admin (non-uploader) file mint status=%d, want 404 — sharing is not an admin power", recorder.Code)
+	}
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q,"artifactId":"art-1"}`, file.ID), member); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("dual-object mint status=%d, want 400", recorder.Code)
+	}
+
+	link := mintFileShareLinkForTest(t, file.ID, member)
+	url := fmt.Sprint(link["url"])
+	recorder := shareLinkRequest(t, http.MethodGet, url, "", nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("public file open status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Body.String() != "quarterly pitch notes" {
+		t.Fatalf("public file body=%q, want the blob bytes", recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/plain" {
+		t.Fatalf("Content-Type=%q, want the pinned blob mime", got)
+	}
+	if got := recorder.Header().Get("Content-Disposition"); got != `attachment; filename="pitch notes.txt"` {
+		t.Fatalf("Content-Disposition=%q, want attachment with the row name", got)
+	}
+	if got := recorder.Header().Get("ETag"); got != `"`+ref+`"` {
+		t.Fatalf("ETag=%q, want the blob ref", got)
+	}
+	for header, want := range map[string]string{"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Robots-Tag": "noindex, nofollow"} {
+		if got := recorder.Header().Get(header); got != want {
+			t.Fatalf("%s=%q, want %q", header, got, want)
+		}
+	}
+	if count := shareOpenedSignalCount(t, file.ID); count != 1 {
+		t.Fatalf("share_opened signals=%d after one open, want 1", count)
+	}
+
+	// Revalidation: a matching validator is a 304 with no body.
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("If-None-Match", `"`+ref+`"`)
+	revalidated := httptest.NewRecorder()
+	shareLinkPublicHandler(revalidated, req)
+	if revalidated.Code != http.StatusNotModified || revalidated.Body.Len() != 0 {
+		t.Fatalf("If-None-Match status=%d bodyLen=%d, want 304 with no body", revalidated.Code, revalidated.Body.Len())
+	}
+
+	// Inline-safe types stream inline.
+	image, _ := seedShareFile(t, "file-share-image", "logo.png", "image/png", "\x89PNG fake bytes", "tim@shareability.com", nil)
+	imageLink := mintFileShareLinkForTest(t, image.ID, member)
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(imageLink["url"]), "", nil); recorder.Code != http.StatusOK || !strings.HasPrefix(recorder.Header().Get("Content-Disposition"), "inline;") {
+		t.Fatalf("png open status=%d disposition=%q, want 200 inline", recorder.Code, recorder.Header().Get("Content-Disposition"))
+	}
+
+	// List for the file: the uploader sees it, a stranger gets 404.
+	listRecorder := shareLinkRequest(t, http.MethodGet, "/artifacts/share?fileId="+file.ID, "", member)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("file list status=%d", listRecorder.Code)
+	}
+	if links, _ := decodeJSON(t, listRecorder)["links"].([]any); len(links) != 1 {
+		t.Fatalf("file list returned %d links, want 1", len(links))
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, "/artifacts/share?fileId="+file.ID, "", joel); recorder.Code != http.StatusNotFound {
+		t.Fatalf("stranger file list status=%d, want 404", recorder.Code)
+	}
+
+	// Expiry: age the record in place.
+	records, err := loadShareLinks()
+	if err != nil {
+		t.Fatalf("loadShareLinks: %v", err)
+	}
+	for index := range records {
+		if records[index].ID == link["id"] {
+			records[index].ExpiresAt = time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+		}
+	}
+	if err := saveShareLinks(records); err != nil {
+		t.Fatalf("saveShareLinks: %v", err)
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, url, "", nil); recorder.Code != http.StatusNotFound {
+		t.Fatalf("expired file link status=%d, want 404", recorder.Code)
+	}
+
+	// Revocation: a stranger cannot, the creator can, the token dies.
+	revokable := mintFileShareLinkForTest(t, file.ID, member)
+	if recorder := shareLinkRequest(t, http.MethodDelete, "/artifacts/share", fmt.Sprintf(`{"id":%q}`, revokable["id"]), joel); recorder.Code != http.StatusNotFound {
+		t.Fatalf("stranger revoke status=%d, want 404", recorder.Code)
+	}
+	if recorder := shareLinkRequest(t, http.MethodDelete, "/artifacts/share", fmt.Sprintf(`{"id":%q}`, revokable["id"]), member); recorder.Code != http.StatusOK {
+		t.Fatalf("creator revoke status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(revokable["url"]), "", nil); recorder.Code != http.StatusNotFound {
+		t.Fatalf("revoked file link status=%d, want 404", recorder.Code)
+	}
+
+	// People visibility: a grant holder may mint; the link dies when the row
+	// goes private (minter is no longer a reader).
+	shared, _ := seedShareFile(t, "file-share-people", "plan.txt", "text/plain", "shared plan", "tim@shareability.com", map[string]string{
+		"visibility": fileVisibilityPeople, "grants": "e@shareability.com,joel@shareability.com",
+	})
+	granteeLink := mintFileShareLinkForTest(t, shared.ID, joel)
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(granteeLink["url"]), "", nil); recorder.Code != http.StatusOK {
+		t.Fatalf("grantee link open status=%d, want 200", recorder.Code)
+	}
+	if _, _, err := kanbanApp.memory.updateEntryWithMetadata(meetingMemoryKindFile, shared.ID, shared.Text, map[string]string{"visibility": fileVisibilityPrivate}); err != nil {
+		t.Fatalf("make private: %v", err)
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(granteeLink["url"]), "", nil); recorder.Code != http.StatusNotFound {
+		t.Fatalf("private-and-ungranted file link status=%d, want 404", recorder.Code)
+	}
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q}`, shared.ID), joel); recorder.Code != http.StatusNotFound {
+		t.Fatalf("mint on a private row by an ex-grantee status=%d, want 404", recorder.Code)
+	}
+
+	// Trash: the uploader's own live link stops serving; a trashed row cannot mint.
+	live := mintFileShareLinkForTest(t, image.ID, member)
+	if _, _, err := kanbanApp.memory.updateEntryWithMetadata(meetingMemoryKindFile, image.ID, image.Text, map[string]string{"deletedAt": time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
+		t.Fatalf("trash row: %v", err)
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(live["url"]), "", nil); recorder.Code != http.StatusNotFound {
+		t.Fatalf("trashed file link status=%d, want 404", recorder.Code)
+	}
+	if recorder := shareLinkRequest(t, http.MethodPost, "/artifacts/share", fmt.Sprintf(`{"fileId":%q}`, image.ID), member); recorder.Code != http.StatusNotFound {
+		t.Fatalf("mint on a trashed row status=%d, want 404", recorder.Code)
+	}
+
+	// Artifact links are untouched by the file branch: mint, open, and the
+	// artifact list never shows file links.
+	artifact := seedShareArtifact(t, "approved", "# Aurora\n\nready", nil)
+	artifactLink := mintShareLinkForTest(t, artifact.ID, member)
+	if artifactLink["objectType"] != shareLinkObjectTypeArtifact || artifactLink["fileId"] != nil {
+		t.Fatalf("artifact link payload=%v, want objectType=artifact and no fileId", artifactLink)
+	}
+	if recorder := shareLinkRequest(t, http.MethodGet, fmt.Sprint(artifactLink["url"]), "", nil); recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Aurora") {
+		t.Fatalf("artifact link open status=%d, want 200 with the rendered page", recorder.Code)
+	}
+	artifactList := shareLinkRequest(t, http.MethodGet, "/artifacts/share?artifactId="+artifact.ID, "", member)
+	if links, _ := decodeJSON(t, artifactList)["links"].([]any); len(links) != 1 {
+		t.Fatalf("artifact list returned %d links, want exactly its own", len(links))
 	}
 }

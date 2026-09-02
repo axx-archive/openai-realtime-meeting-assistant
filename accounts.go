@@ -56,6 +56,40 @@ type userAccount struct {
 	// empty means no account-level choice (client falls back to its device
 	// storage, then the light product default — founder call 2026-07-10).
 	ThemePref string `json:"themePref,omitempty"`
+	// DisabledAt marks an offboarded account (Wave 5 D11). The record is
+	// never deleted: history, authorship, and passkeys stay intact, but a
+	// disabled account cannot sign in, its sessions are revoked on disable,
+	// and directory surfaces (mentions, member pickers, human-group
+	// validation, Drive grants) exclude it via accountIsDisabled. Nil means
+	// active; re-enabling clears the stamp.
+	DisabledAt *time.Time `json:"disabledAt,omitempty"`
+}
+
+// disabled reports whether the account is currently offboarded.
+func (u *userAccount) disabled() bool {
+	return u != nil && u.DisabledAt != nil && !u.DisabledAt.IsZero()
+}
+
+// accountIsDisabled is the one package-level filter every roster consumer
+// (mention candidates, member pickers, human-group validation, Drive grants)
+// applies. An unknown email is NOT disabled — callers that need existence
+// check findUser separately, so this helper never widens a denial into an
+// enumeration signal.
+func accountIsDisabled(email string) bool {
+	email = normalizeAccountEmail(email)
+	if email == "" {
+		return false
+	}
+	return accountStore().findUser(email).disabled()
+}
+
+// isFounderOwner is the owner notion the shell already projects as
+// shellAccess=full for the founder account (shellAccessForSession): the one
+// principal allowed to toggle account lifecycle. Deliberately NOT the
+// organization owner/admin membership path, which can grant "full" to other
+// members — offboarding stays with the founder.
+func isFounderOwner(user *userAccount) bool {
+	return user != nil && normalizeAccountEmail(user.Email) == founderOwnerEmail
 }
 
 // WebAuthnID implements webauthn.User with a stable random handle so passkeys
@@ -271,6 +305,12 @@ func (s *userAccountStore) authenticate(email, password string) (*userAccount, b
 	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)) != nil {
 		return nil, false
 	}
+	// The password compare runs first so a disabled account costs the same
+	// time as a wrong password: the caller's uniform "don't match" message
+	// enumerates nothing.
+	if user.disabled() {
+		return nil, false
+	}
 	return user, true
 }
 
@@ -283,7 +323,37 @@ func (s *userAccountStore) authenticateRosterName(name, password string) (*userA
 	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)) != nil {
 		return nil, false
 	}
+	if user.disabled() {
+		return nil, false
+	}
 	return user, true
+}
+
+// setDisabled stamps or clears DisabledAt with the mutate-persist-rollback
+// discipline updateProfile uses. The record is never removed; a repeated call
+// with the same state is a no-op that still reports the current account.
+func (s *userAccountStore) setDisabled(email string, disabled bool, now time.Time) (*userAccount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[normalizeAccountEmail(email)]
+	if !ok {
+		return nil, errors.New("no such account")
+	}
+	if user.disabled() == disabled {
+		return user, nil
+	}
+	previous := user.DisabledAt
+	if disabled {
+		stamp := now.UTC()
+		user.DisabledAt = &stamp
+	} else {
+		user.DisabledAt = nil
+	}
+	if err := s.persistLocked(); err != nil {
+		user.DisabledAt = previous
+		return nil, err
+	}
+	return user, nil
 }
 
 func (s *userAccountStore) changePassword(email, currentPassword, newPassword string) error {

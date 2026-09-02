@@ -48,3 +48,34 @@ Gate for every plan: `go test -count=1 -run 'TestIndex' .` green before moving o
 - Board-expanded `animation: none !important` kill-switch (≈5386) — documented deliberate ("the expanded board keeps its animation kill-switch").
 - `--ease-spring` bounce on popovers/PiP/goal-advance — sanctioned earned delight.
 - Modal center origins — correct for centered surfaces.
+
+# Wave 10 motion pass — 2026-09-02 audit (commit `5ef9cece`)
+
+Produced by `improve-animations` at AJ's request to roll the motion pass INTO Wave 10 ("light/snappy/responsive/modern; consistency end-to-end"). Four parallel category agents (easing+cohesion; purpose+interruptibility; physicality+performance; accessibility+opportunities) over the uncommitted batch tree; the orchestrator re-vetted every quoted literal against the file before planning (two literals re-anchored by grep). The foundation from the July waves held (no `transition: all`, no `ease-in`, no `scale(0)`); the batch itself introduced most of the drift below.
+
+## Plans
+
+| # | Title | Severity | Status |
+|---|---|---|---|
+| 009 | Chat message entrance: one composited fade-rise at token speed, on every breakpoint | HIGH | DONE |
+| 010 | Tab switch: remove the 360 ms icon bounce from both navs | HIGH | DONE |
+| 011 | One press depth everywhere: `--press-scale` replaces six hand-typed scales | HIGH | DONE |
+| 012 | Toasts, pop-ins and sheets: one recipe each, on tokens | HIGH | DONE |
+| 013 | Hover and keystroke feedback on `--dur-fast`; fold the token residue | HIGH | DONE |
+| 014 | Message hover actions: opacity reveal, no layout tween | HIGH | DONE |
+| 015 | Five open/close surfaces move from one-way keyframes to reversible transitions | MEDIUM | DONE |
+| 016 | Proposal cards: entrance only for new cards | MEDIUM | DONE |
+| 017 | bfMenu: trigger-anchored transform-origin on every branch | MEDIUM | DONE |
+| 018 | Composite-only sweep: PiP drag, voice bars, transfer panel, voice island, resize grip, receipt fill | HIGH | DONE |
+| 019 | Reduced motion: close the remaining gaps | MEDIUM | DONE |
+| 020 | Continuity moments: thread-list FLIP, work-step transitions, theme crossfade, previewer direction, move attribution | MEDIUM | DONE |
+
+## Execution order & dependencies
+
+Two lanes may run in parallel because they touch disjoint regions of `index.html` (both edit surgically, never rewrite): **Lane A (feel)** 010 → 011 → 012 → 013 → 009 → 014 (chat/rail/toasts/global tokens). **Lane B (mechanics)** 017 → 015 → 016 → 018 → 019 → 020 (bfMenu, panels, proposals, rooms/voice/studio performance, accessibility, continuity). 020 last in its lane (largest). Gate for every plan: `go test -count=1 -timeout 20m -run 'TestIndex|TestPolishWave10|DesignSystem' .` green before the next.
+
+## Vetting notes
+
+Refuted/retired during vetting: none of the 44 findings was by-design; two were narrowed (bfMenu origin already fixed on the fixed branch earlier today → 017 covers the adopted/non-fixed branches only; the reaction-row hand `aria-pressed` is a cleanup, handled by the rooms fix). Deliberately NOT planned: the boot `mount-rise`/`rise-in` cinematics and the board `is-fresh`/`is-moved` feedback (sanctioned), the toast one-pill canon (kept), `linear` on constant fills and `ease-in-out` on ambient alternate pulses (correct per AUDIT.md).
+
+Wave 10 motion gate evidence (2026-09-02): all twelve plans DONE across two lanes (per-plan Result notes in each file); every plan gated on `TestIndex|TestPolishWave10|DesignSystem`; Playwright feel checks on :3171 (computed styles, `getAnimations()`, Performance entries) all pass with zero page errors; 015 left memory body / Drive details / room chat entrance-only because their hosts are emptied or hidden synchronously by JS (noted in-file as a follow-up).

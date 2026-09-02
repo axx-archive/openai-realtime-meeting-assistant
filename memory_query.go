@@ -85,6 +85,11 @@ type assistantQueryResult struct {
 	// contextEntries is server-only authority evidence for revision-bound
 	// consumers such as Private Riff. It is never projected or serialized.
 	contextEntries []meetingMemoryEntry
+	// coverage (Wave 8 D7) grades the evidence the answer was composed from:
+	// complete | partial | unavailable, per recall_coverage.go. coverageReason
+	// says why when not complete. Empty for board/clarification answers.
+	coverage       string
+	coverageReason string
 }
 
 type osAssistantAction struct {
@@ -132,12 +137,13 @@ func (app *kanbanBoardApp) answerAssistantQuery(query string) (map[string]any, b
 	})
 
 	return map[string]any{
-		"ok":      true,
-		"query":   result.query,
-		"answer":  result.answer,
-		"source":  "assistant",
-		"matches": result.matches,
-		"context": result.contextSize,
+		"ok":       true,
+		"query":    result.query,
+		"answer":   result.answer,
+		"source":   "assistant",
+		"matches":  result.matches,
+		"context":  result.contextSize,
+		"coverage": result.coverage,
 	}, false, nil
 }
 
@@ -260,6 +266,7 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		}
 	}
 
+	coverage := recallApp.answerRecallCoverage(recallQuery, matches, contextEntries, time.Now())
 	return assistantQueryResult{
 		query:          recallQuery,
 		answer:         answer,
@@ -267,6 +274,8 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		matches:        len(matches),
 		contextSize:    len(contextEntries),
 		contextEntries: contextEntries,
+		coverage:       string(coverage.Status),
+		coverageReason: coverage.Reason,
 	}, nil
 }
 
@@ -2032,7 +2041,9 @@ func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemor
 	// context (status/owner/validity computed in Go, never by the model)
 	// with verbatim anchor drill-down, and the store lanes fill the rest.
 	lane := app.ledgerContextLane(query, now)
-	budget := defaultMemoryQuestionContextLimit - len(lane)
+	// Wave 8 D10: the raw-entry budget follows the query class (recall_budget.go)
+	// instead of one fixed 60 for every shape of question.
+	budget := recallContextBudget(query, now) - len(lane)
 	if budget < 0 {
 		budget = 0
 	}
@@ -2617,6 +2628,9 @@ func (app *kanbanBoardApp) ledgerContextLane(query string, now time.Time) []meet
 	if lane := app.ledgerPositionLane(query, now); len(lane) > 0 {
 		return lane
 	}
+	if lane := app.ledgerWorkResultLane(query, now); len(lane) > 0 {
+		return lane
+	}
 	if !isCurrentStateQuery(query, now) {
 		return nil
 	}
@@ -2677,6 +2691,9 @@ func (app *kanbanBoardApp) ledgerStatusAnswer(query string) (string, bool) {
 		return answer, true
 	}
 	if answer, ok := app.ledgerPositionAnswer(query); ok {
+		return answer, true
+	}
+	if answer, ok := app.ledgerWorkResultAnswer(query); ok {
 		return answer, true
 	}
 	if !isCurrentStateQuery(query, time.Now()) {

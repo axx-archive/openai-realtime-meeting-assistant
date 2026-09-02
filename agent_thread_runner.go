@@ -1587,6 +1587,12 @@ func (app *kanbanBoardApp) appendAgentRunLogEntry(thread scoutAgentThread, artif
 	if _, _, err := app.memory.appendRunLog("run-log-"+thread.ID, text, metadata); err != nil {
 		log.Errorf("Failed to append run log for thread %s: %v", thread.ID, err)
 	}
+	// Wave 8 D9: the same terminal funnel mints the work_result ledger event
+	// (what was produced, for whom, from which conversation) so recall can
+	// answer "what did our agents produce" from the fold.
+	if _, _, err := app.appendWorkResultLedgerEvent(thread, artifact, status); err != nil {
+		log.Errorf("Failed to append work_result ledger event for thread %s: %v", thread.ID, err)
+	}
 
 	// W0 items 7+8 terminal twins: BOTH terminal paths (the in-process
 	// runAgentThread seam and the codex-callback seam via

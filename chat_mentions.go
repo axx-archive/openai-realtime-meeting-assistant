@@ -196,7 +196,9 @@ func chatMentionTargetEmails(text string) []string {
 			}
 			email = directory[mention.handle]
 		}
-		if email == "" {
+		if email == "" || accountIsDisabled(email) {
+			// An offboarded account (Wave 5 D11) is never a mention target,
+			// whichever path resolved the handle (roster or directory).
 			continue
 		}
 		if _, ok := seen[email]; ok {
@@ -210,13 +212,14 @@ func chatMentionTargetEmails(text string) []string {
 
 // chatMentionDirectoryHandles maps lowercased mention handles to registered
 // account emails. accountEmails lists seeds first, so a seed always wins a
-// handle collision with a later-registered account.
+// handle collision with a later-registered account. Offboarded accounts are
+// skipped exactly as chatMentionCandidates skips them.
 func chatMentionDirectoryHandles() map[string]string {
 	store := accountStore()
 	handles := map[string]string{}
 	for _, raw := range store.accountEmails() {
 		user := store.findUser(raw)
-		if user == nil {
+		if user == nil || user.disabled() {
 			continue
 		}
 		handle := strings.ToLower(chatMentionHandle(accountDisplayName(user)))
@@ -393,7 +396,9 @@ func (app *kanbanBoardApp) notifyScoutChatTargets(thread scoutChatThreadRecord, 
 	notified := map[string]struct{}{}
 	if message.ReplyTo != nil {
 		email := normalizeAccountEmail(message.ReplyTo.AuthorEmail)
-		if email != "" && email != authorEmail && scoutChatThreadAllowsViewer(thread, email) {
+		// Same fence as the mention path: a reply to a message whose author
+		// has since been offboarded (Wave 5 D11) must never ring that account.
+		if email != "" && email != authorEmail && !accountIsDisabled(email) && scoutChatThreadAllowsViewer(thread, email) {
 			excluded = append(excluded, email)
 			text := author + " replied to you in #" + thread.Title + ": " + trimForStorage(message.Text, 140)
 			if _, err := app.createChatNotification(email, nil, text, thread, message); err != nil {
@@ -404,7 +409,10 @@ func (app *kanbanBoardApp) notifyScoutChatTargets(thread scoutChatThreadRecord, 
 		}
 	}
 	for _, email := range chatMentionTargetEmails(message.Text) {
-		if email == "" || email == authorEmail || !scoutChatThreadAllowsViewer(thread, email) {
+		// accountIsDisabled is re-checked here defensively: an offboarded
+		// account must never receive a mention notification whatever
+		// resolved it.
+		if email == "" || email == authorEmail || accountIsDisabled(email) || !scoutChatThreadAllowsViewer(thread, email) {
 			continue
 		}
 		if _, exists := notified[email]; exists {

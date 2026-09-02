@@ -18,6 +18,10 @@ const (
 	ConsentTranscription ConsentScope = "transcription"
 	ConsentModelAnalysis ConsentScope = "model_analysis"
 	ConsentOrgMemory     ConsentScope = "org_memory"
+	// ConsentRecording (Wave 7 D2) is the third room consent state beside
+	// transcript recording and Scout invitation: stored media. It depends on
+	// audio capture and never rides the guest default-allow baseline.
+	ConsentRecording ConsentScope = "recording"
 )
 
 type ConsentDisposition string
@@ -266,6 +270,8 @@ func consentScopeDependencies(scope ConsentScope) []ConsentScope {
 		return []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis}
 	case ConsentOrgMemory:
 		return []ConsentScope{ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory}
+	case ConsentRecording:
+		return []ConsentScope{ConsentAudioCapture, ConsentRecording}
 	default:
 		return nil
 	}
@@ -273,7 +279,7 @@ func consentScopeDependencies(scope ConsentScope) []ConsentScope {
 
 func validConsentScope(scope ConsentScope) bool {
 	switch scope {
-	case ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory:
+	case ConsentAudioCapture, ConsentTranscription, ConsentModelAnalysis, ConsentOrgMemory, ConsentRecording:
 		return true
 	default:
 		return false

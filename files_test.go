@@ -1423,3 +1423,1001 @@ func TestSaveToFilesToolFilesDeliverables(t *testing.T) {
 		t.Fatalf("row folderId=%q, want the Diligence folder %+v", row.FolderID, folders)
 	}
 }
+
+// TestAssistantFileSaveAcceptsEveryStudioProjectKind pins Wave 3 D2: the
+// explicit save door files a terminal Work result of every kind — agent-thread
+// image, chat image render, sheet, research brief, generic pdf artifact, and
+// the studio-native blank document/deck — and answers with the file id.
+func TestAssistantFileSaveAcceptsEveryStudioProjectKind(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	previousAuthorizer := artifactObjectAuthorizer
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { kanbanApp = previousApp; artifactObjectAuthorizer = previousAuthorizer })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+
+	owner := "aj@shareability.com"
+	thread, err := kanbanApp.createScoutChatThread(owner, "AJ", "Save every kind", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtures := seedStudioProjectKindFixtures(t, kanbanApp, owner, thread)
+	user := &userAccount{Email: owner, Name: "AJ"}
+	blankDocument := studioBlankBaseMetadata(user, "Blank memo", studioBlankSourceDocument, "document")
+	blankDocument["type"] = artifactTypeMarkdown
+	if fixtures["document"], _, err = kanbanApp.createOSArtifactWithMetadata("research", "Blank memo", "# Blank memo\n\nTyped by hand.", "AJ", blankDocument); err != nil {
+		t.Fatal(err)
+	}
+	blankDeck := studioBlankBaseMetadata(user, "Blank deck", studioBlankSourceDeck, "presentation")
+	blankDeck["type"] = artifactTypeHTMLDeck
+	blankDeck[deckSceneRefMetadataKey] = strings.Repeat("e", 64)
+	if fixtures["presentation"], _, err = kanbanApp.createOSArtifactWithMetadata("artifacts", "Blank deck", "<!doctype html><html><body><main>Blank deck</main></body></html>", "AJ", blankDeck); err != nil {
+		t.Fatal(err)
+	}
+	for kind, entry := range fixtures {
+		if classified, ok := studioLegacyProjectCandidate(entry); !ok || classified == "" {
+			t.Fatalf("%s fixture is not a Work result: %v", kind, entry.Metadata)
+		}
+	}
+
+	cookies := loginAs(t, owner, "B0NFIRE!")
+	for _, kind := range []string{"image", "chatImage", "sheet", "research", "artifact", "document", "presentation"} {
+		entry := fixtures[kind]
+		if fileRowVisible(kanbanApp, owner, entry.ID) {
+			t.Fatalf("%s result was visible in Files before an explicit save", kind)
+		}
+		response := postFileSave(t, cookies, fmt.Sprintf(`{"artifactId":%q}`, entry.ID))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s save status=%d body=%s", kind, response.Code, response.Body.String())
+		}
+		var payload struct {
+			OK     bool                `json:"ok"`
+			FileID string              `json:"fileId"`
+			File   assistantFileRecord `json:"file"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !payload.OK || payload.FileID != entry.ID || payload.File.ID != entry.ID || payload.File.ArtifactID != entry.ID {
+			t.Fatalf("%s save payload=%s", kind, response.Body.String())
+		}
+		if !fileRowVisible(kanbanApp, owner, entry.ID) {
+			t.Fatalf("%s result is not visible in Files after saving", kind)
+		}
+		switch kind {
+		case "image", "chatImage":
+			if payload.File.Mime != "image/png" || payload.File.DownloadURL == "" {
+				t.Fatalf("%s file row=%+v, want image bytes", kind, payload.File)
+			}
+		case "sheet":
+			if payload.File.Mime != ventureWorkbookMime || payload.File.DownloadURL == "" {
+				t.Fatalf("sheet file row=%+v, want workbook bytes", payload.File)
+			}
+		case "artifact":
+			if payload.File.Mime != "application/pdf" || payload.File.DownloadURL == "" {
+				t.Fatalf("artifact file row=%+v, want pdf bytes", payload.File)
+			}
+		case "presentation":
+			if payload.File.Mime != "text/html" {
+				t.Fatalf("presentation file row=%+v, want html", payload.File)
+			}
+		}
+	}
+}
+
+// ---- Wave 5 Drive: per-file ACL, share, versions, star/trash, search, work
+// refs, quota (D1/D2/D5/D6/D7/D8/D9). ----
+
+func postFileUploadWithFields(t *testing.T, cookies []*http.Cookie, name string, contentType string, data []byte, fields map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %s: %v", key, err)
+		}
+	}
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, name))
+	if contentType != "" {
+		header.Set("Content-Type", contentType)
+	}
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatalf("create multipart part: %v", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatalf("write multipart part: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/assistant/files/upload", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantFileUploadHandler(recorder, req)
+	return recorder
+}
+
+func uploadDriveFileRow(t *testing.T, cookies []*http.Cookie, name string, contentType string, data []byte, fields map[string]string) assistantFileRecord {
+	t.Helper()
+	recorder := postFileUploadWithFields(t, cookies, name, contentType, data, fields)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("upload %s status=%d body=%s", name, recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		File assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode upload %s: %v", name, err)
+	}
+	return payload.File
+}
+
+type driveListPayload struct {
+	OK    bool                  `json:"ok"`
+	Files []assistantFileRecord `json:"files"`
+	Scope string                `json:"scope"`
+}
+
+func listDriveFiles(t *testing.T, cookies []*http.Cookie, rawQuery string) driveListPayload {
+	t.Helper()
+	target := "/assistant/files"
+	if rawQuery != "" {
+		target += "?" + rawQuery
+	}
+	req := httptest.NewRequest(http.MethodGet, target, nil)
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantFilesHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("list %q status=%d body=%s", rawQuery, recorder.Code, recorder.Body.String())
+	}
+	var payload driveListPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list %q: %v", rawQuery, err)
+	}
+	return payload
+}
+
+func driveRowByID(rows []assistantFileRecord, id string) (assistantFileRecord, bool) {
+	for _, row := range rows {
+		if row.ID == id {
+			return row, true
+		}
+	}
+	return assistantFileRecord{}, false
+}
+
+func patchDriveFile(t *testing.T, cookies []*http.Cookie, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPatch, "/assistant/files", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantFilesHandler(recorder, req)
+	return recorder
+}
+
+func postDriveJSON(t *testing.T, handler http.HandlerFunc, path string, cookies []*http.Cookie, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range cookies {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	handler(recorder, req)
+	return recorder
+}
+
+func blobRefFromRow(t *testing.T, row assistantFileRecord) string {
+	t.Helper()
+	parsed, err := url.Parse(row.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse downloadUrl %q: %v", row.DownloadURL, err)
+	}
+	return parsed.Query().Get("ref")
+}
+
+func setupDriveWaveTest(t *testing.T) ([]*http.Cookie, []*http.Cookie) {
+	t.Helper()
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	t.Setenv("MEETING_ALLOWED_ORIGINS", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("BONFIRE_FILE_FOLDERS_PATH", filepath.Join(t.TempDir(), "file-folders.json"))
+	return loginAs(t, "aj@shareability.com", "B0NFIRE!"), loginAs(t, "joel@shareability.com", "B0NFIRE!")
+}
+
+// D1: private uploads are the uploader's alone, people uploads reach only their
+// grants, company uploads reach every member, legacy unstamped rows read as
+// company, unknown values fail closed for everyone but the uploader, and the
+// same policy gates the blob route and principal-scoped recall.
+func TestAssistantFilePerFileACLScopesListsBlobsAndRecall(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	aj := accountStore().findUser("aj@shareability.com")
+	joel := accountStore().findUser("joel@shareability.com")
+
+	private := uploadDriveFileRow(t, ajCookies, "private-plan.txt", "text/plain", []byte("private runway plan canary"), map[string]string{"visibility": "private"})
+	company := uploadDriveFileRow(t, ajCookies, "company-notes.txt", "text/plain", []byte("company offsite canary"), nil)
+	people := uploadDriveFileRow(t, ajCookies, "people-brief.txt", "text/plain", []byte("people brief canary"), map[string]string{"visibility": "people"})
+	if private.Visibility != fileVisibilityPrivate || company.Visibility != fileVisibilityCompany || people.Visibility != fileVisibilityPeople {
+		t.Fatalf("visibility private=%q company=%q people=%q", private.Visibility, company.Visibility, people.Visibility)
+	}
+	if !private.CanShare || !private.CanDelete {
+		t.Fatalf("uploader row=%+v, want canShare+canDelete", private)
+	}
+	if bad := postFileUploadWithFields(t, ajCookies, "bad.txt", "text/plain", []byte("x"), map[string]string{"visibility": "everyone"}); bad.Code != http.StatusBadRequest {
+		t.Fatalf("unknown visibility upload status=%d, want 400", bad.Code)
+	}
+
+	joelRows := listDriveFiles(t, joelCookies, "").Files
+	if _, visible := driveRowByID(joelRows, private.ID); visible {
+		t.Fatal("private upload leaked into another member's list")
+	}
+	if _, visible := driveRowByID(joelRows, people.ID); visible {
+		t.Fatal("people upload without grants leaked into a non-grantee's list")
+	}
+	companyRow, visible := driveRowByID(joelRows, company.ID)
+	if !visible || companyRow.CanShare || companyRow.CanDelete {
+		t.Fatalf("company row for non-uploader=%+v visible=%v, want visible without share/delete", companyRow, visible)
+	}
+	ajRows := listDriveFiles(t, ajCookies, "").Files
+	for _, id := range []string{private.ID, company.ID, people.ID} {
+		if _, visible := driveRowByID(ajRows, id); !visible {
+			t.Fatalf("uploader cannot see own upload %s", id)
+		}
+	}
+
+	// Blob route: the same policy, per request.
+	privateRef, peopleRef := blobRefFromRow(t, private), blobRefFromRow(t, people)
+	if blobAuthorized(context.Background(), joel, privateRef) {
+		t.Fatal("private blob authorized for a non-uploader")
+	}
+	if !blobAuthorized(context.Background(), aj, privateRef) {
+		t.Fatal("private blob denied to its uploader")
+	}
+	if blobAuthorized(context.Background(), joel, peopleRef) {
+		t.Fatal("people blob authorized before any grant")
+	}
+	// Recall: the principal-scoped store carries only readable rows.
+	recallHas := func(viewer *userAccount, query string, id string) bool {
+		for _, match := range kanbanApp.recallStoreForPrincipal(context.Background(), recallPrincipalForUser(viewer)).search(query, 10) {
+			if match.Entry.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if recallHas(joel, "private runway plan canary", private.ID) {
+		t.Fatal("private upload reached another member's recall")
+	}
+	if !recallHas(aj, "private runway plan canary", private.ID) {
+		t.Fatal("private upload missing from its uploader's recall")
+	}
+	if recallHas(joel, "people brief canary", people.ID) {
+		t.Fatal("people upload reached a non-grantee's recall")
+	}
+
+	// Grant joel: the people row, its blob and its recall open for him only.
+	grant := patchDriveFile(t, ajCookies, fmt.Sprintf(`{"id":%q,"grants":{"add":["Joel@Shareability.com"]}}`, people.ID))
+	if grant.Code != http.StatusOK {
+		t.Fatalf("grant status=%d body=%s", grant.Code, grant.Body.String())
+	}
+	joelRows = listDriveFiles(t, joelCookies, "").Files
+	peopleRow, visible := driveRowByID(joelRows, people.ID)
+	if !visible || len(peopleRow.Grants) != 1 || peopleRow.Grants[0] != "joel@shareability.com" {
+		t.Fatalf("granted people row=%+v visible=%v", peopleRow, visible)
+	}
+	if !blobAuthorized(context.Background(), joel, peopleRef) {
+		t.Fatal("people blob denied to a grantee")
+	}
+	if !recallHas(joel, "people brief canary", people.ID) {
+		t.Fatal("granted people upload missing from the grantee's recall")
+	}
+	tim := accountStore().findUser("tim@shareability.com")
+	if blobAuthorized(context.Background(), tim, peopleRef) {
+		t.Fatal("people blob authorized for a member without a grant")
+	}
+
+	// Legacy rows (no visibility) read as company for everyone; an unknown
+	// value fails closed for everyone but the uploader.
+	legacy, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, "file-legacy-unstamped", "File legacy.txt uploaded by AJ. legacy canary", map[string]string{
+		"name": "legacy.txt", "mime": "text/plain", "size": "13", "uploaderEmail": "aj@shareability.com", "uploaderName": "AJ", "origin": "files", "brainStatus": fileBrainStatusIngested,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := kanbanApp.memory.appendEntry(meetingMemoryKindFile, "file-weird-visibility", "File weird.txt uploaded by AJ.", map[string]string{
+		"name": "weird.txt", "uploaderEmail": "aj@shareability.com", "origin": "files", "brainStatus": fileBrainStatusStored, "visibility": "everyone",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	joelRows = listDriveFiles(t, joelCookies, "").Files
+	if legacyRow, visible := driveRowByID(joelRows, legacy.ID); !visible || legacyRow.Visibility != fileVisibilityCompany {
+		t.Fatalf("legacy unstamped row=%+v visible=%v, want company-visible", legacyRow, visible)
+	}
+	if _, visible := driveRowByID(joelRows, "file-weird-visibility"); visible {
+		t.Fatal("unknown visibility value must fail closed for other members")
+	}
+
+	// Migration: stamps exactly the unstamped row, then is a no-op.
+	if stamped := kanbanApp.migrateFileVisibilityDefaults(); stamped != 1 {
+		t.Fatalf("first migration stamped %d, want 1", stamped)
+	}
+	if entry, ok := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, legacy.ID); !ok || entry.Metadata["visibility"] != fileVisibilityCompany {
+		t.Fatalf("legacy row after migration=%+v ok=%v", entry.Metadata, ok)
+	}
+	if stamped := kanbanApp.migrateFileVisibilityDefaults(); stamped != 0 {
+		t.Fatalf("second migration stamped %d, want 0", stamped)
+	}
+	if entry, _ := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, private.ID); entry.Metadata["visibility"] != fileVisibilityPrivate {
+		t.Fatalf("migration rewrote a stamped row: %q", entry.Metadata["visibility"])
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, joelCookies, "").Files, legacy.ID); !visible {
+		t.Fatal("migrated legacy row must stay company-visible")
+	}
+}
+
+// D2: PATCH {id, visibility?, grants?} is the uploader's alone (403 for a
+// reader, 404 for a non-reader); grants must be registered accounts.
+func TestAssistantFilePatchManagesAccessForUploaderOnly(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	company := uploadDriveFileRow(t, ajCookies, "shared.txt", "text/plain", []byte("shared body"), nil)
+	private := uploadDriveFileRow(t, ajCookies, "mine.txt", "text/plain", []byte("mine body"), map[string]string{"visibility": "private"})
+
+	if response := patchDriveFile(t, joelCookies, fmt.Sprintf(`{"id":%q,"visibility":"private"}`, company.ID)); response.Code != http.StatusForbidden {
+		t.Fatalf("reader manage-access status=%d body=%s, want 403", response.Code, response.Body.String())
+	}
+	if response := patchDriveFile(t, joelCookies, fmt.Sprintf(`{"id":%q,"visibility":"company"}`, private.ID)); response.Code != http.StatusNotFound {
+		t.Fatalf("non-reader manage-access status=%d, want 404", response.Code)
+	}
+	if entry, _ := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, company.ID); entry.Metadata["visibility"] != fileVisibilityCompany {
+		t.Fatalf("forbidden PATCH changed visibility to %q", entry.Metadata["visibility"])
+	}
+	if response := patchDriveFile(t, ajCookies, fmt.Sprintf(`{"id":%q,"grants":{"add":["nobody@example.com"]}}`, company.ID)); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "not registered") {
+		t.Fatalf("unregistered grant status=%d body=%s, want 400", response.Code, response.Body.String())
+	}
+	if response := patchDriveFile(t, ajCookies, fmt.Sprintf(`{"id":%q,"visibility":"friends"}`, company.ID)); response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid visibility status=%d, want 400", response.Code)
+	}
+
+	response := patchDriveFile(t, ajCookies, fmt.Sprintf(`{"id":%q,"visibility":"people","grants":{"add":["joel@shareability.com","tim@shareability.com","aj@shareability.com"]}}`, company.ID))
+	if response.Code != http.StatusOK {
+		t.Fatalf("manage-access status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		OK   bool                `json:"ok"`
+		File assistantFileRecord `json:"file"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.OK || payload.File.ID != company.ID || payload.File.Visibility != fileVisibilityPeople || strings.Join(payload.File.Grants, ",") != "joel@shareability.com,tim@shareability.com" {
+		t.Fatalf("manage-access row=%+v, want people with joel+tim (uploader implicit)", payload.File)
+	}
+	response = patchDriveFile(t, ajCookies, fmt.Sprintf(`{"id":%q,"grants":{"remove":["tim@shareability.com"]}}`, company.ID))
+	if response.Code != http.StatusOK {
+		t.Fatalf("remove grant status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(payload.File.Grants, ",") != "joel@shareability.com" {
+		t.Fatalf("after remove grants=%v, want joel only", payload.File.Grants)
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, loginAs(t, "tim@shareability.com", "B0NFIRE!"), "").Files, company.ID); visible {
+		t.Fatal("removed grantee still sees the people row")
+	}
+	// A rename by a reader is still a 404 (unchanged write authority).
+	if response := patchDriveFile(t, joelCookies, fmt.Sprintf(`{"id":%q,"name":"renamed.txt"}`, private.ID)); response.Code != http.StatusNotFound {
+		t.Fatalf("reader rename status=%d, want 404", response.Code)
+	}
+}
+
+// D5: a same-name re-upload into the same folder by the same uploader chains
+// versionOf/version, the default list shows only the newest, and
+// ?versionsOf= lists the chain newest first with older rows superseded.
+func TestAssistantFileVersioningChainsSameNameUploads(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	first := uploadDriveFileRow(t, ajCookies, "deck.pdf", "application/pdf", []byte("%PDF-1.7 v1"), map[string]string{"visibility": "private"})
+	second := uploadDriveFileRow(t, ajCookies, "deck.pdf", "application/pdf", []byte("%PDF-1.7 v2"), nil)
+	if second.VersionOf != first.ID || second.Version != 2 || first.Version != 1 || first.VersionOf != "" {
+		t.Fatalf("chain first=%+v second=%+v", first, second)
+	}
+	if second.Visibility != fileVisibilityPrivate {
+		t.Fatalf("new version visibility=%q, want inherited private", second.Visibility)
+	}
+	rows := listDriveFiles(t, ajCookies, "").Files
+	if _, visible := driveRowByID(rows, first.ID); visible {
+		t.Fatal("superseded version still in the default list")
+	}
+	newest, visible := driveRowByID(rows, second.ID)
+	if !visible || newest.Superseded {
+		t.Fatalf("newest version row=%+v visible=%v", newest, visible)
+	}
+	versions := listDriveFiles(t, ajCookies, "versionsOf="+url.QueryEscape(first.ID)).Files
+	if len(versions) != 2 || versions[0].ID != second.ID || versions[1].ID != first.ID || !versions[1].Superseded || versions[0].Superseded {
+		t.Fatalf("versions=%+v, want [v2, v1(superseded)]", versions)
+	}
+	if fromNewest := listDriveFiles(t, ajCookies, "versionsOf="+url.QueryEscape(second.ID)).Files; len(fromNewest) != 2 || fromNewest[0].ID != second.ID {
+		t.Fatalf("versions from newest=%+v", fromNewest)
+	}
+	// A private chain is invisible to others, root and all.
+	if others := listDriveFiles(t, joelCookies, "versionsOf="+url.QueryEscape(first.ID)).Files; len(others) != 0 {
+		t.Fatalf("private version chain leaked: %+v", others)
+	}
+	// Another uploader's same name starts its own chain; a different folder does too.
+	joelDeck := uploadDriveFileRow(t, joelCookies, "deck.pdf", "application/pdf", []byte("%PDF-1.7 joel"), nil)
+	if joelDeck.VersionOf != "" || joelDeck.Version != 1 {
+		t.Fatalf("other uploader chained onto a foreign file: %+v", joelDeck)
+	}
+	folder, err := createFileFolder("Decks", "aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inFolder := uploadDriveFileRow(t, ajCookies, "deck.pdf", "application/pdf", []byte("%PDF-1.7 folder"), map[string]string{"folderId": folder.ID})
+	if inFolder.VersionOf != "" || inFolder.Version != 1 || inFolder.FolderID != folder.ID {
+		t.Fatalf("folder upload=%+v, want a fresh chain filed under %s", inFolder, folder.ID)
+	}
+	if bad := postFileUploadWithFields(t, ajCookies, "deck.pdf", "application/pdf", []byte("%PDF-1.7 x"), map[string]string{"folderId": "folder-missing"}); bad.Code != http.StatusNotFound {
+		t.Fatalf("missing folder upload status=%d, want 404", bad.Code)
+	}
+}
+
+// D6: per-viewer star; DELETE is a soft delete that hides the row from lists
+// and recall but keeps the blob; restore returns it; the daily sweep purges
+// only rows trashed longer than 30 days.
+func TestAssistantFileStarTrashRestoreAndSweep(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	aj := accountStore().findUser("aj@shareability.com")
+	keep := uploadDriveFileRow(t, ajCookies, "keep.txt", "text/plain", []byte("keep canary body"), nil)
+	trash := uploadDriveFileRow(t, ajCookies, "trash.txt", "text/plain", []byte("trash canary body"), nil)
+
+	star := patchDriveFile(t, joelCookies, fmt.Sprintf(`{"id":%q,"starred":true}`, keep.ID))
+	if star.Code != http.StatusOK || !strings.Contains(star.Body.String(), `"starred":true`) {
+		t.Fatalf("star status=%d body=%s", star.Code, star.Body.String())
+	}
+	if row, _ := driveRowByID(listDriveFiles(t, joelCookies, "").Files, keep.ID); !row.Starred {
+		t.Fatal("star missing from the starring viewer's list")
+	}
+	if row, _ := driveRowByID(listDriveFiles(t, ajCookies, "").Files, keep.ID); row.Starred {
+		t.Fatal("one viewer's star leaked into another viewer's row")
+	}
+
+	if response := deleteDriveFileRequest(t, ajCookies, trash.ID); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"trashed"`) {
+		t.Fatalf("trash status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, ajCookies, "").Files, trash.ID); visible {
+		t.Fatal("trashed row still in the live list")
+	}
+	trashed := listDriveFiles(t, ajCookies, "scope=trash")
+	trashedRow, visible := driveRowByID(trashed.Files, trash.ID)
+	if trashed.Scope != "trash" || !visible || trashedRow.DeletedAt == "" {
+		t.Fatalf("trash scope=%+v row=%+v visible=%v", trashed.Scope, trashedRow, visible)
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, joelCookies, "scope=trash").Files, trash.ID); visible {
+		t.Fatal("another member sees the uploader's trash")
+	}
+	rawRecallHas := func(id string) bool {
+		for _, match := range kanbanApp.memory.search("trash canary body", 10) {
+			if match.Entry.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	if rawRecallHas(trash.ID) {
+		t.Fatal("trashed upload still in recall")
+	}
+	trashRef := blobRefFromRow(t, trash)
+	if _, _, err := getBlob(trashRef); err != nil {
+		t.Fatalf("trashed blob must be retained: %v", err)
+	}
+	if !blobAuthorized(context.Background(), aj, trashRef) {
+		t.Fatal("uploader cannot open a trashed file's bytes")
+	}
+	if blobAuthorized(context.Background(), accountStore().findUser("joel@shareability.com"), trashRef) {
+		t.Fatal("trashed company file bytes still served to other members")
+	}
+	if _, _, _, ok := kanbanApp.assistantFileAttachmentSource(context.Background(), aj, trash.ID); ok {
+		t.Fatal("trashed row still resolves as an attachment source")
+	}
+	if response := deleteDriveFileRequest(t, ajCookies, trash.ID); response.Code != http.StatusNotFound {
+		t.Fatalf("second delete status=%d, want 404", response.Code)
+	}
+
+	if response := postDriveJSON(t, assistantFileRestoreHandler, "/assistant/files/restore", joelCookies, fmt.Sprintf(`{"id":%q}`, trash.ID)); response.Code != http.StatusNotFound {
+		t.Fatalf("other member restore status=%d, want 404", response.Code)
+	}
+	restore := postDriveJSON(t, assistantFileRestoreHandler, "/assistant/files/restore", ajCookies, fmt.Sprintf(`{"id":%q}`, trash.ID))
+	if restore.Code != http.StatusOK {
+		t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body.String())
+	}
+	if restored, visible := driveRowByID(listDriveFiles(t, ajCookies, "").Files, trash.ID); !visible || restored.DeletedAt != "" {
+		t.Fatalf("restored row=%+v visible=%v", restored, visible)
+	}
+	if !rawRecallHas(trash.ID) {
+		t.Fatal("restored upload missing from recall")
+	}
+	if response := postDriveJSON(t, assistantFileRestoreHandler, "/assistant/files/restore", ajCookies, fmt.Sprintf(`{"id":%q}`, trash.ID)); response.Code != http.StatusConflict {
+		t.Fatalf("restore of a live row status=%d, want 409", response.Code)
+	}
+
+	// Sweep: 31-day-old trash is purged, fresh trash and live rows survive.
+	fresh := uploadDriveFileRow(t, ajCookies, "fresh-trash.txt", "text/plain", []byte("fresh trash body"), nil)
+	for _, id := range []string{trash.ID, fresh.ID} {
+		if response := deleteDriveFileRequest(t, ajCookies, id); response.Code != http.StatusOK {
+			t.Fatalf("trash %s status=%d", id, response.Code)
+		}
+	}
+	old, _ := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, trash.ID)
+	if _, _, err := kanbanApp.memory.updateEntryWithMetadata(meetingMemoryKindFile, trash.ID, old.Text, map[string]string{
+		"deletedAt": time.Now().UTC().Add(-31 * 24 * time.Hour).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if purged := kanbanApp.sweepFileTrashOnce(time.Now().UTC()); purged != 1 {
+		t.Fatalf("sweep purged %d, want 1", purged)
+	}
+	if _, ok := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, trash.ID); ok {
+		t.Fatal("31-day-old trash survived the sweep")
+	}
+	if _, ok := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, fresh.ID); !ok {
+		t.Fatal("fresh trash was purged early")
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, ajCookies, "").Files, keep.ID); !visible {
+		t.Fatal("live row lost during the sweep")
+	}
+	if purged := kanbanApp.sweepFileTrashOnce(time.Now().UTC()); purged != 0 {
+		t.Fatalf("second sweep purged %d, want 0", purged)
+	}
+}
+
+// D7: ?q= matches ingested body text through the principal-scoped memory
+// search, so a body-only hit surfaces for an authorized viewer and never for
+// an unauthorized one.
+func TestAssistantFilesContentSearchIsACLScoped(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	memo := uploadDriveFileRow(t, ajCookies, "q3-memo.txt", "text/plain", []byte("the runway extends through november"), map[string]string{"visibility": "private"})
+	notes := uploadDriveFileRow(t, ajCookies, "team-notes.txt", "text/plain", []byte("offsite planning for november"), nil)
+	uploadDriveFileRow(t, ajCookies, "unrelated.txt", "text/plain", []byte("nothing to see here"), nil)
+
+	ajHits := listDriveFiles(t, ajCookies, "q=november").Files
+	if _, hit := driveRowByID(ajHits, memo.ID); !hit {
+		t.Fatalf("body-only match missing for the uploader: %+v", ajHits)
+	}
+	if _, hit := driveRowByID(ajHits, notes.ID); !hit || len(ajHits) != 2 {
+		t.Fatalf("uploader search hits=%+v, want memo+notes", ajHits)
+	}
+	joelHits := listDriveFiles(t, joelCookies, "q=november").Files
+	if _, hit := driveRowByID(joelHits, memo.ID); hit {
+		t.Fatalf("private body text matched for an unauthorized viewer: %+v", joelHits)
+	}
+	if _, hit := driveRowByID(joelHits, notes.ID); !hit || len(joelHits) != 1 {
+		t.Fatalf("company body match hits=%+v, want notes only", joelHits)
+	}
+	if byName := listDriveFiles(t, joelCookies, "q=unrelated").Files; len(byName) != 1 || byName[0].Name != "unrelated.txt" {
+		t.Fatalf("name match hits=%+v", byName)
+	}
+	if byUploader := listDriveFiles(t, joelCookies, "q=aj@shareability").Files; len(byUploader) != 2 {
+		t.Fatalf("uploader match hits=%d, want the two company rows", len(byUploader))
+	}
+}
+
+// D9: usage reports the Drive's stored bytes against DRIVE_QUOTA_BYTES and an
+// upload that would exceed it is refused with 413 before any bytes land.
+func TestAssistantFileUsageAndQuota(t *testing.T) {
+	ajCookies, _ := setupDriveWaveTest(t)
+	t.Setenv("DRIVE_QUOTA_BYTES", "100")
+	usageRequest := func() map[string]any {
+		req := httptest.NewRequest(http.MethodGet, "/assistant/files/usage", nil)
+		for _, cookie := range ajCookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantFileUsageHandler(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("usage status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	if usage := usageRequest(); usage["bytesUsed"] != float64(0) || usage["fileCount"] != float64(0) || usage["quotaBytes"] != float64(100) {
+		t.Fatalf("empty usage=%v", usage)
+	}
+	uploadDriveFileRow(t, ajCookies, "sixty.bin", "application/octet-stream", bytes.Repeat([]byte("a"), 60), nil)
+	if usage := usageRequest(); usage["bytesUsed"] != float64(60) || usage["fileCount"] != float64(1) {
+		t.Fatalf("usage after 60 bytes=%v", usage)
+	}
+	over := postFileUploadWithFields(t, ajCookies, "fifty.bin", "application/octet-stream", bytes.Repeat([]byte("b"), 50), nil)
+	if over.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-quota status=%d body=%s, want 413", over.Code, over.Body.String())
+	}
+	var refusal map[string]any
+	if err := json.Unmarshal(over.Body.Bytes(), &refusal); err != nil {
+		t.Fatal(err)
+	}
+	if refusal["error"] == nil || refusal["bytesUsed"] != float64(60) || refusal["quotaBytes"] != float64(100) {
+		t.Fatalf("refusal=%v, want error+bytesUsed+quotaBytes", refusal)
+	}
+	if usage := usageRequest(); usage["bytesUsed"] != float64(60) || usage["fileCount"] != float64(1) {
+		t.Fatalf("refused upload changed usage: %v", usage)
+	}
+	uploadDriveFileRow(t, ajCookies, "forty.bin", "application/octet-stream", bytes.Repeat([]byte("c"), 40), nil)
+	if usage := usageRequest(); usage["bytesUsed"] != float64(100) || usage["fileCount"] != float64(2) {
+		t.Fatalf("usage at quota=%v", usage)
+	}
+}
+
+// D8: client-declared Drive refs on a work request reach the launched goal
+// only after re-authorizing for the requester; an unauthorized ref refuses
+// the launch with a 403-class error and launches nothing.
+func TestConversationWorkLaunchAcceptsAuthorizedDriveContextRefs(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	app := kanbanApp
+	// A configured worker is what lets a registry-tool launch mint its goal;
+	// the async starter is stubbed so nothing actually runs.
+	app.apiKey = "openai-router-test"
+	aj := accountStore().findUser("aj@shareability.com")
+	brief := uploadDriveFileRow(t, ajCookies, "brief.txt", "text/plain", []byte("launch brief body for the one pager"), nil)
+	secret := uploadDriveFileRow(t, joelCookies, "secret.txt", "text/plain", []byte("joel private notes"), map[string]string{"visibility": "private"})
+
+	var launches int
+	previousStarter := startGoalThreadAsync
+	startGoalThreadAsync = func(*kanbanBoardApp, string) { launches++ }
+	t.Cleanup(func() { startGoalThreadAsync = previousStarter })
+
+	launch := func(refs []workRequestContextRef, text string) (map[string]any, scoutChatThreadRecord, error) {
+		thread, err := app.createScoutChatThread(aj.Email, aj.Name, "Drive refs "+text, scoutChatVisibilityPrivate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A private launch binds to the journaled turn operation the chat door
+		// mints; mirror that receipt here the way the crash-reconciliation test does.
+		operation := conversationTurnOperation{ID: "conversation-drive-ref-" + sha256Hex([]byte(text))[:16], BodyDigest: sha256Hex([]byte("drive ref body " + text))}
+		message := scoutChatMessageRecord{
+			ID: "drive-ref-" + sha256Hex([]byte(text))[:12], Kind: "message", Role: "user", Text: text,
+			AuthorName: aj.Name, AuthorEmail: aj.Email, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			SourceOperationID: operation.ID, SourceOperationDigest: operation.BodyDigest,
+		}
+		if _, err := app.commitScoutChatThreadMessages(aj.Email, thread.ID, message); err != nil {
+			t.Fatal(err)
+		}
+		ctx := withWorkRequestContextRefs(withConversationTurnOperation(context.Background(), operation), refs)
+		response, err := app.startConversationPrivateWork(ctx, aj, thread, message, conversationWorkDecision{
+			Kind: conversationWorkRegistryTool, ToolID: "one_pager", Objective: text,
+		}, "", proposalSourceChatRouter, func(messages ...scoutChatMessageRecord) (scoutChatThreadRecord, error) {
+			return app.commitScoutChatThreadMessages(aj.Email, thread.ID, messages...)
+		})
+		return response, thread, err
+	}
+
+	response, _, err := launch([]workRequestContextRef{{Ref: assistantFileContextRef(brief.ID)}}, "Write the one pager from the brief")
+	if err != nil {
+		t.Fatalf("authorized launch err=%v", err)
+	}
+	launched, ok := response["agentThread"].(scoutAgentThread)
+	if !ok || launched.ID == "" {
+		t.Fatalf("launched=%#v", response["agentThread"])
+	}
+	refs := decodeAssistantContextRefs(launched.Artifact.Metadata["contextRefs"])
+	found := false
+	for _, ref := range refs {
+		if ref == assistantFileContextRef(brief.ID) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("launched goal contextRefs=%v, want %s", refs, assistantFileContextRef(brief.ID))
+	}
+
+	_, thread, err := launch([]workRequestContextRef{{Ref: assistantFileContextRef(secret.ID)}}, "Summarize the secret notes")
+	if !errors.Is(err, errWorkRequestContextRefForbidden) || workRequestContextRefStatus(err) != http.StatusForbidden {
+		t.Fatalf("unauthorized ref err=%v status=%d, want forbidden/403", err, workRequestContextRefStatus(err))
+	}
+	current, _, readErr := app.scoutChatThreadByID(aj.Email, thread.ID)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	for _, message := range current.Messages {
+		if message.Thread != nil {
+			t.Fatalf("unauthorized ref still produced a work card: %+v", message)
+		}
+	}
+	if _, _, err := launch([]workRequestContextRef{{Ref: assistantFileContextRef(brief.ID), SourceRevision: "stale-revision"}}, "Stale revision"); !errors.Is(err, errWorkRequestContextRefForbidden) {
+		t.Fatalf("stale revision err=%v, want forbidden", err)
+	}
+	if _, _, err := launch([]workRequestContextRef{{Ref: "artifact|" + brief.ID}}, "Non drive ref"); !errors.Is(err, errWorkRequestContextRefForbidden) {
+		t.Fatalf("non-Drive ref err=%v, want forbidden", err)
+	}
+	if _, _, err := launch([]workRequestContextRef{{Ref: assistantFileContextRef(secret.ID)}, {Ref: assistantFileContextRef(brief.ID)}}, "Mixed refs"); !errors.Is(err, errWorkRequestContextRefForbidden) {
+		t.Fatalf("mixed refs err=%v, want forbidden (one refusal refuses all)", err)
+	}
+	if launches != 1 {
+		t.Fatalf("launches=%d, want exactly the one authorized launch", launches)
+	}
+	if decoded, err := decodeWorkRequestContextRefs([]any{"file|abc", map[string]any{"ref": "file|def", "sourceId": "s1", "sourceRevision": "r1"}}); err != nil || len(decoded) != 2 || decoded[1].SourceID != "s1" {
+		t.Fatalf("decode=%+v err=%v", decoded, err)
+	}
+	if _, err := decodeWorkRequestContextRefs("file|abc"); err == nil {
+		t.Fatal("non-list contextRefs must be rejected")
+	}
+}
+
+// D1 migration cost: N unstamped rows are stamped in ONE locked pass with a
+// single JSONL rewrite, stamped rows are untouched, and a second run neither
+// stamps nor rewrites.
+func TestMigrateFileVisibilityDefaultsBatchesOneRewrite(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+	app := kanbanApp
+
+	const unstamped = 5
+	ids := make([]string, 0, unstamped)
+	for index := 0; index < unstamped; index++ {
+		id := fmt.Sprintf("file-legacy-batch-%d", index)
+		if _, _, err := app.memory.appendEntry(meetingMemoryKindFile, id, fmt.Sprintf("File legacy-%d.txt uploaded by AJ.", index), map[string]string{
+			"name": fmt.Sprintf("legacy-%d.txt", index), "uploaderEmail": "aj@shareability.com", "origin": "files", "brainStatus": fileBrainStatusStored,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if _, _, err := app.memory.appendEntry(meetingMemoryKindFile, "file-already-private", "File mine.txt uploaded by AJ.", map[string]string{
+		"name": "mine.txt", "uploaderEmail": "aj@shareability.com", "origin": "files", "brainStatus": fileBrainStatusStored, "visibility": fileVisibilityPrivate,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rewrites := 0
+	previousProbe := memoryRewriteProbe
+	memoryRewriteProbe = func() { rewrites++ }
+	t.Cleanup(func() { memoryRewriteProbe = previousProbe })
+
+	if stamped := app.migrateFileVisibilityDefaults(); stamped != unstamped {
+		t.Fatalf("first migration stamped %d, want %d", stamped, unstamped)
+	}
+	if rewrites != 1 {
+		t.Fatalf("first migration rewrote the store %d times, want exactly 1", rewrites)
+	}
+	for _, id := range ids {
+		if entry, ok := app.memory.entryByKindAndID(meetingMemoryKindFile, id); !ok || entry.Metadata["visibility"] != fileVisibilityCompany {
+			t.Fatalf("row %s after migration=%v ok=%v, want company", id, entry.Metadata, ok)
+		}
+	}
+	if entry, _ := app.memory.entryByKindAndID(meetingMemoryKindFile, "file-already-private"); entry.Metadata["visibility"] != fileVisibilityPrivate {
+		t.Fatalf("stamped row rewritten to %q", entry.Metadata["visibility"])
+	}
+	if stamped := app.migrateFileVisibilityDefaults(); stamped != 0 || rewrites != 1 {
+		t.Fatalf("second migration stamped %d rewrites=%d, want 0 and still 1", stamped, rewrites)
+	}
+	// The stamp is durable: a fresh store from the same file carries it.
+	reloaded, err := newMeetingMemoryStore(app.memory.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry, ok := reloaded.entryByKindAndID(meetingMemoryKindFile, ids[0]); !ok || entry.Metadata["visibility"] != fileVisibilityCompany {
+		t.Fatalf("reloaded row=%v ok=%v, want the persisted company stamp", entry.Metadata, ok)
+	}
+}
+
+// D8 door: POST /assistant/chat-threads/{id}/messages accepts contextRefs; an
+// authorized Drive ref reaches the launched goal, an unauthorized one is a 403
+// with nothing committed or launched, and a malformed field is a 400.
+func TestScoutChatSendAcceptsDriveContextRefsAndRefusesUnauthorized(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	kanbanApp.apiKey = "openai-router-test"
+	t.Setenv("OPENAI_API_KEY", "openai-router-test")
+	swapOpenAITextResponder(t, func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		if request.Workflow != "scout_route" {
+			t.Fatalf("unexpected workflow %q", request.Workflow)
+		}
+		return openAIScoutRouteJSON(t, openAIScoutRouterOutput{
+			Outcome: string(conversationIntentStartPrivateWork), Route: "tool_run", ToolID: "deep_research", Objective: "Map the fintech landscape",
+		}), nil
+	})
+	launches := 0
+	previousRunner := startGoalThreadAsync
+	startGoalThreadAsync = func(_ *kanbanBoardApp, _ string) { launches++ }
+	t.Cleanup(func() { startGoalThreadAsync = previousRunner })
+
+	brief := uploadDriveFileRow(t, ajCookies, "fintech-brief.txt", "text/plain", []byte("fintech landscape brief body"), nil)
+	secret := uploadDriveFileRow(t, joelCookies, "joel-secret.txt", "text/plain", []byte("joel private notes"), map[string]string{"visibility": "private"})
+
+	send := func(threadID string, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/assistant/chat-threads/"+threadID+"/messages", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range ajCookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		assistantChatThreadHandler(recorder, req)
+		return recorder
+	}
+
+	thread, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Drive refs door", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := send(thread.ID, fmt.Sprintf(`{"text":"map the fintech landscape","operationId":"drive-ref-door-operation-0001","contextRefs":[{"ref":%q}]}`, assistantFileContextRef(brief.ID)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authorized send status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		AgentThread scoutAgentThread   `json:"agentThread"`
+		Artifact    meetingMemoryEntry `json:"artifact"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.AgentThread.ID == "" {
+		t.Fatalf("body=%s, want a launched agentThread", rec.Body.String())
+	}
+	found := false
+	for _, ref := range decodeAssistantContextRefs(payload.Artifact.Metadata["contextRefs"]) {
+		if ref == assistantFileContextRef(brief.ID) {
+			found = true
+		}
+	}
+	if !found || launches != 1 {
+		t.Fatalf("launched contextRefs=%q launches=%d, want %s reached the goal exactly once", payload.Artifact.Metadata["contextRefs"], launches, assistantFileContextRef(brief.ID))
+	}
+
+	denied, err := kanbanApp.createScoutChatThread("aj@shareability.com", "AJ", "Drive refs denied", scoutChatVisibilityPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = send(denied.ID, fmt.Sprintf(`{"text":"summarize the secret notes","operationId":"drive-ref-door-operation-0002","contextRefs":[{"ref":%q}]}`, assistantFileContextRef(secret.ID)))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "not readable") {
+		t.Fatalf("unauthorized send status=%d body=%s, want 403", rec.Code, rec.Body.String())
+	}
+	if launches != 1 {
+		t.Fatalf("unauthorized ref launched work: launches=%d", launches)
+	}
+	current, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", denied.ID)
+	if err != nil || len(current.Messages) != 0 {
+		t.Fatalf("refused turn left messages behind: %+v err=%v", current.Messages, err)
+	}
+	if rec := send(denied.ID, `{"text":"hello","operationId":"drive-ref-door-operation-0003","contextRefs":"file|nope"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed contextRefs status=%d, want 400", rec.Code)
+	}
+}
+
+// D5 reviewer finding: a trashed MIDDLE version must not split the chain.
+// Edges bridge trashed nodes in both directions; the trashed row itself is
+// projected only for its uploader.
+func TestAssistantFileVersionsBridgeTrashedMiddleVersion(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	v1 := uploadDriveFileRow(t, ajCookies, "plan.pdf", "application/pdf", []byte("%PDF-1.7 one"), map[string]string{"visibility": "people"})
+	if response := patchDriveFile(t, ajCookies, fmt.Sprintf(`{"id":%q,"grants":{"add":["joel@shareability.com"]}}`, v1.ID)); response.Code != http.StatusOK {
+		t.Fatalf("grant status=%d body=%s", response.Code, response.Body.String())
+	}
+	v2 := uploadDriveFileRow(t, ajCookies, "plan.pdf", "application/pdf", []byte("%PDF-1.7 two"), nil)
+	v3 := uploadDriveFileRow(t, ajCookies, "plan.pdf", "application/pdf", []byte("%PDF-1.7 three"), nil)
+	if v2.VersionOf != v1.ID || v3.VersionOf != v2.ID || v3.Version != 3 {
+		t.Fatalf("chain v2=%+v v3=%+v", v2, v3)
+	}
+	// Trash the middle version directly (the live list only exposes the newest).
+	middle, _ := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, v2.ID)
+	if _, _, err := kanbanApp.memory.updateEntryWithMetadata(meetingMemoryKindFile, v2.ID, middle.Text, map[string]string{
+		"deletedAt": time.Now().UTC().Format(time.RFC3339Nano), "deletedBy": "aj@shareability.com", relevanceMetadataKey: relevanceExpired,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(rows []assistantFileRecord) string {
+		out := make([]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, row.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	for _, anchor := range []string{v1.ID, v3.ID} {
+		uploaderChain := listDriveFiles(t, ajCookies, "versionsOf="+url.QueryEscape(anchor)).Files
+		if ids(uploaderChain) != strings.Join([]string{v3.ID, v2.ID, v1.ID}, ",") || uploaderChain[1].DeletedAt == "" {
+			t.Fatalf("uploader chain from %s=%s (deletedAt=%q), want v3,v2(trashed),v1", anchor, ids(uploaderChain), uploaderChain[1].DeletedAt)
+		}
+		granteeChain := listDriveFiles(t, joelCookies, "versionsOf="+url.QueryEscape(anchor)).Files
+		if ids(granteeChain) != strings.Join([]string{v3.ID, v1.ID}, ",") {
+			t.Fatalf("grantee chain from %s=%s, want v3,v1 bridging the trashed v2", anchor, ids(granteeChain))
+		}
+	}
+	// The trashed anchor itself is the uploader's alone.
+	if chain := listDriveFiles(t, joelCookies, "versionsOf="+url.QueryEscape(v2.ID)).Files; len(chain) != 0 {
+		t.Fatalf("grantee walked from a trashed anchor: %s", ids(chain))
+	}
+	if chain := listDriveFiles(t, ajCookies, "versionsOf="+url.QueryEscape(v2.ID)).Files; ids(chain) != strings.Join([]string{v3.ID, v2.ID, v1.ID}, ",") {
+		t.Fatalf("uploader chain from trashed anchor=%s", ids(chain))
+	}
+	live := listDriveFiles(t, joelCookies, "").Files
+	if _, visible := driveRowByID(live, v3.ID); !visible {
+		t.Fatal("newest version missing from the live list")
+	}
+	for _, id := range []string{v1.ID, v2.ID} {
+		if _, visible := driveRowByID(live, id); visible {
+			t.Fatalf("older version %s leaked into the live list", id)
+		}
+	}
+}
+
+// D6/D9 reviewer finding: POST /assistant/files/trash/empty hard-deletes the
+// caller's own trashed rows now, reports purged + freedBytes, drops usage, and
+// never touches another member's trash or any live row.
+func TestAssistantFileEmptyTrashPurgesOnlyCallersRows(t *testing.T) {
+	ajCookies, joelCookies := setupDriveWaveTest(t)
+	keep := uploadDriveFileRow(t, ajCookies, "keep.bin", "application/octet-stream", bytes.Repeat([]byte("k"), 30), nil)
+	first := uploadDriveFileRow(t, ajCookies, "one.bin", "application/octet-stream", bytes.Repeat([]byte("a"), 40), nil)
+	second := uploadDriveFileRow(t, ajCookies, "two.bin", "application/octet-stream", bytes.Repeat([]byte("b"), 50), nil)
+	joels := uploadDriveFileRow(t, joelCookies, "joel.bin", "application/octet-stream", bytes.Repeat([]byte("j"), 60), nil)
+	for _, target := range []struct {
+		cookies []*http.Cookie
+		id      string
+	}{{ajCookies, first.ID}, {ajCookies, second.ID}, {joelCookies, joels.ID}} {
+		if response := deleteDriveFileRequest(t, target.cookies, target.id); response.Code != http.StatusOK {
+			t.Fatalf("trash %s status=%d", target.id, response.Code)
+		}
+	}
+	if usage := kanbanApp.driveUsageForPrincipal(context.Background()); usage.BytesUsed != 180 {
+		t.Fatalf("usage before empty=%+v, want trash still counted (180)", usage)
+	}
+	empty := postDriveJSON(t, assistantFileEmptyTrashHandler, "/assistant/files/trash/empty", ajCookies, `{}`)
+	if empty.Code != http.StatusOK {
+		t.Fatalf("empty trash status=%d body=%s", empty.Code, empty.Body.String())
+	}
+	var receipt struct {
+		OK         bool  `json:"ok"`
+		Purged     int   `json:"purged"`
+		FreedBytes int64 `json:"freedBytes"`
+	}
+	if err := json.Unmarshal(empty.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if !receipt.OK || receipt.Purged != 2 || receipt.FreedBytes != 90 {
+		t.Fatalf("receipt=%+v, want purged 2 freeing 90 bytes", receipt)
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		if _, ok := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, id); ok {
+			t.Fatalf("emptied row %s still in memory", id)
+		}
+	}
+	if _, ok := kanbanApp.memory.entryByKindAndID(meetingMemoryKindFile, joels.ID); !ok {
+		t.Fatal("another member's trash was emptied")
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, ajCookies, "").Files, keep.ID); !visible {
+		t.Fatal("live row lost while emptying trash")
+	}
+	// keep.bin (30, live) + joel's trashed row (60, still retained) remain; only
+	// keep.bin is a live row.
+	if usage := kanbanApp.driveUsageForPrincipal(context.Background()); usage.BytesUsed != 90 || usage.FileCount != 1 {
+		t.Fatalf("usage after empty=%+v, want 90 bytes / 1 live row", usage)
+	}
+	if trashed := listDriveFiles(t, ajCookies, "scope=trash").Files; len(trashed) != 0 {
+		t.Fatalf("trash scope after empty=%+v, want empty", trashed)
+	}
+	if _, visible := driveRowByID(listDriveFiles(t, joelCookies, "scope=trash").Files, joels.ID); !visible {
+		t.Fatal("another member's trashed row disappeared from their trash")
+	}
+	empty = postDriveJSON(t, assistantFileEmptyTrashHandler, "/assistant/files/trash/empty", ajCookies, `{}`)
+	if err := json.Unmarshal(empty.Body.Bytes(), &receipt); err != nil || receipt.Purged != 0 || receipt.FreedBytes != 0 {
+		t.Fatalf("second empty=%+v err=%v, want nothing to purge", receipt, err)
+	}
+}

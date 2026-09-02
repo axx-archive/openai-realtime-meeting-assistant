@@ -315,7 +315,10 @@ test('Bonfire uses the supplied black wordmark on light and orange on dark', () 
     'the founder-supplied orange artwork changed',
   );
   // Placements consume the theme token or themed asset, not one-off cuts.
-  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 5);
+  // AJ ratified 2026-09-02: wordmark back, no flame, no date, no status by the
+  // org name — the rail's top row (#brandMark.topbar__mark) is the fourth
+  // placement beside the rail label, the login mark and the bsheet eyebrow.
+  assert.equal((html.match(/color: var\(--wordmark\)/g) ?? []).length, 4);
   assert.match(read('mobile/src/theme/tokens.ts'), /wordmark: adaptive\('#000000', '#FF5A19'\)/);
   assert.match(read('mobile/src/components/BrandMark.tsx'), /color = colors\.wordmark/);
   assert.doesNotMatch(read('mobile/src/components/BrandMark.tsx'), /color = colors\.ember/);

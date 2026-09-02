@@ -16,6 +16,14 @@ package main
 // (complete/published) work — and the PUBLIC route re-checks on every open,
 // so pulling an artifact's approval kills every live link instantly.
 //
+// FILE LINKS (Wave 5 D3): the same record and route also carry a plain Drive
+// upload (objectType=file). Minting requires the caller to be the row's
+// uploader or a people-visibility grant holder; the public route streams the
+// bound blob (Content-Disposition from the row name, inline only for
+// blobInlineSafeMimes, ETag = blob ref) and re-resolves the row on every
+// open, so a trashed row, a changed blob, or the minter losing read access
+// turns the link into the same non-enumerating 404 as a revoked artifact.
+//
 // STORAGE: data/share-links.json beside the memory store (the users.json/
 // sessions.json/codex-runner-jobs precedent) — share links are pure workspace
 // state and never belong in Scout recall, and this file needs no change to
@@ -44,6 +52,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +74,11 @@ const (
 	// vocabulary; these two are the Wave-3 share/export seams).
 	signalEventShareOpened = "share_opened"
 	signalEventPDFExported = "pdf_exported"
+
+	// shareLinkObjectTypeArtifact / shareLinkObjectTypeFile are the closed
+	// vocabulary for shareLinkRecord.ObjectType.
+	shareLinkObjectTypeArtifact = "artifact"
+	shareLinkObjectTypeFile     = "file"
 )
 
 // shareLinkRecord is one minted capability. Token is the public read
@@ -73,6 +87,9 @@ const (
 type shareLinkRecord struct {
 	ID         string `json:"id"`
 	ArtifactID string `json:"artifactId"`
+	// FileID binds an objectType=file link to its kind=file Drive row; the
+	// record's ContentDigest is then the exact blob ref the link streams.
+	FileID string `json:"fileId,omitempty"`
 	// Token is legacy-only. Rows containing plaintext credentials fail closed;
 	// new credentials are returned once and only TokenHash is persisted.
 	Token             string `json:"token,omitempty"`
@@ -258,8 +275,99 @@ func validShareLinkBinding(record shareLinkRecord) bool {
 }
 
 func validShareLinkBindingForTenant(record shareLinkRecord, tenantID string) bool {
-	return record.TokenHash != "" && isHexDigest(record.TokenHash) && record.TenantID == strings.TrimSpace(tenantID) && record.ObjectType == "artifact" &&
-		record.ArtifactID != "" && record.Revision >= 1 && record.ACLGeneration >= 1 && isHexDigest(record.ContentDigest) && record.Action == "read_content"
+	if record.TokenHash == "" || !isHexDigest(record.TokenHash) || record.TenantID != strings.TrimSpace(tenantID) || record.Action != "read_content" {
+		return false
+	}
+	switch record.ObjectType {
+	case shareLinkObjectTypeArtifact:
+		return record.ArtifactID != "" && record.FileID == "" && record.Revision >= 1 && record.ACLGeneration >= 1 && isHexDigest(record.ContentDigest)
+	case shareLinkObjectTypeFile:
+		// A file link binds to the row id plus the exact blob it streams; no
+		// artifact fields may ride along (a record claiming both is malformed
+		// and fails closed).
+		return record.FileID != "" && record.ArtifactID == "" && validBlobRef(record.ContentDigest)
+	}
+	return false
+}
+
+/* ---------- file (Drive row) bindings ---------- */
+
+// fileShareAccessible is the extra policy a file link layers ON TOP of the
+// Files read discipline (assistantFileEntryForViewer already proved the
+// viewer can read the untrashed row): only the row's uploader, or a grant
+// holder when the row is shared with people, may publish it behind a
+// sessionless token. Company-visible rows are readable by every member but
+// publishable only by their uploader; a disabled account and a promoted chat
+// file (bound to its chat source) never are.
+func fileShareAccessible(entry meetingMemoryEntry, email string) bool {
+	email = normalizeAccountEmail(email)
+	if email == "" || entry.Kind != meetingMemoryKindFile || fileEntryTrashed(entry.Metadata) || accountIsDisabled(email) {
+		return false
+	}
+	if _, promoted, _ := promotedChatFileBindingFromEntry(entry); promoted {
+		return false
+	}
+	if !validBlobRef(strings.TrimSpace(entry.Metadata["blobRef"])) {
+		return false
+	}
+	if normalizeAccountEmail(entry.Metadata["uploaderEmail"]) == email {
+		return true
+	}
+	if visibility, ok := fileEntryVisibility(entry.Metadata); !ok || visibility != fileVisibilityPeople {
+		return false
+	}
+	for _, grant := range fileGrantEmails(entry.Metadata) {
+		if grant == email {
+			return true
+		}
+	}
+	return false
+}
+
+// shareableFileForViewer resolves a Drive row for the mint/list/open paths:
+// the Files read seam first (tenant, trash, promoted source, per-file ACL),
+// then the stricter publisher policy above. Canonical (E10 tenant)
+// principals never reach here — the anonymous-capability signer only speaks
+// artifact bindings.
+func shareableFileForViewer(ctx context.Context, viewer *userAccount, fileID string) (meetingMemoryEntry, bool) {
+	if kanbanApp == nil || viewer == nil {
+		return meetingMemoryEntry{}, false
+	}
+	if _, canonical := strideE10TenantPrincipalFromContext(ctx); canonical {
+		return meetingMemoryEntry{}, false
+	}
+	entry, found := kanbanApp.assistantFileEntryForViewer(ctx, viewer, fileID)
+	if !found || !fileShareAccessible(entry, viewer.Email) {
+		return meetingMemoryEntry{}, false
+	}
+	return entry, true
+}
+
+// shareLinkBoundFile re-resolves a file link's row on every use AS THE
+// MINTER: the row must still exist untrashed, still carry the exact blob the
+// link was minted for, and the minter must still be able to read and publish
+// it (a row gone private, a revoked grant, or a disabled minter all kill the
+// link without touching the capability record).
+func shareLinkBoundFile(record shareLinkRecord) (meetingMemoryEntry, bool) {
+	if record.ObjectType != shareLinkObjectTypeFile {
+		return meetingMemoryEntry{}, false
+	}
+	entry, found := shareableFileForViewer(context.Background(), accountStore().findUser(record.CreatedBy), record.FileID)
+	if !found || strings.TrimSpace(entry.Metadata["blobRef"]) != record.ContentDigest {
+		return meetingMemoryEntry{}, false
+	}
+	return entry, true
+}
+
+// shareLinkBoundAvailable is the type-dispatched "does this link still
+// resolve" check behind the list/mint payload.
+func shareLinkBoundAvailable(record shareLinkRecord) bool {
+	if record.ObjectType == shareLinkObjectTypeFile {
+		_, ok := shareLinkBoundFile(record)
+		return ok
+	}
+	_, ok := shareLinkBoundArtifact(record)
+	return ok
 }
 
 // shareLinkByToken resolves a public token via hash-then-constant-time
@@ -305,7 +413,7 @@ func shareLinkPayloadForTenant(record shareLinkRecord, now time.Time, tenantID s
 		case !shareLinkLiveForTenant(record, now, tenantID):
 			effectiveStatus = shareLinkEffectiveStatusUnavailable
 		default:
-			_, available = shareLinkBoundArtifact(record)
+			available = shareLinkBoundAvailable(record)
 			if !available {
 				effectiveStatus = shareLinkEffectiveStatusUnavailable
 			}
@@ -313,6 +421,7 @@ func shareLinkPayloadForTenant(record shareLinkRecord, now time.Time, tenantID s
 	}
 	payload := map[string]any{
 		"id":              record.ID,
+		"objectType":      firstNonEmptyString(record.ObjectType, shareLinkObjectTypeArtifact),
 		"artifactId":      record.ArtifactID,
 		"status":          record.Status,
 		"storedStatus":    record.Status,
@@ -323,6 +432,9 @@ func shareLinkPayloadForTenant(record shareLinkRecord, now time.Time, tenantID s
 		"openCount":       record.OpenCount,
 		"lastOpenedAt":    record.LastOpenedAt,
 		"expired":         effectiveStatus == shareLinkEffectiveStatusExpired,
+	}
+	if record.FileID != "" {
+		payload["fileId"] = record.FileID
 	}
 	if record.KeyID == "" && record.CreatedBy != "" {
 		payload["createdBy"] = record.CreatedBy
@@ -338,7 +450,9 @@ func shareLinkPayloadForTenant(record shareLinkRecord, now time.Time, tenantID s
 // artifactShareHandler serves the session-gated share-link management verbs
 // on one route, its /artifacts neighbors' preamble on each:
 //   - POST   {artifactId, expiresDays} mints a link (approved artifacts only)
-//   - GET    ?artifactId=...           lists that artifact's links
+//   - POST   {fileId, expiresDays}     mints a link for a Drive upload (its
+//     uploader or a people-visibility grant holder)
+//   - GET    ?artifactId=... | ?fileId=... lists that object's links
 //   - DELETE {id}                      revokes (creator or approval admin)
 func artifactShareHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost && r.Method != http.MethodGet && r.Method != http.MethodDelete {
@@ -382,10 +496,19 @@ func artifactShareHandler(w http.ResponseWriter, r *http.Request) {
 func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAccount) {
 	payload := struct {
 		ArtifactID  string `json:"artifactId"`
+		FileID      string `json:"fileId"`
 		ExpiresDays int    `json:"expiresDays"`
 	}{}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)).Decode(&payload); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "could not read share link request")
+		return
+	}
+	if fileID := strings.TrimSpace(payload.FileID); fileID != "" {
+		if strings.TrimSpace(payload.ArtifactID) != "" {
+			writeAuthError(w, http.StatusBadRequest, "share one object per link: artifactId or fileId")
+			return
+		}
+		mintFileShareLink(w, r, user, fileID, payload.ExpiresDays)
 		return
 	}
 
@@ -406,13 +529,7 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 		return
 	}
 
-	expiresDays := payload.ExpiresDays
-	if expiresDays <= 0 {
-		expiresDays = shareLinkDefaultExpiryDays
-	}
-	if expiresDays > shareLinkMaxExpiryDays {
-		expiresDays = shareLinkMaxExpiryDays
-	}
+	expiresDays := clampShareLinkExpiryDays(payload.ExpiresDays)
 
 	now := time.Now().UTC()
 	tenantID := canonicalArtifactTenantID()
@@ -425,7 +542,7 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 	record := shareLinkRecord{
 		ID:         durableTimestampID("share-link", now),
 		ArtifactID: artifact.ID,
-		TenantID:   tenantID, ObjectType: "artifact", Revision: artifactVersion(artifact), ACLGeneration: header.ACLVersion,
+		TenantID:   tenantID, ObjectType: shareLinkObjectTypeArtifact, Revision: artifactVersion(artifact), ACLGeneration: header.ACLVersion,
 		ContentDigest: artifactCapabilityDigest(artifact), Action: "read_content",
 		Status:    shareLinkStatusActive,
 		CreatedBy: normalizeAccountEmail(user.Email),
@@ -488,16 +605,105 @@ func mintShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAcco
 	})
 }
 
-func listShareLinksHandler(w http.ResponseWriter, r *http.Request, user *userAccount) {
-	artifactID := strings.TrimSpace(r.URL.Query().Get("artifactId"))
-	if artifactID == "" {
-		writeAuthError(w, http.StatusBadRequest, "artifactId is required")
+func clampShareLinkExpiryDays(expiresDays int) int {
+	if expiresDays <= 0 {
+		expiresDays = shareLinkDefaultExpiryDays
+	}
+	if expiresDays > shareLinkMaxExpiryDays {
+		expiresDays = shareLinkMaxExpiryDays
+	}
+	return expiresDays
+}
+
+// mintFileShareLink mints a capability for a plain Drive upload. The caller
+// must be the row's uploader or a people-visibility grant holder
+// (fileShareAccessible); anything else is the same non-enumerating 404 the
+// artifact path returns. The record binds the exact blob ref, so a row whose
+// bytes change (a new version chained onto the same row) stops serving.
+// Deliberately, a link minted on version N keeps serving version N's bytes
+// after a same-name re-upload chains version N+1 onto it: the newer version
+// is a NEW row, the linked row is merely superseded (hidden from the Drive
+// list, still live), and its link is a capability on those exact bytes — the
+// versions lane reports shareLinkCount per row so the minter can see this.
+// Canonical (E10 tenant) principals are refused: the anonymous-capability
+// signer only speaks artifact bindings, and a file link must not ride an
+// unsigned token there.
+func mintFileShareLink(w http.ResponseWriter, r *http.Request, user *userAccount, fileID string, expiresDays int) {
+	if _, canonical := strideE10TenantPrincipalFromContext(r.Context()); canonical {
+		writeAuthError(w, http.StatusServiceUnavailable, "file share links are unavailable")
 		return
 	}
-	header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(artifactID)
-	if !found || !artifactHeaderAuthorized(r.Context(), user, ACLReadMetadata, header) || !artifactHeaderAuthorized(r.Context(), user, ACLShare, header) {
-		writeAuthError(w, http.StatusNotFound, "artifact not found")
+	entry, found := shareableFileForViewer(r.Context(), user, fileID)
+	if !found {
+		writeAuthError(w, http.StatusNotFound, "file not found")
 		return
+	}
+	ref := strings.TrimSpace(entry.Metadata["blobRef"])
+	if _, err := blobStatForRef(ref); err != nil {
+		writeAuthError(w, http.StatusNotFound, "file not found")
+		return
+	}
+
+	now := time.Now().UTC()
+	tenantID := canonicalArtifactTenantID()
+	token, err := newShareLinkToken()
+	if err != nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "share links are unavailable")
+		return
+	}
+	record := shareLinkRecord{
+		ID:            durableTimestampID("share-link", now),
+		FileID:        entry.ID,
+		TenantID:      tenantID,
+		ObjectType:    shareLinkObjectTypeFile,
+		ContentDigest: ref,
+		Action:        "read_content",
+		Status:        shareLinkStatusActive,
+		CreatedBy:     normalizeAccountEmail(user.Email),
+		CreatedAt:     now.Format(time.RFC3339Nano),
+		ExpiresAt:     now.AddDate(0, 0, clampShareLinkExpiryDays(expiresDays)).Format(time.RFC3339Nano),
+		TokenHash:     fmt.Sprintf("%x", sha256.Sum256([]byte(token))),
+		RawToken:      token,
+	}
+
+	shareLinksMu.Lock()
+	defer shareLinksMu.Unlock()
+	records, err := loadShareLinks()
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	records = append(records, record)
+	if err := saveShareLinks(records); err != nil {
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":   true,
+		"link": shareLinkPayloadForTenant(record, now, tenantID),
+	})
+}
+
+func listShareLinksHandler(w http.ResponseWriter, r *http.Request, user *userAccount) {
+	artifactID := strings.TrimSpace(r.URL.Query().Get("artifactId"))
+	fileID := strings.TrimSpace(r.URL.Query().Get("fileId"))
+	if artifactID == "" && fileID == "" {
+		writeAuthError(w, http.StatusBadRequest, "artifactId or fileId is required")
+		return
+	}
+	if fileID != "" {
+		// The same people who may mint may see the history; nobody else learns
+		// the row exists.
+		if _, found := shareableFileForViewer(r.Context(), user, fileID); !found {
+			writeAuthError(w, http.StatusNotFound, "file not found")
+			return
+		}
+	} else {
+		header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(artifactID)
+		if !found || !artifactHeaderAuthorized(r.Context(), user, ACLReadMetadata, header) || !artifactHeaderAuthorized(r.Context(), user, ACLShare, header) {
+			writeAuthError(w, http.StatusNotFound, "artifact not found")
+			return
+		}
 	}
 	records, err := loadShareLinks()
 	if err != nil {
@@ -516,7 +722,10 @@ func listShareLinksHandler(w http.ResponseWriter, r *http.Request, user *userAcc
 		if exactTenant && record.TenantID != tenantID {
 			continue
 		}
-		if artifactID != "" && record.ArtifactID != artifactID {
+		if artifactID != "" && (record.ArtifactID != artifactID || record.FileID != "") {
+			continue
+		}
+		if fileID != "" && (record.FileID != fileID || record.ObjectType != shareLinkObjectTypeFile) {
 			continue
 		}
 		if exactTenant {
@@ -569,17 +778,29 @@ func revokeShareLinkHandler(w http.ResponseWriter, r *http.Request, user *userAc
 		if exactTenant && record.TenantID != tenantID {
 			continue
 		}
-		header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(record.ArtifactID)
-		if !found || !artifactHeaderAuthorized(r.Context(), user, ACLReadMetadata, header) || !artifactHeaderAuthorized(r.Context(), user, ACLShare, header) {
-			writeAuthError(w, http.StatusNotFound, "share link not found")
-			return
-		}
-		// The minter revokes their own link; the approval admin revokes any
-		// (the same authority that approves artifacts for external shipping).
 		_, canonical := strideE10TenantPrincipalFromContext(r.Context())
-		if !canonical && record.CreatedBy != normalizeAccountEmail(user.Email) && !isArtifactApprovalAdmin(user) {
-			writeAuthError(w, http.StatusForbidden, "only the link's creator or the approval admin may revoke it")
-			return
+		if record.ObjectType == shareLinkObjectTypeFile {
+			// A file link's row may already be trashed or re-scoped; revoking
+			// must still work for its creator or the approval admin, and no
+			// canonical principal ever minted one.
+			if canonical || (record.CreatedBy != normalizeAccountEmail(user.Email) && !isArtifactApprovalAdmin(user)) {
+				writeAuthError(w, http.StatusNotFound, "share link not found")
+				return
+			}
+		} else {
+			header, found := kanbanApp.memory.artifactAuthorizationHeaderByID(record.ArtifactID)
+			if !found || !artifactHeaderAuthorized(r.Context(), user, ACLReadMetadata, header) || !artifactHeaderAuthorized(r.Context(), user, ACLShare, header) {
+				writeAuthError(w, http.StatusNotFound, "share link not found")
+				return
+			}
+			// The minter revokes their own link; the approval admin revokes any
+			// (the same authority that approves artifacts for external shipping).
+			// Anyone else gets the same non-enumerating 404 as a file link —
+			// a reader of the artifact must not learn who minted which token.
+			if !canonical && record.CreatedBy != normalizeAccountEmail(user.Email) && !isArtifactApprovalAdmin(user) {
+				writeAuthError(w, http.StatusNotFound, "share link not found")
+				return
+			}
 		}
 		if record.Status != shareLinkStatusRevoked {
 			record.Status = shareLinkStatusRevoked
@@ -622,7 +843,7 @@ const shareLinkOpenSignalInterval = time.Hour
 // mint UI (never fails the serve) and logs the §5 open signal at most once
 // per shareLinkOpenSignalInterval per link, keyed on the lastOpenedAt stamp
 // the same rewrite already maintains.
-func recordShareLinkOpen(record shareLinkRecord, artifact meetingMemoryEntry) {
+func recordShareLinkOpen(record shareLinkRecord, object meetingMemoryEntry) {
 	now := time.Now().UTC()
 	recordSignal := true
 
@@ -655,9 +876,17 @@ func recordShareLinkOpen(record shareLinkRecord, artifact meetingMemoryEntry) {
 	if !recordSignal {
 		return
 	}
-	kanbanApp.recordSignalEvent("external", signalEventShareOpened, signalValenceNeutral, artifact.ID, artifact.Metadata["packageId"], map[string]string{
+	if record.ObjectType == shareLinkObjectTypeFile {
+		kanbanApp.recordSignalEvent("external", signalEventShareOpened, signalValenceNeutral, object.ID, "", map[string]string{
+			"shareId":    record.ID,
+			"objectType": shareLinkObjectTypeFile,
+			"mime":       strings.TrimSpace(object.Metadata["mime"]),
+		})
+		return
+	}
+	kanbanApp.recordSignalEvent("external", signalEventShareOpened, signalValenceNeutral, object.ID, object.Metadata["packageId"], map[string]string{
 		"shareId":      record.ID,
-		"artifactType": artifactType(artifact),
+		"artifactType": artifactType(object),
 	})
 }
 
@@ -682,6 +911,8 @@ func firstArtifactAssetOfKind(artifact meetingMemoryEntry, kind string) (artifac
 //     never ride anything on the app origin)
 //   - pdf → the newest pdf asset streamed inline from the blob store
 //   - everything else → the injection-safe server renderer
+//   - objectType=file → the bound Drive blob streamed as a download (inline
+//     only for blobInlineSafeMimes), ETag = blob ref
 func shareLinkPublicHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -712,7 +943,62 @@ func shareLinkPublicHandler(w http.ResponseWriter, r *http.Request) {
 		writeShareLinkNotFound(w)
 		return
 	}
+	if record.ObjectType == shareLinkObjectTypeFile {
+		serveSharedFileRecord(w, r, record)
+		return
+	}
 	serveShareLinkRecord(w, record)
+}
+
+// serveSharedFileRecord streams a file link's bound blob. The row is
+// re-resolved before AND after the byte read (the artifactBlobHandler
+// discipline) so a concurrent trash, blob change, or access loss yields the
+// uniform 404 rather than bytes authorized by a stale snapshot. The ETag is
+// the content-addressed ref; a matching If-None-Match answers 304 only after
+// the same re-resolution, so revocation is never masked by a cached
+// validator, and the response is private/no-cache so every open revalidates.
+func serveSharedFileRecord(w http.ResponseWriter, r *http.Request, record shareLinkRecord) {
+	entry, found := shareLinkBoundFile(record)
+	if !found {
+		writeShareLinkNotFound(w)
+		return
+	}
+	ref := record.ContentDigest
+	etag := `"` + ref + `"`
+	if requestETagMatches(r.Header.Get("If-None-Match"), etag) {
+		recordShareLinkOpen(record, entry)
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "private, no-cache")
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	data, meta, err := getBlob(ref)
+	if err != nil {
+		log.Errorf("Failed to read shared file blob %s: %v", ref, err)
+		writeShareLinkNotFound(w)
+		return
+	}
+	if _, stillBound := shareLinkBoundFile(record); !stillBound {
+		writeShareLinkNotFound(w)
+		return
+	}
+	recordShareLinkOpen(record, entry)
+
+	disposition := "attachment"
+	if blobInlineSafeMimes[meta.Mime] {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Type", meta.Mime)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, blobDownloadFilename(entry.Metadata["name"], ref)))
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	if _, err := w.Write(data); err != nil {
+		log.Errorf("Failed to serve shared file %s: %v", entry.ID, err)
+	}
 }
 
 func shareLinkPublicCutoverHandler(w http.ResponseWriter, r *http.Request) {
@@ -730,6 +1016,11 @@ func shareLinkPublicCutoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var record shareLinkRecord
 	for _, candidate := range records {
+		if candidate.ObjectType != shareLinkObjectTypeArtifact {
+			// The signed anonymous capability speaks artifact bindings only;
+			// a file record can never satisfy its claims.
+			continue
+		}
 		candidateHash, decodeErr := hex.DecodeString(candidate.TokenHash)
 		if candidate.ID == claims.LinkID && decodeErr == nil && subtle.ConstantTimeCompare(providedHash[:], candidateHash) == 1 {
 			record = candidate
@@ -754,7 +1045,7 @@ func shareLinkPublicCutoverHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func shareLinkBoundArtifact(record shareLinkRecord) (meetingMemoryEntry, bool) {
-	if kanbanApp == nil {
+	if kanbanApp == nil || record.ObjectType != shareLinkObjectTypeArtifact {
 		return meetingMemoryEntry{}, false
 	}
 	artifact, found := kanbanApp.osArtifactByID(record.ArtifactID)

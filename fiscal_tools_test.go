@@ -270,9 +270,11 @@ func TestRealtimeRoomVoiceToolsExcludeHeavyFiscal(t *testing.T) {
 			t.Fatalf("%s should ride the room voice session (spoken-ready)", name)
 		}
 	}
-	// The filter removes exactly the two heavy tools, nothing else.
-	if got, want := len(app.realtimeRoomVoiceTools()), len(app.kanbanTools())-2; got != want {
-		t.Fatalf("room voice tools=%d, want kanbanTools-2=%d", got, want)
+	// The filter removes exactly the two heavy tools plus `remember_note`
+	// (Wave 8 review M11: the room voice has no requester identity, so the
+	// tool could only ever error there), nothing else.
+	if got, want := len(app.realtimeRoomVoiceTools()), len(app.kanbanTools())-3; got != want {
+		t.Fatalf("room voice tools=%d, want kanbanTools-3=%d", got, want)
 	}
 }
 

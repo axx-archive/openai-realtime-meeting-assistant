@@ -1514,6 +1514,11 @@ modelRoute:
 	if imageRequest {
 		model, effort = scoutImageDirectionModel(), scoutImageDirectionReasoningEffort()
 	}
+	// Wave 9: the router seat rides the per-seat breaker + same-provider
+	// fallback (provider_breaker.go). The capture reports which dial answered
+	// so the routing verdict carries honest provenance.
+	routerProvenance := &providerCallProvenanceCapture{}
+	ctx = withProviderCallProvenanceCapture(ctx, routerProvenance)
 	response, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           model,
 		Seat:            seatRouter,
@@ -1534,8 +1539,27 @@ modelRoute:
 		} else if scoutTurnAppearsWorkShaped(intentText) {
 			decision = unavailableConversationDecision("router_unavailable", "I couldn't safely determine the work route, so nothing started.", proposalSourceChatRouter)
 		}
-		recordConversationIntentOutcome(decision, map[string]any{"degraded": "router_error", "provider": providerOpenAI, "model": routerModel()})
+		failureFields := map[string]any{"degraded": "router_error", "provider": providerOpenAI, "model": routerModel()}
+		if class, wire := classifyProviderFailure(err); wire {
+			failureFields["failureClass"] = class
+		}
+		recordConversationIntentOutcome(decision, failureFields)
 		return decision
+	}
+	routerOutcomeFields := func(fields map[string]any) map[string]any {
+		provenance, observed := routerProvenance.snapshot()
+		if !observed || !provenance.FallbackUsed {
+			return fields
+		}
+		if fields == nil {
+			fields = map[string]any{}
+		}
+		fields["provider"] = provenance.Provider
+		fields["model"] = provenance.Model
+		fields["fallbackUsed"] = true
+		fields["primaryModel"] = provenance.PrimaryModel
+		fields["primaryFailureClass"] = provenance.PrimaryFailureClass
+		return fields
 	}
 	output, err := decodeOpenAIScoutRouterOutput(response)
 	if err != nil {
@@ -1585,15 +1609,15 @@ modelRoute:
 				work = decision.Approval.Work
 			}
 			if scoutRegistryWorkAvailableWithoutAgentWorker(work) {
-				recordConversationIntentOutcome(decision, map[string]any{"worker": "goal_engine"})
+				recordConversationIntentOutcome(decision, routerOutcomeFields(map[string]any{"worker": "goal_engine"}))
 				return decision
 			}
 			decision = conversationalReplyDecision(proposalSourceChatRouter)
-			recordConversationIntentOutcome(decision, map[string]any{"degraded": "agent_worker_unavailable"})
+			recordConversationIntentOutcome(decision, routerOutcomeFields(map[string]any{"degraded": "agent_worker_unavailable"}))
 			return decision
 		}
 	}
-	recordConversationIntentOutcome(decision, nil)
+	recordConversationIntentOutcome(decision, routerOutcomeFields(nil))
 	return decision
 }
 

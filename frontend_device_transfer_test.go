@@ -43,7 +43,7 @@ func TestIndexDeviceTransferPromptIsExplicitAndAccessible(t *testing.T) {
 		`Leave on the other device.`,
 		`id="roomTransferCancel"`,
 		`.room-transfer__choice:active,`,
-		`transform: scale(0.96);`,
+		`transform: scale(var(--press-scale));`, // plan 011: one press token
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("index.html missing device-transfer prompt contract %q", want)

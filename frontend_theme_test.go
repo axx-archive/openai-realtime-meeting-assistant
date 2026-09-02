@@ -6,8 +6,10 @@ import (
 	"testing"
 )
 
-// Pins for the theme default + persistence contract (founder call 2026-07-10):
-// LIGHT is the product default (OS preference only honored for an explicit
+// Pins for the theme default + persistence contract. DARK is the product
+// default (AJ, Wave 10, 2026-09-02: "a beautiful product with a light/dark
+// mode, dark as default" — supersedes the light default of 2026-07-10; a
+// saved 'light' still wins; OS preference only honored for an explicit
 // "system" choice), the choice persists to localStorage on every apply, and a
 // signed-in user's choice syncs to their account via POST /auth/theme and is
 // re-applied from /auth/me at session bootstrap. Also pins the lobby ink-
@@ -23,16 +25,23 @@ func readIndexForTheme(t *testing.T) string {
 	return string(html)
 }
 
-func TestIndexThemeDefaultsToLight(t *testing.T) {
+func TestIndexThemeDefaultsToDark(t *testing.T) {
 	html := readIndexForTheme(t)
 
-	// pre-paint script: absent/unknown key = light; matchMedia consulted ONLY
-	// for a stored 'system' choice
+	// pre-paint script: absent/unknown key = dark; matchMedia consulted ONLY
+	// for a stored 'system' choice; a stored 'light' is honored as-is
 	if !strings.Contains(html, "if (theme === 'system') {") {
 		t.Error("pre-paint script must honor an explicit stored 'system' choice")
 	}
-	if !strings.Contains(html, "} else if (theme !== 'light' && theme !== 'dark') {\n          theme = 'light'\n        }") {
-		t.Error("pre-paint script must default an absent/unknown stored theme to LIGHT")
+	if !strings.Contains(html, "} else if (theme !== 'light' && theme !== 'dark') {\n          theme = 'dark'\n        }") {
+		t.Error("pre-paint script must default an absent/unknown stored theme to DARK")
+	}
+	if !strings.Contains(html, "if (theme === 'dark') document.documentElement.dataset.theme = 'dark'") {
+		t.Error("pre-paint script must stamp data-theme=dark before first paint")
+	}
+	// the tab strip colour before any script runs is the dark ground
+	if !strings.Contains(html, `<meta name="theme-color" content="#000000">`) {
+		t.Error("theme-color meta must start on the dark ground")
 	}
 
 	// runtime resolution mirrors it
@@ -40,8 +49,11 @@ func TestIndexThemeDefaultsToLight(t *testing.T) {
 	if body == "" {
 		t.Fatal("storedThemePreference missing")
 	}
-	if !strings.Contains(body, "stored === 'system' ? stored : 'light'") {
-		t.Error("storedThemePreference must default to 'light', not 'system'")
+	if !strings.Contains(body, "stored === 'system' ? stored : 'dark'") {
+		t.Error("storedThemePreference must default to 'dark', not 'system' or 'light'")
+	}
+	if !strings.Contains(body, "stored === 'light' || stored === 'dark' || stored === 'system' ? stored") {
+		t.Error("a saved 'light' choice must still win over the dark default")
 	}
 }
 
@@ -120,10 +132,13 @@ func TestIndexDarkThemeUsesNativeParityBlackCanvas(t *testing.T) {
 	dark := html[darkStart : darkStart+darkEnd]
 	for _, want := range []string{
 		"--bg-app: #000000;",
-		"--surface-1: #050506;",
-		"--surface-2: #0A0A0C;",
-		"--surface-3: #141416;",
-		"--glass-chrome: rgba(8, 8, 10, 0.82);",
+		// AJ ratified dark ladder v2 2026-09-02: the canvas stays true black;
+		// the chrome is one plane above it, cards and wells one step each
+		// above that (was #050506 / #0A0A0C / #141416 and rgba(8, 8, 10, 0.82)).
+		"--surface-1: #0E0E10;",
+		"--surface-2: #151518;",
+		"--surface-3: #1C1C20;",
+		"--glass-chrome: rgba(14, 14, 16, 0.86);",
 		"--glass-panel: rgba(8, 8, 10, 0.62);",
 	} {
 		if !strings.Contains(dark, want) {

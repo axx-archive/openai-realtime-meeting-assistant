@@ -55,6 +55,9 @@ const (
 var (
 	errRoomNotFound = errors.New("room not found")
 	errRoomArchived = errors.New("room is archived")
+	// errRoomLocked is the host lock (Wave 6 D5): new arrivals are refused
+	// while everyone already seated stays. HTTP surfaces answer 423.
+	errRoomLocked = errors.New("room is locked")
 )
 
 // normalizeRoomID maps the migration invariant (§9: absent roomId == office)
@@ -695,6 +698,7 @@ func roomListPayload(room roomRecord) map[string]any {
 		"passcodeRequired": room.PasscodeHash != "",
 		"guestEnabled":     room.GuestEnabled,
 		"guestLinkActive":  roomGuestLinkActive(room),
+		"recordingEnabled": roomMediaRecordingEnabled(room.ID),
 		"createdBy":        room.CreatedBy,
 		"archived":         room.Archived,
 	}
@@ -1009,6 +1013,12 @@ func guestJoinHandler(w http.ResponseWriter, r *http.Request) {
 	room, ok := appRoomStore().redeemGuestToken(token)
 	if !ok {
 		writeAuthError(w, http.StatusForbidden, "that guest link is no longer valid")
+		return
+	}
+	// Host lock (Wave 6 D5): the link stays valid, but nobody new is seated
+	// until the host unlocks. 423 so the guest gate can say exactly that.
+	if kanbanApp != nil && kanbanApp.roomJoinLocked(room.ID) {
+		writeAuthError(w, http.StatusLocked, "the host has locked this room; ask them to unlock it")
 		return
 	}
 

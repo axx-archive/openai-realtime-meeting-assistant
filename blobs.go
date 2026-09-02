@@ -19,9 +19,14 @@ package main
 // and the serving route may set ETag=ref + cache forever. getBlob re-verifies
 // the digest on read: a corrupted file is an error, never wrong bytes.
 //
-// GC is exposed as sweepUnreferencedBlobs for a FUTURE admin action only —
-// deliberately NOT wired to any timer or ambient agent (spec: blobs
-// referenced by no artifact are eligible, and a human triggers it).
+// GC (Wave 5 D10): sweepBlobStore computes the referenced set from every
+// live or trashed file row, artifact asset, version body, chat attachment,
+// pending upload, and live file share link, then deletes the rest. Two
+// callers: the admin action POST /assistant/admin/blobs/sweep (dry-run or
+// immediate, a human triggers it) and runScheduledBlobSweep, the weekly job
+// that runs behind the Drive trash purge and deletes only blobs unreferenced
+// across two consecutive weekly runs (dry-run first, delete on the second
+// sighting).
 //
 // KEYLESS: pure disk, no model calls, no sidecar — nothing here degrades.
 
@@ -35,6 +40,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -163,11 +169,23 @@ func blobPaths(ref string) (string, string, error) {
 // file lands via temp-file + rename so a crash can never leave half-written
 // bytes addressable by their ref.
 func putBlob(data []byte, mime string) (string, error) {
+	return putBlobWithCap(data, mime, blobMaxBytes)
+}
+
+// putBlobWithCap is putBlob with a caller-supplied size ceiling for lanes
+// whose spec cap exceeds the 64MB default (Wave 7 meeting recordings,
+// MEETING_RECORDING_MAX_BYTES). A non-positive cap falls back to
+// blobMaxBytes; the cap only ever bounds THIS write — the store's
+// content-addressed contract is unchanged.
+func putBlobWithCap(data []byte, mime string, maxBytes int) (string, error) {
+	if maxBytes <= 0 {
+		maxBytes = blobMaxBytes
+	}
 	if len(data) == 0 {
 		return "", fmt.Errorf("blob is empty")
 	}
-	if len(data) > blobMaxBytes {
-		return "", fmt.Errorf("blob exceeds the %dMB cap", blobMaxBytes>>20)
+	if len(data) > maxBytes {
+		return "", fmt.Errorf("blob exceeds the %dMB cap", maxBytes>>20)
 	}
 	if mime = strings.TrimSpace(mime); mime == "" {
 		mime = blobDefaultMime
@@ -393,35 +411,72 @@ func (app *kanbanBoardApp) replaceArtifactAssetsOfKind(artifactID string, kind s
 	return entry, err
 }
 
-// sweepUnreferencedBlobs deletes every stored blob whose ref appears in no
-// artifact's assets metadata, returning the deleted refs. Exposed for a
-// FUTURE admin action only — deliberately NOT wired to a timer or ambient
-// agent. It refuses to run without a live artifact store: sweeping blind
-// would treat every blob as an orphan.
-func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
+// blobReferenceWalkers are additional "these refs are still in use" sources
+// registered by other files (registerBlobReferenceWalker from an init), so a
+// new blob-storing lane keeps its bytes alive without editing this file.
+var (
+	blobReferenceWalkersMu sync.Mutex
+	blobReferenceWalkers   []func(app *kanbanBoardApp) []string
+)
+
+// registerBlobReferenceWalker adds a reference source to every future sweep.
+// The walker must tolerate a nil app and return only refs it can vouch for.
+func registerBlobReferenceWalker(walker func(app *kanbanBoardApp) []string) {
+	if walker == nil {
+		return
+	}
+	blobReferenceWalkersMu.Lock()
+	blobReferenceWalkers = append(blobReferenceWalkers, walker)
+	blobReferenceWalkersMu.Unlock()
+}
+
+// blobReferencedRefs collects every blob ref the workspace still points at.
+// It refuses to run without a live store: sweeping blind would treat every
+// blob as an orphan. Trashed Drive rows count as references until the trash
+// purge removes the row itself — the sweep never races the restore window.
+func blobReferencedRefs(app *kanbanBoardApp) (map[string]struct{}, error) {
 	if app == nil || app.memory == nil {
 		return nil, fmt.Errorf("artifact memory is unavailable")
 	}
 
 	referenced := map[string]struct{}{}
-	for _, artifact := range app.osArtifactsSnapshot(0) {
+	keep := func(ref string) {
+		if ref = strings.TrimSpace(ref); validBlobRef(ref) {
+			referenced[ref] = struct{}{}
+		}
+	}
+	// Raw entriesOfKind, not osArtifactsSnapshot: a quarantined/expired
+	// artifact is hidden from recall but can still be restored, so its bytes
+	// must outlive the hide. rowsWithRefs feeds the fail-safe below.
+	rowsWithRefs := 0
+	for _, artifact := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		rowsWithRefs++
 		for _, asset := range artifactAssets(artifact) {
-			referenced[asset.Ref] = struct{}{}
+			keep(asset.Ref)
+			keep(asset.SourceSceneRef)
+		}
+		// Metadata-held refs: the Deck Studio scene (deckSceneRef) is the ONLY
+		// copy of a native deck's editable scene — loadDeckDocument 409s
+		// without it — and the render lane pins the scene/PDF it rendered
+		// from. None of these are artifact assets, so they are walked here.
+		for _, key := range []string{deckSceneRefMetadataKey, renderSourceSceneRefMetadataKey, renderPDFAssetRefMetadataKey} {
+			keep(artifact.Metadata[key])
 		}
 		// Version-lineage body snapshots (memory.go's artifactVersions journal)
-		// are referenced too — the sweep must never orphan an edit history.
+		// and each superseded revision's scene are referenced too — the sweep
+		// must never orphan an edit history.
 		for _, version := range artifactVersionHistory(artifact) {
-			if ref := strings.TrimSpace(version.BodyBlobRef); validBlobRef(ref) {
-				referenced[ref] = struct{}{}
-			}
+			keep(version.BodyBlobRef)
+			keep(version.SceneRef)
 		}
 	}
 	// Files-surface direct uploads (kind=file entries, card 095) reference
 	// their bytes via metadata blobRef — the shared drive must survive a sweep.
+	// Every row counts, live or trashed: a purge deletes the row first, and
+	// only then does the next weekly pass see the blob as unreferenced.
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindFile, 0) {
-		if ref := strings.TrimSpace(entry.Metadata["blobRef"]); validBlobRef(ref) {
-			referenced[ref] = struct{}{}
-		}
+		rowsWithRefs++
+		keep(entry.Metadata["blobRef"])
 	}
 	// Chat-attachment refs (scoutChatFileAttachment.Ref, card 085) are live
 	// references too: a thread's inline images and PDFs must survive a sweep
@@ -454,16 +509,78 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 		}
 	}
 	app.pendingAttachmentUploadsMu.Unlock()
+	// Other lanes that store bytes here (Wave 7 meeting recordings) register
+	// their reference walkers at init; a lane that has not registered yet
+	// simply contributes nothing, so the sweep never depends on link order.
+	blobReferenceWalkersMu.Lock()
+	walkers := append([]func(*kanbanBoardApp) []string(nil), blobReferenceWalkers...)
+	blobReferenceWalkersMu.Unlock()
+	for _, walker := range walkers {
+		for _, ref := range walker(app) {
+			if ref = strings.TrimSpace(ref); validBlobRef(ref) {
+				referenced[ref] = struct{}{}
+			}
+		}
+	}
+	// A live file share link (share_links.go, Wave 5 D3) binds its capability
+	// to the exact blob it streams. The row behind it is already referenced
+	// above; this keeps the bytes for the link's window even if that row
+	// changes underneath it.
+	if links, err := loadShareLinks(); err == nil {
+		now := time.Now().UTC()
+		for _, link := range links {
+			if link.ObjectType == shareLinkObjectTypeFile && shareLinkLive(link, now) && validBlobRef(link.ContentDigest) {
+				referenced[link.ContentDigest] = struct{}{}
+			}
+		}
+	} else {
+		return nil, fmt.Errorf("read share links for blob sweep: %w", err)
+	}
+	// Fail-safe: rows exist but the walk produced no refs at all. That is a
+	// broken walk (a renamed metadata key, a decoder regression), not an empty
+	// workspace — refuse, so sweepBlobStore never treats every blob as an
+	// orphan. An error here skips deletion on both the admin and weekly paths.
+	if rowsWithRefs > 0 && len(referenced) == 0 {
+		return nil, fmt.Errorf("blob reference walk found %d artifact/file rows but no refs; refusing to sweep", rowsWithRefs)
+	}
+	return referenced, nil
+}
+
+// blobSweepReport is the outcome of one sweep pass — the admin action's wire
+// shape and the weekly job's log line.
+type blobSweepReport struct {
+	DryRun       bool  `json:"dryRun"`
+	Scanned      int   `json:"scanned"`
+	Unreferenced int   `json:"unreferenced"`
+	Deleted      int   `json:"deleted"`
+	DeletedBytes int64 `json:"deletedBytes"`
+	// UnreferencedRefs / DeletedRefs are the per-ref detail behind the counts
+	// (never on the wire — a ref list is not something an admin needs to see,
+	// and the weekly job persists its own candidate set).
+	UnreferencedRefs []string `json:"-"`
+	DeletedRefs      []string `json:"-"`
+}
+
+// sweepBlobStore walks the store once. Every blob absent from the referenced
+// set is reported as unreferenced; with dryRun=false those are deleted —
+// restricted to the eligible set when one is supplied (the weekly job's
+// "unreferenced twice in a row" rule). Every deletion journals to the
+// canonical lifecycle log first, exactly as before.
+func sweepBlobStore(app *kanbanBoardApp, dryRun bool, eligible map[string]struct{}) (blobSweepReport, error) {
+	report := blobSweepReport{DryRun: dryRun}
+	referenced, err := blobReferencedRefs(app)
+	if err != nil {
+		return report, err
+	}
 
 	shards, err := os.ReadDir(blobStoreDir())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return report, nil
 		}
-		return nil, fmt.Errorf("read blob store: %w", err)
+		return report, fmt.Errorf("read blob store: %w", err)
 	}
 
-	var deleted []string
 	for _, shard := range shards {
 		if !shard.IsDir() {
 			continue
@@ -471,36 +588,240 @@ func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
 		shardDir := filepath.Join(blobStoreDir(), shard.Name())
 		files, err := os.ReadDir(shardDir)
 		if err != nil {
-			return deleted, fmt.Errorf("read blob shard %s: %w", shard.Name(), err)
+			return report, fmt.Errorf("read blob shard %s: %w", shard.Name(), err)
 		}
 		for _, file := range files {
 			ref := file.Name()
 			if strings.HasSuffix(ref, blobMetaSuffix) || !validBlobRef(ref) {
 				continue
 			}
+			report.Scanned++
 			if _, ok := referenced[ref]; ok {
 				continue
+			}
+			report.Unreferenced++
+			report.UnreferencedRefs = append(report.UnreferencedRefs, ref)
+			if dryRun {
+				continue
+			}
+			if eligible != nil {
+				if _, ok := eligible[ref]; !ok {
+					continue
+				}
+			}
+			var size int64
+			if info, infoErr := file.Info(); infoErr == nil {
+				size = info.Size()
 			}
 			journalRecord := CanonicalLifecycleJournalRecord{
 				Family: "blob", ObjectID: ref, StateDigest: ref, At: time.Now().UTC(), Reason: "unreferenced_blob_sweep",
 			}
 			journalPath := filepath.Join(filepath.Dir(meetingMemoryPath()), "evicted-objects.jsonl")
 			if err := ensureCanonicalLifecycleJournal(journalPath, journalRecord); err != nil {
-				return deleted, fmt.Errorf("journal blob eviction %s: %w", ref, err)
+				return report, fmt.Errorf("journal blob eviction %s: %w", ref, err)
 			}
 			metaPath := filepath.Join(shardDir, ref+blobMetaSuffix)
 			if err := canonicalFenceRemoveMutation(metaPath, func() error { return os.Remove(metaPath) }); err != nil && !os.IsNotExist(err) {
-				return deleted, fmt.Errorf("delete blob metadata %s: %w", ref, err)
+				return report, fmt.Errorf("delete blob metadata %s: %w", ref, err)
 			}
 			dataPath := filepath.Join(shardDir, ref)
 			if err := canonicalFenceRemoveMutation(dataPath, func() error { return os.Remove(dataPath) }); err != nil {
-				return deleted, fmt.Errorf("delete blob %s: %w", ref, err)
+				return report, fmt.Errorf("delete blob %s: %w", ref, err)
 			}
-			deleted = append(deleted, ref)
+			report.Deleted++
+			report.DeletedBytes += size
+			report.DeletedRefs = append(report.DeletedRefs, ref)
 		}
 	}
 
-	return deleted, nil
+	return report, nil
+}
+
+// sweepUnreferencedBlobs deletes every stored blob whose ref appears in no
+// live reference, returning the deleted refs — the immediate (non-dry-run)
+// form a human triggers through the admin action.
+func sweepUnreferencedBlobs(app *kanbanBoardApp) ([]string, error) {
+	report, err := sweepBlobStore(app, false, nil)
+	return report.DeletedRefs, err
+}
+
+/* ---------- Wave 5 D10: admin action + weekly two-sighting sweep ---------- */
+
+// blobSweepInterval is the weekly cadence of the scheduled sweep. Combined
+// with the two-consecutive-sightings rule, a blob is deleted no sooner than a
+// week after it first became unreferenced.
+const blobSweepInterval = 7 * 24 * time.Hour
+
+// blobSweepState is the scheduled job's durable memory beside the memory
+// store: when it last ran and which refs it saw unreferenced then. A ref is
+// deleted only when it is unreferenced on two consecutive weekly runs.
+type blobSweepState struct {
+	LastRunAt        string   `json:"lastRunAt"`
+	PendingRefs      []string `json:"pendingRefs"`
+	LastScanned      int      `json:"lastScanned"`
+	LastUnreferenced int      `json:"lastUnreferenced"`
+	LastDeleted      int      `json:"lastDeleted"`
+	LastDeletedBytes int64    `json:"lastDeletedBytes"`
+}
+
+// blobSweepMu serializes the admin action and the scheduled job: two
+// concurrent walks could otherwise both journal and race the same removal.
+var blobSweepMu sync.Mutex
+
+func blobSweepStatePath() string {
+	return filepath.Join(filepath.Dir(meetingMemoryPath()), "blob-sweep-state.json")
+}
+
+func loadBlobSweepState() (blobSweepState, error) {
+	raw, err := os.ReadFile(blobSweepStatePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return blobSweepState{}, nil
+		}
+		return blobSweepState{}, fmt.Errorf("read blob sweep state: %w", err)
+	}
+	var state blobSweepState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return blobSweepState{}, fmt.Errorf("decode blob sweep state: %w", err)
+	}
+	return state, nil
+}
+
+// blobSweepDue reports whether the weekly cadence has elapsed. An unreadable
+// or missing timestamp counts as due (the first run is always a dry run, so
+// a lost state file can only delay deletion, never cause one).
+func blobSweepDue(state blobSweepState, now time.Time) bool {
+	last, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(state.LastRunAt))
+	if err != nil {
+		return true
+	}
+	return !now.Before(last.Add(blobSweepInterval))
+}
+
+// runScheduledBlobSweep is the weekly job. Safe to call on any cadence (the
+// daily trash-purge tick calls it after purged rows are gone): it returns
+// ran=false without touching disk when the weekly interval has not elapsed.
+// Each due run is a dry-run walk first (logged), then deletes ONLY the refs
+// that were already unreferenced on the previous weekly run — a blob must be
+// sighted as an orphan twice, a week apart, before its bytes go. The fresh
+// reference walk inside the delete pass means a ref re-referenced in between
+// (a re-upload of the same bytes dedupes to the same ref) survives.
+func (app *kanbanBoardApp) runScheduledBlobSweep(now time.Time) (blobSweepReport, bool, error) {
+	if app == nil || app.memory == nil {
+		return blobSweepReport{}, false, fmt.Errorf("artifact memory is unavailable")
+	}
+	now = now.UTC()
+	blobSweepMu.Lock()
+	defer blobSweepMu.Unlock()
+
+	state, err := loadBlobSweepState()
+	if err != nil {
+		return blobSweepReport{}, false, err
+	}
+	if !blobSweepDue(state, now) {
+		return blobSweepReport{}, false, nil
+	}
+
+	dry, err := sweepBlobStore(app, true, nil)
+	if err != nil {
+		return dry, true, err
+	}
+	log.Infof("Weekly blob sweep dry run: scanned=%d unreferenced=%d pendingFromLastRun=%d", dry.Scanned, dry.Unreferenced, len(state.PendingRefs))
+
+	previouslyPending := make(map[string]struct{}, len(state.PendingRefs))
+	for _, ref := range state.PendingRefs {
+		if validBlobRef(ref) {
+			previouslyPending[ref] = struct{}{}
+		}
+	}
+	eligible := map[string]struct{}{}
+	for _, ref := range dry.UnreferencedRefs {
+		if _, seenBefore := previouslyPending[ref]; seenBefore {
+			eligible[ref] = struct{}{}
+		}
+	}
+	report := dry
+	if len(eligible) > 0 {
+		report, err = sweepBlobStore(app, false, eligible)
+		if err != nil {
+			return report, true, err
+		}
+		log.Infof("Weekly blob sweep deleted %d blob(s) (%d bytes) unreferenced on two consecutive runs", report.Deleted, report.DeletedBytes)
+	}
+
+	deleted := make(map[string]struct{}, len(report.DeletedRefs))
+	for _, ref := range report.DeletedRefs {
+		deleted[ref] = struct{}{}
+	}
+	pending := make([]string, 0, len(report.UnreferencedRefs))
+	for _, ref := range report.UnreferencedRefs {
+		if _, gone := deleted[ref]; !gone {
+			pending = append(pending, ref)
+		}
+	}
+	state = blobSweepState{
+		LastRunAt: now.Format(time.RFC3339Nano), PendingRefs: pending,
+		LastScanned: report.Scanned, LastUnreferenced: report.Unreferenced, LastDeleted: report.Deleted, LastDeletedBytes: report.DeletedBytes,
+	}
+	if err := writeJSONFileAtomically(blobSweepStatePath(), "blob sweep state", state); err != nil {
+		return report, true, err
+	}
+	return report, true, nil
+}
+
+// adminBlobSweepHandler serves POST /assistant/admin/blobs/sweep {dryRun}
+// for the artifact approval admin — the human-triggered form of the GC.
+// dryRun=true reports the counts and deletes nothing; dryRun=false deletes
+// every currently unreferenced blob immediately (no two-sighting wait: a
+// human asked). Response: {ok, dryRun, scanned, unreferenced, deleted,
+// deletedBytes}.
+func adminBlobSweepHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if !isArtifactApprovalAdmin(user) {
+		writeAuthError(w, http.StatusForbidden, "blob sweep is admin-only")
+		return
+	}
+	if kanbanApp == nil || kanbanApp.memory == nil {
+		writeAuthError(w, http.StatusServiceUnavailable, "blob sweep is unavailable")
+		return
+	}
+	payload := struct {
+		DryRun bool `json:"dryRun"`
+	}{}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&payload); err != nil {
+			writeAuthError(w, http.StatusBadRequest, "could not read blob sweep request")
+			return
+		}
+	}
+
+	blobSweepMu.Lock()
+	report, err := sweepBlobStore(kanbanApp, payload.DryRun, nil)
+	blobSweepMu.Unlock()
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{
+		"ok":           true,
+		"dryRun":       report.DryRun,
+		"scanned":      report.Scanned,
+		"unreferenced": report.Unreferenced,
+		"deleted":      report.Deleted,
+		"deletedBytes": report.DeletedBytes,
+	})
 }
 
 // blobInlineSafeMimes are the types the blob route may serve with an inline
@@ -515,6 +836,9 @@ var blobInlineSafeMimes = map[string]bool{
 	"image/jpeg":      true,
 	"image/gif":       true,
 	"image/webp":      true,
+	// Wave 7 Meeting Record playback: non-script-capable media containers.
+	"video/webm": true,
+	"audio/webm": true,
 }
 
 var artifactBlobAfterReadProbe func(string)

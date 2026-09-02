@@ -175,6 +175,10 @@ type ledgerEventPayload struct {
 	Record ledgerRecord `json:"record"`
 	Reason string       `json:"reason,omitempty"`
 	At     string       `json:"at"`
+	// Spilled (Wave 8 D6) carries the provenance values the record's overflow
+	// lists evicted during this op — persisted on the event instead of being
+	// dropped, so nothing the ledger ever anchored is lost from the log.
+	Spilled []string `json:"spilled,omitempty"`
 }
 
 /* ---------- agent wiring ---------- */
@@ -984,8 +988,20 @@ func mergeLedgerAliases(existing []string, incoming []string) []string {
 // reading. Reports whether anything actually changed — an unchanged merge
 // emits NO event, which is what makes re-consolidating a rebuilt cumulative
 // digest a no-op.
+//
+// spilled (Wave 8 D6) reports the provenance values evicted off the OVERFLOW
+// lists (the second-tier caps): the caller persists them on the ledger event
+// instead of losing them — spill-never-shed all the way down.
 func mergeLedgerFact(record ledgerRecord, fact ledgerFact, nowStamp string) (ledgerRecord, bool) {
+	merged, changed, _ := mergeLedgerFactSpill(record, fact, nowStamp)
+	return merged, changed
+}
+
+// mergeLedgerFactSpill is mergeLedgerFact that also reports what the overflow
+// caps evicted (Wave 8 D6); the consolidation pass persists it on the event.
+func mergeLedgerFactSpill(record ledgerRecord, fact ledgerFact, nowStamp string) (ledgerRecord, bool, []string) {
 	changed := false
+	var spilledOut []string
 	if owner := normalizeLedgerOwner(fact.Owner); owner != "" && owner != record.Owner {
 		// ownership drift newest-wins, but the displaced owner is retained on the
 		// evolution trail (item 2.3a) instead of being lost.
@@ -1007,13 +1023,19 @@ func mergeLedgerFact(record ledgerRecord, fact ledgerFact, nowStamp string) (led
 	var spilled string
 	if record.Anchors, spilled, added = appendUniqueCappedSpill(record.Anchors, fact.Anchor, ledgerAnchorCap); added {
 		if spilled != "" {
-			record.AnchorsOverflow, _ = appendUniqueCapped(record.AnchorsOverflow, spilled, ledgerProvenanceOverflowCap)
+			var evicted string
+			if record.AnchorsOverflow, evicted, _ = appendUniqueCappedSpill(record.AnchorsOverflow, spilled, ledgerProvenanceOverflowCap); evicted != "" {
+				spilledOut = append(spilledOut, "anchor:"+evicted)
+			}
 		}
 		changed = true
 	}
 	if record.MeetingIDs, spilled, added = appendUniqueCappedSpill(record.MeetingIDs, fact.MeetingID, ledgerMeetingIDCap); added {
 		if spilled != "" {
-			record.MeetingIDsOverflow, _ = appendUniqueCapped(record.MeetingIDsOverflow, spilled, ledgerProvenanceOverflowCap)
+			var evicted string
+			if record.MeetingIDsOverflow, evicted, _ = appendUniqueCappedSpill(record.MeetingIDsOverflow, spilled, ledgerProvenanceOverflowCap); evicted != "" {
+				spilledOut = append(spilledOut, "meeting:"+evicted)
+			}
 		}
 		changed = true
 	}
@@ -1028,7 +1050,7 @@ func mergeLedgerFact(record ledgerRecord, fact ledgerFact, nowStamp string) (led
 		record.UpdatedAt = nowStamp
 	}
 
-	return record, changed
+	return record, changed, spilledOut
 }
 
 /* ---------- LLM adjudication (ambiguous band only) ---------- */
@@ -1334,18 +1356,18 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 	consolidateAgainst := func(fact ledgerFact, record ledgerRecord, reason string) {
 		status := normalizeLedgerStatus(fact.Entity, fact.Status)
 		if record.current() {
-			merged, changed := mergeLedgerFact(record, fact, nowStamp)
+			merged, changed, spilled := mergeLedgerFactSpill(record, fact, nowStamp)
 			if isTerminalLedgerStatus(status) {
 				// contradiction/completion: close the validity window, keep
 				// the row — history is never deleted.
 				merged.Status = status
 				merged.ValidTo = nowStamp
 				merged.UpdatedAt = nowStamp
-				apply(ledgerEventPayload{Op: ledgerOpClose, Record: merged, Reason: reason})
+				apply(ledgerEventPayload{Op: ledgerOpClose, Record: merged, Reason: reason, Spilled: spilled})
 				return
 			}
 			if changed {
-				apply(ledgerEventPayload{Op: ledgerOpUpdate, Record: merged, Reason: reason})
+				apply(ledgerEventPayload{Op: ledgerOpUpdate, Record: merged, Reason: reason, Spilled: spilled})
 			}
 			return
 		}
@@ -1418,22 +1440,49 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 	if len(events) == 0 {
 		return 0, nil
 	}
+	entries, err := ledgerEventEntries(events, scope, now, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	return app.memory.appendLedgerEvents(entries)
+}
+
+// ledgerEventEntries encodes consolidation events as kind=ledger_event rows.
+// scope (when non-empty) derives the ambient room/tenant stamps from the
+// inputs; otherwise the event is organization-visible in the canonical
+// tenant. extra metadata (inspector actor/action, work-result pointers) is
+// merged last but can never override the op/record identity keys. A spilled
+// provenance list (D6) is mirrored into metadata so a metadata-only reader
+// sees it too.
+func ledgerEventEntries(events []ledgerEventPayload, scope []meetingMemoryEntry, now time.Time, extra map[string]string) ([]meetingMemoryEntry, error) {
 	entries := make([]meetingMemoryEntry, 0, len(events))
 	for index, event := range events {
 		raw, err := json.Marshal(event)
 		if err != nil {
-			return 0, fmt.Errorf("encode ledger event: %w", err)
+			return nil, fmt.Errorf("encode ledger event: %w", err)
 		}
-		metadata := map[string]string{
-			"op":       event.Op,
-			"recordId": event.Record.ID,
-			"entity":   event.Record.Entity,
+		metadata := map[string]string{}
+		for key, value := range extra {
+			if key = strings.TrimSpace(key); key != "" && strings.TrimSpace(value) != "" {
+				metadata[key] = value
+			}
+		}
+		metadata["op"] = event.Op
+		metadata["recordId"] = event.Record.ID
+		metadata["entity"] = event.Record.Entity
+		if len(event.Spilled) > 0 {
+			metadata["spilled"] = strings.Join(event.Spilled, ",")
 		}
 		if len(scope) > 0 {
 			metadata = applyAmbientDerivedScope(metadata, scope)
 		} else {
-			metadata["tenantId"] = canonicalArtifactTenantID()
-			metadata["visibility"] = "organization"
+			if strings.TrimSpace(metadata["tenantId"]) == "" {
+				metadata["tenantId"] = canonicalArtifactTenantID()
+			}
+			if strings.TrimSpace(metadata["visibility"]) == "" {
+				metadata["visibility"] = "organization"
+			}
 		}
 		entries = append(entries, meetingMemoryEntry{
 			ID:        fmt.Sprintf("ledger-event-%d-%03d", now.UnixNano(), index),
@@ -1443,8 +1492,7 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 			Metadata:  metadata,
 		})
 	}
-
-	return app.memory.appendLedgerEvents(entries)
+	return entries, nil
 }
 
 /* ---------- read surfaces (Waves 4/5 consume these) ---------- */

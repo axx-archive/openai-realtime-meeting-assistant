@@ -28,6 +28,8 @@ const (
 	ConsentLaneTranscription  ConsentLane = "transcription"
 	ConsentLaneModelAnalysis  ConsentLane = "model_analysis"
 	ConsentLaneOrgMemory      ConsentLane = "org_memory"
+	// ConsentLaneRecording gates stored media (Wave 7 D2 recording upload).
+	ConsentLaneRecording ConsentLane = "recording"
 )
 
 var (
@@ -302,6 +304,13 @@ func (authority *ConsentLaneAuthority) effectiveDecision(ctx context.Context, bi
 		decision.MissingScopes = nil
 		for _, scope := range required {
 			disposition, explicit := decision.Dispositions[scope]
+			if !explicit && scope == ConsentRecording {
+				// Stored media is default OFF (founder decision #4): an external
+				// guest must grant recording explicitly; silence is a refusal.
+				decision.Allowed = false
+				decision.MissingScopes = append(decision.MissingScopes, scope)
+				continue
+			}
 			if !explicit {
 				decision.Dispositions[scope] = ConsentGranted
 				decision.RecordIDs[scope] = authority.policyDecisionRecordID(binding, scope, "guest-default")
@@ -825,6 +834,8 @@ func consentLaneScopes(lane ConsentLane) ([]ConsentScope, bool) {
 		return []ConsentScope{ConsentModelAnalysis}, true
 	case ConsentLaneOrgMemory:
 		return []ConsentScope{ConsentOrgMemory}, true
+	case ConsentLaneRecording:
+		return []ConsentScope{ConsentRecording}, true
 	default:
 		return nil, false
 	}

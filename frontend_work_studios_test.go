@@ -149,7 +149,7 @@ const server=http.createServer((req,res)=>{
  assert.ok(requestLog.filter(url=>url==='/artifacts/deck?id=deck-final').length>=2,JSON.stringify(requestLog));
  assert.ok(requestLog.includes('/artifacts?id=deck-final'),JSON.stringify(requestLog));
  await page.evaluate(project=>{const entry={id:'deck-final',kind:'os_artifact',text:'',metadata:{title:'Western engagement army',type:'html_deck',artifactVersion:'4',source:'scout_thread',status:'complete'}};const button=artifactSaveToFilesControl(entry,{expectedBinding:studioProjectExpectedBinding(project),readyLabel:'Save exact deck'});if(!button)throw new Error('Save control unavailable');button.id='driveSplitAuthorityProof';document.body.appendChild(button);},projects[0]);
- await page.click('#driveSplitAuthorityProof');
+ await page.$eval('#driveSplitAuthorityProof', el => el.click()); /* harness-appended body control: a DOM click, since the wide rail's account row can overlap body origin */
  await page.waitForSelector('.drive-save-dialog[open]');
  await page.fill('.drive-save-dialog__input','Western engagement army — filed');
  await page.click('.drive-save-dialog__button[data-primary="true"]');
@@ -208,7 +208,7 @@ const server=http.createServer((req,res)=>{
  assert.deepEqual(await page.locator('.studio-project-decision__choice').allInnerTexts(),['Operators and brand leaders','Change the audience','Hold for now']);
  if(renderDir)await page.screenshot({path:path.join(renderDir,'research-needs-you.png'),fullPage:true});
  await page.click('.studio-project-decision__choice[data-action="proceed"]');
- await page.waitForFunction(()=>document.querySelector('.studio-project-decision__choice')?.textContent!=='Saving…');
+ await page.waitForFunction(()=>document.querySelector('.studio-project-decision__choice')?.textContent!=='Submitting…');
  assert.deepEqual(actions[0],{id:'doc-needs',action:'approve',checkpointId:'goal-checkpoint-aaaaaaaaaaaaaaaaaaaaaaaa',checkpointOptionId:'checkpoint-option-111111111111111111111111'});
  await page.click('.studio-project-row[data-project-id="doc-draft"]');
  assert.match(await page.locator('.studio-project-deliverable__kicker').innerText(),/DRAFT AVAILABLE/);

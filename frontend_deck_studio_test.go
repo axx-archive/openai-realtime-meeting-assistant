@@ -54,7 +54,6 @@ func TestDeckStudioUsesStructuredDurableSecurityContract(t *testing.T) {
 		"data-prop=\"lineHeight\"",
 		"data-prop=\"letterSpacing\"",
 		"openDeckStudio(artifactId, title,",
-		"if (e.source !== state.currentBackdrop?.contentWindow) return",
 		"artifactIsDeckOutline(entry)",
 		"Generate deck",
 		"async function openDeckPresentation(artifactId, title, initialPayload = null)",

@@ -694,3 +694,206 @@ func TestArtifactsFetchByID(t *testing.T) {
 		t.Fatalf("unknown id status=%d, want 404", recorder.Code)
 	}
 }
+
+// Wave 5 D10: the admin action. Dry run reports counts and deletes nothing;
+// the immediate form deletes every unreferenced blob; non-admins are 403 and
+// the signed-out caller 401.
+func TestBlobSweepAdminActionDryRunThenDelete(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+	admin := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	member := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+
+	keptRef, err := putBlob([]byte("referenced drive upload"), "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.memory.appendEntry(meetingMemoryKindFile, "file-sweep-kept", "File kept.txt uploaded.", map[string]string{
+		"name": "kept.txt", "blobRef": keptRef, "mime": "text/plain", "uploaderEmail": "tim@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	orphanBody := []byte("abandoned intermediate raster for the admin action")
+	orphanRef, err := putBlob(orphanBody, "image/jpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sweep := func(body string, cookies []*http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/assistant/admin/blobs/sweep", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		adminBlobSweepHandler(recorder, req)
+		return recorder
+	}
+	if recorder := sweep(`{"dryRun":true}`, nil); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out sweep status=%d, want 401", recorder.Code)
+	}
+	if recorder := sweep(`{"dryRun":true}`, member); recorder.Code != http.StatusForbidden {
+		t.Fatalf("member sweep status=%d, want 403", recorder.Code)
+	}
+
+	dry := sweep(`{"dryRun":true}`, admin)
+	if dry.Code != http.StatusOK {
+		t.Fatalf("dry run status=%d body=%s", dry.Code, dry.Body.String())
+	}
+	dryPayload := decodeJSON(t, dry)
+	if dryPayload["dryRun"] != true || dryPayload["scanned"] != float64(2) || dryPayload["unreferenced"] != float64(1) || dryPayload["deleted"] != float64(0) || dryPayload["deletedBytes"] != float64(0) {
+		t.Fatalf("dry run payload=%v, want scanned=2 unreferenced=1 deleted=0 deletedBytes=0", dryPayload)
+	}
+	if _, _, err := getBlob(orphanRef); err != nil {
+		t.Fatalf("dry run deleted the orphan: %v", err)
+	}
+
+	real := sweep(`{"dryRun":false}`, admin)
+	if real.Code != http.StatusOK {
+		t.Fatalf("sweep status=%d body=%s", real.Code, real.Body.String())
+	}
+	realPayload := decodeJSON(t, real)
+	if realPayload["dryRun"] != false || realPayload["unreferenced"] != float64(1) || realPayload["deleted"] != float64(1) || realPayload["deletedBytes"] != float64(len(orphanBody)) {
+		t.Fatalf("sweep payload=%v, want unreferenced=1 deleted=1 deletedBytes=%d", realPayload, len(orphanBody))
+	}
+	if _, _, err := getBlob(orphanRef); err == nil {
+		t.Fatal("orphan survived the immediate admin sweep")
+	}
+	if _, _, err := getBlob(keptRef); err != nil {
+		t.Fatalf("referenced Drive blob deleted by the admin sweep: %v", err)
+	}
+}
+
+// Wave 5 D10: the weekly job. A referenced blob (live or trashed Drive row,
+// live file share link) always survives; an unreferenced blob is deleted only
+// on the second consecutive weekly run; a run inside the interval is a no-op;
+// the first sighting is a dry run that deletes nothing.
+func TestBlobScheduledSweepDeletesOnlyAfterTwoConsecutiveRuns(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	liveRef, _ := putBlob([]byte("live drive row"), "text/plain")
+	trashedRef, _ := putBlob([]byte("trashed drive row awaiting purge"), "text/plain")
+	linkedRef, _ := putBlob([]byte("bytes behind a live file share link"), "text/plain")
+	orphanRef, _ := putBlob([]byte("first orphan"), "image/jpeg")
+	for id, ref := range map[string]string{"file-live": liveRef, "file-trashed": trashedRef, "file-linked": linkedRef} {
+		metadata := map[string]string{"name": id + ".txt", "blobRef": ref, "mime": "text/plain", "uploaderEmail": "tim@shareability.com"}
+		if id == "file-trashed" {
+			metadata["deletedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		if _, _, err := app.memory.appendEntry(meetingMemoryKindFile, id, "File uploaded.", metadata); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A live file share link keeps its bound blob even after its row is gone.
+	if err := saveShareLinks([]shareLinkRecord{{
+		ID: "share-link-file-gc", FileID: "file-linked", TenantID: canonicalArtifactTenantID(), ObjectType: shareLinkObjectTypeFile,
+		ContentDigest: linkedRef, Action: "read_content", Status: shareLinkStatusActive, TokenHash: strings.Repeat("ab", 32),
+		CreatedBy: "tim@shareability.com", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), ExpiresAt: time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Date(2026, 9, 1, 3, 0, 0, 0, time.UTC)
+	report, ran, err := app.runScheduledBlobSweep(start)
+	if err != nil || !ran {
+		t.Fatalf("first run ran=%v err=%v", ran, err)
+	}
+	if report.Deleted != 0 || report.Unreferenced != 1 || report.Scanned != 4 {
+		t.Fatalf("first run report=%+v, want scanned=4 unreferenced=1 deleted=0 (dry-run first sighting)", report)
+	}
+	if _, _, err := getBlob(orphanRef); err != nil {
+		t.Fatalf("first sighting deleted the orphan: %v", err)
+	}
+	state, err := loadBlobSweepState()
+	if err != nil || len(state.PendingRefs) != 1 || state.PendingRefs[0] != orphanRef {
+		t.Fatalf("state after first run=%+v err=%v, want the orphan pending", state, err)
+	}
+
+	// Inside the weekly interval: nothing runs, nothing changes.
+	if _, ran, err := app.runScheduledBlobSweep(start.Add(3 * 24 * time.Hour)); err != nil || ran {
+		t.Fatalf("mid-interval run ran=%v err=%v, want a no-op", ran, err)
+	}
+
+	// A second orphan appears between runs: it is sighted, not deleted.
+	secondOrphanRef, _ := putBlob([]byte("second orphan"), "image/jpeg")
+	report, ran, err = app.runScheduledBlobSweep(start.Add(blobSweepInterval))
+	if err != nil || !ran {
+		t.Fatalf("second run ran=%v err=%v", ran, err)
+	}
+	if report.Deleted != 1 || len(report.DeletedRefs) != 1 || report.DeletedRefs[0] != orphanRef {
+		t.Fatalf("second run report=%+v, want exactly the twice-sighted orphan deleted", report)
+	}
+	if _, _, err := getBlob(orphanRef); err == nil {
+		t.Fatal("orphan survived its second consecutive sighting")
+	}
+	if _, _, err := getBlob(secondOrphanRef); err != nil {
+		t.Fatalf("second orphan deleted on its first sighting: %v", err)
+	}
+	for name, ref := range map[string]string{"live": liveRef, "trashed": trashedRef, "linked": linkedRef} {
+		if _, _, err := getBlob(ref); err != nil {
+			t.Fatalf("referenced %s blob deleted by the weekly sweep: %v", name, err)
+		}
+	}
+	state, _ = loadBlobSweepState()
+	if len(state.PendingRefs) != 1 || state.PendingRefs[0] != secondOrphanRef || state.LastDeleted != 1 {
+		t.Fatalf("state after second run=%+v, want only the second orphan pending", state)
+	}
+
+	// Third run: the second orphan goes; nothing else does.
+	report, ran, err = app.runScheduledBlobSweep(start.Add(2 * blobSweepInterval))
+	if err != nil || !ran || report.Deleted != 1 || report.DeletedRefs[0] != secondOrphanRef {
+		t.Fatalf("third run ran=%v err=%v report=%+v, want the second orphan deleted", ran, err, report)
+	}
+	if _, ran, err := app.runScheduledBlobSweep(start.Add(2*blobSweepInterval + time.Hour)); err != nil || ran {
+		t.Fatalf("post-run repeat ran=%v err=%v, want a no-op", ran, err)
+	}
+}
+
+// Registered reference walkers (Wave 7 recordings register theirs at init)
+// keep their refs alive across a sweep; putBlobWithCap honors a per-write
+// ceiling above the store default.
+func TestBlobReferenceWalkersAndPutBlobWithCap(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	walked, err := putBlob([]byte("bytes kept alive by a registered walker"), "video/webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan, err := putBlob([]byte("orphan beside the walked ref"), "video/webm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerBlobReferenceWalker(func(app *kanbanBoardApp) []string { return []string{walked, "not-a-ref"} })
+	t.Cleanup(func() {
+		blobReferenceWalkersMu.Lock()
+		blobReferenceWalkers = blobReferenceWalkers[:len(blobReferenceWalkers)-1]
+		blobReferenceWalkersMu.Unlock()
+	})
+	deleted, err := sweepUnreferencedBlobs(app)
+	if err != nil || len(deleted) != 1 || deleted[0] != orphan {
+		t.Fatalf("deleted=%v err=%v, want only the orphan", deleted, err)
+	}
+	if _, _, err := getBlob(walked); err != nil {
+		t.Fatalf("walker-referenced blob deleted: %v", err)
+	}
+
+	big := make([]byte, blobMaxBytes+1)
+	if _, err := putBlob(big, "video/webm"); err == nil {
+		t.Fatal("putBlob accepted a payload over the default cap")
+	}
+	if _, err := putBlobWithCap(big, "video/webm", blobMaxBytes+2); err != nil {
+		t.Fatalf("putBlobWithCap rejected a payload under its own cap: %v", err)
+	}
+	if _, err := putBlobWithCap([]byte("x"), "video/webm", 0); err != nil {
+		t.Fatalf("non-positive cap must fall back to the default: %v", err)
+	}
+	if !blobInlineSafeMimes["video/webm"] || !blobInlineSafeMimes["audio/webm"] {
+		t.Fatal("webm media must be inline-safe for Meeting Record playback")
+	}
+}

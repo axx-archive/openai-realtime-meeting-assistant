@@ -424,6 +424,29 @@ func (s *OrganizationAuthorityService) ActiveMembershipCount(personID string) in
 	return s.activeMembershipCountLocked(personID)
 }
 
+// SingleActiveOrganizationName returns the name of the workspace's one active
+// organization. The product ships as a single-organization workspace (Bonfire;
+// creation is closed), so the shell chip needs a label even for a session that
+// is not organization-bound yet. Returns "" when there is not exactly one.
+func (s *OrganizationAuthorityService) SingleActiveOrganizationName() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	name := ""
+	for _, organization := range s.organizations {
+		if organization.Status != "active" {
+			continue
+		}
+		if name != "" {
+			return ""
+		}
+		name = organization.Name
+	}
+	return name
+}
+
 func (s *OrganizationAuthorityService) Audit(organizationID string) []OrganizationAuditEvent {
 	if s == nil {
 		return nil

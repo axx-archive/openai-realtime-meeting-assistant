@@ -355,19 +355,24 @@ console.log('[2g] signaling - correlated offer dedupe and non-blocking sender tu
 // ---------- ISSUE 3: screen share ----------
 console.log('[3] Screen share - remoteScreenShareStream')
 {
-  const src = extractFn('remoteScreenShareStream')
+  // Wave 6 D4: a share seated on its own uplink (remoteShareByParticipant)
+  // wins over every camera-stream fallback — extract that seam with it
+  const src = extractFn('remoteShareStreamForParticipant') + '\n' + extractFn('remoteScreenShareStream')
   const STREAM = { id:'cam-stream' }
+  const SHARE = { id:'share-stream' }
   const liveTr = { kind:'video', readyState:'live' }
-  const run = (mapE, trE) => new Function('remoteStreamsByParticipant','remoteVideoTracksByParticipant','liveTrack','MediaStream', `
+  const run = (mapE, trE, shareE = []) => new Function('remoteStreamsByParticipant','remoteVideoTracksByParticipant','remoteShareByParticipant','liveTrack','MediaStream', `
     ${src}
     return remoteScreenShareStream
-  `)(new Map(mapE), new Map(trE), t=>t && t.readyState==='live', class { constructor(ts){ this.tracks=ts; this.id='from-track' } })
+  `)(new Map(mapE), new Map(trE), new Map(shareE), t=>t && t.readyState==='live', class { constructor(ts){ this.tracks=ts; this.id='from-track' } })
 
   ok('exact-name match returns stream', run([['Alice', STREAM]], [])('Alice') === STREAM)
   ok('case/space-skewed name still resolves (the real bug)', run([['Alice', STREAM]], [])('  alice ') === STREAM)
   ok('falls back to live remote track when stream map empty', run([], [['Bob', liveTr]])('bob')?.id === 'from-track')
   ok('returns null when participant truly absent', run([['Alice', STREAM]], [])('Carol') === null)
   ok('returns null for empty name', run([], [])('') === null)
+  ok('a share on its own uplink wins over the camera stream', run([['Alice', STREAM]], [], [['Alice', { videoTrack: liveTr, stream: SHARE }]])('alice') === SHARE)
+  ok('an ended own-uplink share falls through to the camera fallback', run([['Alice', STREAM]], [], [['Alice', { videoTrack: { kind:'video', readyState:'ended' }, stream: SHARE }]])('Alice') === STREAM)
 }
 
 console.log(`\nresult: ${pass} passed, ${fail} failed`)

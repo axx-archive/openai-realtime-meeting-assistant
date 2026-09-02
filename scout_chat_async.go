@@ -693,9 +693,17 @@ func (app *kanbanBoardApp) resolveScoutOpeningReply(ctx context.Context, user *u
 	}
 	query = app.prepareSTRIDEPrivateRelationshipModelQuery(user.Email, query)
 	answerContext := withAssistantModelSuccessRequired(withAssistantResponseStyle(ctx, scoutChatResponseStyle(thread)))
+	// Wave 9: the answer seat rides the per-seat breaker + same-provider
+	// fallback. Capture which dial answered so the opening reply's provenance
+	// is visible in the server log alongside the ledger/eval stamps.
+	answerProvenance := &providerCallProvenanceCapture{}
+	answerContext = withProviderCallProvenanceCapture(answerContext, answerProvenance)
 	result, err := app.resolveAssistantQueryContextForUser(answerContext, user.Email, query, history)
 	if err != nil {
 		return scoutChatMessageRecord{}, err
+	}
+	if provenance, observed := answerProvenance.snapshot(); observed && provenance.FallbackUsed {
+		log.Warnf("Scout opening reply for thread %s answered on the %s fallback dial after a %s failure on %s", thread.ID, provenance.Model, provenance.PrimaryFailureClass, provenance.PrimaryModel)
 	}
 	answer := strings.TrimSpace(result.answer)
 	if answer == "" {

@@ -97,6 +97,14 @@ var (
 	trackSourceIDs   map[string]string
 	trackLayerRIDs   map[string]string // forwarded track ID -> simulcast RID ("" when not simulcast)
 	trackLayerGroups map[string]string // forwarded track ID -> source group key (shared by sibling layers)
+	// trackSources tags a forwarded track with the publisher m-line it arrived
+	// on (Wave 6 D4): "camera" for the first recvonly video/audio pair,
+	// "screen" for the second. trackPaused marks a share whose publisher said
+	// screen_share_stopped: the forwarding goroutine stays bound to the m-line
+	// (RTP resumes on the same SSRC when the share restarts) but subscribers
+	// drop their senders, so no zombie share sender outlives the share.
+	trackSources map[string]string
+	trackPaused  map[string]bool
 	// trackMediaOwners binds a concrete forwarded track object to the exact
 	// sitting generation that published it. Pointer identity preserves legacy
 	// tests/direct fixtures that replace trackLocals without registry metadata.
@@ -459,6 +467,9 @@ type participantTrackSnapshot struct {
 	StreamID      string `json:"streamId,omitempty"`
 	EndpointID    string `json:"endpointId,omitempty"`
 	RoomID        string `json:"roomId"`
+	// Source is "camera" or "screen" (Wave 6 D4); absent on legacy entries,
+	// which receivers treat as camera.
+	Source string `json:"source,omitempty"`
 }
 
 type trackMediaOwner struct {
@@ -470,6 +481,11 @@ type trackMediaOwner struct {
 
 func (p peerConnectionState) acceptsTrack(track *webrtc.TrackLocalStaticRTP) bool {
 	if track != nil && sameParticipantName(trackParticipants[track.ID()], p.participantName) {
+		return false
+	}
+	// A paused share (publisher said screen_share_stopped) is withdrawn from
+	// every subscriber until it resumes.
+	if track != nil && trackPaused[track.ID()] {
 		return false
 	}
 	// Two-room isolation (multi-room W3): a track only forwards to subscribers
@@ -1028,12 +1044,20 @@ func main() {
 	trackSourceIDs = map[string]string{}
 	trackLayerRIDs = map[string]string{}
 	trackLayerGroups = map[string]string{}
+	trackSources = map[string]string{}
+	trackPaused = map[string]bool{}
 	trackMediaOwners = map[string]trackMediaOwner{}
 	subscriberLayerTiers = map[string]string{}
 	activeParticipantConnections = map[string]peerConnectionState{}
 	roomMixer = newAudioMixer()
 	defer roomMixer.close()
 	kanbanApp = newKanbanBoardApp()
+	// Wave 8 D12: reconcile channel-ingestion rows frozen before the
+	// edit/delete hooks existed (idempotent, bounded, keyless-safe). It runs
+	// off the boot path: the store mutex serializes it against readers, the
+	// company-source lock tolerates historical drift until it lands, and a
+	// large transcript corpus must never delay ListenAndServe.
+	go kanbanApp.backfillChannelIngestionDrift()
 	canonicalRuntime.setReconcileDeferred(kanbanApp.canonicalReconcileDeferred)
 	kanbanApp.startScoutOpeningReplyWorkers()
 	kanbanApp.startScoutChatImageWorkers()
@@ -1058,6 +1082,9 @@ func main() {
 	// zombie/backgrounded room socket can never hold occupancy above zero and
 	// keep a finished sitting from finalizing into a fresh meeting id.
 	kanbanApp.startParticipantLivenessSweeper()
+	// Drive trash purge (Wave 5 D6): daily, keyless, hard-deletes uploads
+	// trashed longer than 30 days and hands off to the weekly blob GC.
+	kanbanApp.startFileTrashSweeper()
 	// Memory-architecture study §6 Phase 0.1 (gap #1): nightly encrypted snapshot
 	// of the whole data dir to a local ring + optional offsite S3/Spaces, so a
 	// droplet disk loss is no longer total permanent loss of the company brain.
@@ -1156,14 +1183,27 @@ func main() {
 	http.HandleFunc("/assistant/board/cards/", assistantBoardCardsHandler)
 	http.HandleFunc("/assistant/board/drafts/", assistantBoardDraftActionHandler)
 	http.HandleFunc("/assistant/memory", assistantMemoryHandler)
+	// Wave 8: deliberate remember() seam + memory inspector (memory_remember.go,
+	// memory_inspector.go).
+	http.HandleFunc("/assistant/remember", assistantRememberHandler)
+	http.HandleFunc("/assistant/memory/inspect", assistantMemoryInspectHandler)
+	http.HandleFunc("/assistant/memory/inspect/action", assistantMemoryInspectActionHandler)
 	http.HandleFunc("/assistant/agent-mind", assistantAgentMindHandler)
 	http.HandleFunc("/assistant/files", assistantFilesHandler)
 	http.HandleFunc("/assistant/files/upload", assistantFileUploadHandler)
 	http.HandleFunc("/assistant/files/folders", assistantFileFoldersHandler)
 	http.HandleFunc("/assistant/files/move", assistantFileMoveHandler)
 	http.HandleFunc("/assistant/files/save", assistantFileSaveHandler)
+	http.HandleFunc("/assistant/files/restore", assistantFileRestoreHandler)
+	http.HandleFunc("/assistant/files/usage", assistantFileUsageHandler)
+	http.HandleFunc("/assistant/files/trash/empty", assistantFileEmptyTrashHandler)
 	http.HandleFunc("/assistant/meetings", assistantMeetingsHandler)
 	http.HandleFunc("/assistant/meetings/", assistantMeetingsHandler)
+	// Wave 7: scheduled meetings + recording (scheduled_meetings.go, meeting_recordings.go).
+	http.HandleFunc("/assistant/meetings/scheduled", scheduledMeetingsHandler)
+	http.HandleFunc("/assistant/meetings/scheduled/", scheduledMeetingsHandler)
+	http.HandleFunc("/assistant/meetings/recording/settings", meetingRecordingSettingsHandler)
+	http.HandleFunc("/assistant/meetings/recording/upload", meetingRecordingUploadHandler)
 	http.HandleFunc("/assistant/mission", assistantMissionHandler)
 	http.HandleFunc("/assistant/mission/refresh", assistantMissionRefreshHandler)
 	http.HandleFunc("/assistant/proposals/", assistantProposalActionHandler)
@@ -1199,6 +1239,10 @@ func main() {
 	http.HandleFunc("/api/admin/brain-projection/backfill", brainProjectionHistoricalBackfillHandler)
 	http.HandleFunc("/api/admin/ambient-intelligence-replay/plan", ambientReplayPlanHandler)
 	http.HandleFunc("/api/admin/ambient-intelligence-replay/execute", ambientReplayExecuteHandler)
+	// Wave 5 D10/D11: owner-only account lifecycle (auth_http.go) and the
+	// admin blob GC action (blobs.go).
+	http.HandleFunc("/assistant/admin/accounts", adminAccountsHandler)
+	http.HandleFunc("/assistant/admin/blobs/sweep", adminBlobSweepHandler)
 	http.HandleFunc("/api/artifact-dispositions/v1", artifactDispositionHandler)
 	http.HandleFunc("/api/artifact-drive-saves/v1", artifactDriveSaveHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
@@ -1219,6 +1263,10 @@ func main() {
 	http.HandleFunc("/artifacts/document/new", documentEditorNewHandler)
 	http.HandleFunc("/artifacts/document/copies", documentEditorCopyHandler)
 	http.HandleFunc("/artifacts/document/images", documentEditorImageUploadHandler)
+	// Wave 4 studios: read-only version history, Drive import, DOCX export.
+	http.HandleFunc("/artifacts/document/versions", documentEditorVersionsHandler)
+	http.HandleFunc("/artifacts/document/import", documentEditorImportHandler)
+	http.HandleFunc("/artifacts/deck/versions", deckEditorVersionsHandler)
 	http.HandleFunc("/artifacts/final-export-capability", authoredResultFinalExportCapabilityHandler)
 	http.HandleFunc("/artifacts/deck/image-generations", deckEditorImageGenerationHandler)
 	http.HandleFunc("/artifacts/deck/assets", deckEditorAssetUploadHandler)
@@ -1233,7 +1281,9 @@ func main() {
 	http.HandleFunc("/a/", shareLinkPublicHandler)
 	http.HandleFunc("/artifacts/export-pdf", artifactExportPDFHandler)
 	http.HandleFunc("/artifacts/export-pptx", deckPPTXExportHandler)
+	http.HandleFunc("/artifacts/export-docx", documentDOCXExportHandler)
 	http.HandleFunc("/calendar/event.ics", calendarICSHandler)
+	http.HandleFunc("/calendar/meetings.ics", calendarMeetingsICSHandler)
 	http.HandleFunc("/internal/render/jobs/result", internalRenderRunnerResultHandler)
 	http.HandleFunc("/signals/survey", signalSurveyHandler)
 	http.HandleFunc("/archives/", meetingArchiveHandler)
@@ -2515,6 +2565,7 @@ func assistantQueryHandler(w http.ResponseWriter, r *http.Request) {
 		"matchedCards": result.matchedCards,
 		"matches":      result.matches,
 		"context":      result.contextSize,
+		"coverage":     result.coverage,
 		"mode":         mode,
 		"user":         user.Name,
 	}
@@ -3452,25 +3503,74 @@ func newRoomPeerConnection() (*webrtc.PeerConnection, error) {
 }
 
 func addRoomPublisherUplinkTransceivers(pc *webrtc.PeerConnection) error {
-	for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
-		transceiver, err := pc.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
-			Direction: webrtc.RTPTransceiverDirectionRecvonly,
-		})
-		if err != nil {
-			return err
-		}
-		if typ != webrtc.RTPCodecTypeVideo {
-			continue
-		}
-		preferences := []webrtc.RTPCodecParameters{
-			roomCodecPreferenceWithTransportCC(roomH264Codec),
-			roomH264RTXCodec,
-		}
-		if err := transceiver.SetCodecPreferences(preferences); err != nil {
-			return fmt.Errorf("prefer H.264 for room publisher uplink: %w", err)
+	_, err := addRoomPublisherUplinkTransceiversWithSources(pc)
+	return err
+}
+
+// Publisher m-line sources (Wave 6 D4). The server offers two recvonly
+// video+audio pairs per publisher: the first pair is the camera/microphone,
+// the second is the screen share (video + system/tab audio). Because the
+// server is the offerer, the browser cannot add m-lines itself; it answers
+// the second pair sendonly and attaches the share when it starts.
+const (
+	trackSourceCamera = "camera"
+	trackSourceScreen = "screen"
+)
+
+// publisherUplink remembers which of a publisher's transceivers carry the
+// share pair so OnTrack can tag each forwarded track by the m-line it arrived
+// on. Transceivers are pointer-stable for the PeerConnection's life; pion may
+// replace a transceiver's RTPReceiver across renegotiations, so lookups go
+// through the transceiver's CURRENT receiver at callback time.
+type publisherUplink struct {
+	screen map[*webrtc.RTPTransceiver]bool
+}
+
+func (u *publisherUplink) sourceForReceiver(pc *webrtc.PeerConnection, receiver *webrtc.RTPReceiver) string {
+	if u == nil || pc == nil || receiver == nil || len(u.screen) == 0 {
+		return trackSourceCamera
+	}
+	for _, transceiver := range pc.GetTransceivers() {
+		if transceiver.Receiver() == receiver {
+			if u.screen[transceiver] {
+				return trackSourceScreen
+			}
+			return trackSourceCamera
 		}
 	}
-	return nil
+	return trackSourceCamera
+}
+
+// addRoomPublisherUplinkTransceiversWithSources adds the camera pair then the
+// screen pair, in that order, so the offer's m-line order (video, audio,
+// video, audio) is the contract the client uses to pick its share sender.
+// Both video sections carry the same H.264-only preference.
+func addRoomPublisherUplinkTransceiversWithSources(pc *webrtc.PeerConnection) (*publisherUplink, error) {
+	uplink := &publisherUplink{screen: map[*webrtc.RTPTransceiver]bool{}}
+	for _, source := range []string{trackSourceCamera, trackSourceScreen} {
+		for _, typ := range []webrtc.RTPCodecType{webrtc.RTPCodecTypeVideo, webrtc.RTPCodecTypeAudio} {
+			transceiver, err := pc.AddTransceiverFromKind(typ, webrtc.RTPTransceiverInit{
+				Direction: webrtc.RTPTransceiverDirectionRecvonly,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if source == trackSourceScreen {
+				uplink.screen[transceiver] = true
+			}
+			if typ != webrtc.RTPCodecTypeVideo {
+				continue
+			}
+			preferences := []webrtc.RTPCodecParameters{
+				roomCodecPreferenceWithTransportCC(roomH264Codec),
+				roomH264RTXCodec,
+			}
+			if err := transceiver.SetCodecPreferences(preferences); err != nil {
+				return nil, fmt.Errorf("prefer H.264 for room publisher %s uplink: %w", source, err)
+			}
+		}
+	}
+	return uplink, nil
 }
 
 // serverICEServersFromEnv resolves the TURN servers the SERVER dials for its
@@ -3719,6 +3819,10 @@ func addTrackForGeneration(roomID string, mediaGeneration uint64, t *webrtc.Trac
 }
 
 func addTrackForEndpointGeneration(roomID string, mediaGeneration uint64, t *webrtc.TrackRemote, participantName string, sessionID string, endpointID string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
+	return addTrackForEndpointGenerationSource(roomID, mediaGeneration, t, participantName, sessionID, endpointID, trackSourceCamera)
+}
+
+func addTrackForEndpointGenerationSource(roomID string, mediaGeneration uint64, t *webrtc.TrackRemote, participantName string, sessionID string, endpointID string, source string) (*webrtc.TrackLocalStaticRTP, error) { // nolint
 	// Create a new TrackLocal with the same codec as our incoming
 	trackLocal, err := webrtc.NewTrackLocalStaticRTP(t.Codec().RTPCodecCapability, forwardedRemoteTrackID(t), t.StreamID())
 	if err != nil {
@@ -3750,6 +3854,12 @@ func addTrackForEndpointGeneration(roomID string, mediaGeneration uint64, t *web
 	if trackMediaOwners == nil {
 		trackMediaOwners = map[string]trackMediaOwner{}
 	}
+	if trackSources == nil {
+		trackSources = map[string]string{}
+	}
+	if trackPaused == nil {
+		trackPaused = map[string]bool{}
+	}
 	groupKey := layerGroupKey(t.StreamID(), t.ID())
 	reapStaleLayerTwinsLocked(groupKey, t.RID(), trackLocal.ID())
 	trackLocals[trackLocal.ID()] = trackLocal
@@ -3759,6 +3869,10 @@ func addTrackForEndpointGeneration(roomID string, mediaGeneration uint64, t *web
 	trackSourceIDs[trackLocal.ID()] = t.ID()
 	trackLayerRIDs[trackLocal.ID()] = t.RID()
 	trackLayerGroups[trackLocal.ID()] = groupKey
+	trackSources[trackLocal.ID()] = normalizeTrackSource(source)
+	// A fresh publish is live: a stale pause left by a same-ID republish
+	// must never hide the new track.
+	delete(trackPaused, trackLocal.ID())
 	sittingID := ""
 	if kanbanApp != nil && kanbanApp.memory != nil {
 		sittingID = kanbanApp.memory.currentMeetingID(roomID)
@@ -3793,6 +3907,8 @@ func reapStaleLayerTwinsLocked(groupKey string, rid string, keepTrackID string) 
 		delete(trackLayerRIDs, staleID)
 		delete(trackLayerGroups, staleID)
 		delete(trackMediaOwners, staleID)
+		delete(trackSources, staleID)
+		delete(trackPaused, staleID)
 		subscriberKeyframeThrottle.forget(staleID)
 	}
 }
@@ -3803,6 +3919,16 @@ func participantTrackPayload(name string, t *webrtc.TrackRemote) map[string]any 
 
 func participantTrackPayloadForEndpoint(name string, t *webrtc.TrackRemote, endpointID string) map[string]any {
 	return participantTrackPayloadFields(name, t.Kind().String(), forwardedRemoteTrackID(t), t.ID(), t.StreamID(), endpointID)
+}
+
+// participantTrackPayloadForEndpointSource is the Wave 6 D4 form: `source`
+// ("camera" | "screen") tells receivers which publisher m-line the track rode,
+// so the roster's one-video-per-participant dedupe keeps camera and share
+// alive side by side.
+func participantTrackPayloadForEndpointSource(name string, t *webrtc.TrackRemote, endpointID string, source string) map[string]any {
+	payload := participantTrackPayloadForEndpoint(name, t, endpointID)
+	payload["source"] = normalizeTrackSource(source)
+	return payload
 }
 
 func participantTrackPayloadFields(name, kind, trackID, sourceTrackID, streamID, endpointID string) map[string]any {
@@ -3903,6 +4029,8 @@ func removeTrack(t *webrtc.TrackLocalStaticRTP) {
 	delete(trackLayerRIDs, t.ID())
 	delete(trackLayerGroups, t.ID())
 	delete(trackMediaOwners, t.ID())
+	delete(trackSources, t.ID())
+	delete(trackPaused, t.ID())
 	subscriberKeyframeThrottle.forget(t.ID())
 	totalTracks, audioTracks, videoTracks = forwardedTrackCountsLocked()
 }
@@ -3924,11 +4052,83 @@ func removeParticipantTracksLocked(name string, sessionID string) bool {
 		delete(trackLayerRIDs, trackID)
 		delete(trackLayerGroups, trackID)
 		delete(trackMediaOwners, trackID)
+		delete(trackSources, trackID)
+		delete(trackPaused, trackID)
 		subscriberKeyframeThrottle.forget(trackID)
 		removedTracks = true
 	}
 
 	return removedTracks
+}
+
+func normalizeTrackSource(source string) string {
+	if strings.TrimSpace(source) == trackSourceScreen {
+		return trackSourceScreen
+	}
+	return trackSourceCamera
+}
+
+// setParticipantSourceTracksPaused pauses (screen_share_stopped) or resumes
+// (screen_share_started) every forwarded track of one publisher session with
+// the given source. Pausing leaves the publisher's forwarding goroutine bound
+// to its m-line — the browser keeps the sender and RTP resumes on the same
+// SSRC when the share restarts — while acceptsTrack stops offering the track,
+// so the next signaling pass removes every subscriber's sender for it. The
+// affected tracks' snapshots are returned so a resume can re-announce them.
+func setParticipantSourceTracksPaused(roomID string, name string, sessionID string, source string, paused bool) []participantTrackSnapshot {
+	roomID = normalizeRoomID(roomID)
+	source = normalizeTrackSource(source)
+	listLock.Lock()
+	if trackPaused == nil {
+		trackPaused = map[string]bool{}
+	}
+	changed := make([]participantTrackSnapshot, 0, 2)
+	for trackID, trackLocal := range trackLocals {
+		if trackLocal == nil || !sameParticipantName(trackParticipants[trackID], name) || normalizeRoomID(trackRooms[trackID]) != roomID {
+			continue
+		}
+		if sessionID != "" && trackParticipantSessions[trackID] != sessionID {
+			continue
+		}
+		if trackSources[trackID] != source {
+			continue
+		}
+		if trackPaused[trackID] == paused {
+			continue
+		}
+		if paused {
+			trackPaused[trackID] = true
+		} else {
+			delete(trackPaused, trackID)
+		}
+		endpointID := ""
+		if owner, ok := trackMediaOwners[trackID]; ok && owner.track == trackLocal {
+			endpointID = owner.endpointID
+		}
+		changed = append(changed, participantTrackSnapshot{
+			Name:          canonicalRoomParticipantName(trackParticipants[trackID]),
+			Kind:          trackLocal.Kind().String(),
+			TrackID:       trackID,
+			SourceTrackID: trackSourceIDs[trackID],
+			StreamID:      trackLocal.StreamID(),
+			EndpointID:    endpointID,
+			RoomID:        roomID,
+			Source:        source,
+		})
+	}
+	listLock.Unlock()
+	if len(changed) == 0 {
+		return nil
+	}
+	sort.Slice(changed, func(i, j int) bool {
+		if changed[i].Kind != changed[j].Kind {
+			return changed[i].Kind < changed[j].Kind
+		}
+		return changed[i].TrackID < changed[j].TrackID
+	})
+	log.Infof("room_share_tracks_%s participant=%s session=%s room=%s tracks=%d", map[bool]string{true: "paused", false: "resumed"}[paused], mediaLogPrincipal(name), sessionID, roomID, len(changed))
+	requestRoomMediaCommand(roomID, roomMediaCommandTrack)
+	return changed
 }
 
 func participantTrackSnapshots(roomID string, excludeParticipant string) []participantTrackSnapshot {
@@ -3959,6 +4159,11 @@ func participantTrackSnapshotsLockedForGeneration(roomID string, excludeParticip
 		if normalizeRoomID(trackRooms[trackID]) != snapshotRoomID {
 			continue
 		}
+		// A paused share is not offered to anyone; replaying its label would
+		// resurrect exactly the zombie tile the pause exists to prevent.
+		if trackPaused[trackID] {
+			continue
+		}
 		owner, hasOwner := trackMediaOwners[trackID]
 		if enforceGeneration && hasOwner && owner.track == trackLocal && owner.generation != mediaGeneration {
 			continue
@@ -3979,6 +4184,7 @@ func participantTrackSnapshotsLockedForGeneration(roomID string, excludeParticip
 			StreamID:      trackLocal.StreamID(),
 			EndpointID:    endpointID,
 			RoomID:        snapshotRoomID,
+			Source:        trackSources[trackID],
 		})
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
@@ -5659,6 +5865,15 @@ func sweepPublisherSilence() {
 			w.resetSilenceState()
 			continue
 		}
+		// A paused share is silent by design (screen_share_stopped): it is
+		// neither a stalled uplink nor worth a keyframe nudge.
+		listLock.RLock()
+		paused := trackPaused[w.sourceKey]
+		listLock.RUnlock()
+		if paused {
+			w.resetSilenceState()
+			continue
+		}
 		obs := w.evaluate(nowNs)
 		switch obs.action {
 		case publisherSilenceOnset:
@@ -6047,6 +6262,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 	}
 	participantName := "participant"
 	participantSessionID := nextParticipantSessionID()
+	// shareAnnounced remembers that THIS socket fanned out a
+	// screen_share_started, so its stop always reaches the viewers that heard
+	// the start even if the roster flag never landed on the endpoint.
+	shareAnnounced := false
 	// endpointID is the stable per-device id from the participant hello. Empty
 	// for legacy clients; guests use their per-socket session id. The OnTrack
 	// callback reads it through participantMu after admission.
@@ -6103,6 +6322,10 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				// do so before unregister removes the final connection/track rows.
 				removed, stillPresent := kanbanApp.forgetParticipantSessionResultInRoom(connRoomID, name, participantSessionID)
 				unregisterParticipantSession(name, participantSessionID)
+				// The room_hand bucket keys on this per-socket session id for
+				// guests and members alike — release it or the map grows one
+				// entry per connection.
+				kanbanApp.dropRoomHandBucket(connRoomID, participantSessionID)
 				if guest == nil {
 					// Member repair + ice-restart buckets key on this per-socket
 					// session id — release them or the room's maps grow one entry
@@ -6188,7 +6411,8 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 		// offering only H.264 here makes the negotiation deterministic and also
 		// prevents the native fail-closed validator from entering a reconnect
 		// loop that churns every desktop participant in the room.
-		if err := addRoomPublisherUplinkTransceivers(pc); err != nil {
+		uplink, err := addRoomPublisherUplinkTransceiversWithSources(pc)
+		if err != nil {
 			_ = pc.Close()
 			return err
 		}
@@ -6268,16 +6492,21 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				return
 			}
 			forwardedTrackID := forwardedRemoteTrackID(t)
+			// Wave 6 D4: the m-line this track arrived on decides camera vs
+			// screen. Everything downstream (forwarding, RTX, keyframes,
+			// simulcast layers) is identical; only the tag and the audio
+			// analysis lane differ.
+			trackSource := uplink.sourceForReceiver(pc, receiver)
 			// The ids THIS publisher negotiated for sdes:mid/rid/repaired-rid;
 			// forwardPublisherRTP strips them per packet (transport-scoped,
 			// never valid on a subscriber's transport).
 			stripExtensionIDs := transportScopedRTPExtensionIDs(receiver)
 			codec := t.Codec()
-			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
-				mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, connRoomID, t.Kind(), forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
+			log.Infof("room_ontrack_start participant=%s session=%s room=%s kind=%s source=%s track_id=%s source_track_id=%s stream_id=%s rid=%q ssrc=%d rtx_ssrc=%d payload_type=%d codec=%s clock_rate=%d channels=%d fmtp=%q feedback=%s has_rtx=%t",
+				mediaLogPrincipal(trackParticipantName), trackParticipantSessionID, connRoomID, t.Kind(), trackSource, forwardedTrackID, t.ID(), t.StreamID(), t.RID(), t.SSRC(), t.RtxSSRC(), t.PayloadType(), codec.MimeType, codec.ClockRate, codec.Channels, codec.SDPFmtpLine, rtcpFeedbackSummary(codec.RTCPFeedback), t.HasRTX())
 			// Create a track to fan out our incoming media to all browser peers
 			// of THIS room only (trackRooms + acceptsTrack, multi-room W3).
-			trackLocal, err := addTrackForEndpointGeneration(connRoomID, trackMediaGeneration, t, trackParticipantName, trackParticipantSessionID, trackParticipantEndpointID)
+			trackLocal, err := addTrackForEndpointGenerationSource(connRoomID, trackMediaGeneration, t, trackParticipantName, trackParticipantSessionID, trackParticipantEndpointID, trackSource)
 			if err != nil {
 				log.Errorf("Failed to create local track for remote track=%s: %v", t.ID(), err)
 				return
@@ -6290,7 +6519,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			published := false
 			if !trackAdmission.whileCurrent(func() {
 				if mediaActor.enqueue(roomMediaCommandTrack) && roomMediaActorForGeneration(connRoomID, trackMediaGeneration) == mediaActor {
-					trackPayload := participantTrackPayloadForEndpoint(trackParticipantName, t, trackParticipantEndpointID)
+					trackPayload := participantTrackPayloadForEndpointSource(trackParticipantName, t, trackParticipantEndpointID, trackSource)
 					trackPayload["roomId"] = connRoomID
 					broadcastRoomKanbanEvent(connRoomID, "participant_track", trackPayload)
 					published = true
@@ -6300,8 +6529,9 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				return
 			}
 			if trackAdmission.isCurrent() {
-				broadcastRoomAssistantTelemetry(connRoomID, "signal", fmt.Sprintf("received %s track from browser", t.Kind().String()), map[string]any{
+				broadcastRoomAssistantTelemetry(connRoomID, "signal", fmt.Sprintf("received %s %s track from browser", trackSource, t.Kind().String()), map[string]any{
 					"participant":   trackParticipantName,
+					"source":        trackSource,
 					"trackId":       forwardedTrackID,
 					"sourceTrackId": t.ID(),
 					"streamId":      t.StreamID(),
@@ -6316,9 +6546,17 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			silenceWatch := publisherSilence.register(forwardedTrackID, trackParticipantName, trackParticipantSessionID, t.Kind(), pc)
 			defer publisherSilence.forget(silenceWatch)
 
-			audioDecoder, audioChannels, err := newRoomAudioDecoder(t)
-			if err != nil {
-				log.Errorf("Failed to create audio decoder for track=%s: %v", t.ID(), err)
+			// Share audio (a tab or app, never the person) is forwarded to
+			// the room but stays out of the mixer: transcription and Scout
+			// analysis capture human speech only, and a share cannot widen
+			// what the participant consented to.
+			var audioDecoder *opusDecoder
+			var audioChannels int
+			if trackSource != trackSourceScreen {
+				audioDecoder, audioChannels, err = newRoomAudioDecoder(t)
+				if err != nil {
+					log.Errorf("Failed to create audio decoder for track=%s: %v", t.ID(), err)
+				}
 			}
 			audioTrackKey := roomAudioTrackKey(t)
 			var consentGate *consentAudioIngressGate
@@ -7234,6 +7472,74 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}
 			payload["roomId"] = connRoomID
 			broadcastScopedRoomKanbanEvent(RoomScoutScope{RoomID: connRoomID, SittingID: participantSittingID, MediaGeneration: participantMediaGeneration.Load()}, "room_chat_delete", payload)
+		case "room_reaction":
+			// Wave 6 D2: ephemeral emoji fan-out to THIS room only (guests
+			// included). Allowlist + 1/s per participant live in
+			// recordRoomReaction; identity comes from the admitted seat.
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before reacting")
+				continue
+			}
+			reaction := struct {
+				Emoji string `json:"emoji"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &reaction); err != nil {
+				continue
+			}
+			payload, err := kanbanApp.recordRoomReaction(connRoomID, currentParticipantName(), participantSessionID, reaction.Emoji, time.Now())
+			if err != nil {
+				continue
+			}
+			broadcastRoomKanbanEvent(connRoomID, "room_reaction", payload)
+		case "room_hand":
+			// Wave 6 D2: raise/lower hand; the roster projection carries
+			// handRaisedAt + raisedHands so late joiners see the order.
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before raising a hand")
+				continue
+			}
+			hand := struct {
+				Raised bool `json:"raised"`
+			}{}
+			if err := json.Unmarshal([]byte(message.Data), &hand); err != nil {
+				continue
+			}
+			// Every seated socket — guest or member — spends the small
+			// per-session hand bucket first; a storm is dropped silently.
+			if !kanbanApp.allowRoomHandEvent(connRoomID, participantSessionID, time.Now()) {
+				log.Infof("room_hand_rate_limited session=%s room=%s", participantSessionID, connRoomID)
+				continue
+			}
+			payload, snapshot, err := kanbanApp.setRoomHandRaised(connRoomID, currentParticipantName(), participantSessionID, hand.Raised, time.Now())
+			if err != nil {
+				continue
+			}
+			if snapshot == nil {
+				// Unchanged hand: no roster projection was built and nothing
+				// fans out. The sender alone hears its current state back.
+				_ = sendKanbanEvent(c, "room_hand", payload)
+				continue
+			}
+			broadcastRoomKanbanEvent(connRoomID, "room_hand", payload)
+			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)
+		case "room_moderate":
+			// Wave 6 D5: host controls (mute | remove | lock | unlock), owner or
+			// manager only via roomManagedByUser; a guest socket never
+			// qualifies. Errors answer the requester alone; success fans out.
+			if !participantAccepted {
+				_ = sendKanbanEvent(c, "access_denied", "enter the room before moderating it")
+				continue
+			}
+			if guest != nil || !roomManagedByUser(connRoomID, sessionUser) {
+				_ = sendKanbanEvent(c, "room_moderate", map[string]any{"ok": false, "roomId": connRoomID, "error": errRoomModerationForbidden.Error()})
+				continue
+			}
+			payload, err := kanbanApp.moderateRoom(connRoomID, currentParticipantName(), message.Data)
+			if err != nil {
+				_ = sendKanbanEvent(c, "room_moderate", map[string]any{"ok": false, "roomId": connRoomID, "error": err.Error()})
+				continue
+			}
+			broadcastRoomKanbanEvent(connRoomID, "room_moderate", payload)
 		case "manual_create_ticket":
 			_ = sendKanbanEvent(c, "assistant_event", map[string]any{"kind": "error", "text": ErrBoardRetired.Error(), "createdAt": time.Now().UTC().Format(time.RFC3339Nano)})
 			continue
@@ -7298,13 +7604,6 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before publishing media state.")
 				continue
 			}
-			// §6.5 hardening: each accepted update fans a room-wide participants
-			// broadcast (amplification × room size); token-bucket guests, members
-			// unbucketed.
-			if guest != nil && !kanbanApp.allowGuestMediaStateEvent(connRoomID, guest.SessionKey, time.Now()) {
-				log.Infof("guest_media_state_rate_limited session=%s room=%s", participantSessionID, connRoomID)
-				continue
-			}
 			payload := struct {
 				MicMuted      bool `json:"micMuted"`
 				CameraOff     bool `json:"cameraOff"`
@@ -7312,6 +7611,16 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			}{}
 			if err := json.Unmarshal([]byte(message.Data), &payload); err != nil {
 				log.Errorf("Failed to unmarshal participant media state: %v", err)
+				continue
+			}
+			// §6.5 hardening: each accepted update fans a room-wide participants
+			// broadcast (amplification × room size); token-bucket guests, members
+			// unbucketed. Teardown is exempt: an update that CLEARS an active
+			// share must always land (it shares the bucket with the share
+			// events, and a dropped clear leaves a dead share on the roster).
+			shareTeardown := !payload.ScreenSharing && kanbanApp.participantEndpointScreenSharingInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID)
+			if guest != nil && !shareTeardown && !kanbanApp.allowGuestMediaStateEvent(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_media_state_rate_limited session=%s room=%s", participantSessionID, connRoomID)
 				continue
 			}
 			snapshot, err := kanbanApp.setParticipantEndpointMediaStateInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID, participantMediaState{
@@ -7362,6 +7671,14 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				_ = sendKanbanEvent(c, "access_denied", "Enter the room before sharing your screen.")
 				continue
 			}
+			// §6.5: each accepted share edge fans out two room-wide broadcasts,
+			// scans the forwarding registry under listLock, enqueues the actor
+			// and spawns a keyframe request — the same state/repair bucket that
+			// caps participant_media_state caps this for guests (members exempt).
+			if guest != nil && !kanbanApp.allowGuestMediaStateEvent(connRoomID, guest.SessionKey, time.Now()) {
+				log.Infof("guest_screen_share_rate_limited event=screen_share_started session=%s room=%s", participantSessionID, connRoomID)
+				continue
+			}
 			snapshot, err := kanbanApp.setParticipantEndpointScreenSharingInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID, true)
 			if err != nil {
 				log.Errorf("Failed to update participant screen sharing: %v", err)
@@ -7372,15 +7689,42 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 				"name":   currentParticipantName(),
 				"roomId": connRoomID,
 			})
+			shareAnnounced = true
+			// Wave 6 D4: a share that was paused on the second m-line pair
+			// resumes on the same forwarded tracks; re-announce them so
+			// receivers relabel before the senders come back.
+			for _, resumed := range setParticipantSourceTracksPaused(connRoomID, currentParticipantName(), participantSessionID, trackSourceScreen, false) {
+				broadcastRoomKanbanEvent(connRoomID, "participant_track", resumed)
+			}
 			go requestParticipantVideoKeyframes(currentParticipantName(), participantSessionID, "screen_share_started")
 			broadcastRoomAssistantTelemetry(connRoomID, "status", currentParticipantName()+" started sharing their screen", nil)
 		case "screen_share_stopped":
 			if !participantAccepted {
 				continue
 			}
+			// Teardown is NEVER rate-limited (the bucket stays on
+			// screen_share_started only): a dropped stop left the share track
+			// registered and un-paused — receivers froze on the last frame, the
+			// roster kept "sharing", and the silence watchdog repaired a dead
+			// track. The roster write and the sender pause always apply. The
+			// room-wide fan-out goes out whenever a share could have reached
+			// viewers — the endpoint was marked sharing, this socket broadcast a
+			// start, or the withdraw just paused live share tracks — and is
+			// skipped only for a stop that follows no share at all (a missed
+			// stop is the expensive failure; the skip merely bounds a stop storm).
+			wasSharing := kanbanApp.participantEndpointScreenSharingInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID)
 			snapshot, err := kanbanApp.setParticipantEndpointScreenSharingInRoom(connRoomID, currentParticipantName(), endpointID, participantSessionID, false)
 			if err != nil {
 				log.Errorf("Failed to update participant screen sharing: %v", err)
+				continue
+			}
+			// Wave 6 D4: withdraw the share pair from every subscriber now —
+			// the m-line stays negotiated for a restart, but no sender may
+			// outlive the share.
+			withdrawn := setParticipantSourceTracksPaused(connRoomID, currentParticipantName(), participantSessionID, trackSourceScreen, true)
+			announced := shareAnnounced
+			shareAnnounced = false
+			if !wasSharing && !announced && len(withdrawn) == 0 {
 				continue
 			}
 			broadcastRoomKanbanEvent(connRoomID, "participants", snapshot)

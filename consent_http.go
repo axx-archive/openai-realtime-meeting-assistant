@@ -113,7 +113,7 @@ func (app *kanbanBoardApp) consentStatus(ctx context.Context, authority *Consent
 	}
 	for _, lane := range []ConsentLane{
 		ConsentLaneAudioTransport, ConsentLaneAudioCapture, ConsentLaneTranscription,
-		ConsentLaneModelAnalysis, ConsentLaneOrgMemory,
+		ConsentLaneModelAnalysis, ConsentLaneOrgMemory, ConsentLaneRecording,
 	} {
 		decision, err := authority.Authorize(ctx, binding, lane)
 		if err != nil {

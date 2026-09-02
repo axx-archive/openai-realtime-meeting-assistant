@@ -194,12 +194,18 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/assistant/board/cards/":                        {handler: assistantBoardCardsHandler, memberGated: true, path: "/assistant/board/cards/card-1"},
 		"/assistant/board/drafts/":                       {handler: assistantBoardDraftActionHandler, memberGated: true, path: "/assistant/board/drafts/draft-1"},
 		"/assistant/memory":                              {handler: assistantMemoryHandler, memberGated: true},
+		"/assistant/remember":                            {handler: assistantRememberHandler, memberGated: true},
+		"/assistant/memory/inspect":                      {handler: assistantMemoryInspectHandler, memberGated: true},
+		"/assistant/memory/inspect/action":               {handler: assistantMemoryInspectActionHandler, memberGated: true},
 		"/assistant/agent-mind":                          {handler: assistantAgentMindHandler, memberGated: true},
 		"/assistant/files":                               {handler: assistantFilesHandler, memberGated: true},
 		"/assistant/files/upload":                        {handler: assistantFileUploadHandler, memberGated: true},
 		"/assistant/files/folders":                       {handler: assistantFileFoldersHandler, memberGated: true},
 		"/assistant/files/move":                          {handler: assistantFileMoveHandler, memberGated: true},
 		"/assistant/files/save":                          {handler: assistantFileSaveHandler, memberGated: true},
+		"/assistant/files/restore":                       {handler: assistantFileRestoreHandler, memberGated: true},
+		"/assistant/files/usage":                         {handler: assistantFileUsageHandler, memberGated: true},
+		"/assistant/files/trash/empty":                   {handler: assistantFileEmptyTrashHandler, memberGated: true},
 		"/api/studio-projects/v1":                        {handler: studioProjectsHandler, memberGated: true},
 		"/assistant/meetings":                            {handler: assistantMeetingsHandler, memberGated: true},
 		"/assistant/meetings/":                           {handler: assistantMeetingsHandler, memberGated: true, path: "/assistant/meetings/meeting-1"},
@@ -220,6 +226,8 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/api/admin/brain-projection/backfill":           {handler: brainProjectionHistoricalBackfillHandler, memberGated: true},
 		"/api/admin/ambient-intelligence-replay/plan":    {handler: ambientReplayPlanHandler, memberGated: true},
 		"/api/admin/ambient-intelligence-replay/execute": {handler: ambientReplayExecuteHandler, memberGated: true},
+		"/assistant/admin/accounts":                      {handler: adminAccountsHandler, memberGated: true},
+		"/assistant/admin/blobs/sweep":                   {handler: adminBlobSweepHandler, memberGated: true},
 		"/api/artifact-dispositions/v1":                  {handler: artifactDispositionHandler, memberGated: true},
 		artifactDriveSavePath:                            {handler: artifactDriveSaveHandler, memberGated: true},
 		"/assistant/realtime-offer":                      {handler: assistantRealtimeOfferHandler, memberGated: true},
@@ -248,11 +256,15 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/artifacts/final-export-capability":             {handler: authoredResultFinalExportCapabilityHandler, memberGated: true},
 		"/artifacts/document/copies":                     {handler: documentEditorCopyHandler, memberGated: true},
 		"/artifacts/document/images":                     {handler: documentEditorImageUploadHandler, memberGated: true},
+		"/artifacts/document/versions":                   {handler: documentEditorVersionsHandler, memberGated: true},
+		"/artifacts/document/import":                     {handler: documentEditorImportHandler, memberGated: true},
+		"/artifacts/deck/versions":                       {handler: deckEditorVersionsHandler, memberGated: true},
 		"/artifacts/deck/image-generations":              {handler: deckEditorImageGenerationHandler, memberGated: true},
 		"/artifacts/deck/assets":                         {handler: deckEditorAssetUploadHandler, memberGated: true},
 		"/artifacts/share":                               {handler: artifactShareHandler, memberGated: true},
 		"/artifacts/export-pdf":                          {handler: artifactExportPDFHandler, memberGated: true},
 		"/artifacts/export-pptx":                         {handler: deckPPTXExportHandler, memberGated: true},
+		"/artifacts/export-docx":                         {handler: documentDOCXExportHandler, memberGated: true},
 		"/calendar/event.ics":                            {handler: calendarICSHandler, memberGated: true},
 		"/signals/survey":                                {handler: signalSurveyHandler, memberGated: true},
 		"/client-config":                                 {handler: clientConfigHandler, memberGated: true},
@@ -281,6 +293,14 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/rooms/":        {handler: roomActionHandler, memberGated: true, path: "/rooms/office/archive"},
 		"/ice-test":      {handler: iceTestHandler, memberGated: true},
 	}
+
+	// Wave 7 (Rooms around-call): scheduled meetings, recording setting +
+	// chunk upload, and the timed .ics are member surfaces — never guest.
+	probes["/assistant/meetings/scheduled"] = guestRouteProbe{handler: scheduledMeetingsHandler, memberGated: true}
+	probes["/assistant/meetings/scheduled/"] = guestRouteProbe{handler: scheduledMeetingsHandler, memberGated: true, path: "/assistant/meetings/scheduled/sched-1"}
+	probes["/assistant/meetings/recording/settings"] = guestRouteProbe{handler: meetingRecordingSettingsHandler, memberGated: true}
+	probes["/assistant/meetings/recording/upload"] = guestRouteProbe{handler: meetingRecordingUploadHandler, memberGated: true}
+	probes["/calendar/meetings.ics"] = guestRouteProbe{handler: calendarMeetingsICSHandler, memberGated: true}
 
 	// ---- fail closed in BOTH directions.
 	routes := registeredHTTPRoutes(t)

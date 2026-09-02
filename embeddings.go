@@ -136,6 +136,7 @@ var embeddingCorpusKinds = map[string]struct{}{
 	meetingMemoryKindMeetingDigest: {},
 	meetingMemoryKindDayDigest:     {},
 	meetingMemoryKindCompanyDigest: {},
+	meetingMemoryKindChannelDigest: {},
 	meetingMemoryKindNarrative:     {},
 	meetingMemoryKindDecision:      {},
 	meetingMemoryKindReflection:    {},

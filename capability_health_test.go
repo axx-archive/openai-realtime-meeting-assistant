@@ -152,11 +152,17 @@ func TestCapabilityProducerEvidenceIsAuthoritative(t *testing.T) {
 }
 
 func TestCapabilityConfigurationAloneIsNotHealthyEvidence(t *testing.T) {
-	if status := capabilityStatus(map[string]any{"enabled": true, "connected": true}, true); status != "degraded" {
-		t.Fatalf("configured but unevidenced status=%q, want degraded", status)
+	// Wave 9 D3: configuration alone is still never healthy, but with nothing
+	// failed and nothing asked of the lane the honest state is idle, not degraded.
+	if status := capabilityStatus(map[string]any{"enabled": true, "connected": true}, true); status != capabilityStatusIdle {
+		t.Fatalf("configured but unevidenced status=%q, want idle", status)
 	}
-	if status := capabilityStatus(map[string]any{"enabled": true, "connected": false, "lastSuccessAt": time.Now().UTC().Format(time.RFC3339Nano)}, true); status != "degraded" {
-		t.Fatalf("disconnected status=%q, want degraded", status)
+	success := time.Now().UTC().Format(time.RFC3339Nano)
+	if status := capabilityStatus(map[string]any{"enabled": true, "connected": false, "allocated": true, "lastSuccessAt": success}, true); status != capabilityStatusDegraded {
+		t.Fatalf("allocated but disconnected status=%q, want degraded", status)
+	}
+	if status := capabilityStatus(map[string]any{"enabled": true, "connected": false, "lastSuccessAt": success}, true); status != capabilityStatusIdle {
+		t.Fatalf("unallocated disconnected status=%q, want idle", status)
 	}
 }
 
@@ -367,7 +373,7 @@ func TestSpecialtyWorkerHealthRequiresItsTypedArtifactSuccess(t *testing.T) {
 	workers := ambientWorkersCapabilitySnapshot(time.Now().UTC(), true)
 	for _, name := range []string{"tasteAnalyst", "houseStyle"} {
 		worker := workers[name].(map[string]any)
-		if worker["status"] != "degraded" || worker["lastSuccessAt"] != nil {
+		if worker["status"] == "healthy" || worker["lastSuccessAt"] != nil {
 			t.Fatalf("unrelated os_artifact made %s healthy: %v", name, worker)
 		}
 	}
@@ -471,7 +477,7 @@ func TestSpecialtyIdlePollWithoutTypedArtifactDoesNotManufactureHealth(t *testin
 	} {
 		recordCapabilityPoll(test.name, now)
 		health := ambientWorkerCapabilitySnapshot(test.agent, now.Add(time.Second), providerAnthropic, true)
-		if health["status"] != "degraded" || health["lastSuccessAt"] != nil {
+		if health["status"] != capabilityStatusIdle || health["lastSuccessAt"] != nil {
 			t.Fatalf("idle poll manufactured %s success: %v", test.name, health)
 		}
 		if strings.TrimSpace(asString(health["lastPollAt"])) == "" || health["workDue"] != false {

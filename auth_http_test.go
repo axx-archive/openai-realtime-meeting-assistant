@@ -1104,3 +1104,127 @@ func TestAuthThemePreferenceRoundTrip(t *testing.T) {
 		t.Fatalf("expected 200 for system, got %d", recorder.Code)
 	}
 }
+
+// Wave 5 D11: PATCH /assistant/admin/accounts is owner-only; disabling
+// revokes live sessions, blocks sign-in with the uniform credentials
+// message, and drops the account from mention candidates and human-group
+// validation; re-enabling restores everything. The record is never deleted.
+func TestAccountDisableRevokesSessionsBlocksLoginAndHidesMentions(t *testing.T) {
+	setupAuthTestEnv(t)
+	owner := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	tim := loginAs(t, "tim@shareability.com", "B0NFIRE!")
+	joel := loginAs(t, "joel@shareability.com", "B0NFIRE!")
+
+	adminAccounts := func(method, body string, cookies []*http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/assistant/admin/accounts", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		adminAccountsHandler(recorder, req)
+		return recorder
+	}
+	me := func(cookies []*http.Cookie) int {
+		req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		authHandler(recorder, req)
+		return recorder.Code
+	}
+	mentionable := func(email string) bool {
+		for _, candidate := range chatMentionCandidates("aj@shareability.com") {
+			if candidate.Email == email {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Gates: signed out 401, non-owner 403 (an approval admin is the owner
+	// here, so a plain member is the negative), owner self-disable 400,
+	// unknown account 404.
+	if recorder := adminAccounts(http.MethodPatch, `{"email":"tim@shareability.com","disabled":true}`, nil); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out PATCH status=%d, want 401", recorder.Code)
+	}
+	if recorder := adminAccounts(http.MethodPatch, `{"email":"tim@shareability.com","disabled":true}`, joel); recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-owner PATCH status=%d, want 403", recorder.Code)
+	}
+	if recorder := adminAccounts(http.MethodGet, "", joel); recorder.Code != http.StatusForbidden {
+		t.Fatalf("non-owner GET status=%d, want 403", recorder.Code)
+	}
+	if recorder := adminAccounts(http.MethodPatch, `{"email":"aj@shareability.com","disabled":true}`, owner); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("owner self-disable status=%d, want 400", recorder.Code)
+	}
+	if recorder := adminAccounts(http.MethodPatch, `{"email":"ghost@shareability.com","disabled":true}`, owner); recorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown account status=%d, want 404", recorder.Code)
+	}
+	if recorder := adminAccounts(http.MethodPatch, `{"email":"tim@shareability.com"}`, owner); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("missing disabled flag status=%d, want 400", recorder.Code)
+	}
+	if !mentionable("tim@shareability.com") {
+		t.Fatal("precondition: Tim is mentionable before disable")
+	}
+
+	// Disable.
+	recorder := adminAccounts(http.MethodPatch, `{"email":"tim@shareability.com","disabled":true}`, owner)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("owner disable status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var disabled struct {
+		Account struct {
+			Email      string `json:"email"`
+			Disabled   bool   `json:"disabled"`
+			DisabledAt string `json:"disabledAt"`
+		} `json:"account"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &disabled); err != nil || !disabled.Account.Disabled || disabled.Account.DisabledAt == "" || disabled.Account.Email != "tim@shareability.com" {
+		t.Fatalf("disable payload=%s err=%v", recorder.Body.String(), err)
+	}
+	if !accountIsDisabled("tim@shareability.com") || accountIsDisabled("joel@shareability.com") || accountIsDisabled("nobody@example.com") {
+		t.Fatal("accountIsDisabled must be true for Tim only")
+	}
+	if code := me(tim); code != http.StatusUnauthorized {
+		t.Fatalf("disabled account's existing session status=%d, want 401 (session revoked)", code)
+	}
+	if code := me(joel); code != http.StatusOK {
+		t.Fatalf("bystander session status=%d, want 200 — only the disabled account is revoked", code)
+	}
+	login := postAuthJSON(t, "/auth/login", `{"name":"Tim","password":"B0NFIRE!"}`, nil)
+	if login.Code != http.StatusUnauthorized || !strings.Contains(login.Body.String(), "don't match") {
+		t.Fatalf("disabled login status=%d body=%s, want 401 with the uniform credentials message", login.Code, login.Body.String())
+	}
+	if _, err := userSessionStore().create("tim@shareability.com"); err == nil {
+		t.Fatal("session mint for a disabled account must fail regardless of ceremony")
+	}
+	if mentionable("tim@shareability.com") {
+		t.Fatal("disabled account still offered as a mention candidate")
+	}
+	if _, err := validateScoutChatHumanGroupMembers("aj@shareability.com", []string{"tim@shareability.com"}); err == nil {
+		t.Fatal("human-group validation accepted a disabled member")
+	}
+	if accountStore().findUser("tim@shareability.com") == nil {
+		t.Fatal("disable deleted the account record")
+	}
+	list := adminAccounts(http.MethodGet, "", owner)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"disabled":true`) {
+		t.Fatalf("owner roster status=%d body=%s, want the disabled row", list.Code, list.Body.String())
+	}
+
+	// Re-enable: sign-in and directory membership return.
+	if recorder := adminAccounts(http.MethodPatch, `{"email":"tim@shareability.com","disabled":false}`, owner); recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), `"disabled":true`) {
+		t.Fatalf("re-enable status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	resetAuthRateLimitersForTest()
+	if cookies := loginAs(t, "tim@shareability.com", "B0NFIRE!"); me(cookies) != http.StatusOK {
+		t.Fatal("re-enabled account cannot use a fresh session")
+	}
+	if !mentionable("tim@shareability.com") {
+		t.Fatal("re-enabled account missing from mention candidates")
+	}
+	if _, err := validateScoutChatHumanGroupMembers("aj@shareability.com", []string{"tim@shareability.com"}); err != nil {
+		t.Fatalf("human-group validation rejects a re-enabled member: %v", err)
+	}
+}

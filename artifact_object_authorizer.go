@@ -627,21 +627,24 @@ func blobAuthorized(ctx context.Context, user *userAccount, ref string) bool {
 			return true
 		}
 	}
-	// True Files uploads are explicitly organization-visible under the current
-	// product contract. A chat-promoted Files row is only another durable handle
-	// to its exact source, so reauthorize that committed source on every blob
-	// request instead of laundering the ref into independent Files authority.
+	// Meeting recordings (Wave 7 D2) are authorized exactly like the Meeting
+	// Record that owns the ref: the viewer must currently hold an authorized
+	// source for that meeting. A learned ref is never authority.
+	if kanbanApp.meetingRecordingBlobAuthorized(ctx, user, ref) {
+		return true
+	}
+	// Files uploads carry a per-file ACL (files.go: private/company/people)
+	// that the blob route honors on every request. A chat-promoted Files row is
+	// only another durable handle to its exact source, so its committed source
+	// is reauthorized too instead of laundering the ref into independent Files
+	// authority. fileEntryReadableByViewer composes both. The store-level
+	// metadata lookup clones only the one or two rows behind this ref (bytes
+	// are content-addressed, so a re-upload shares the ref) instead of every
+	// Drive row on every blob GET/HEAD.
 	if kanbanApp.memory != nil {
-		for _, file := range kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0) {
-			if strings.TrimSpace(file.Metadata["blobRef"]) != ref {
-				continue
-			}
-			if _, promoted, valid := promotedChatFileBindingFromEntry(file); !promoted {
+		for _, file := range kanbanApp.memory.entriesOfKindByMetadata(meetingMemoryKindFile, "blobRef", ref) {
+			if kanbanApp.fileEntryReadableByViewer(ctx, user, file) {
 				return true
-			} else if valid {
-				if _, _, _, authorized := kanbanApp.promotedChatFileSource(ctx, user, file); authorized {
-					return true
-				}
 			}
 		}
 	}
@@ -656,53 +659,6 @@ func blobAuthorized(ctx context.Context, user *userAccount, ref string) bool {
 				// authority for a chat attachment. Re-resolve its committed
 				// source handle on every download check so a revoked legacy or
 				// unhealthy source cannot serve bytes from a learned ref.
-				if strings.TrimSpace(file.Ref) == ref && kanbanApp.committedChatAttachmentAuthorized(user.Email, thread.ID, message.ID, file) {
-					return true
-				}
-			}
-			if message.Image != nil && strings.TrimSpace(message.Image.Ref) == ref {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// blobOrganizationVisible proves that a blob is already readable across an
-// organization/public chat destination. It is intentionally narrower than
-// blobAuthorized: private ownership/read access is not permission to smuggle a
-// known ref into a public channel. Fresh composer uploads use their separate
-// uploader-bound pending grant and become destination-owned only on commit.
-func blobOrganizationVisible(ctx context.Context, user *userAccount, ref string) bool {
-	if user == nil || !validBlobRef(ref) || kanbanApp == nil {
-		return false
-	}
-	for _, header := range artifactOwnersForBlob(ref) {
-		if strings.EqualFold(strings.TrimSpace(header.Visibility), "organization") &&
-			artifactHeaderAuthorized(ctx, user, ACLReadContent, header) {
-			return true
-		}
-	}
-	if kanbanApp.memory != nil {
-		for _, file := range kanbanApp.memory.entriesOfKind(meetingMemoryKindFile, 0) {
-			if strings.TrimSpace(file.Metadata["blobRef"]) != ref {
-				continue
-			}
-			if _, promoted, valid := promotedChatFileBindingFromEntry(file); !promoted {
-				return true
-			} else if valid {
-				if sourceThread, _, _, authorized := kanbanApp.promotedChatFileSource(ctx, user, file); authorized && scoutChatThreadIsOrganizationPublic(sourceThread) {
-					return true
-				}
-			}
-		}
-	}
-	for _, thread := range kanbanApp.scoutChatThreadsSnapshot(user.Email, true, 0) {
-		if !scoutChatThreadIsOrganizationPublic(thread) {
-			continue
-		}
-		for _, message := range thread.Messages {
-			for _, file := range message.Files {
 				if strings.TrimSpace(file.Ref) == ref && kanbanApp.committedChatAttachmentAuthorized(user.Email, thread.ID, message.ID, file) {
 					return true
 				}

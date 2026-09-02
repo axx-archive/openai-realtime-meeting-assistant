@@ -120,6 +120,12 @@ func (s *sessionStore) createMemberSession(email, personID, organizationID, memb
 	if email == "" || canonical && (!zeroOrganization && !activeOrganization || authorize == nil) {
 		return "", errors.New("invalid member session authority")
 	}
+	// Wave 5 D11: every member-session mint (password, passkey, native, the
+	// change-password rotation) funnels through here, so a disabled account
+	// can never obtain a fresh session regardless of which ceremony proved it.
+	if accountIsDisabled(email) {
+		return "", errors.New("account is disabled")
+	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -527,7 +533,14 @@ func userFromRequest(r *http.Request) *userAccount {
 	if record.Kind == sessionKindGuest {
 		return nil
 	}
-	return accountStore().findUser(record.Email)
+	user := accountStore().findUser(record.Email)
+	// A disabled account's sessions are revoked on disable; this check is the
+	// belt to that suspender so a session persisted by a concurrent write can
+	// never keep serving after the stamp lands.
+	if user.disabled() {
+		return nil
+	}
+	return user
 }
 
 // guestPrincipal is the resolved identity of a guest session: the hashed
@@ -787,7 +800,29 @@ func identityPayload(user *userAccount) map[string]any {
 		"hasPasskeys":   len(user.Credentials) > 0,
 		"themePref":     user.ThemePref,
 		"shellAccess":   shellAccessForSession(user, ""),
+		"organization":  workspaceOrganizationName(),
 	}
+}
+
+// defaultWorkspaceOrganizationName is the label the shell shows when the
+// organization authority has nothing to say (keyless sandboxes, a session that
+// is not organization-bound yet). The workspace is single-organization by
+// product contract, so "unavailable" is never a truthful label.
+const defaultWorkspaceOrganizationName = "Bonfire"
+
+// workspaceOrganizationName resolves the one organization every account
+// belongs to: the authority store's single active organization when it has
+// one, else STRIDE_ORGANIZATION_NAME, else the product default.
+func workspaceOrganizationName() string {
+	if runtime := strideE10LiveProductRuntime; runtime != nil {
+		if name := strings.TrimSpace(runtime.organization.SingleActiveOrganizationName()); name != "" {
+			return name
+		}
+	}
+	if name := strings.TrimSpace(os.Getenv("STRIDE_ORGANIZATION_NAME")); name != "" {
+		return name
+	}
+	return defaultWorkspaceOrganizationName
 }
 
 // handleAuthTheme persists the account-level theme preference ("light" |
@@ -1127,4 +1162,95 @@ func handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	setSessionCookie(w, r, token, int(sessionTTL/time.Second))
 	writeAuthJSON(w, http.StatusOK, identityPayloadForRequest(r, user, token))
+}
+
+/* ---------- Wave 5 D11: owner-only account lifecycle ---------- */
+
+// adminAccountPayload is the wire shape for one roster row on the lifecycle
+// surface. Deliberately thin: no hashes, no passkeys, no avatars.
+func adminAccountPayload(user *userAccount) map[string]any {
+	payload := map[string]any{
+		"email":    user.Email,
+		"name":     user.Name,
+		"disabled": user.disabled(),
+	}
+	if user.disabled() {
+		payload["disabledAt"] = user.DisabledAt.UTC().Format(time.RFC3339Nano)
+	}
+	return payload
+}
+
+// adminAccountsHandler serves the owner-only account lifecycle surface:
+//   - GET   lists the roster with each account's disabled state
+//   - PATCH {email, disabled} stamps or clears disabledAt; disabling also
+//     revokes every live session for that account (the password-rotation
+//     precedent). The record is never deleted.
+//
+// Owner means the founder account (isFounderOwner), the same principal the
+// shell already projects as shellAccess=full without an organization
+// membership. Everyone else — including artifact approval admins — is 403.
+func adminAccountsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !websocketOriginAllowed(r) {
+		writeAuthError(w, http.StatusForbidden, "cross-origin request rejected")
+		return
+	}
+	user := userFromRequest(r)
+	if user == nil {
+		writeAuthError(w, http.StatusUnauthorized, "not signed in")
+		return
+	}
+	if !isFounderOwner(user) {
+		writeAuthError(w, http.StatusForbidden, "account lifecycle is owner-only")
+		return
+	}
+	store := accountStore()
+	if r.Method == http.MethodGet {
+		accounts := make([]map[string]any, 0, len(seededAccounts))
+		for _, email := range store.accountEmails() {
+			if account := store.findUser(email); account != nil {
+				accounts = append(accounts, adminAccountPayload(account))
+			}
+		}
+		writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "accounts": accounts})
+		return
+	}
+
+	payload := struct {
+		Email    string `json:"email"`
+		Disabled *bool  `json:"disabled"`
+	}{}
+	if err := decodeAuthBody(r, &payload); err != nil {
+		writeAuthError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	email := normalizeAccountEmail(payload.Email)
+	if email == "" || payload.Disabled == nil {
+		writeAuthError(w, http.StatusBadRequest, "email and disabled are required")
+		return
+	}
+	if email == normalizeAccountEmail(user.Email) {
+		// The owner disabling the owner would strand the workspace with nobody
+		// able to reverse it.
+		writeAuthError(w, http.StatusBadRequest, "the owner account cannot be disabled")
+		return
+	}
+	if store.findUser(email) == nil {
+		writeAuthError(w, http.StatusNotFound, "no such account")
+		return
+	}
+	account, err := store.setDisabled(email, *payload.Disabled, time.Now().UTC())
+	if err != nil {
+		writeAuthError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if *payload.Disabled {
+		// Revoke every live session now; userFromRequest also refuses the
+		// disabled account so nothing persisted concurrently keeps serving.
+		userSessionStore().destroyAllForEmail(email)
+	}
+	writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "account": adminAccountPayload(account)})
 }

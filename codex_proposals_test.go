@@ -1042,3 +1042,53 @@ func TestCodexProposalConfirmReusesMatchingChannel(t *testing.T) {
 		t.Fatalf("originId=%q, want the existing #%s channel %q (fuzzy reuse, not a duplicate)", got, existing.Title, existing.ID)
 	}
 }
+
+// Plan 016: the proposal deck is rebuilt on every upsert, dock timer and focus
+// call, so the entrance keyframe lives on .proposal-card.is-entering (added
+// once per new id, gated on reduced motion) — never on bare .proposal-card,
+// which would replay the rise on every surviving card.
+func TestIndexProposalCardEntranceKeyedOnNewIds(t *testing.T) {
+	rawHTML, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatalf("read index.html: %v", err)
+	}
+	html := string(rawHTML)
+
+	ruleBody := func(selector string) string {
+		start := strings.Index(html, "\n      "+selector+" {")
+		if start < 0 {
+			t.Fatalf("rule %q missing", selector)
+		}
+		end := strings.Index(html[start:], "}")
+		if end < 0 {
+			t.Fatalf("rule %q never closes", selector)
+		}
+		return html[start : start+end]
+	}
+	if bare := ruleBody(".proposal-card"); strings.Contains(bare, "animation:") {
+		t.Error("bare .proposal-card must not carry the entrance animation — it would replay on every re-render (plan 016)")
+	}
+	if entering := ruleBody(".proposal-card.is-entering"); !strings.Contains(entering, "animation: bf-islandin var(--dur-med) var(--ease)") {
+		t.Error(".proposal-card.is-entering must carry the token-timed bf-islandin entrance (plan 016)")
+	}
+
+	render := functionBody(html, "function renderCodexProposals()")
+	for _, want := range []string{
+		"seenProposalIds.has(id)",
+		"seenProposalIds.add(id)",
+		"reducedMotion.matches",
+		"card.classList.add('is-entering')",
+		"card.classList.remove('is-entering')",
+	} {
+		if !strings.Contains(render, want) {
+			t.Errorf("renderCodexProposals must key the entrance once per new id: missing %q", want)
+		}
+	}
+	if !strings.Contains(html, "let seenProposalIds = new Set()") {
+		t.Error("seenProposalIds must be declared beside codexProposals (boot-safe, before any render)")
+	}
+	snapshot := functionBody(html, "function handleCodexProposalsSnapshot(payload)")
+	if !strings.Contains(snapshot, "seenProposalIds = new Set(") {
+		t.Error("the admission replay must prune seenProposalIds to the surviving ids (plan 016)")
+	}
+}

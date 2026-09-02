@@ -61,7 +61,9 @@ func chatMentionCandidates(viewerEmail string) []chatMentionCandidate {
 		}
 		seen[email] = true
 		user := store.findUser(email)
-		if user == nil {
+		if user == nil || user.disabled() {
+			// Offboarded accounts (Wave 5 D11) stay on disk for history but are
+			// never offered as a mention target.
 			continue
 		}
 		name := accountDisplayName(user)

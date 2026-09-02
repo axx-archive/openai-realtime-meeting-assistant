@@ -82,6 +82,22 @@ type meetingRecord struct {
 	IdleDeadlineAt string                      `json:"idleDeadlineAt,omitempty"` // durable all-empty grace boundary; cleared by admission/close
 	Participants   []string                    `json:"participants"`             // union of admitted canonical names, meetingParticipantNames order
 	Finalization   *meetingFinalizationReceipt `json:"finalization,omitempty"`
+	// Recording (Wave 7 D2) is the stored media output stage: the assembled
+	// webm's blob ref plus its playback path. Nil until an upload finishes.
+	Recording *meetingRecordingOutput `json:"recording,omitempty"`
+	// RecapCard* (Wave 7 D3) stamp the one post-call recap card posted into
+	// the room's channel so finalization retries never re-post it.
+	RecapCardPostedAt  string `json:"recapCardPostedAt,omitempty"`
+	RecapCardThreadID  string `json:"recapCardThreadId,omitempty"`
+	RecapCardMessageID string `json:"recapCardMessageId,omitempty"`
+	// Stuck / StuckReason / StuckAt (Wave 8 D11) surface a digest that the
+	// producer cannot land (max_output_truncation after the retry, or the
+	// identical-rejected-output circuit suppressing retries) so Meeting Records
+	// can show the honest state instead of only the server log. Cleared by the
+	// next accepted digest.
+	Stuck       bool   `json:"stuck,omitempty"`
+	StuckReason string `json:"stuckReason,omitempty"`
+	StuckAt     string `json:"stuckAt,omitempty"`
 }
 
 // meetingRoomID resolves a record's room under the migration invariant:
@@ -284,6 +300,7 @@ func cloneMeetingRecord(record meetingRecord) meetingRecord {
 		finalization := cloneMeetingFinalizationReceipt(*record.Finalization)
 		record.Finalization = &finalization
 	}
+	record.Recording = cloneMeetingRecordingOutput(record.Recording)
 	return record
 }
 
@@ -727,6 +744,41 @@ func (store *meetingStore) setAutoTitle(id string, title string) (meetingRecord,
 	return meetingRecord{}, false
 }
 
+// setStuck stamps (or clears, with stuck=false) the digest-stuck state on the
+// record with this id. Idempotent: an unchanged state is not re-persisted.
+func (store *meetingStore) setStuck(id string, stuck bool, reason string, at time.Time) (meetingRecord, bool) {
+	if store == nil || strings.TrimSpace(id) == "" {
+		return meetingRecord{}, false
+	}
+	reason = trimForStorage(strings.TrimSpace(reason), 120)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	for index := len(store.records) - 1; index >= 0; index-- {
+		if store.records[index].ID != id {
+			continue
+		}
+		if store.records[index].Stuck == stuck && (!stuck || store.records[index].StuckReason == reason) {
+			return cloneMeetingRecord(store.records[index]), false
+		}
+		prior := cloneMeetingRecord(store.records[index])
+		store.records[index].Stuck = stuck
+		if stuck {
+			store.records[index].StuckReason = reason
+			store.records[index].StuckAt = at.UTC().Format(time.RFC3339Nano)
+		} else {
+			store.records[index].StuckReason = ""
+			store.records[index].StuckAt = ""
+		}
+		if err := store.persistLocked(); err != nil {
+			store.resolvePersistFailureLocked(err, func() { store.records[index] = prior })
+			return cloneMeetingRecord(prior), false
+		}
+		return cloneMeetingRecord(store.records[index]), true
+	}
+	return meetingRecord{}, false
+}
+
 // hasEndedRecord reports whether any record with this id has already ended —
 // the guard that keeps an ended meeting's id from ever being re-minted onto a
 // second record (boot reconciliation and the admission path both consult it).
@@ -1103,10 +1155,23 @@ func meetingRecordPayload(record meetingRecord, now time.Time) map[string]any {
 		"analysisReady":     analysisReady,
 		"durationSeconds":   durationSeconds,
 		"serverNow":         now.UTC().Format(time.RFC3339Nano),
+		"stuck":             record.Stuck,
+	}
+	if record.Stuck {
+		payload["stuckReason"] = record.StuckReason
+		payload["stuckAt"] = record.StuckAt
 	}
 	if record.Finalization != nil {
 		receipt := cloneMeetingFinalizationReceipt(*record.Finalization)
+		receipt.Recording = meetingRecordingStageReceipt(record.Recording)
 		payload["finalization"] = receipt
+	}
+	if record.Recording != nil {
+		payload["recording"] = *cloneMeetingRecordingOutput(record.Recording)
+	}
+	if record.RecapCardPostedAt != "" {
+		payload["recapCardPostedAt"] = record.RecapCardPostedAt
+		payload["recapCardThreadId"] = record.RecapCardThreadID
 	}
 	return payload
 }

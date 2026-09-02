@@ -232,6 +232,10 @@ Details, deliverables, and team per wave live in the execution plan.
 | E. Memory | W8 | Needs Drive ACL and Work results settled; largest design surface |
 | F. Resilience + polish | W9 (founder-gated), W10 | Provider failover needs ratification; integration polish last |
 
+**Wave 11 (added 2026-09-02, AJ):** the Work surface becomes **Packaging Studio** — three commissions (New Presentation, New Document, Commission Research), organization-branded research reports, deliverable actions (rename / duplicate / save / DOCX / PDF), and project tags that auto-file deliverables into Drive folders. It reuses the deep-research lifecycle and the deck engine rather than rebuilding them.
+
+**Wave 12 (added 2026-09-02, AJ):** first-class harness (streaming, wide tools, step cards, budgets) and platform-chosen per-seat providers with Fable 5.1 on the design/judgment seats, an eval before flipping the chat answer seat, and Dissent (`~/Documents/business`: "independent multi-model review for AI-made work") acquired into STRIDE as a founder-owned sub-product: its control plane, assurance and receipts ported to Go behind every judgment seat and Packaging Studio deliverable, plus a founder-only DISSENT admin panel (token flow through every model, cost, latency, assurance analytics, routing controls). External onboarding of non-STRIDE harnesses comes later.
+
 ## Founder decisions this plan does not assume
 
 1. Restore OpenAI billing (blocks live verification of every Scout-dependent wave).
@@ -243,6 +247,8 @@ Details, deliverables, and team per wave live in the execution plan.
 5. Google Calendar OAuth build vs. scheduled rooms only (Wave 7 ships scheduled rooms).
 6. Whether a non-owner may leave a human group on their own (Wave 1 ships owner-managed
    membership only; a "leave group" action is a product call, not a default).
+
+7. **Packaging Studio naming.** The codebase already uses "packaging studio" for the deck chassis/scene engine (`packaging_studio.go`). Wave 11 takes AJ's meaning — the user-facing hub for all three commission kinds — and treats the deck engine as an internal component of it. If AJ wants a different name for the engine's own surfaces, say so; nothing else assumes it.
 
 ## Gap map closure (every audited gap has exactly one home)
 

@@ -351,6 +351,7 @@ const server=http.createServer((req,res)=>{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:900}});
+ await page.addInitScript(()=>{try{localStorage.setItem('bonfire.theme.v1','light')}catch(e){}}); /* dark is the product default (Wave 10); this harness asserts light-theme hairlines */
  await page.goto('http://127.0.0.1:'+server.address().port+'/',{waitUntil:'domcontentloaded'});
  await page.waitForSelector('#appShell.is-authed');
  await page.evaluate(id=>openDocumentStudio(id,'Activation plan',{}),artifactId);

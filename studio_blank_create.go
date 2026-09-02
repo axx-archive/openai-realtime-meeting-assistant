@@ -79,14 +79,8 @@ func documentEditorNewHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	storedBody, emptyMarker := documentStudioStoredBody("")
-	metadata := studioBlankBaseMetadata(user, title, studioBlankSourceDocument, "document")
-	metadata["type"] = artifactTypeMarkdown
-	metadata["documentSchemaVersion"] = "1"
-	metadata[documentStudioEmptyMetadataKey] = emptyMarker
-	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
-	entry, appended, err := kanbanApp.createOSArtifactWithMetadata("artifacts", title, storedBody, actor, metadata)
-	if err != nil || !appended || strings.TrimSpace(entry.ID) == "" {
+	entry, err := createDocumentStudioArtifact(user, title, "", nil)
+	if err != nil {
 		log.Errorf("Blank document create failed: %v", err)
 		writeAuthError(w, http.StatusInternalServerError, "the document could not be created")
 		return
@@ -95,6 +89,36 @@ func documentEditorNewHandler(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "artifact": documentStudioView(entry),
 		"document": documentStudioDocumentFromEntry(entry),
 	})
+}
+
+// createDocumentStudioArtifact mints a Document Studio document owned by the
+// signed-in account: the one creation path shared by blank "New document" and
+// Drive imports (source: document_studio), so both land as the same editable,
+// projection-visible kind of artifact.
+func createDocumentStudioArtifact(user *userAccount, title, markdown string, extraMetadata map[string]string) (meetingMemoryEntry, error) {
+	if user == nil || kanbanApp == nil || kanbanApp.memory == nil {
+		return meetingMemoryEntry{}, fmt.Errorf("artifacts are unavailable")
+	}
+	title = firstNonEmptyString(strings.TrimSpace(title), "Untitled document")
+	storedBody, emptyMarker := documentStudioStoredBody(markdown)
+	metadata := studioBlankBaseMetadata(user, title, studioBlankSourceDocument, "document")
+	metadata["type"] = artifactTypeMarkdown
+	metadata["documentSchemaVersion"] = "1"
+	metadata[documentStudioEmptyMetadataKey] = emptyMarker
+	for key, value := range extraMetadata {
+		if key = strings.TrimSpace(key); key != "" {
+			metadata[key] = value
+		}
+	}
+	actor := firstNonEmptyString(strings.TrimSpace(user.Name), normalizeAccountEmail(user.Email))
+	entry, appended, err := kanbanApp.createOSArtifactWithMetadata("artifacts", title, storedBody, actor, metadata)
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	if !appended || strings.TrimSpace(entry.ID) == "" {
+		return meetingMemoryEntry{}, fmt.Errorf("document was not appended")
+	}
+	return entry, nil
 }
 
 // deckEditorNewHandler POST /artifacts/deck/new — a one-slide native deck,

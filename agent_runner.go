@@ -414,9 +414,17 @@ type ambientAgentCircuitOpenError struct {
 	RoomID          string
 	RetryAt         time.Time
 	RestartRequired bool
+	// PausedByBreaker marks a pass skipped because the provider breaker for
+	// the worker's seat is open (provider_breaker.go). No attempt budget was
+	// spent, no cursor moved, and no worker restart is required: the pass
+	// resumes on its own once the cooldown lets a half-open probe through.
+	PausedByBreaker bool
 }
 
 func (failure *ambientAgentCircuitOpenError) Error() string {
+	if failure.PausedByBreaker {
+		return fmt.Sprintf("%s is paused by the provider breaker until %s", failure.Agent, failure.RetryAt.UTC().Format(time.RFC3339))
+	}
 	if failure.RestartRequired {
 		return fmt.Sprintf("%s is paused after repeated failures; retry after the worker is restarted", failure.Agent)
 	}
@@ -445,6 +453,10 @@ type ambientAgentConfig struct {
 	defaultInterval time.Duration
 	intervalEnv     string // duration override; "0"/"off"/"false"/"disabled" turns the agent off
 	disabledEnv     string // truthy disables the agent
+	// providerSeat overrides the usage-ledger seat this worker's provider calls
+	// carry (ambientAgentProviderSeat). Production workers resolve it from
+	// their name; tests set it directly to ride the provider breaker.
+	providerSeat    string
 	backfillEnv     string // truthy consumes history from the start at boot
 	minBatchEnv     string
 	defaultMinBatch int
@@ -487,7 +499,19 @@ type ambientAgentConfig struct {
 	// drive summarization spend. Nudges accumulate (the ticker floor retries)
 	// and the close-flush chain still runs its one bounded pass.
 	defersWhenGuestsOnly bool
-	produce              func(app *kanbanBoardApp, ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error)
+	// inputFilter (Wave 8 D5) narrows the agent's window to the rows it owns
+	// WITHOUT disturbing cursor resolution: the cursor index still spans every
+	// row of inputKind, only the collected inputs (and the minBatch count) are
+	// filtered. nil admits every row (the pre-wave behavior).
+	inputFilter func(meetingMemoryEntry) bool
+	produce     func(app *kanbanBoardApp, ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error)
+	// drainedWork (Wave 8 D12 follow-up) runs when the input window is drained
+	// — nothing new past the cursor — so a producer can service work that is
+	// not keyed by a new input row: a channel digest invalidated by a message
+	// delete/edit must be rebuilt even when the thread never posts again. It
+	// runs under the same run lock and behind the same breaker pause as an
+	// ordinary pass; the cursor never moves. nil means no such work.
+	drainedWork func(app *kanbanBoardApp, ctx context.Context, apiKey string, responder openAITextResponder) (meetingMemoryEntry, error)
 }
 
 // windowRoomID resolves the room an agent pass runs for into the memory
@@ -1027,6 +1051,13 @@ func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, c
 	}
 	roomID = normalizeRoomID(roomID)
 	key := ambientAgentScopeKey(agent, roomID)
+	// Wave 9 D4: an open provider breaker for this worker's seat skips the
+	// pass entirely. Nothing below runs — no held-window checkpoint, no attempt
+	// budget, no provider call — so the cursor stays put and the worker is not
+	// converted into a restart-required circuit by an outage it cannot fix.
+	if pauseErr := app.ambientAgentBreakerPause(agent, roomID); pauseErr != nil {
+		return meetingMemoryEntry{}, pauseErr
+	}
 	// Admission, the retry-budget read, provider invocation, and completion
 	// accounting are one scope-serial transaction. Locking only the producer
 	// allowed a burst of callers to pre-admit against the same stale attempt
@@ -1055,6 +1086,9 @@ func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, c
 		// cursor remains visible to peek and can never reach this branch.
 		if err := app.clearAmbientAgentFailure(key); err != nil {
 			return meetingMemoryEntry{}, &ambientAgentHoldError{err: err}
+		}
+		if agent.drainedWork != nil {
+			return agent.drainedWork(app, ctx, apiKey, responder)
 		}
 		return meetingMemoryEntry{}, nil
 	}
@@ -1096,6 +1130,76 @@ func (app *kanbanBoardApp) ambientAgentCircuitError(agent ambientAgentConfig, he
 	}
 	app.mu.Unlock()
 	return &ambientAgentCircuitOpenError{Agent: agent.name, RoomID: normalizeRoomID(roomID), RetryAt: retryAt, RestartRequired: restartRequired}
+}
+
+// ambientAgentProviderSeat resolves the usage-ledger seat a worker's provider
+// calls carry, which is also the provider breaker key for that worker. Test
+// agents without a known name report no seat and are never breaker-gated.
+func ambientAgentProviderSeat(agent ambientAgentConfig) string {
+	if seat := strings.TrimSpace(agent.providerSeat); seat != "" {
+		return seat
+	}
+	switch agent.name {
+	case meetingBrainAgentName:
+		return seatBrain
+	case meetingBoardAgentName:
+		return seatBoard
+	case researchSuggestionAgentName:
+		return seatSuggestion
+	case missionIntelAgentName:
+		return seatMissionIntel
+	case decisionLedgerAgentName:
+		return seatDecisionLedger
+	case narrativeMaintainerAgentName:
+		return seatNarrative
+	case meetingDigestAgentName, dayDigestAgentName, channelDigestAgentName:
+		// The channel digest bills seatMeetingDigest (channel_digest.go), so
+		// an open breaker on that seat must pause it too.
+		return seatMeetingDigest
+	case entityLedgerAgentName:
+		return seatEntityLedger
+	case companyDigestAgentName:
+		return seatCompanyDigest
+	case slopClassifierAgentName:
+		return seatSlop
+	case tasteAnalystAgentName:
+		return seatTaste
+	case houseStyleAgentName:
+		return seatHouseStyle
+	default:
+		return ""
+	}
+}
+
+// ambientBreakerPauseLog remembers the breaker epoch each worker last logged
+// so an open breaker is reported once per cooldown instead of once per tick.
+var ambientBreakerPauseLog = struct {
+	sync.Mutex
+	epochs map[string]uint64
+}{epochs: map[string]uint64{}}
+
+// ambientAgentBreakerPause returns a circuit-open error when the provider
+// breaker for the worker's seat is open. Half-open is not a pause: that pass
+// is the probe that can close the breaker again.
+func (app *kanbanBoardApp) ambientAgentBreakerPause(agent ambientAgentConfig, roomID string) error {
+	seat := ambientAgentProviderSeat(agent)
+	if seat == "" {
+		return nil
+	}
+	snapshot, paused := providerBreakers.paused(providerOpenAI, seat)
+	if !paused {
+		return nil
+	}
+	ambientBreakerPauseLog.Lock()
+	logged := ambientBreakerPauseLog.epochs[agent.name] == snapshot.Epoch
+	if !logged {
+		ambientBreakerPauseLog.epochs[agent.name] = snapshot.Epoch
+	}
+	ambientBreakerPauseLog.Unlock()
+	if !logged {
+		log.Warnf("%s worker paused by the %s/%s provider breaker (%s); passes resume after %s", agent.name, providerOpenAI, seat, firstNonEmptyString(snapshot.OpenReason, "repeated failures"), snapshot.RetryAt.UTC().Format(time.RFC3339))
+	}
+	return &ambientAgentCircuitOpenError{Agent: agent.name, RoomID: normalizeRoomID(roomID), RetryAt: snapshot.RetryAt, PausedByBreaker: true}
 }
 
 func (app *kanbanBoardApp) recordAmbientAgentContinuityFailure(agent ambientAgentConfig, roomID string) {
@@ -1249,6 +1353,9 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgent
 		maxBatch = configured
 	}
 	roomID = normalizeRoomID(roomID)
+	if pauseErr := app.ambientAgentBreakerPause(agent, roomID); pauseErr != nil {
+		return meetingMemoryEntry{}, pauseErr
+	}
 	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
 
 	servicePrincipal := app.currentRoomMediaRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
@@ -1260,9 +1367,12 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgent
 	if durabilityBlocked {
 		return meetingMemoryEntry{}, app.ambientAgentCircuitError(agent, "", roomID)
 	}
-	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, baselineID, agent.windowRoomID(roomID), servicePrincipal)
+	inputs := app.memory.unconsumedEntriesAfterFiltered(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, maxBatch, baselineID, agent.windowRoomID(roomID), servicePrincipal, agent.inputFilter)
 	inputs = compatibleAmbientScopePrefix(inputs)
 	if len(inputs) < minBatch {
+		if agent.drainedWork != nil {
+			return agent.drainedWork(app, ctx, apiKey, responder)
+		}
 		return meetingMemoryEntry{}, nil
 	}
 
@@ -1475,7 +1585,7 @@ func (app *kanbanBoardApp) peekUnconsumedWindow(agent ambientAgentConfig, roomID
 	}
 	roomID = normalizeRoomID(roomID)
 	principal := app.currentRoomMediaRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
-	inputs := app.memory.unconsumedEntriesAfterForRoomForPrincipal(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID), principal)
+	inputs := app.memory.unconsumedEntriesAfterFiltered(agent.inputKind, agent.artifactKind, agent.cursorMetadataKey, limit, app.ambientAgentWindowBaseline(agent, roomID), agent.windowRoomID(roomID), principal, agent.inputFilter)
 	if len(inputs) == 0 {
 		return "", 0, 0, false
 	}
@@ -1800,6 +1910,15 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoom(inputKind string,
 }
 
 func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string, roomID string, principal RecallPrincipal) []meetingMemoryEntry {
+	return store.unconsumedEntriesAfterFiltered(inputKind, artifactKind, cursorKey, limit, baselineID, roomID, principal, nil)
+}
+
+// unconsumedEntriesAfterFiltered is the window read with an optional row
+// filter (ambientAgentConfig.inputFilter): the cursor/baseline index spans
+// EVERY row of inputKind — a cursor pointing at a filtered-out row still
+// resolves, so a cursor stamped before a filter existed never rewinds — and
+// only the collected inputs honor the filter.
+func (store *meetingMemoryStore) unconsumedEntriesAfterFiltered(inputKind string, artifactKind string, cursorKey string, limit int, baselineID string, roomID string, principal RecallPrincipal, filter func(meetingMemoryEntry) bool) []meetingMemoryEntry {
 	if store == nil || limit <= 0 {
 		return nil
 	}
@@ -1846,6 +1965,9 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterForRoomForPrincipal(input
 			continue
 		}
 		if principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal) {
+			continue
+		}
+		if filter != nil && !filter(entry) {
 			continue
 		}
 		inputs = append(inputs, cloneMemoryEntry(entry))

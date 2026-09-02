@@ -154,11 +154,17 @@ func capabilityEvidence(name string, now time.Time, staleAfter time.Duration) ma
 	}
 	if !state.LastPoll.IsZero() {
 		out["lastPollAt"] = state.LastPoll.UTC().Format(time.RFC3339Nano)
+		// lastRequestAt is the honest-state name for the same evidence: the
+		// last time anything asked this lane to do work, success or not.
+		out["lastRequestAt"] = out["lastPollAt"]
 		age := now.Sub(state.LastPoll)
 		if age < 0 {
 			age = 0
 		}
 		out["pollLagSeconds"] = int64(age.Seconds())
+		if staleAfter > 0 {
+			out["requestInWindow"] = age <= staleAfter
+		}
 	}
 	if !state.LastFailure.IsZero() {
 		out["lastFailureAt"] = state.LastFailure.UTC().Format(time.RFC3339Nano)
@@ -183,24 +189,135 @@ func capabilityEvidence(name string, now time.Time, staleAfter time.Duration) ma
 	return out
 }
 
+// Capability lane states (Wave 9 D3, honest states):
+//
+//	disabled          the lane is configured off
+//	degraded          the last request failed, the provider key is missing, a
+//	                  retry/persistence circuit is open, an allocated session is
+//	                  disconnected, or due work is overdue
+//	paused_by_breaker an ambient worker is skipping passes while its seat's
+//	                  provider breaker is open
+//	fallback_active   the seat's breaker is steering to the fallback dial, or
+//	                  the last completed request was served by it
+//	idle              no failure is pending and no success landed inside the
+//	                  evidence window (nothing has asked the lane for work
+//	                  recently, or ever) — NOT a degradation
+//	healthy           the last request inside the window succeeded
+const (
+	capabilityStatusDisabled        = "disabled"
+	capabilityStatusDegraded        = "degraded"
+	capabilityStatusPausedByBreaker = "paused_by_breaker"
+	capabilityStatusFallbackActive  = "fallback_active"
+	capabilityStatusIdle            = "idle"
+	capabilityStatusHealthy         = "healthy"
+)
+
 func capabilityStatus(base map[string]any, providerReady bool) string {
 	if enabled, ok := base["enabled"].(bool); ok && !enabled {
-		return "disabled"
+		return capabilityStatusDisabled
+	}
+	if !providerReady {
+		return capabilityStatusDegraded
 	}
 	circuit, _ := base["circuit"].(string)
-	if !providerReady || base["lastError"] != nil || base["stale"] == true || (circuit != "" && circuit != "closed") {
-		return "degraded"
+	// Durable-state faults always win: a corrupt/blocked checkpoint or a
+	// persistence circuit needs an operator regardless of provider weather.
+	if circuit == "persistence_error" || circuit == "continuity_error" || base["persistenceError"] == true || base["continuityError"] == true || base["checkpointError"] == true {
+		return capabilityStatusDegraded
+	}
+	// A worker paused behind its seat's provider breaker is deliberately not
+	// calling the provider. The failures that opened the breaker are still
+	// visible (lastError, retryAttempts, breaker.reason) but the state names
+	// what is actually happening now.
+	if base["pausedByBreaker"] == true {
+		return capabilityStatusPausedByBreaker
+	}
+	if base["lastError"] != nil || (circuit != "" && circuit != "closed") {
+		return capabilityStatusDegraded
+	}
+	// Due work whose artifact is still stale is a real degradation; ordinary
+	// interval staleness with nothing due is idleness (see below).
+	if base["overdue"] == true {
+		return capabilityStatusDegraded
 	}
 	if connected, reported := base["connected"].(bool); reported && !connected {
-		return "degraded"
+		// A session/lane that exists but is not connected is a fault. A lane
+		// with nothing allocated (no live meeting, no realtime session) is
+		// simply idle — the 2026-09-01 production symptom was every such lane
+		// reporting degraded with zero provider errors in the logs.
+		if base["allocated"] == true {
+			return capabilityStatusDegraded
+		}
+		return capabilityStatusIdle
+	}
+	if base["fallbackActive"] == true {
+		return capabilityStatusFallbackActive
 	}
 	// Configuration is not success evidence. Until a producer or persisted
-	// artifact proves that the capability has completed useful work, report it
-	// as degraded instead of manufacturing a healthy state from a present key.
-	if _, evidenced := base["lastSuccessAt"]; !evidenced {
-		return "degraded"
+	// artifact proves that the capability has completed useful work inside the
+	// evidence window, report it as idle rather than manufacturing a healthy
+	// state from a present key — and never as degraded when nothing failed.
+	if _, evidenced := base["lastSuccessAt"]; !evidenced || base["stale"] == true {
+		if base["stale"] == true && capabilityLaneLive(base) {
+			// Something is live and should be producing (an allocated meeting
+			// STT lane, an active voice session) but nothing landed inside the
+			// evidence window: that is a stall, not idleness.
+			return capabilityStatusDegraded
+		}
+		return capabilityStatusIdle
 	}
-	return "healthy"
+	return capabilityStatusHealthy
+}
+
+// capabilityLaneLive reports whether a lane has a live producer attached:
+// `allocated` decides when the lane reports it; a lane that reports only
+// `connected` counts as live while connected. A lane with neither key (typed
+// seats, ambient workers) is never "live" in this sense — its staleness is
+// ordinary idleness.
+func capabilityLaneLive(base map[string]any) bool {
+	if allocated, reported := base["allocated"].(bool); reported {
+		return allocated
+	}
+	connected, _ := base["connected"].(bool)
+	return connected
+}
+
+// capabilityStatusCountsDegraded reports whether a lane status counts toward the
+// degraded rollup (/capabilities ok=false, the `degraded` list). A worker
+// parked behind its seat's provider breaker keeps its specific
+// paused_by_breaker label on the lane, but it is still not doing its job, so
+// the rollup must not say ok while it is parked.
+func capabilityStatusCountsDegraded(status any) bool {
+	switch asString(status) {
+	case capabilityStatusDegraded, capabilityStatusPausedByBreaker:
+		return true
+	}
+	return false
+}
+
+// aggregateCapabilityStatus folds child lane statuses into one honest parent
+// status: any degraded child degrades the parent; otherwise breaker/fallback
+// states surface; otherwise the parent is idle only when every child is idle.
+func aggregateCapabilityStatus(lanes ...map[string]any) string {
+	idle := 0
+	fallback := false
+	for _, lane := range lanes {
+		switch asString(lane["status"]) {
+		case capabilityStatusDegraded:
+			return capabilityStatusDegraded
+		case capabilityStatusPausedByBreaker, capabilityStatusFallbackActive:
+			fallback = true
+		case capabilityStatusIdle, capabilityStatusDisabled:
+			idle++
+		}
+	}
+	if fallback {
+		return capabilityStatusFallbackActive
+	}
+	if len(lanes) > 0 && idle == len(lanes) {
+		return capabilityStatusIdle
+	}
+	return capabilityStatusHealthy
 }
 
 func mergeCapabilityEvidence(dst map[string]any, src map[string]any) {
@@ -315,6 +432,7 @@ func ambientCapabilityEvidence(name string, agent ambientAgentConfig, now time.T
 		if due {
 			out["artifactFreshness"] = "work_due"
 			out["stale"] = true
+			out["overdue"] = true
 		} else {
 			out["artifactFreshness"] = "not_due"
 			// Never inherit interval-based staleness for an artifact whose actual
@@ -443,6 +561,13 @@ func ambientWorkerCapabilitySnapshot(agent ambientAgentConfig, now time.Time, pr
 	snap["provider"] = provider
 	if !superseded {
 		markNamedProviderFailure(snap, provider, providerReady)
+	}
+	if seat := ambientAgentProviderSeat(agent); seat != "" {
+		breaker := providerBreakerEvidence(snap, provider, seat, seatFallbackModel(seat, meetingBrainModel()) != "")
+		if breaker.State == providerBreakerOpen {
+			snap["pausedByBreaker"] = true
+			snap["retryAt"] = breaker.RetryAt.UTC().Format(time.RFC3339Nano)
+		}
 	}
 	// Cadence-gated specialty workers can also run synchronously on demand and
 	// prove current health from their typed artifact + workDue contract. Generic
@@ -611,6 +736,7 @@ func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady bool) map[strin
 	add("narrative", narrativeMaintainerAgent(), providerOpenAI, openAIReady)
 	add("meetingDigest", meetingDigestAgent(), providerOpenAI, openAIReady)
 	add("dayDigest", dayDigestAgent(), providerOpenAI, openAIReady)
+	add("channelDigest", channelDigestAgent(), providerOpenAI, openAIReady)
 	add("entityLedger", entityLedgerAgent(), providerOpenAI, openAIReady)
 	add("companyDigest", companyDigestAgent(), providerOpenAI, openAIReady)
 	add("researchSuggestion", researchSuggestionAgent(), providerOpenAI, openAIReady)
@@ -680,6 +806,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	meetingSTT := capabilityEvidence(capabilityMeetingSTT, now, 5*time.Minute)
 	meetingSTT["enabled"] = true
 	meetingSTT["connected"] = false
+	meetingSTT["allocated"] = false
 	meetingSTT["provider"] = providerOpenAI
 	meetingSTT["model"] = transcriptionLaneModel()
 	dictation := capabilityEvidence(capabilityDictation, now, 5*time.Minute)
@@ -690,18 +817,31 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	typedRouter["enabled"] = true
 	typedRouter["provider"] = providerOpenAI
 	typedRouter["model"] = scoutRouterModel()
+	typedRouter["fallbackModel"] = seatFallbackModel(seatRouter, scoutRouterModel())
+	providerBreakerEvidence(typedRouter, providerOpenAI, seatRouter, seatFallbackModel(seatRouter, scoutRouterModel()) != "")
 	typedAnswer := capabilityEvidence(capabilityTypedScoutAnswer, now, 5*time.Minute)
 	typedAnswer["enabled"] = true
 	typedAnswer["provider"] = providerOpenAI
 	typedAnswer["model"] = scoutChatModel()
+	typedAnswer["fallbackModel"] = seatFallbackModel(seatChat, scoutChatModel())
+	providerBreakerEvidence(typedAnswer, providerOpenAI, seatChat, seatFallbackModel(seatChat, scoutChatModel()) != "")
+	// Realtime voice lanes have no text breaker; they still carry the honest
+	// lane shape so every scout.lanes.* entry reads the same way.
+	roomVoice["fallbackUsed"] = false
+	privateVoice["fallbackUsed"] = false
 	if kanbanApp != nil {
 		kanbanApp.mu.Lock()
 		roomVoice["connected"] = kanbanApp.connected
+		roomVoice["allocated"] = kanbanApp.voiceControlActive
+		transcriptLaneAllocated := kanbanApp.transcriptLane != nil
 		kanbanApp.mu.Unlock()
+		meetingSTT["allocated"] = transcriptLaneAllocated
 		meetingSTT["connected"] = kanbanApp.transcriptionLaneConnected()
 	}
 	if roomRows, roomCircuitOpen := roomScoutCapabilityRows(kanbanApp); len(roomRows) > 0 {
 		roomVoice["rooms"] = roomRows
+		// A live room holds a real Scout session: a disconnect there is a fault.
+		roomVoice["allocated"] = true
 		if roomCircuitOpen {
 			roomVoice["circuit"] = "open"
 			roomVoice["retrySuppressed"] = true
@@ -719,18 +859,22 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	} {
 		markProviderFailure(snap, providerReady)
 		snap["status"] = capabilityStatus(snap, providerReady)
-		if snap["status"] == "degraded" {
+		if capabilityStatusCountsDegraded(snap["status"]) {
 			degraded = append(degraded, name)
 		}
 	}
 	// Backward-compatible aggregates remain while clients adopt the split
-	// contract. They are healthy only when every required child is healthy.
+	// contract. They degrade only when a required child degrades; idle
+	// children never count as degraded (Wave 9 D3).
 	scout := map[string]any{
-		"enabled": true, "connected": roomVoice["connected"], "status": "healthy",
-		"lanes": map[string]any{"roomVoice": roomVoice, "privateVoice": privateVoice, "typedRouter": typedRouter, "typedAnswer": typedAnswer},
+		"enabled": true, "connected": roomVoice["connected"],
+		"status": aggregateCapabilityStatus(roomVoice, privateVoice, typedRouter, typedAnswer),
+		"lanes":  map[string]any{"roomVoice": roomVoice, "privateVoice": privateVoice, "typedRouter": typedRouter, "typedAnswer": typedAnswer},
 	}
-	if roomVoice["status"] != "healthy" || privateVoice["status"] != "healthy" || typedRouter["status"] != "healthy" || typedAnswer["status"] != "healthy" {
-		scout["status"] = "degraded"
+	// Wave 6 D7: the chat-only Scout seat sits beside the voice lanes, never
+	// inside the aggregate — text availability must not relabel voice status.
+	scout["scoutText"] = currentRoomScoutTextAvailability().snapshot()
+	if capabilityStatusCountsDegraded(scout["status"]) {
 		degraded = append(degraded, capabilityScout)
 	}
 	if circuit, ok := roomVoice["circuit"]; ok {
@@ -743,11 +887,11 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 		scout["retrySuppressed"] = retrySuppressed
 	}
 	stt := map[string]any{
-		"enabled": true, "connected": meetingSTT["connected"], "status": "healthy",
-		"lanes": map[string]any{"meeting": meetingSTT, "dictation": dictation},
+		"enabled": true, "connected": meetingSTT["connected"],
+		"status": aggregateCapabilityStatus(meetingSTT, dictation),
+		"lanes":  map[string]any{"meeting": meetingSTT, "dictation": dictation},
 	}
-	if meetingSTT["status"] != "healthy" || dictation["status"] != "healthy" {
-		stt["status"] = "degraded"
+	if capabilityStatusCountsDegraded(stt["status"]) {
 		degraded = append(degraded, capabilitySTT)
 	}
 
@@ -762,13 +906,13 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	}
 	markProviderFailure(brain, providerReady)
 	brain["status"] = capabilityStatus(brain, providerReady)
-	if brain["status"] == "degraded" {
+	if capabilityStatusCountsDegraded(brain["status"]) {
 		degraded = append(degraded, "brain")
 	}
 	ambientWorkers := ambientWorkersCapabilitySnapshot(now, providerReady)
 	for key, raw := range ambientWorkers {
 		worker, _ := raw.(map[string]any)
-		if worker["status"] == "degraded" {
+		if capabilityStatusCountsDegraded(worker["status"]) {
 			degraded = append(degraded, "ambient."+key)
 		}
 	}
@@ -782,7 +926,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	}
 	markProviderFailure(recap, providerReady)
 	recap["status"] = capabilityStatus(recap, providerReady)
-	if recap["status"] == "degraded" {
+	if capabilityStatusCountsDegraded(recap["status"]) {
 		degraded = append(degraded, "recap")
 	}
 
@@ -792,7 +936,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	mergeCapabilityEvidence(embeddings, embeddingProviderCircuitEvidence())
 	markProviderFailure(embeddings, providerReady)
 	embeddings["status"] = capabilityStatus(embeddings, providerReady)
-	if embeddings["status"] == "degraded" {
+	if capabilityStatusCountsDegraded(embeddings["status"]) {
 		degraded = append(degraded, "embeddings")
 	}
 
@@ -808,7 +952,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 		mergeCapabilityEvidence(workflows, capabilityEvidenceFromSuccess(lastWorkflowPass, now, 2*workflowTickerInterval()))
 	}
 	workflows["status"] = capabilityStatus(workflows, true)
-	if workflows["status"] == "degraded" {
+	if capabilityStatusCountsDegraded(workflows["status"]) {
 		degraded = append(degraded, "workflows")
 	}
 
@@ -832,7 +976,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 			attachments["status"] = "healthy"
 		}
 	}
-	if attachments["status"] == "degraded" {
+	if capabilityStatusCountsDegraded(attachments["status"]) {
 		degraded = append(degraded, capabilityAttachments)
 	}
 
@@ -843,7 +987,7 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	roomRows, roomDegraded := roomOperationalCapabilityRows(kanbanApp, now, providerReady, roomConsentHealth())
 	degraded = append(degraded, roomDegraded...)
 	strideRuntime := strideRuntimeCapabilitySnapshot(kanbanApp)
-	if strideRuntime["status"] == "degraded" {
+	if capabilityStatusCountsDegraded(strideRuntime["status"]) {
 		degraded = append(degraded, "stride_runtime_unavailable")
 	}
 	replayStatus := ambientReplayRuntimeSnapshot()

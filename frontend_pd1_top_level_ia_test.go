@@ -153,9 +153,10 @@ func TestPD1GlobalRailAndWorkRemainTruthful(t *testing.T) {
 	for _, marker := range []string{
 		`toolRail.hidden = !shellVisible`,
 		`toolRail.inert = !shellVisible`,
-		`class="tool-rail__utilities" aria-label="Account and display controls"`,
-		`<span class="tool-rail__label">Notifications</span>`,
-		`<span class="tool-rail__label">Appearance</span>`,
+		// AJ 2026-09-02: bell top-right, status only when not ready, theme in Settings
+		`class="tool-rail__utilities" aria-label="Account"`,
+		`id="notificationBell" class="topbar__notify tool-rail__bell"`,
+		`#statusPill[data-state="ready"] {`,
 		`#appShell.is-authed .tool-rail__utilities .tool-rail__label`,
 		`.scout-chat-thread > .scout-chat-research[data-state="complete"]`,
 		`flex: 0 0 auto`,
@@ -282,12 +283,19 @@ const server = http.createServer((req, res) => {
     railWidth: document.getElementById('toolRail').getBoundingClientRect().width,
     navInsideRail: document.getElementById('toolRail').contains(document.getElementById('pd1PrimaryNav')),
     navInsideHeader: document.querySelector('.topbar')?.contains(document.getElementById('pd1PrimaryNav')),
-    organizationText: document.getElementById('topbarOrganizationSwitcher').innerText.trim(),
+    // AJ: org-first shell 2026-09-02 — the default "subtle" identity folds the
+    // name into the tooltip / account row, so the chooser's innerText is empty
+    // by design; the projected name is asserted on its label node.
+    organizationText: document.getElementById('topbarOrganizationName').textContent.trim(),
     organizationChildCount: document.getElementById('topbarOrganizationSwitcher').children.length,
   }));
-  // The switcher wears the workspace's initial as an aria-hidden badge tile
-  // (design evolution 2026-09-01), so the closed chooser is badge + name + chevron.
-  assert.deepEqual(shellChrome, {railWidth:56,navInsideRail:true,navInsideHeader:false,organizationText:'S\nSynthetic Lab',organizationChildCount:3});
+  // AJ ratified 2026-09-02 (wordmark back, no flame): the chooser is the
+  // rail's top row — the Stride wordmark + name + the (hidden) offline tag +
+  // chevron; the wordmark is an image, so the closed chooser still reads as
+  // the name alone.
+  // railWidth 168: AJ ratified the wide labelled rail 2026-09-02 (labels
+  // visible at >=1180px; the slim 56px rail remains below that).
+  assert.deepEqual(shellChrome, {railWidth:168,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:4});
   await page.click('#topbarOrganizationSwitcher');
   await page.waitForFunction(() => !document.getElementById('topbarOrganizationMenu').hidden && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2);
   assert.equal(await page.locator('#topbarOrganizationMenu').evaluate(el => !el.hidden), true);
@@ -347,7 +355,13 @@ const server = http.createServer((req, res) => {
     controls:Array.from(el.querySelectorAll('button')).filter(button => button.offsetParent !== null).map(button => button.getAttribute('aria-label')),
     width:el.getBoundingClientRect().width
   }));
-  assert.deepEqual(utilities.controls, ['Notifications','Switch theme','User settings']);
+  // AJ 2026-09-02: bell top-right, status only when not ready, theme in Settings
+  assert.deepEqual(utilities.controls, ['User settings']);
+  assert.deepEqual(await page.evaluate(() => ({
+    bellInTopbar: !!document.querySelector('.topbar #notificationBell'),
+    bellVisible: document.getElementById('notificationBell').offsetParent !== null,
+    pillHidden: getComputedStyle(document.getElementById('statusPill')).display === 'none' || document.getElementById('statusPill').dataset.state !== 'ready',
+  })), {bellInTopbar:true, bellVisible:true, pillHidden:true});
   assert.ok(utilities.width >= 40);
   await page.focus('#pd1PrimaryNav [data-pd1-destination="Work"]');
   await page.keyboard.press('ArrowDown');

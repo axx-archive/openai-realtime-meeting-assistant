@@ -52,6 +52,11 @@ type scoutConversationMessageRequest struct {
 	ToolTemplate        string                    `json:"toolTemplate"`
 	OperationID         string                    `json:"operationId"`
 	ProjectContextToken string                    `json:"projectContextToken"`
+	// ContextRefs are client-declared Drive attachments for the work this turn
+	// may start (Wave 5 D8): {ref: "file|<id>", sourceId?, sourceRevision?}.
+	// Decoded through decodeWorkRequestContextRefs; the launcher re-authorizes
+	// every one and refuses the whole turn (403) if any is not readable.
+	ContextRefs []workRequestContextRef `json:"-"`
 }
 
 func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Request) (scoutConversationMessageRequest, error) {
@@ -67,13 +72,18 @@ func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Reques
 	allowed := map[string]bool{
 		"text": true, "files": true, "replyToMessageId": true,
 		"followUpArtifactId": true, "toolTemplate": true, "operationId": true,
-		"projectContextToken": true,
+		"projectContextToken": true, "contextRefs": true,
 	}
 	for key := range object {
 		if !allowed[key] {
 			return payload, fmt.Errorf("unknown conversation field %q", key)
 		}
 	}
+	contextRefs, err := decodeWorkRequestContextRefs(object["contextRefs"])
+	if err != nil {
+		return payload, err
+	}
+	delete(object, "contextRefs")
 	normalized, err := json.Marshal(object)
 	if err != nil {
 		return payload, err
@@ -81,6 +91,7 @@ func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Reques
 	if err := json.Unmarshal(normalized, &payload); err != nil {
 		return payload, err
 	}
+	payload.ContextRefs = contextRefs
 	return payload, nil
 }
 
@@ -156,7 +167,7 @@ func validateScoutChatHumanGroupMembers(ownerEmail string, values []string) ([]s
 		return nil, fmt.Errorf("a human group supports at most %d members", scoutChatHumanGroupMaxMembersIncludingOwner)
 	}
 	for _, member := range members {
-		if accountStore().findUser(member) == nil {
+		if accountStore().findUser(member) == nil || accountIsDisabled(member) {
 			// Keep this deliberately non-enumerating. The caller learns only that
 			// the requested set is invalid, never which account does or does not
 			// exist.
@@ -816,7 +827,11 @@ type scoutChatMessageRecord struct {
 	// Sources are the thread messages a Scout answer provably quotes. omitempty
 	// for the same round-trip reason every other added field is: pre-Sources
 	// messages on disk must decode unchanged.
-	Sources   []answerSource             `json:"sources,omitempty"`
+	Sources []answerSource `json:"sources,omitempty"`
+	// Coverage (Wave 8 D7) is the recall grade of the evidence this Scout
+	// answer was composed from: complete | partial | unavailable. Rendered
+	// beside the source chips; absent on human messages and unavailable turns.
+	Coverage  string                     `json:"coverage,omitempty"`
 	Files     []scoutChatFileAttachment  `json:"files,omitempty"`
 	Reactions []scoutChatMessageReaction `json:"reactions,omitempty"`
 	ReplyTo   *scoutChatReplyRef         `json:"replyTo,omitempty"`
@@ -1866,6 +1881,9 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(payload.ProjectContextToken) != "" {
 			bodyFields["projectContextTokenDigest"] = homeProjectTokenDigest(payload.ProjectContextToken)
 		}
+		if len(payload.ContextRefs) > 0 {
+			bodyFields["contextRefs"] = payload.ContextRefs
+		}
 		body, bodyErr := canonicalJSON(bodyFields)
 		if bodyErr != nil {
 			writeAuthError(w, http.StatusBadRequest, "conversation request is invalid")
@@ -1903,6 +1921,8 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		messageContext = withConversationTurnOperation(messageContext, conversationTurnOperation{
 			ID: operationID, BodyDigest: bodyDigest,
 		})
+		// Wave 5 D8: Drive refs ride the request context into the one launch seam.
+		messageContext = withWorkRequestContextRefs(messageContext, payload.ContextRefs)
 		if encodedToken := strings.TrimSpace(payload.ProjectContextToken); encodedToken != "" {
 			tokenDigest := homeProjectTokenDigest(encodedToken)
 			acceptedRetry := kanbanApp.acceptedScoutProjectTurnRetry(user, threadID, operationID, bodyDigest, tokenDigest)
@@ -2331,6 +2351,9 @@ func writeScoutChatThreadError(w http.ResponseWriter, err error) {
 	}
 	if strings.Contains(err.Error(), "your own") || strings.Contains(err.Error(), "admin-only") || strings.Contains(err.Error(), "public agent replies") {
 		status = http.StatusForbidden
+	}
+	if errors.Is(err, errWorkRequestContextRefForbidden) {
+		status = workRequestContextRefStatus(err)
 	}
 	writeAuthError(w, status, err.Error())
 }
@@ -2799,6 +2822,13 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 	}
 	if thread.ArchivedAt != "" {
 		return nil, fmt.Errorf("chat thread is archived")
+	}
+	// Wave 5 D8: client-declared Drive refs must re-authorize for this requester
+	// and destination before anything is committed, proposed, or launched; one
+	// refusal fails the whole turn (the door maps it to 403).
+	authorizedDriveRefs, driveRefErr := app.authorizeWorkRequestContextRefs(ctx, user, thread, workRequestContextRefsFromContext(ctx))
+	if driveRefErr != nil {
+		return nil, driveRefErr
 	}
 	if thread.Riff != nil && (strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != "" || projectLinkBinding.Token.Kind != "") {
 		return nil, fmt.Errorf("Private Riff work starts from a natural-language request; direct artifact, tool, and project-link overrides are not accepted")
@@ -3358,6 +3388,11 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		strings.TrimSpace(followUpArtifactID) != "" || strings.TrimSpace(toolTemplate) != ""
 	if explicitScoutEngagement {
 		sourceNeed = app.scoutChatReadableSourceNeed(ctx, user, thread, userMessage)
+		if len(authorizedDriveRefs) > 0 {
+			// Authorized Drive refs ride beside the chat-derived sources so a
+			// proposal, held work, or direct launch all carry them.
+			sourceNeed.ContextRefs = canonicalAssistantContextRefs(append(sourceNeed.ContextRefs, authorizedDriveRefs...))
+		}
 		_, directMeetingBriefing := conversationMeetingBriefingRange(text, time.Now())
 		if scoutChatThreadVisibility(thread) != scoutChatVisibilityPublic && thread.MeetingRecord == nil && thread.Riff == nil &&
 			(!directMeetingBriefing || conversationRequestsDurableMeetingWork(text)) {
@@ -4436,7 +4471,8 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		// thread's own messages, never by "it was in my context window" — an
 		// answer that quotes nothing carries no chips, visibly, rather than
 		// borrowing unearned authority (design §10, shell §13.5).
-		Sources: sources,
+		Sources:  sources,
+		Coverage: result.coverage,
 	}
 	if thread.Riff != nil {
 		completedAt := time.Now().UTC()
@@ -6617,6 +6653,9 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 		if canceledOpeningReply {
 			deliverScoutChatThreadUpdate(thread, canceledReply)
 		}
+		// Wave 8 D12: the brain-ingestion row follows the edit (supersede, never
+		// a frozen first-post row beside the current text).
+		app.supersedeChannelMessageIngestion(thread, message)
 		return thread, message, nil
 	}
 	if store := currentHomeProjectStore(); store != nil {
@@ -6668,6 +6707,8 @@ func (app *kanbanBoardApp) editScoutChatThreadMessage(ctx context.Context, user 
 	if canceledOpeningReply {
 		app.sendScoutChatThreadUpdateToViewer(thread.OwnerEmail, thread, canceledReply)
 	}
+	// Wave 8 D12: the brain-ingestion row follows the edit.
+	app.supersedeChannelMessageIngestion(thread, message)
 	return thread, message, nil
 }
 
@@ -6860,6 +6901,9 @@ func (app *kanbanBoardApp) deleteScoutChatThreadMessageWithContext(ctx context.C
 	app.rebuildPrivateConversationContinuity(thread, "delete")
 	for _, deletedID := range deletedIDs {
 		deliverScoutChatThreadDeletion(thread, deletedID)
+		// Wave 8 D12: every removed message's brain-ingestion row is tombstoned
+		// so recall never returns deleted text.
+		app.tombstoneChannelMessageIngestion(thread, deletedID, viewerEmail)
 	}
 	return thread, nil
 }
@@ -6968,6 +7012,8 @@ func (app *kanbanBoardApp) moderateScoutChatThreadMessage(user *userAccount, thr
 		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
 	}
 	deliverScoutChatThreadDeletion(thread, messageID)
+	// Wave 8 D12: the brain-ingestion row is tombstoned with the message.
+	app.tombstoneChannelMessageIngestion(thread, messageID, user.Email)
 	receiptIndex := len(thread.ModerationReceipts) - 1
 	updated, err := app.reconcileScoutChatModerationLocked(thread, receiptIndex)
 	if err != nil {
@@ -7183,6 +7229,8 @@ func (app *kanbanBoardApp) supersedeScoutChatTerminalWork(user *userAccount, thr
 		return scoutChatThreadRecord{}, scoutChatModerationReceipt{}, err
 	}
 	deliverScoutChatThreadDeletion(thread, messageID)
+	// Wave 8 D12: the brain-ingestion row is tombstoned with the message.
+	app.tombstoneChannelMessageIngestion(thread, messageID, user.Email)
 	receiptIndex := len(thread.ModerationReceipts) - 1
 	updated, err := app.reconcileScoutChatModerationLocked(thread, receiptIndex)
 	if err != nil {

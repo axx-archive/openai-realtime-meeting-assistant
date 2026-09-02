@@ -53,10 +53,16 @@ const (
 	// close the digest object. A higher ceiling does not pre-spend tokens; it
 	// gives the strict schema enough headroom while the storage clamps still
 	// bound accepted output.
-	meetingDigestMaxOutputTokens         = 4000
-	meetingDigestPoisonFailureThreshold  = 2
-	meetingDigestPoisonSuppressionPasses = 3
-	meetingDigestPoisonCircuitCapacity   = 256
+	meetingDigestMaxOutputTokens = 4000
+	// meetingDigestTruncationRetryOutputTokens (Wave 8 D11): on
+	// max_output_truncation the producer retries ONCE with the output budget
+	// raised by 50% before the rejection counts toward the poison circuit.
+	// Production showed a digest stuck for hours on truncation → identical
+	// rejected output with no recovery path.
+	meetingDigestTruncationRetryOutputTokens = meetingDigestMaxOutputTokens * 3 / 2
+	meetingDigestPoisonFailureThreshold      = 2
+	meetingDigestPoisonSuppressionPasses     = 3
+	meetingDigestPoisonCircuitCapacity       = 256
 	// meetingDigestCursorMetadataKey rides every upserted meeting_digest; the
 	// runner reads it off the NEWEST digest to resume after the consumed
 	// window (agent_runner.go unconsumedEntriesAfter).
@@ -1106,9 +1112,10 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		if meetingDigestCircuitSuppress(attemptHash) {
 			recordMeetingDigestOutput("circuit_open", "identical_poison_input", attemptHash, group.key, false)
 			log.Errorf("%s circuit suppressed identical rejected input for %s; cursor remains put", meetingDigestAgentName, group.key)
+			app.markMeetingDigestStuck(group.key, "identical_rejected_output")
 			return newest, &ambientAgentHoldError{err: &ambientOutputRejection{agent: meetingDigestAgentName, reason: "identical_rejected_output"}}
 		}
-		text, err := responder(ctx, apiKey, openAITextRequest{
+		request := openAITextRequest{
 			Model:           model,
 			Seat:            seatMeetingDigest,
 			Workflow:        "meeting_digest",
@@ -1122,7 +1129,19 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 				var payload meetingDigestPayload
 				return json.Unmarshal([]byte(strings.TrimSpace(text)), &payload)
 			},
-		})
+		}
+		text, err := responder(ctx, apiKey, request)
+		truncationRecovered := false
+		if reason, rejected := openAIOutputRejectionReason(err); rejected && reason == "max_output_truncation" {
+			// Wave 8 D11: reasoning tokens share the output envelope; a dense
+			// window can exhaust it before the JSON closes. Retry once with 50%
+			// more headroom — same model, same input, same reasoning policy — and
+			// only count the rejection if the retry truncates too.
+			recordMeetingDigestOutput("truncation_retry", reason, attemptHash, group.key, false)
+			request.MaxOutputTokens = meetingDigestTruncationRetryOutputTokens
+			text, err = responder(ctx, apiKey, request)
+			truncationRecovered = err == nil
+		}
 		if err != nil {
 			if isProviderInvocationFailure(err) {
 				recordCapabilityFailure(capabilityRecap, time.Now().UTC(), err)
@@ -1131,6 +1150,9 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			if reason, rejected := openAIOutputRejectionReason(err); rejected {
 				meetingDigestCircuitReject(attemptHash)
 				recordMeetingDigestOutput("rejected", reason, attemptHash, group.key, false)
+				if reason == "max_output_truncation" {
+					app.markMeetingDigestStuck(group.key, reason)
+				}
 				return newest, &ambientAgentHoldError{err: &ambientOutputRejection{agent: meetingDigestAgentName, reason: reason}}
 			}
 			return newest, err
@@ -1254,7 +1276,8 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		// projection. The scope check drops stale/ended sittings, and the guest
 		// writer allowlist withholds this member-memory surface.
 		app.broadcastMeetingIntelligence(metadata["roomId"], group.key)
-		recordMeetingDigestOutput("accepted", "", attemptHash, group.key, meetingDigestCircuitAccept(attemptHash))
+		recordMeetingDigestOutput("accepted", "", attemptHash, group.key, meetingDigestCircuitAccept(attemptHash) || truncationRecovered)
+		app.clearMeetingDigestStuck(group.key)
 		newest = entry
 	}
 	if newest.ID != "" {
@@ -1266,6 +1289,30 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 	}
 
 	return newest, nil
+}
+
+// markMeetingDigestStuck / clearMeetingDigestStuck (Wave 8 D11) keep the
+// meeting record's honest digest state: stuck when the producer cannot land a
+// digest (truncation after the retry, or the poison circuit suppressing
+// retries), cleared by the next accepted digest. Legacy/synthetic keys have no
+// directory record and are skipped; the broadcast lets an open Meeting Records
+// view refresh the badge.
+func (app *kanbanBoardApp) markMeetingDigestStuck(meetingID string, reason string) {
+	if app == nil || app.meetings == nil || isLegacyMeetingKey(meetingID) {
+		return
+	}
+	if record, changed := app.meetings.setStuck(meetingID, true, reason, time.Now().UTC()); changed {
+		app.broadcastMeetingRecord(record)
+	}
+}
+
+func (app *kanbanBoardApp) clearMeetingDigestStuck(meetingID string) {
+	if app == nil || app.meetings == nil || isLegacyMeetingKey(meetingID) {
+		return
+	}
+	if record, changed := app.meetings.setStuck(meetingID, false, "", time.Now().UTC()); changed {
+		app.broadcastMeetingRecord(record)
+	}
 }
 
 /* ---------- day digest fold (deterministic) ---------- */

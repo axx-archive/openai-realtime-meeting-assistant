@@ -14,7 +14,10 @@ package main
 // stays a router.
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +66,16 @@ const (
 	// the session cleanup seam.
 	memberMediaRepairBucketBurst  = 4.0
 	memberMediaRepairBucketRefill = 5 * time.Second
+
+	// room_hand had no limit at all (guests AND members): every frame ran a
+	// full roster snapshot under app.mu plus two room-wide broadcasts, and a
+	// repeated raise re-broadcast an unchanged state. An unchanged hand is now
+	// a true no-op (sender-only echo, no snapshot, no fan-out) and every
+	// session — guest or member — spends this small per-socket bucket first.
+	// Burst 4 covers a nervous raise/lower/raise; refill 1 per 2s clears any
+	// human cadence.
+	roomHandBucketBurst  = 4.0
+	roomHandBucketRefill = 2 * time.Second
 
 	// card-003 W4 ICE-restart hardening: restart_ice was the last media-inbound
 	// event left unbucketed after the keyframe-spiral damping wave — each one
@@ -176,6 +189,32 @@ type roomLiveState struct {
 	scoutRuntimeStatus    RoomScoutStatus
 	scoutVoiceState       string
 	scoutLastStatusReason string
+	// scoutMode is the seat kind of the current invitation: "voice" (the
+	// qualified realtime lane) or "text" (a chat-only seat answering @Scout
+	// through the server-owned room-chat path, no provider audio). Empty when
+	// Scout is not invited.
+	scoutMode string
+	// Wave 6 in-call state. handRaised keys raised hands by participant name
+	// (first raise wins the ordering; lowered explicitly or on leave via the
+	// roster projection). reactionStamps rate-limits room_reaction per
+	// participant. hostMutedAt records a server-enforced host mute. locked is
+	// the host lock: new names are refused admission while current
+	// participants stay; an empty room clears it.
+	handRaised     map[string]time.Time
+	reactionStamps map[string]time.Time
+	hostMutedAt    map[string]time.Time
+	locked         bool
+	lockedBy       string
+	lockedAt       time.Time
+	// Host "remove" ejections for the current sitting. Closing the target's
+	// sockets alone let the same guest link (or the same session) re-seat
+	// itself on reload, so the ejection is remembered three ways — the guest
+	// session key, the normalized display name, and the exact participant
+	// session ids that were closed — and honoured at admission until the
+	// sitting's in-call state resets (media teardown / room close).
+	ejectedNames               map[string]time.Time
+	ejectedGuestSessions       map[string]time.Time
+	ejectedParticipantSessions map[string]time.Time
 	// mediaActor is the Pion control-plane owner for exactly this sitting.
 	// Lifecycle code detaches this exact pointer, so an old teardown can never
 	// close a successor sitting's actor in the package registry.
@@ -204,6 +243,10 @@ type roomLiveState struct {
 	// guest buckets.
 	memberIceRestartBuckets map[string]*guestChatBucket
 	guestIceRestartBuckets  map[string]*guestChatBucket
+	// handBuckets caps room_hand per participant session (guests and members
+	// alike — the key is the per-socket participant session id) and is
+	// released in the socket cleanup seam like the member buckets.
+	handBuckets map[string]*guestChatBucket
 }
 
 // participantAdmissionLease binds every post-admission side effect to the
@@ -301,6 +344,9 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		participantMedia:           map[string]participantMediaState{},
 		participantEndpointMedia:   map[string]map[string]participantMediaState{},
 		guestSeats:                 map[string]string{},
+		handRaised:                 map[string]time.Time{},
+		reactionStamps:             map[string]time.Time{},
+		hostMutedAt:                map[string]time.Time{},
 		recordingEnabled:           true,
 		recordingUpdatedAt:         now,
 		recordingEpoch:             1,
@@ -311,6 +357,10 @@ func newRoomLiveState(roomID string, now time.Time) *roomLiveState {
 		memberRepairBuckets:        map[string]*guestChatBucket{},
 		memberIceRestartBuckets:    map[string]*guestChatBucket{},
 		guestIceRestartBuckets:     map[string]*guestChatBucket{},
+		handBuckets:                map[string]*guestChatBucket{},
+		ejectedNames:               map[string]time.Time{},
+		ejectedGuestSessions:       map[string]time.Time{},
+		ejectedParticipantSessions: map[string]time.Time{},
 	}
 }
 
@@ -505,8 +555,13 @@ func (app *kanbanBoardApp) allowGuestRoomChat(roomID string, sessionKey string, 
 }
 
 // allowGuestMediaStateEvent charges the state/repair bucket shared by
-// participant_media_state and request_participant_tracks — the two inbound
-// events that fan out a room-wide roster broadcast / a global peer-sync walk.
+// participant_media_state, request_participant_tracks and screen_share_started
+// — the inbound events that fan out a room-wide roster broadcast / a global
+// peer-sync walk. Teardown is never charged: screen_share_stopped and a
+// participant_media_state that clears an active share always apply, or a
+// rate-limited guest's dead share track stays registered and un-paused
+// (frozen last frame for receivers, roster still "sharing", silence watchdog
+// repairing a track that will never come back).
 func (app *kanbanBoardApp) allowGuestMediaStateEvent(roomID string, sessionKey string, now time.Time) bool {
 	return app.allowGuestBucket(roomID, sessionKey,
 		func(s *roomLiveState) map[string]*guestChatBucket { return s.mediaStateBuckets },
@@ -568,6 +623,23 @@ func (app *kanbanBoardApp) dropMemberIceRestartBucket(roomID string, participant
 	app.mu.Lock()
 	defer app.mu.Unlock()
 	delete(app.roomLiveLocked(roomID).memberIceRestartBuckets, participantSessionID)
+}
+
+// allowRoomHandEvent charges the room_hand bucket (burst 4, refill 1 per 2s)
+// for ANY seated socket — guest or member — keyed on the per-socket
+// participant session id.
+func (app *kanbanBoardApp) allowRoomHandEvent(roomID string, participantSessionID string, now time.Time) bool {
+	return app.allowGuestBucket(roomID, participantSessionID,
+		func(s *roomLiveState) map[string]*guestChatBucket { return s.handBuckets },
+		roomHandBucketBurst, roomHandBucketRefill, now)
+}
+
+// dropRoomHandBucket releases a socket's room_hand bucket in the session
+// cleanup seam (same per-socket key lifetime as the member buckets).
+func (app *kanbanBoardApp) dropRoomHandBucket(roomID string, participantSessionID string) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	delete(app.roomLiveLocked(roomID).handBuckets, participantSessionID)
 }
 
 /* ---------- §6.1 pre-upgrade guest socket caps ---------- */
@@ -671,9 +743,18 @@ var guestWritableKanbanEvents = map[string]bool{
 	// start/stop events their tile only recovered via the roster fallback.
 	"screen_share_started": true,
 	"screen_share_stopped": true,
-	"offer":                true,
-	"answer":               true,
-	"candidate":            true,
+	// Wave 6 in-call: reactions and raised hands are room-wide ephemera every
+	// seat sees; host controls must reach the guest they target (mute request,
+	// removal notice) and the room-wide lock/mute/remove announcements carry
+	// no member-only data.
+	"room_reaction":            true,
+	"room_hand":                true,
+	"room_moderate":            true,
+	"room_moderate_request":    true,
+	"room_participant_removed": true,
+	"offer":                    true,
+	"answer":                   true,
+	"candidate":                true,
 }
 
 // guestTopLevelEvents are the raw websocketMessage envelopes a guest writer
@@ -727,6 +808,16 @@ var guestInboundEvents = map[string]bool{
 	"request_participant_tracks": true,
 	"media_quality":              true,
 	"media_error":                true,
+	// Wave 6 in-call: a guest may react and raise a hand (both allowlisted,
+	// rate-limited, name from the server-minted seat). room_moderate is
+	// deliberately absent — host controls never come from a guest socket.
+	"room_reaction": true,
+	"room_hand":     true,
+	// Wave 6 D4: guests publish a share on the same second m-line pair as
+	// members; both handlers touch only the sender's own roster row and
+	// its own forwarded tracks.
+	"screen_share_started": true,
+	"screen_share_stopped": true,
 }
 
 /* ---------- lazy media lifecycle (§4.4) ---------- */
@@ -959,6 +1050,8 @@ func (app *kanbanBoardApp) teardownRoomMediaAfterIdle(roomID string) {
 	state.scoutRuntimeStatus = RoomScoutClosed
 	state.scoutVoiceState = ""
 	state.scoutLastStatusReason = ""
+	state.scoutMode = ""
+	resetRoomInCallStateLocked(state)
 	state.mediaActor = nil
 	state.mediaSittingID = ""
 	state.capTimer = nil
@@ -1016,6 +1109,8 @@ func (app *kanbanBoardApp) teardownOfficeMediaAfterIdle() {
 	state.scoutRuntimeStatus = RoomScoutClosed
 	state.scoutVoiceState = ""
 	state.scoutLastStatusReason = ""
+	state.scoutMode = ""
+	resetRoomInCallStateLocked(state)
 	state.audioActivity = nil
 	state.audioActivityStart = 0
 	state.currentSpeechStartedAt = time.Time{}
@@ -1580,4 +1675,740 @@ func broadcastRoomsSnapshot() {
 		rooms = append(rooms, roomListPayload(room))
 	}
 	broadcastOfficeKanbanEvent("rooms", map[string]any{"rooms": rooms})
+}
+
+/* ---------- Wave 6 in-call: reactions, raised hands, host controls ---------- */
+
+// roomReactionAllowlist is the exact emoji row the control island offers.
+// Anything else is refused server-side so a client cannot fan out arbitrary
+// text through the reaction lane.
+var roomReactionAllowlist = []string{"👍", "❤️", "😂", "😮", "👏", "🎉", "🔥", "🤔"}
+
+// roomReactionMinInterval is the per-participant reaction rate limit.
+const roomReactionMinInterval = time.Second
+
+// roomModerateMuteGrace is how long a mute request waits for the target
+// client to comply (report micMuted) before the server drops its audio
+// forwarding. Tests shorten it.
+var roomModerateMuteGrace = 3 * time.Second
+
+var (
+	errRoomReactionUnknown     = errors.New("that reaction is not available")
+	errRoomReactionTooFast     = errors.New("one reaction per second")
+	errRoomParticipantAbsent   = errors.New("that participant is not in the room")
+	errRoomModerationInvalid   = errors.New("choose mute, remove, lock, or unlock")
+	errRoomModerationSelf      = errors.New("you cannot moderate yourself")
+	errRoomModerationForbidden = errors.New("only the room owner can moderate this room")
+	// errRoomParticipantRemoved answers a re-admission attempt by a seat the
+	// host ejected during the current sitting (guest session key, display
+	// name, or the exact closed participant session).
+	errRoomParticipantRemoved = errors.New("you were removed from this meeting by the host")
+)
+
+func roomReactionAllowed(emoji string) (string, bool) {
+	emoji = strings.TrimSpace(emoji)
+	for _, candidate := range roomReactionAllowlist {
+		if candidate == emoji {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// resetRoomInCallStateLocked clears the sitting-scoped in-call state when a
+// room's media is torn down. Callers hold app.mu.
+func resetRoomInCallStateLocked(state *roomLiveState) {
+	if state == nil {
+		return
+	}
+	state.handRaised = map[string]time.Time{}
+	state.reactionStamps = map[string]time.Time{}
+	state.hostMutedAt = map[string]time.Time{}
+	state.locked = false
+	state.lockedBy = ""
+	state.lockedAt = time.Time{}
+	// Ejections last exactly one sitting: the next sitting starts clean.
+	state.ejectedNames = map[string]time.Time{}
+	state.ejectedGuestSessions = map[string]time.Time{}
+	state.ejectedParticipantSessions = map[string]time.Time{}
+}
+
+// recordRoomReaction validates the emoji against the allowlist, charges the
+// per-participant 1/s limit, and shapes the room_reaction fan-out payload.
+// Identity comes from the admitted seat (name + participant session), never
+// the payload.
+func (app *kanbanBoardApp) recordRoomReaction(roomID, name, sessionID, emoji string, now time.Time) (map[string]any, error) {
+	emoji, ok := roomReactionAllowed(emoji)
+	if !ok {
+		return nil, errRoomReactionUnknown
+	}
+	name = canonicalRoomParticipantName(name)
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	if name == "" || state.participantCounts[name] <= 0 {
+		return nil, errRoomParticipantAbsent
+	}
+	if state.reactionStamps == nil {
+		state.reactionStamps = map[string]time.Time{}
+	}
+	if last, seen := state.reactionStamps[name]; seen && now.Sub(last) < roomReactionMinInterval {
+		return nil, errRoomReactionTooFast
+	}
+	state.reactionStamps[name] = now
+	return map[string]any{
+		"roomId":        state.id,
+		"participantId": sessionID,
+		"name":          name,
+		"emoji":         emoji,
+		"at":            now.UTC().Format(time.RFC3339Nano),
+	}, nil
+}
+
+// setRoomHandRaised raises or lowers the participant's hand. A raised hand
+// keeps its original stamp so the roster ordering is stable while the hand
+// stays up. Returns the room_hand payload and the refreshed roster snapshot.
+// An UNCHANGED hand (re-raise while up, lower while down) is a true no-op:
+// the payload still describes the current state for a sender-only echo, but
+// the snapshot is nil — no roster projection is built and callers must not
+// fan anything out.
+func (app *kanbanBoardApp) setRoomHandRaised(roomID, name, sessionID string, raised bool, now time.Time) (map[string]any, map[string]any, error) {
+	name = canonicalRoomParticipantName(name)
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	if name == "" || state.participantCounts[name] <= 0 {
+		return nil, nil, errRoomParticipantAbsent
+	}
+	if state.handRaised == nil {
+		state.handRaised = map[string]time.Time{}
+	}
+	at := now.UTC()
+	changed := false
+	if raised {
+		if existing, already := state.handRaised[name]; already {
+			at = existing
+		} else {
+			state.handRaised[name] = at
+			changed = true
+		}
+	} else if _, wasRaised := state.handRaised[name]; wasRaised {
+		delete(state.handRaised, name)
+		changed = true
+	}
+	payload := map[string]any{
+		"roomId":        state.id,
+		"participantId": sessionID,
+		"name":          name,
+		"raised":        raised,
+		"at":            at.Format(time.RFC3339Nano),
+	}
+	if !changed {
+		return payload, nil, nil
+	}
+	return payload, app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity()), nil
+}
+
+// decorateRoomSnapshotLocked adds the Wave 6 in-call fields to the roster
+// projection: handRaisedAt (name -> RFC3339Nano), raisedHands (names in raise
+// order), hostMutedAt, and locked. It also prunes per-name state for anyone no
+// longer present, which is what lowers a hand on leave. Callers hold app.mu.
+func (app *kanbanBoardApp) decorateRoomSnapshotLocked(state *roomLiveState, participants []string, snapshot map[string]any) {
+	if state == nil || snapshot == nil {
+		return
+	}
+	present := make(map[string]bool, len(participants))
+	for _, name := range participants {
+		present[name] = true
+	}
+	type raisedHand struct {
+		name string
+		at   time.Time
+	}
+	ordered := make([]raisedHand, 0, len(state.handRaised))
+	handRaisedAt := make(map[string]string, len(state.handRaised))
+	for name, at := range state.handRaised {
+		if !present[name] {
+			delete(state.handRaised, name)
+			continue
+		}
+		handRaisedAt[name] = at.UTC().Format(time.RFC3339Nano)
+		ordered = append(ordered, raisedHand{name: name, at: at})
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if !ordered[i].at.Equal(ordered[j].at) {
+			return ordered[i].at.Before(ordered[j].at)
+		}
+		return ordered[i].name < ordered[j].name
+	})
+	raisedHands := make([]string, 0, len(ordered))
+	for _, hand := range ordered {
+		raisedHands = append(raisedHands, hand.name)
+	}
+	for name := range state.reactionStamps {
+		if !present[name] {
+			delete(state.reactionStamps, name)
+		}
+	}
+	// hostMutedAt is informational on the wire: clients store it but render
+	// nothing from it today; mediaStates[name].MicMuted is the rendered truth.
+	hostMutedAt := make(map[string]string, len(state.hostMutedAt))
+	for name, at := range state.hostMutedAt {
+		if !present[name] {
+			delete(state.hostMutedAt, name)
+			continue
+		}
+		hostMutedAt[name] = at.UTC().Format(time.RFC3339Nano)
+	}
+	snapshot["handRaisedAt"] = handRaisedAt
+	snapshot["raisedHands"] = raisedHands
+	snapshot["hostMutedAt"] = hostMutedAt
+	snapshot["locked"] = state.locked
+}
+
+// setRoomLocked flips the host lock and returns the refreshed roster snapshot.
+func (app *kanbanBoardApp) setRoomLocked(roomID string, locked bool, by string, now time.Time) map[string]any {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	state.locked = locked
+	if locked {
+		state.lockedBy = canonicalRoomActorName(by)
+		state.lockedAt = now.UTC()
+	} else {
+		state.lockedBy = ""
+		state.lockedAt = time.Time{}
+	}
+	return app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity())
+}
+
+// roomJoinLocked answers the HTTP join surfaces (guest join): a locked room
+// with people in it refuses new arrivals.
+func (app *kanbanBoardApp) roomJoinLocked(roomID string) bool {
+	if app == nil {
+		return false
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	return state.locked && app.activeParticipantCountInRoomLocked(state) > 0
+}
+
+// roomAdmissionLockedLocked is the admission-seam half of the host lock. A
+// name already present (another device, a refreshed tab) always passes — the
+// lock keeps current participants, it does not evict them. An empty room
+// clears the lock so a stale flag can never strand the next sitting's first
+// arrival. Callers hold app.mu.
+func (app *kanbanBoardApp) roomAdmissionLockedLocked(state *roomLiveState, name string) bool {
+	if state == nil || !state.locked {
+		return false
+	}
+	if state.participantCounts[name] > 0 {
+		return false
+	}
+	if app.activeParticipantCountInRoomLocked(state) == 0 {
+		state.locked = false
+		state.lockedBy = ""
+		state.lockedAt = time.Time{}
+		return false
+	}
+	return true
+}
+
+type roomModerationRequest struct {
+	Action        string `json:"action"`
+	ParticipantID string `json:"participantId"`
+}
+
+// resolveRoomModerationTarget maps the client-supplied participantId — either
+// a participant session id from a room_reaction/room_hand payload or the
+// roster name itself — onto a present participant.
+func (app *kanbanBoardApp) resolveRoomModerationTarget(roomID, participantID string) (string, error) {
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" {
+		return "", errRoomParticipantAbsent
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	for name, endpoints := range state.participantEndpoints {
+		for _, sessionID := range endpoints {
+			if sessionID == participantID && state.participantCounts[name] > 0 {
+				return name, nil
+			}
+		}
+	}
+	if name := canonicalRoomParticipantName(participantID); name != "" && state.participantCounts[name] > 0 {
+		return name, nil
+	}
+	return "", errRoomParticipantAbsent
+}
+
+// moderateRoom is the server half of the room_moderate verb. The websocket
+// case has already proven the requester is the room owner (roomManagedByUser;
+// guests never reach here). It returns the room-wide room_moderate payload.
+func (app *kanbanBoardApp) moderateRoom(roomID, actor, raw string) (map[string]any, error) {
+	if app == nil {
+		return nil, errRoomModerationInvalid
+	}
+	roomID = normalizeRoomID(roomID)
+	actor = canonicalRoomParticipantName(actor)
+	var request roomModerationRequest
+	if strings.TrimSpace(raw) != "" {
+		if err := json.Unmarshal([]byte(raw), &request); err != nil {
+			return nil, errRoomModerationInvalid
+		}
+	}
+	action := strings.ToLower(strings.TrimSpace(request.Action))
+	now := time.Now().UTC()
+	payload := map[string]any{
+		"ok":     true,
+		"roomId": roomID,
+		"action": action,
+		"by":     actor,
+		"at":     now.Format(time.RFC3339Nano),
+	}
+	switch action {
+	case "lock", "unlock":
+		snapshot := app.setRoomLocked(roomID, action == "lock", actor, now)
+		payload["locked"] = action == "lock"
+		broadcastRoomKanbanEvent(roomID, "participants", snapshot)
+		return payload, nil
+	case "mute", "remove":
+		target, err := app.resolveRoomModerationTarget(roomID, request.ParticipantID)
+		if err != nil {
+			return nil, err
+		}
+		if sameParticipantName(target, actor) {
+			return nil, errRoomModerationSelf
+		}
+		payload["name"] = target
+		payload["participantId"] = strings.TrimSpace(request.ParticipantID)
+		if action == "mute" {
+			// Ask first: the target's own client mutes and reports it through
+			// participant_media_state. If it has not complied when the grace
+			// window closes, the server stops forwarding its audio.
+			sendRoomKanbanEventToParticipant(roomID, target, "room_moderate_request", map[string]any{
+				"roomId": roomID,
+				"action": "mute",
+				"by":     actor,
+				"at":     now.Format(time.RFC3339Nano),
+			})
+			// The grace timer is bound to the exact sessions that were asked. A
+			// same-name rejoin inside the window is a fresh seat that never saw
+			// the request, so enforcement must not touch it.
+			generation := app.roomMediaGeneration(roomID)
+			askedSessions := app.participantSessionIDsInRoom(roomID, target)
+			time.AfterFunc(roomModerateMuteGrace, func() {
+				app.enforceRoomMute(roomID, target, generation, actor, askedSessions)
+			})
+			payload["enforced"] = false
+			return payload, nil
+		}
+		// Remember the ejection for this sitting BEFORE the sockets close, so a
+		// reload racing the close cannot re-seat the same guest link/session.
+		app.recordRoomEjection(roomID, target, now)
+		payload["removed"] = removeRoomParticipantConnections(roomID, target, strings.TrimSpace(request.ParticipantID), actor, now)
+		return payload, nil
+	default:
+		return nil, errRoomModerationInvalid
+	}
+}
+
+// participantSessionIDsInRoom lists the participant session ids currently
+// holding endpoints for one name in one room.
+func (app *kanbanBoardApp) participantSessionIDsInRoom(roomID, name string) []string {
+	name = canonicalRoomParticipantName(name)
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	sessions := make([]string, 0, len(state.participantEndpoints[name]))
+	for _, sessionID := range state.participantEndpoints[name] {
+		if sessionID != "" {
+			sessions = append(sessions, sessionID)
+		}
+	}
+	sort.Strings(sessions)
+	return sessions
+}
+
+// enforceRoomMute runs when the mute grace window closes. It acts only on the
+// sessions that were asked (askedSessions) and still hold the seat: a session
+// that complied (reports micMuted) is left alone; a session that left, or a
+// same-name rejoin that was never asked, is never touched. For the remaining
+// asked sessions the audio tracks are dropped from the forwarding registry
+// (video and share stay) and their roster rows are stamped so the room sees an
+// honest "muted by host".
+func (app *kanbanBoardApp) enforceRoomMute(roomID, name string, generation uint64, actor string, askedSessions []string) {
+	if app == nil || len(askedSessions) == 0 {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	name = canonicalRoomParticipantName(name)
+	asked := make(map[string]bool, len(askedSessions))
+	for _, sessionID := range askedSessions {
+		asked[sessionID] = true
+	}
+	app.mu.Lock()
+	state := app.roomLiveLocked(roomID)
+	if name == "" || state.mediaGen != generation || state.participantCounts[name] <= 0 {
+		app.mu.Unlock()
+		return
+	}
+	// Asked sessions that are still seated and have not complied.
+	pending := map[string]bool{}
+	for endpointID, sessionID := range state.participantEndpoints[name] {
+		if !asked[sessionID] {
+			continue
+		}
+		endpointState, known := state.participantEndpointMedia[name][endpointID]
+		if !known {
+			endpointState = state.participantMedia[name]
+		}
+		if !endpointState.MicMuted {
+			pending[sessionID] = true
+		}
+	}
+	app.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+
+	dropped := dropParticipantAudioTracks(roomID, name, pending)
+
+	app.mu.Lock()
+	state = app.roomLiveLocked(roomID)
+	if state.mediaGen != generation || state.participantCounts[name] <= 0 {
+		app.mu.Unlock()
+		return
+	}
+	now := time.Now().UTC()
+	stamp := now.Format(time.RFC3339Nano)
+	if state.participantEndpointMedia == nil {
+		state.participantEndpointMedia = map[string]map[string]participantMediaState{}
+	}
+	endpointMedia := state.participantEndpointMedia[name]
+	if endpointMedia == nil {
+		endpointMedia = map[string]participantMediaState{}
+		state.participantEndpointMedia[name] = endpointMedia
+	}
+	stamped := false
+	for endpointID, sessionID := range state.participantEndpoints[name] {
+		if !pending[sessionID] {
+			continue
+		}
+		current, known := endpointMedia[endpointID]
+		if !known {
+			current = state.participantMedia[name]
+		}
+		current.MicMuted = true
+		current.UpdatedAt = stamp
+		endpointMedia[endpointID] = current
+		stamped = true
+	}
+	if !stamped {
+		// Every pending session left between the drop and the stamp.
+		app.mu.Unlock()
+		return
+	}
+	state.participantMedia[name] = participantMediaProjectionLocked(state, name, stamp)
+	if state.hostMutedAt == nil {
+		state.hostMutedAt = map[string]time.Time{}
+	}
+	state.hostMutedAt[name] = now
+	snapshot := app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity())
+	app.mu.Unlock()
+
+	if dropped {
+		requestRoomMediaCommand(roomID, roomMediaCommandLeave)
+	}
+	log.Infof("room_moderate_mute_enforced room=%s participant=%s by=%s sessions=%d dropped_audio=%t", roomID, mediaLogPrincipal(name), mediaLogPrincipal(actor), len(pending), dropped)
+	broadcastRoomKanbanEvent(roomID, "participants", snapshot)
+	broadcastRoomKanbanEvent(roomID, "room_moderate", map[string]any{
+		"ok":       true,
+		"roomId":   roomID,
+		"action":   "mute",
+		"name":     name,
+		"by":       actor,
+		"enforced": true,
+		"at":       stamp,
+	})
+}
+
+// dropParticipantAudioTracks is the audio-only form of
+// removeParticipantTracksLocked: it detaches the forwarded audio tracks that
+// belong to the given participant sessions in one room and leaves video/share
+// (and any session not listed) untouched.
+func dropParticipantAudioTracks(roomID, name string, sessions map[string]bool) bool {
+	roomID = normalizeRoomID(roomID)
+	listLock.Lock()
+	defer listLock.Unlock()
+	dropped := false
+	for trackID, participantName := range trackParticipants {
+		if !sameParticipantName(participantName, name) || normalizeRoomID(trackRooms[trackID]) != roomID {
+			continue
+		}
+		if !sessions[trackParticipantSessions[trackID]] {
+			continue
+		}
+		trackLocal := trackLocals[trackID]
+		if trackLocal == nil || trackLocal.Kind() != webrtc.RTPCodecTypeAudio {
+			continue
+		}
+		delete(trackLocals, trackID)
+		delete(trackParticipants, trackID)
+		delete(trackParticipantSessions, trackID)
+		delete(trackRooms, trackID)
+		delete(trackSourceIDs, trackID)
+		delete(trackLayerRIDs, trackID)
+		delete(trackLayerGroups, trackID)
+		delete(trackMediaOwners, trackID)
+		delete(trackSources, trackID)
+		delete(trackPaused, trackID)
+		subscriberKeyframeThrottle.forget(trackID)
+		dropped = true
+	}
+	return dropped
+}
+
+// participantWritersInRoom collects the distinct websocket writers a
+// participant currently holds in one room — admitted sockets and media-joined
+// sockets alike — so a targeted event reaches every device of that person.
+func participantWritersInRoom(roomID, name string) []peerConnectionState {
+	roomID = normalizeRoomID(roomID)
+	listLock.RLock()
+	defer listLock.RUnlock()
+	seen := map[*threadSafeWriter]bool{}
+	var states []peerConnectionState
+	collect := func(state peerConnectionState) {
+		if state.websocket == nil || seen[state.websocket] {
+			return
+		}
+		if !sameParticipantName(state.participantName, name) || normalizeRoomID(state.roomID) != roomID {
+			return
+		}
+		seen[state.websocket] = true
+		states = append(states, state)
+	}
+	for _, state := range peerConnections {
+		collect(state)
+	}
+	for _, state := range activeParticipantConnections {
+		collect(state)
+	}
+	return states
+}
+
+// sendRoomKanbanEventToParticipant delivers one event to exactly one
+// participant's sockets in one room (never the whole room).
+func sendRoomKanbanEventToParticipant(roomID, name, event string, data any) int {
+	states := participantWritersInRoom(roomID, name)
+	if len(states) == 0 {
+		return 0
+	}
+	raw, err := encodeKanbanEvent(event, data)
+	if err != nil {
+		log.Errorf("Failed to encode %s for %s: %v", event, mediaLogPrincipal(name), err)
+		return 0
+	}
+	writers := make([]*threadSafeWriter, 0, len(states))
+	for _, state := range states {
+		writers = append(writers, state.websocket)
+	}
+	_, delivered := deliverKanbanEventAcknowledged(event, writers, raw)
+	return delivered
+}
+
+// removeRoomParticipantConnections ejects a participant. Ordering is the
+// contract: the target's own sockets hear room_participant_removed{self:true}
+// first, then the whole room hears room_participant_removed, and only then do
+// the target's PeerConnection and websocket close — so the socket's own
+// handler cleanup (presence retirement + participant_left, exactly as an
+// ordinary leave) can never precede the announcement.
+func removeRoomParticipantConnections(roomID, name, participantID, actor string, now time.Time) bool {
+	roomID = normalizeRoomID(roomID)
+	states := participantWritersInRoom(roomID, name)
+	if len(states) == 0 {
+		return false
+	}
+	at := now.UTC().Format(time.RFC3339Nano)
+	notice := map[string]any{
+		"roomId":        roomID,
+		"name":          name,
+		"participantId": participantID,
+		"by":            actor,
+		"at":            at,
+		"self":          true,
+	}
+	for _, state := range states {
+		_ = sendKanbanEvent(state.websocket, "room_participant_removed", notice)
+	}
+	broadcastRoomKanbanEvent(roomID, "room_participant_removed", map[string]any{
+		"roomId":        roomID,
+		"name":          name,
+		"participantId": participantID,
+		"by":            actor,
+		"at":            at,
+	})
+	closed := map[*webrtc.PeerConnection]bool{}
+	for _, state := range states {
+		if state.peerConnection != nil && !closed[state.peerConnection] {
+			closed[state.peerConnection] = true
+			if err := state.peerConnection.Close(); err != nil {
+				log.Errorf("Failed to close removed participant PeerConnection: %v", err)
+			}
+		}
+		_ = state.websocket.Close()
+	}
+	log.Infof("room_moderate_removed room=%s participant=%s by=%s sockets=%d", normalizeRoomID(roomID), mediaLogPrincipal(name), mediaLogPrincipal(actor), len(states))
+	return true
+}
+
+// normalizedEjectionName is the display-name key of the ejection record.
+func normalizedEjectionName(name string) string {
+	return strings.ToLower(canonicalRoomParticipantName(name))
+}
+
+// recordRoomEjection remembers a host "remove" for the current sitting: the
+// normalized display name, every guest session key seated under that name,
+// and every participant session id currently holding the seat. Admission
+// honours all three until resetRoomInCallStateLocked clears them.
+func (app *kanbanBoardApp) recordRoomEjection(roomID, name string, now time.Time) {
+	if app == nil {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	name = canonicalRoomParticipantName(name)
+	if name == "" {
+		return
+	}
+	sessionIDs := map[string]bool{}
+	for _, state := range participantWritersInRoom(roomID, name) {
+		if state.sessionID != "" {
+			sessionIDs[state.sessionID] = true
+		}
+	}
+	at := now.UTC()
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	if state.ejectedNames == nil {
+		state.ejectedNames = map[string]time.Time{}
+	}
+	if state.ejectedGuestSessions == nil {
+		state.ejectedGuestSessions = map[string]time.Time{}
+	}
+	if state.ejectedParticipantSessions == nil {
+		state.ejectedParticipantSessions = map[string]time.Time{}
+	}
+	state.ejectedNames[normalizedEjectionName(name)] = at
+	for sessionKey, display := range state.guestSeats {
+		if sameParticipantName(display, name) {
+			state.ejectedGuestSessions[sessionKey] = at
+		}
+	}
+	for _, sessionID := range state.participantEndpoints[name] {
+		if sessionID != "" {
+			sessionIDs[sessionID] = true
+		}
+	}
+	for sessionID := range sessionIDs {
+		state.ejectedParticipantSessions[sessionID] = at
+	}
+}
+
+// roomEjectionRefusalLocked is the admission half of a host remove. A guest
+// is refused when its session key OR its (deduped) display name was ejected
+// this sitting; a member is refused only for the exact participant session
+// that was closed. Callers hold app.mu. Empty keys never match.
+func roomEjectionRefusalLocked(state *roomLiveState, guestSessionKey, name, participantSessionID string) error {
+	if state == nil {
+		return nil
+	}
+	if guestSessionKey != "" {
+		if _, ejected := state.ejectedGuestSessions[guestSessionKey]; ejected {
+			return errRoomParticipantRemoved
+		}
+		if key := normalizedEjectionName(name); key != "" {
+			if _, ejected := state.ejectedNames[key]; ejected {
+				return errRoomParticipantRemoved
+			}
+		}
+	}
+	if participantSessionID != "" {
+		if _, ejected := state.ejectedParticipantSessions[participantSessionID]; ejected {
+			return errRoomParticipantRemoved
+		}
+	}
+	return nil
+}
+
+// clearHostMuteForNewSessionLocked drops the roster's "muted by host" stamp
+// when a NEW session of that name registers. enforceRoomMute is scoped to
+// the exact sessions that were asked (a fresh seat was never asked and its
+// audio is not dropped), so keeping the stamp would claim a mute that is not
+// in force. Callers hold app.mu.
+func clearHostMuteForNewSessionLocked(state *roomLiveState, name string) {
+	if state == nil || state.hostMutedAt == nil {
+		return
+	}
+	delete(state.hostMutedAt, canonicalRoomParticipantName(name))
+}
+
+// participantEndpointScreenSharingInRoom reports whether the exact endpoint
+// session currently has an active share on the roster — the check that lets
+// a share TEARDOWN bypass the guest state bucket.
+func (app *kanbanBoardApp) participantEndpointScreenSharingInRoom(roomID, name, endpointID, sessionID string) bool {
+	if app == nil {
+		return false
+	}
+	name = canonicalRoomParticipantName(name)
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	if name == "" || state.participantCounts[name] <= 0 {
+		return false
+	}
+	if current, ok := state.participantEndpoints[name][endpointID]; !ok || current != sessionID {
+		return false
+	}
+	if endpointState, known := state.participantEndpointMedia[name][endpointID]; known {
+		return endpointState.ScreenSharing
+	}
+	return state.participantMedia[name].ScreenSharing
+}
+
+// seatedMemberAccountEmailsInRoom lists the authenticated account emails
+// behind a name's live sockets in one room — the principal that was actually
+// admitted, which in production need not equal the roster-derived
+// "<name>@…" address. Empty for guests or a seat with no live socket.
+func seatedMemberAccountEmailsInRoom(roomID, name string) []string {
+	seen := map[string]bool{}
+	var emails []string
+	for _, state := range participantWritersInRoom(roomID, name) {
+		email := normalizeAccountEmail(state.sessionEmail)
+		if email == "" || seen[email] {
+			continue
+		}
+		seen[email] = true
+		emails = append(emails, email)
+	}
+	sort.Strings(emails)
+	return emails
+}
+
+// participantSeatedInRoom reports whether the name currently holds presence
+// in the room's live state (never creates the room state).
+func (app *kanbanBoardApp) participantSeatedInRoom(roomID, name string) bool {
+	if app == nil {
+		return false
+	}
+	name = canonicalRoomParticipantName(name)
+	if name == "" {
+		return false
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state, ok := app.roomLive[normalizeRoomID(roomID)]
+	return ok && state.participantCounts[name] > 0
 }

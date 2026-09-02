@@ -92,14 +92,18 @@ type meetingFinalizationReceipt struct {
 	Brain                   meetingFinalizationStageReceipt `json:"brain"`
 	Digest                  meetingFinalizationStageReceipt `json:"digest"`
 	Actions                 meetingFinalizationStageReceipt `json:"actions"`
-	StartedAt               string                          `json:"startedAt"`
-	UpdatedAt               string                          `json:"updatedAt"`
-	FinalizedAt             string                          `json:"finalizedAt,omitempty"`
-	DegradedAt              string                          `json:"degradedAt,omitempty"`
-	ArchiveSyncedAt         string                          `json:"archiveSyncedAt,omitempty"`
-	LastError               string                          `json:"lastError,omitempty"`
-	RetryAttempt            int                             `json:"retryAttempt,omitempty"`
-	RetryAfter              string                          `json:"retryAfter,omitempty"`
+	// Recording is a read-side projection of meetingRecord.Recording (Wave 7
+	// D2): an optional output stage, never part of readiness, never persisted
+	// here — the record field is the truth.
+	Recording       *meetingFinalizationStageReceipt `json:"recording,omitempty"`
+	StartedAt       string                           `json:"startedAt"`
+	UpdatedAt       string                           `json:"updatedAt"`
+	FinalizedAt     string                           `json:"finalizedAt,omitempty"`
+	DegradedAt      string                           `json:"degradedAt,omitempty"`
+	ArchiveSyncedAt string                           `json:"archiveSyncedAt,omitempty"`
+	LastError       string                           `json:"lastError,omitempty"`
+	RetryAttempt    int                              `json:"retryAttempt,omitempty"`
+	RetryAfter      string                           `json:"retryAfter,omitempty"`
 }
 
 type meetingFinalizationOutputBinding struct {
@@ -895,6 +899,7 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 				app.clearFinalizedLiveTemporalBrain(record)
 				app.publishFinalizedMeetingSourceEpisodeFailSoft(ctx, record)
 				app.scheduleMeetingSourceEpisodeRetrySweep()
+				record = app.postMeetingRecapCardFailSoft(record)
 				return record, nil
 			}
 			record, err = app.meetings.beginFinalizationAtRevision(meetingID, source, observedRevision, true, time.Now().UTC())
@@ -999,6 +1004,9 @@ func (app *kanbanBoardApp) finalizeMeetingCore(ctx context.Context, meetingID st
 			app.clearFinalizedLiveTemporalBrain(finalized)
 			app.publishFinalizedMeetingSourceEpisodeFailSoft(ctx, finalized)
 			app.scheduleMeetingSourceEpisodeRetrySweep()
+			// Wave 7 D3: the recap card rides the durable receipt. Fail-soft and
+			// idempotent — a retry that lands here again finds the stamp.
+			finalized = app.postMeetingRecapCardFailSoft(finalized)
 		}
 		return finalized, err
 	}

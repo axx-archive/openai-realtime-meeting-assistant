@@ -109,9 +109,10 @@ func recallEntryScopeAllowed(metadata map[string]string, principal RecallPrincip
 	}
 	visibility := strings.ToLower(strings.TrimSpace(metadata["visibility"]))
 	switch visibility {
-	case "", "organization", "org", "team", "public", "shared":
+	case "", "organization", "org", "team", "public", "shared", fileVisibilityCompany:
 		// Known organization/shared vocabularies. Empty is the legacy office
-		// migration value and remains organization-visible.
+		// migration value and remains organization-visible; "company" is the
+		// Drive per-file default (files.go) with the same every-member scope.
 	case "private", "owner":
 		if principal.Audience == "shared_channel" || principal.Audience == "shared_room" {
 			return false
@@ -121,6 +122,19 @@ func recallEntryScopeAllowed(metadata map[string]string, principal RecallPrincip
 			viewer = normalizeAccountEmail(principal.User.Email)
 		}
 		if viewer == "" || viewer != normalizeAccountEmail(metadata["ownerEmail"]) {
+			return false
+		}
+	case fileVisibilityPeople:
+		// Drive per-file grants (files.go): the uploader plus the explicitly
+		// granted accounts, never a shared-room/channel service principal.
+		if principal.Audience == "shared_channel" || principal.Audience == "shared_room" {
+			return false
+		}
+		viewer := ""
+		if principal.User != nil {
+			viewer = normalizeAccountEmail(principal.User.Email)
+		}
+		if viewer == "" || !fileGrantsAllowEmail(metadata, viewer) {
 			return false
 		}
 	case "room", "room_only":

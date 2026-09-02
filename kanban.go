@@ -742,6 +742,9 @@ func newKanbanBoardApp() *kanbanBoardApp {
 	// pre-gate-qualifying deliverable savedToFiles=true so introducing the
 	// explicit-save gate never disappears content the team already relies on.
 	app.grandfatherSavedToFilesAtBoot()
+	// Idempotent Drive ACL stamp (Wave 5 D1): unlabeled kind=file rows get the
+	// explicit company visibility they already read as; a second boot is a no-op.
+	app.migrateFileVisibilityDefaults()
 	if !loadedBoard && boardPersistenceHealthy {
 		if err := app.persistBoard(); err != nil {
 			log.Errorf("Could not persist initial Kanban board: %v", err)
@@ -941,6 +944,9 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	// so a first deploy never token-spikes over weeks of stored brains.
 	app.startMeetingDigestWorker(apiKey)
 	app.startDayDigestWorker(apiKey)
+	// Wave 8 D5: chat-native extractor — channel/riff rows digest per thread
+	// (channel_digest.go) instead of riding the meeting brain prompt.
+	app.startChannelDigestWorker(apiKey)
 	// Track-2 Wave 3 (amendment A1): the entity ledger consolidates each landed
 	// meeting_digest's facts — plus new decision-ledger rows — into the
 	// canonical cross-meeting registry of decisions / action items / topics /
@@ -1978,6 +1984,10 @@ func (app *kanbanBoardApp) sessionConfig(model string) map[string]any {
 var realtimeRoomVoiceExcluded = map[string]bool{
 	"fiscal_api_docs":   true,
 	"fiscal_data_query": true,
+	// remember_note is attributed to ONE person (rememberedBy); the shared
+	// room voice has no single actor and its dispatch refuses the call, so
+	// advertising it there only invites a tool call that always fails.
+	rememberNoteToolName: true,
 }
 
 // realtimeRoomVoiceTools is kanbanTools() minus the heavy-payload tools that
@@ -2688,7 +2698,7 @@ type orchestratorToolPolicy struct {
 // the orchestrator; every present tool declares both authority and effects.
 var orchestratorToolPolicies = map[string]orchestratorToolPolicy{
 	"create_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"}, "update_artifact": {codexJobAuthorityWorkspaceWrite, "artifact_write"},
-	"answer_memory_question": {codexJobAuthorityReadOnly, "read"}, "note_for_the_record": {codexJobAuthorityWorkspaceWrite, "memory_write"},
+	"answer_memory_question": {codexJobAuthorityReadOnly, "read"}, "note_for_the_record": {codexJobAuthorityWorkspaceWrite, "memory_write"}, rememberNoteToolName: {codexJobAuthorityWorkspaceWrite, "memory_write"},
 	"meeting_interval_recall": {codexJobAuthorityReadOnly, "read"}, "cross_meeting_briefing": {codexJobAuthorityReadOnly, "read"}, "get_meeting_detail": {codexJobAuthorityReadOnly, "read"},
 	"create_package": {codexJobAuthorityWorkspaceWrite, "package_write"}, "attach_to_package": {codexJobAuthorityWorkspaceWrite, "package_write"},
 	"advance_package_stage": {codexJobAuthorityWorkspaceWrite, "package_write"}, "send_notification": {codexJobAuthorityWorkspaceWrite, "notification_write"},
@@ -3450,6 +3460,7 @@ func (app *kanbanBoardApp) kanbanTools() []map[string]any {
 				"additionalProperties": false,
 			},
 		},
+		rememberNoteToolDefinition(),
 		{
 			"type":        "function",
 			"name":        "do_nothing",
@@ -4235,6 +4246,11 @@ func (app *kanbanBoardApp) applyToolCallArgs(toolName string, args map[string]an
 		// and the agent-thread orchestrator passes job.RequestedBy + thread + tool-
 		// call id, so those file author-certain with their own idempotency scope.
 		return app.noteForTheRecordTool(args, "", hourBucketedNoteScope("room-voice", time.Now()))
+	case rememberNoteToolName:
+		// A remember is attributed to ONE person (rememberedBy); the shared room
+		// voice has no single actor, so it is refused here. The private voice
+		// and orchestrator paths pass the signed-in requester.
+		return app.rememberNoteTool(args, "", hourBucketedNoteScope("room-voice", time.Now()))
 	case "portfolio_health":
 		// Read-only aggregation over the venture packages; no requester needed,
 		// so the shared dispatch serves both the room and private voice paths.
@@ -4657,7 +4673,7 @@ func privateRealtimeVoiceServerActionAllowed(toolName string) bool {
 		"save_to_files",
 		// Deliberate-write path: file an author-certain "for the record" note into
 		// company memory. The private user owns filing their own notes.
-		"note_for_the_record",
+		"note_for_the_record", rememberNoteToolName,
 		// Private grill (Wave 12) — client-driven session.update swap, private
 		// only. The room grill (start_grill_session/end_grill_session) swaps the
 		// SHARED room persona server-side and stays room-only above; this variant
@@ -5000,6 +5016,11 @@ func (app *kanbanBoardApp) applyPrivateRealtimeVoiceTool(requesterEmail string, 
 	// files once, a later deliberate re-file lands as its own record.
 	if toolName == "note_for_the_record" {
 		return app.noteForTheRecordTool(args, requesterEmail, hourBucketedNoteScope("private-voice:"+normalizeAccountEmail(requesterEmail), time.Now()))
+	}
+	// remember_note (Wave 8 D1) is the deliberate remember() seam; the signed-in
+	// requester is rememberedBy. Same hour-bucketed idempotency scope.
+	if toolName == rememberNoteToolName {
+		return app.rememberNoteTool(args, requesterEmail, hourBucketedNoteScope("private-voice:"+normalizeAccountEmail(requesterEmail), time.Now()))
 	}
 	// start_chat_as_user posts on the user's behalf with a mandatory,
 	// server-stamped disclosure — the requester identity, never a model arg.
@@ -6145,7 +6166,7 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// reflections, and cursor stubs stay recall/bookkeeping material: the
 		// briefing surfaces read digests through the range helpers, not this
 		// feed. None of them are timeline entries.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == memoryContextKindCompanyConversation || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog || isMeetingDigestKind(entry.Kind) {
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == memoryContextKindCompanyConversation || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindChannelDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog || isMeetingDigestKind(entry.Kind) {
 			continue
 		}
 		visible = append(visible, entry)
@@ -6232,9 +6253,12 @@ func (app *kanbanBoardApp) answerMemoryQuestionForPrincipal(args map[string]any,
 			answer = buildMemoryAnswer(query, matches)
 		}
 	}
+	// Wave 8 D7: the recall grade rides the broadcast and the tool result.
+	coverage := string(recallApp.answerRecallCoverage(query, matches, contextEntries, time.Now()).Status)
 	response := map[string]any{
-		"query":  query,
-		"answer": answer,
+		"query":    query,
+		"answer":   answer,
+		"coverage": coverage,
 	}
 
 	if emit {
@@ -6249,11 +6273,12 @@ func (app *kanbanBoardApp) answerMemoryQuestionForPrincipal(args map[string]any,
 	}
 
 	return map[string]any{
-		"ok":      true,
-		"query":   query,
-		"answer":  answer,
-		"matches": len(matches),
-		"context": len(contextEntries),
+		"ok":       true,
+		"query":    query,
+		"answer":   answer,
+		"matches":  len(matches),
+		"context":  len(contextEntries),
+		"coverage": coverage,
 	}, false, nil
 }
 
@@ -7315,6 +7340,9 @@ func (app *kanbanBoardApp) admitParticipantSessionEndpointInRoom(roomID string, 
 func (app *kanbanBoardApp) validateParticipantAdmissionLocked(state *roomLiveState, name, endpointID string) error {
 	capacity := configuredMeetingRoomCapacity()
 	alreadyPresent := state.participantCounts[name] > 0
+	if !alreadyPresent && app.roomAdmissionLockedLocked(state, name) {
+		return errRoomLocked
+	}
 	if !alreadyPresent && app.activeParticipantCountInRoomLocked(state) >= capacity {
 		return fmt.Errorf("the room is full. this room supports %d people with video on", capacity)
 	}
@@ -8041,6 +8069,8 @@ func (app *kanbanBoardApp) startParticipantLivenessSweeper() {
 		defer ticker.Stop()
 		for range ticker.C {
 			app.sweepStaleParticipantSessions()
+			// Wave 7 D2: abandoned recording chunk streams ride the same tick.
+			sweepAbandonedMeetingRecordingUploads()
 		}
 	}()
 }
@@ -8483,7 +8513,7 @@ func (app *kanbanBoardApp) roomSnapshotLockedForRoom(room *roomLiveState, capaci
 		endpointMediaStates[participant] = perEndpoint
 	}
 
-	return map[string]any{
+	snapshot := map[string]any{
 		"roomId":              room.id,
 		"participants":        participants,
 		"capacity":            capacity,
@@ -8494,6 +8524,8 @@ func (app *kanbanBoardApp) roomSnapshotLockedForRoom(room *roomLiveState, capaci
 		"endpointCounts":      app.participantEndpointCountsLocked(room),
 		"recording":           app.roomRecordingStateLocked(room),
 	}
+	app.decorateRoomSnapshotLocked(room, participants, snapshot)
+	return snapshot
 }
 
 func (app *kanbanBoardApp) archiveMeeting(archivedBy string) (meetingArchiveResult, error) {
@@ -10007,28 +10039,7 @@ func broadcastOfficeKanbanEvent(event string, data any) {
 // a harmless re-render.
 func broadcastSignedInKanbanEvent(event string, data any) {
 	if event == "memory" && kanbanApp != nil {
-		type recipient struct {
-			websocket *threadSafeWriter
-			email     string
-			roomID    string
-		}
-		listLock.RLock()
-		seen := make(map[*threadSafeWriter]bool, len(officeConnections)+len(peerConnections))
-		recipients := make([]recipient, 0, len(officeConnections)+len(peerConnections))
-		for _, state := range officeConnections {
-			if state.websocket != nil && !seen[state.websocket] {
-				seen[state.websocket] = true
-				recipients = append(recipients, recipient{state.websocket, state.sessionEmail, officeRoomID})
-			}
-		}
-		for _, state := range peerConnections {
-			if state.websocket != nil && !state.websocket.guest && !seen[state.websocket] {
-				seen[state.websocket] = true
-				recipients = append(recipients, recipient{state.websocket, state.sessionEmail, state.roomID})
-			}
-		}
-		listLock.RUnlock()
-		for _, recipient := range recipients {
+		for _, recipient := range signedInKanbanRecipients() {
 			if _, ok := authenticatedRecallPrincipal(recipient.email); !ok {
 				continue
 			}
@@ -10036,6 +10047,40 @@ func broadcastSignedInKanbanEvent(event string, data any) {
 			_ = sendKanbanEvent(recipient.websocket, "memory", kanbanApp.memorySnapshotForPrincipal(context.Background(), principal, 20))
 		}
 		return
+	}
+	// "file" events that carry a decorated Drive row (name, uploader, download
+	// URL) are re-projected per recipient (review B4): only a recipient who
+	// could list the row receives it; everyone else gets a bare {kind, id}
+	// tombstone, which is all the client needs to refetch.
+	if event == "file" && kanbanApp != nil {
+		if row, kind, carriesRow := fileBroadcastRow(data); carriesRow {
+			raw, err := encodeKanbanEvent(event, data)
+			if err != nil {
+				log.Errorf("Failed to encode signed-in Kanban event: %v", err)
+				return
+			}
+			tombstone, err := encodeKanbanEvent(event, fileBroadcastTombstone(kind, row))
+			if err != nil {
+				log.Errorf("Failed to encode signed-in Kanban event: %v", err)
+				return
+			}
+			decisions := map[string]bool{}
+			for _, recipient := range signedInKanbanRecipients() {
+				email := normalizeAccountEmail(recipient.email)
+				readable, decided := decisions[email]
+				if !decided {
+					viewer := accountStore().findUser(email)
+					readable = viewer != nil && kanbanApp.fileBroadcastRowReadableByViewer(context.Background(), viewer, row)
+					decisions[email] = readable
+				}
+				if readable {
+					deliverKanbanEvent(event, []*threadSafeWriter{recipient.websocket}, raw)
+				} else {
+					deliverKanbanEvent(event, []*threadSafeWriter{recipient.websocket}, tombstone)
+				}
+			}
+			return
+		}
 	}
 	raw, err := encodeKanbanEvent(event, data)
 	if err != nil {
@@ -10061,6 +10106,37 @@ func broadcastSignedInKanbanEvent(event string, data any) {
 	listLock.RUnlock()
 
 	deliverKanbanEvent(event, websockets, raw)
+}
+
+// signedInKanbanRecipient is one signed-in socket with the session email and
+// room the per-recipient projections (memory, file) authorize against.
+type signedInKanbanRecipient struct {
+	websocket *threadSafeWriter
+	email     string
+	roomID    string
+}
+
+// signedInKanbanRecipients is the union of office sockets and media-joined
+// MEMBER room sockets, deduped by writer pointer, guests excluded — the same
+// population the plain fan-out reaches, with the identity each socket holds.
+func signedInKanbanRecipients() []signedInKanbanRecipient {
+	listLock.RLock()
+	defer listLock.RUnlock()
+	seen := make(map[*threadSafeWriter]bool, len(officeConnections)+len(peerConnections))
+	recipients := make([]signedInKanbanRecipient, 0, len(officeConnections)+len(peerConnections))
+	for _, state := range officeConnections {
+		if state.websocket != nil && !seen[state.websocket] {
+			seen[state.websocket] = true
+			recipients = append(recipients, signedInKanbanRecipient{state.websocket, state.sessionEmail, officeRoomID})
+		}
+	}
+	for _, state := range peerConnections {
+		if state.websocket != nil && !state.websocket.guest && !seen[state.websocket] {
+			seen[state.websocket] = true
+			recipients = append(recipients, signedInKanbanRecipient{state.websocket, state.sessionEmail, state.roomID})
+		}
+	}
+	return recipients
 }
 
 // sendKanbanEventToUser delivers an event only to live connections whose

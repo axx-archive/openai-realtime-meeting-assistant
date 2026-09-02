@@ -20,6 +20,33 @@ const (
 
 	studioProjectKindPresentation = "presentation"
 	studioProjectKindDocument     = "document"
+	// Wave 3 (Work hub truth): every terminal result kind a conversation can
+	// produce is Work. image covers agent-thread image results and chat renders,
+	// sheet covers workbooks and data tables, research covers research-mode
+	// briefs that carry the research contract, artifact covers pdf/bundle/file
+	// results. presentation and document keep their exact prior meaning.
+	studioProjectKindImage    = "image"
+	studioProjectKindSheet    = "sheet"
+	studioProjectKindResearch = "research"
+	studioProjectKindArtifact = "artifact"
+
+	// studioProjectResultVersionsMax bounds the prior-version list carried on
+	// a result ref; the journal itself is unbounded in metadata.
+	studioProjectResultVersionsMax = 20
+
+	// studioProjectOpenActionPresent etc. are the one open/download verb the
+	// Work detail renders per kind. Clients never infer the verb from a title,
+	// filename, or MIME claim.
+	studioProjectOpenActionPresent  = "present"
+	studioProjectOpenActionDocument = "document"
+	studioProjectOpenActionImage    = "image"
+	studioProjectOpenActionDownload = "download"
+	studioProjectOpenActionOpen     = "open"
+
+	studioProjectStepQueued  = "queued"
+	studioProjectStepRunning = "running"
+	studioProjectStepDone    = "done"
+	studioProjectStepFailed  = "failed"
 
 	studioProjectStatusQueued         = "queued"
 	studioProjectStatusRunning        = "running"
@@ -53,13 +80,54 @@ type studioProjectView struct {
 	Result          *studioProjectResultRef     `json:"result,omitempty"`
 	Checkpoint      *scoutChatWorkCheckpointRef `json:"checkpoint,omitempty"`
 	Attention       *studioProjectAttentionView `json:"attention,omitempty"`
-	CanRename       bool                        `json:"canRename"`
+	// Origin names the non-chat surface that launched the work. Chat origins
+	// keep using Source (which re-checks thread access); a room origin has no
+	// thread to authorize, so it carries only the room identity and display
+	// title the viewer can already see in the rooms list.
+	Origin *studioProjectOriginRef `json:"origin,omitempty"`
+	// Steps is the per-stage run log of a canonical goal root, in plan order:
+	// the same subtasks the chat goalcard renders from the goal plan.
+	Steps     []studioProjectStepView `json:"steps,omitempty"`
+	CanRename bool                    `json:"canRename"`
 }
 
 type studioProjectPhaseView struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
 	Status string `json:"status"`
+}
+
+// studioProjectOriginRef is the viewer-safe launch origin for work that did
+// not start in a chat thread. Kind is currently always "room".
+type studioProjectOriginRef struct {
+	Kind      string `json:"kind"`
+	RoomID    string `json:"roomId,omitempty"`
+	RoomTitle string `json:"roomTitle,omitempty"`
+}
+
+// studioProjectStepView is one goal-plan subtask projected for the Work
+// detail. State is the closed queued|running|done|failed vocabulary; At is
+// best-effort (the stage artifact's filing time when the directory holds it)
+// and omitted rather than invented.
+type studioProjectStepView struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	State string `json:"state"`
+	At    string `json:"at,omitempty"`
+}
+
+// studioProjectResultVersionRef is one superseded version of the result
+// artifact, projected from the artifactVersions lineage journal memory.go
+// keeps on every body edit. Source is who superseded that version (the
+// editor recorded on the journal line). BodyRef is the content-addressed
+// snapshot of that version's body when the blob seam captured one; the blob
+// route re-authorizes the signed-in viewer before serving it.
+type studioProjectResultVersionRef struct {
+	Version int    `json:"version"`
+	At      string `json:"at,omitempty"`
+	Digest  string `json:"digest,omitempty"`
+	Source  string `json:"source,omitempty"`
+	BodyRef string `json:"bodyRef,omitempty"`
 }
 
 // studioProjectAttentionView is intentionally viewer-safe. Raw goal blockers
@@ -201,6 +269,19 @@ type studioProjectResultRef struct {
 	CanContinue   bool                        `json:"canContinue"`
 	CanPresent    bool                        `json:"canPresent"`
 	CanExport     bool                        `json:"canExport"`
+	// OpenAction is the one verb the Work detail offers for this kind:
+	// present (deck), document (document-style open, also research), image
+	// (preview PrimaryAsset), download (sheet/artifact bytes), open (artifact
+	// stage when no asset is available).
+	OpenAction string `json:"openAction,omitempty"`
+	// PrimaryAsset is the exact blob the open/download verb targets, chosen
+	// server-side by kind; DownloadURL is its authenticated download route.
+	PrimaryAsset *scoutChatResultAssetRef `json:"primaryAsset,omitempty"`
+	DownloadURL  string                   `json:"downloadUrl,omitempty"`
+	// Versions lists superseded versions of this exact result, newest first,
+	// capped at studioProjectResultVersionsMax. The current version is the
+	// Version field above and is not repeated here.
+	Versions []studioProjectResultVersionRef `json:"versions,omitempty"`
 }
 
 // scoutChatStudioProjectRef is the quiet conversation receipt. It is
@@ -217,15 +298,66 @@ type scoutChatStudioProjectRef struct {
 	Attention       *studioProjectAttentionView `json:"attention,omitempty"`
 }
 
+// studioProjectKinds is the closed kind vocabulary the list filter accepts.
+var studioProjectKinds = []string{
+	studioProjectKindPresentation, studioProjectKindDocument, studioProjectKindImage,
+	studioProjectKindSheet, studioProjectKindResearch, studioProjectKindArtifact,
+}
+
+func studioProjectKindValid(kind string) bool {
+	return oneOf(strings.TrimSpace(kind), studioProjectKinds...)
+}
+
+// studioProjectKindByProcessID maps a registered process to the Work kind of
+// its result. Only processes whose result the goal projection can bind
+// (a declared deck or a goalDeliverable document) belong here; image, sheet,
+// research, and generic artifact results have no authored process today and
+// enter Work through studioLegacyProjectCandidate as standalone terminal
+// results instead.
+var studioProjectKindByProcessID = map[string]string{
+	packagingStudioProcessID: studioProjectKindPresentation,
+	documentReportProcessID:  studioProjectKindDocument,
+}
+
 func studioProjectKindForProcessID(processID string) string {
-	switch strings.TrimSpace(processID) {
-	case packagingStudioProcessID:
-		return studioProjectKindPresentation
-	case documentReportProcessID:
-		return studioProjectKindDocument
+	return studioProjectKindByProcessID[strings.TrimSpace(processID)]
+}
+
+// studioResearchReportArtifact recognizes a research-mode brief by its
+// durable contract stamp, never by prose or title. Research-mode Markdown
+// without the contract stays a plain document so historical reports keep
+// their kind.
+func studioResearchReportArtifact(metadata map[string]string) bool {
+	contract := strings.ToLower(strings.TrimSpace(firstNonEmptyString(metadata["artifactContract"], metadata["outputContract"])))
+	return strings.HasPrefix(contract, "research_")
+}
+
+// studioProjectKindForArtifactType maps a concrete non-authored result type
+// onto its Work kind. Markdown and decks are classified by their own rules.
+func studioProjectKindForArtifactType(typeName string) string {
+	switch typeName {
+	case artifactTypeImage:
+		return studioProjectKindImage
+	case artifactTypeWorkbook, artifactTypeTable:
+		return studioProjectKindSheet
+	case artifactTypePDF, artifactTypeBundle, artifactTypeFile:
+		return studioProjectKindArtifact
 	default:
 		return ""
 	}
+}
+
+// studioChatImageCandidate recognizes a chat-generated image render
+// (scout_chat_images.go): source chat_image, no goal lineage, and a real
+// image asset on the record. Its body is Markdown, so the type switch alone
+// would misfile it as a document.
+func studioChatImageCandidate(entry meetingMemoryEntry) bool {
+	metadata := entry.Metadata
+	if strings.TrimSpace(metadata["source"]) != "chat_image" || strings.TrimSpace(metadata["goalParentId"]) != "" ||
+		strings.TrimSpace(metadata["processStage"]) != "" || strings.TrimSpace(metadata["threadId"]) != "" {
+		return false
+	}
+	return scoutChatResultHasImageAsset(scoutChatResultAssets(entry))
 }
 
 // studioProjectCandidate recognizes only a canonical root goal. Titles,
@@ -246,27 +378,42 @@ func studioProjectCandidate(entry meetingMemoryEntry) (string, goalPlan, bool) {
 	return kind, plan, kind != ""
 }
 
-// studioLegacyProjectCandidate keeps pre-Studio authored work reachable
-// without rewriting production history or inventing a second lifecycle store.
-// The migration is deliberately typed and fail closed: old Design, Grill,
-// Workflow, generic Artifacts, process children, and ordinary Files stay out
-// of the Research library even when their persisted body happens to be
-// Markdown. A native named deck copy is the one threadless exception because
-// its scene/copy metadata is a server-owned presentation identity.
+// studioLegacyProjectCandidate keeps pre-Studio authored work and every
+// standalone terminal result reachable without rewriting production history
+// or inventing a second lifecycle store. The classification is deliberately
+// typed and fail closed: Markdown bodies of old Design, Grill, Workflow and
+// generic Artifacts modes, process children, and ordinary Files stay out even
+// when their persisted body happens to be Markdown. Concrete non-Markdown
+// results (image, workbook/table, pdf/bundle/file) filed by a conversation
+// run are Work by type; a chat image render is Work by its image asset. A
+// native named deck copy is the one threadless deck exception because its
+// scene/copy metadata is a server-owned presentation identity.
 func studioLegacyProjectCandidate(entry meetingMemoryEntry) (string, bool) {
 	if _, _, canonical := studioProjectCandidate(entry); canonical {
 		return "", false
 	}
 	metadata := entry.Metadata
-	source := strings.TrimSpace(metadata["source"])
 	if entry.Kind != meetingMemoryKindOSArtifact || strings.TrimSpace(metadata["goalParentId"]) != "" ||
-		strings.TrimSpace(metadata["processStage"]) != "" ||
-		!oneOf(source, "scout_thread", studioBlankSourceDocument, studioBlankSourceDeck) {
+		strings.TrimSpace(metadata["processStage"]) != "" {
+		return "", false
+	}
+	if studioChatImageCandidate(entry) {
+		return studioProjectKindImage, true
+	}
+	source := strings.TrimSpace(metadata["source"])
+	if !oneOf(source, "scout_thread", studioBlankSourceDocument, studioBlankSourceDeck) {
 		return "", false
 	}
 	mode := strings.ToLower(strings.TrimSpace(metadata["mode"]))
 	threadID := strings.TrimSpace(metadata["threadId"])
-	switch artifactType(entry) {
+	typeName := artifactType(entry)
+	if kind := studioProjectKindForArtifactType(typeName); kind != "" {
+		// A concrete result type is its own identity; only a real conversation
+		// run (source + run id) may file it as Work, and children/stages were
+		// already excluded above.
+		return kind, source == "scout_thread" && threadID != ""
+	}
+	switch typeName {
 	case artifactTypeHTMLDeck:
 		threadedPresentation := source == "scout_thread" && threadID != "" && oneOf(mode, "artifacts", "presentation", "deck", "slides")
 		nativeNamedCopy := source == "scout_thread" && threadID == "" && mode == "artifacts" &&
@@ -280,6 +427,9 @@ func studioLegacyProjectCandidate(entry meetingMemoryEntry) (string, bool) {
 	case artifactTypeMarkdown:
 		threaded := source == "scout_thread" && threadID != "" && oneOf(mode, "research", "document", "report")
 		nativeBlank := source == studioBlankSourceDocument && threadID == ""
+		if threaded && mode == "research" && studioResearchReportArtifact(metadata) {
+			return studioProjectKindResearch, true
+		}
 		return studioProjectKindDocument, threaded || nativeBlank
 	default:
 		return "", false
@@ -557,6 +707,199 @@ func studioProjectResultReady(result *studioProjectResultRef) bool {
 	return result.QualityState == ""
 }
 
+// studioProjectOrigin projects a room launch origin. Chat origins are carried
+// by Source (which re-checks thread access) and are deliberately not repeated
+// here. The room title is the same display name the member rooms list shows;
+// the office is the migration-invariant default room.
+func studioProjectOrigin(entry meetingMemoryEntry) *studioProjectOriginRef {
+	if strings.TrimSpace(entry.Metadata["originKind"]) != agentThreadOriginRoom {
+		return nil
+	}
+	roomID := normalizeRoomID(entry.Metadata["originId"])
+	origin := &studioProjectOriginRef{Kind: agentThreadOriginRoom, RoomID: roomID}
+	if roomID == officeRoomID {
+		origin.RoomTitle = officeRoomName
+	} else if store := appRoomStoreIfOpen(); store != nil {
+		if room, ok := store.byID(roomID); ok {
+			origin.RoomTitle = strings.TrimSpace(room.Name)
+		}
+	}
+	return origin
+}
+
+// studioProjectStepState folds the engine's subtask vocabulary onto the
+// closed Work step vocabulary. Unknown values read as queued rather than as
+// progress that never happened.
+func studioProjectStepState(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case subtaskRunning:
+		return studioProjectStepRunning
+	case subtaskComplete:
+		return studioProjectStepDone
+	case subtaskFailed, subtaskBlocked:
+		return studioProjectStepFailed
+	default:
+		return studioProjectStepQueued
+	}
+}
+
+// studioProjectSteps projects the goal plan's subtasks — the exact run log the
+// chat goalcard renders — in plan order. At is stamped only when the stage's
+// filed artifact is already in the body-free directory; it is never invented
+// from the root's timestamps.
+func studioProjectSteps(plan goalPlan, index scoutChatResultProjectionIndex) []studioProjectStepView {
+	if len(plan.Subtasks) == 0 {
+		return nil
+	}
+	steps := make([]studioProjectStepView, 0, len(plan.Subtasks))
+	for _, subtask := range plan.Subtasks {
+		id := strings.TrimSpace(subtask.ID)
+		if id == "" {
+			continue
+		}
+		step := studioProjectStepView{
+			ID:    id,
+			Label: boundedStudioProjectTitle(firstNonEmptyString(subtask.Title, id)),
+			State: studioProjectStepState(subtask.Status),
+		}
+		if artifactID := strings.TrimSpace(subtask.ArtifactID); artifactID != "" && step.State == studioProjectStepDone {
+			if filed, ok := index.byID[artifactID]; ok && !filed.CreatedAt.IsZero() {
+				step.At = filed.CreatedAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+// studioProjectResultVersions projects the superseded versions of the exact
+// current result from its lineage journal, newest first. The indexed row must
+// still describe the current version the viewer was just authorized for;
+// otherwise the directory is stale and no history is claimed.
+func studioProjectResultVersions(indexed meetingMemoryEntry, currentVersion int) []studioProjectResultVersionRef {
+	if currentVersion < 1 || artifactVersion(indexed) != currentVersion {
+		return nil
+	}
+	history := artifactVersionHistory(indexed)
+	if len(history) == 0 {
+		return nil
+	}
+	versions := make([]studioProjectResultVersionRef, 0, min(len(history), studioProjectResultVersionsMax))
+	for position := len(history) - 1; position >= 0 && len(versions) < studioProjectResultVersionsMax; position-- {
+		record := history[position]
+		if record.V < 1 || record.V >= currentVersion {
+			continue
+		}
+		ref := studioProjectResultVersionRef{
+			Version: record.V,
+			At:      strings.TrimSpace(record.At),
+			Digest:  strings.ToLower(strings.TrimSpace(record.ContentDigest)),
+			Source:  strings.TrimSpace(record.EditedBy),
+		}
+		if validBlobRef(strings.TrimSpace(record.BodyBlobRef)) {
+			ref.BodyRef = strings.TrimSpace(record.BodyBlobRef)
+		}
+		versions = append(versions, ref)
+	}
+	return versions
+}
+
+// studioProjectPrimaryAsset picks the one blob the kind's open/download verb
+// targets: the image for an image, the export (workbook/pdf) for sheets and
+// artifacts, otherwise the first bounded asset.
+func studioProjectPrimaryAsset(kind string, assets []scoutChatResultAssetRef) *scoutChatResultAssetRef {
+	if len(assets) == 0 {
+		return nil
+	}
+	pick := func(match func(scoutChatResultAssetRef) bool) *scoutChatResultAssetRef {
+		for index := range assets {
+			if match(assets[index]) {
+				asset := assets[index]
+				return &asset
+			}
+		}
+		return nil
+	}
+	switch kind {
+	case studioProjectKindImage:
+		return pick(func(asset scoutChatResultAssetRef) bool {
+			return asset.Kind == "image" && strings.HasPrefix(strings.ToLower(asset.Mime), "image/")
+		})
+	case studioProjectKindSheet, studioProjectKindArtifact:
+		if asset := pick(func(asset scoutChatResultAssetRef) bool { return oneOf(asset.Kind, "export", "pdf") }); asset != nil {
+			return asset
+		}
+		asset := assets[0]
+		return &asset
+	default:
+		return nil
+	}
+}
+
+// studioProjectDecorateResult stamps the kind-specific open verb, the primary
+// asset and its authenticated download route, and the prior-version list on
+// an already viewer-authorized result ref.
+func studioProjectDecorateResult(result *studioProjectResultRef, kind string, index scoutChatResultProjectionIndex) {
+	if result == nil {
+		return
+	}
+	switch kind {
+	case studioProjectKindPresentation:
+		result.OpenAction = studioProjectOpenActionPresent
+	case studioProjectKindDocument, studioProjectKindResearch:
+		result.OpenAction = studioProjectOpenActionDocument
+	case studioProjectKindImage:
+		result.OpenAction = studioProjectOpenActionImage
+	case studioProjectKindSheet, studioProjectKindArtifact:
+		result.OpenAction = studioProjectOpenActionDownload
+	default:
+		result.OpenAction = studioProjectOpenActionOpen
+	}
+	result.PrimaryAsset = studioProjectPrimaryAsset(kind, result.Assets)
+	if result.PrimaryAsset != nil {
+		result.DownloadURL = fileBlobDownloadURL(result.PrimaryAsset.Ref, firstNonEmptyString(result.PrimaryAsset.Name, result.Title))
+	} else if result.OpenAction == studioProjectOpenActionImage || result.OpenAction == studioProjectOpenActionDownload {
+		// No exact bytes to hand over: fall back to the artifact stage instead
+		// of offering a download that would 404.
+		result.OpenAction = studioProjectOpenActionOpen
+	}
+	if indexed, ok := index.byID[result.ArtifactID]; ok {
+		result.Versions = studioProjectResultVersions(indexed, result.Version)
+	}
+}
+
+// studioProjectChatImageResult binds a chat image render as its own result.
+// Chat renders sit outside the agent-thread result contract (no run id, a
+// Markdown body around the image), so the thread-ref projection cannot bind
+// them; this path applies the same rules — current authorized body, exact
+// version + capability digest, a real image asset, viewer-scoped capability
+// flags — without a goal or run identity.
+func studioProjectChatImageResult(ctx context.Context, app *kanbanBoardApp, viewer *userAccount, entry meetingMemoryEntry) *studioProjectResultRef {
+	if app == nil || viewer == nil || !studioChatImageCandidate(entry) {
+		return nil
+	}
+	current, ok := app.authorizedScoutChatResultArtifact(ctx, viewer, entry.ID)
+	if !ok || current.ID != entry.ID || !studioChatImageCandidate(current) {
+		return nil
+	}
+	if agentThreadStatusValue(current) != artifactStatusComplete {
+		return nil
+	}
+	assets := scoutChatResultAssets(current)
+	version := artifactVersion(current)
+	digest := strings.ToLower(strings.TrimSpace(artifactCapabilityDigest(current)))
+	if version < 1 || !isHexDigest(digest) || !scoutChatResultHasImageAsset(assets) {
+		return nil
+	}
+	return &studioProjectResultRef{
+		ArtifactID: current.ID, Type: artifactTypeImage, Version: version, Digest: digest,
+		Title:     firstNonEmptyString(strings.TrimSpace(current.Metadata["title"]), "Image"),
+		Assets:    assets,
+		CanEdit:   app.artifactAuthorized(ctx, viewer, ACLWrite, current),
+		CanExport: app.artifactAuthorized(ctx, viewer, ACLExport, current),
+	}
+}
+
 func studioProjectAuthorizationCandidateCurrent(ctx context.Context, app *kanbanBoardApp, candidate artifactListAuthorizationCandidate) bool {
 	if app == nil || app.memory == nil {
 		return false
@@ -640,7 +983,10 @@ func studioProjectViewForCandidateProjectionWithApp(app *kanbanBoardApp, ctx con
 			CanEdit:       ref.ResultCanEdit, CanContinue: ref.ResultCanContinue,
 			CanPresent: ref.ResultCanPresent, CanExport: ref.ResultCanExport,
 		}
+	} else if !canonical && kind == studioProjectKindImage {
+		view.Result = studioProjectChatImageResult(ctx, app, viewer, entry)
 	}
+	studioProjectDecorateResult(view.Result, kind, resultIndex)
 	// Completion is a claim about an exact, current, viewer-authorized file, not
 	// merely a terminal plan state. If that file is missing, revoked, or drifted,
 	// the Studio must ask for attention instead of presenting a false Ready state.
@@ -660,6 +1006,10 @@ func studioProjectViewForCandidateProjectionWithApp(app *kanbanBoardApp, ctx con
 	view.Phases = studioProjectPhases(status, phase)
 	view.Attention = studioProjectAttention(status, plan, resultReady)
 	view.CanRename = studioProjectCanRename(ctx, viewer, candidate, status)
+	view.Origin = studioProjectOrigin(entry)
+	if canonical {
+		view.Steps = studioProjectSteps(plan, resultIndex)
+	}
 	return view, true
 }
 
@@ -859,8 +1209,8 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
-	if kind != "" && !oneOf(kind, studioProjectKindPresentation, studioProjectKindDocument) {
-		writeAuthError(w, http.StatusBadRequest, "kind must be presentation or document")
+	if kind != "" && !studioProjectKindValid(kind) {
+		writeAuthError(w, http.StatusBadRequest, "kind must be one of "+strings.Join(studioProjectKinds, ", "))
 		return
 	}
 	if wantID := strings.TrimSpace(r.URL.Query().Get("id")); wantID != "" {

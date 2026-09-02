@@ -77,6 +77,12 @@ const (
 	tasteProfileArtifactTypeKey = "artifactType"
 	tasteProfileUserKey         = "profileUser"
 	tasteProfileDistilledAtKey  = "distilledAt"
+	// tasteProfileDecisionCountKey / tasteDecisionsConsumedAtKey (Wave 8 D3):
+	// the person model is also fed by the decisions they made and their
+	// recorded positions; the consumed-at stamp is the per-profile decision
+	// cursor (decisions created after it are unconsumed).
+	tasteProfileDecisionCountKey = "decisionCount"
+	tasteDecisionsConsumedAtKey  = "tasteDecisionsConsumedAt"
 	// tasteProfileProposalsKey holds the analyst's decision-ledger candidates
 	// and supersessions as compact JSON on the profile artifact — recorded
 	// proposals, never ledger writes; the confirm seam reads them from here.
@@ -119,7 +125,7 @@ func tasteAnalystWorkDue(app *kanbanBoardApp, now time.Time) bool {
 		return false
 	}
 	agent := tasteAnalystAgent()
-	for _, userName := range meetingParticipantNames {
+	for _, userName := range tasteAnalystRoster() {
 		profile, hasProfile := app.tasteProfileForUser(userName)
 		cursor := ""
 		distilledAt := time.Time{}
@@ -128,11 +134,8 @@ func tasteAnalystWorkDue(app *kanbanBoardApp, now time.Time) bool {
 			distilledAt, _ = time.Parse(time.RFC3339Nano, strings.TrimSpace(profile.Metadata[tasteProfileDistilledAtKey]))
 		}
 		window := app.memory.unconsumedSignalsForActor(userName, cursor, agent.maxBatch())
-		oldest := time.Time{}
-		if len(window) > 0 {
-			oldest = window[0].CreatedAt
-		}
-		if tasteAnalystShouldRun(len(window), agent.minBatch(), distilledAt, oldest, now) {
+		decisions := app.unconsumedDecisionsForPerson(userName, tasteDecisionsConsumedAt(profile, hasProfile), agent.maxBatch())
+		if tasteAnalystShouldRun(len(window)+len(decisions), agent.minBatch(), distilledAt, oldestTasteInput(window, decisions), now) {
 			return true
 		}
 	}
@@ -263,7 +266,7 @@ func (app *kanbanBoardApp) runTasteAnalystOnceResult(ctx context.Context, apiKey
 
 	var firstErr error
 	persistedAny := false
-	for _, userName := range meetingParticipantNames {
+	for _, userName := range tasteAnalystRoster() {
 		// Each user gets their OWN request timeout derived from the caller's
 		// context: a slow early call costs only that user's pass, never the
 		// fixed-order roster tail (the "one user's failure never starves the
@@ -295,11 +298,12 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	}
 
 	window := app.memory.unconsumedSignalsForActor(userName, cursor, agent.maxBatch())
-	oldestSignalAt := time.Time{}
-	if len(window) > 0 {
-		oldestSignalAt = window[0].CreatedAt
-	}
-	if !tasteAnalystShouldRun(len(window), agent.minBatch(), distilledAt, oldestSignalAt, now) {
+	// Wave 8 D3: the person model is also fed by the decisions this person
+	// made (cursor: tasteDecisionsConsumedAt) and their recorded positions
+	// from the entity ledger (state, not a window — always supplied).
+	decisions := app.unconsumedDecisionsForPerson(userName, tasteDecisionsConsumedAt(profile, hasProfile), agent.maxBatch())
+	positions := app.searchPositionRecords(userName, "", tasteAnalystDecisionContext)
+	if !tasteAnalystShouldRun(len(window)+len(decisions), agent.minBatch(), distilledAt, oldestTasteInput(window, decisions), now) {
 		return false, nil
 	}
 
@@ -310,7 +314,7 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	output, err := responder(ctx, apiKey, openAITextRequest{
 		Model:           meetingBrainModel(),
 		Instructions:    tasteAnalystInstructions(),
-		Input:           app.buildTasteAnalystInput(userName, priorBody, window, now),
+		Input:           app.buildTasteAnalystInputWithLedger(userName, priorBody, window, decisions, positions, now),
 		ReasoningEffort: tasteAnalystEffort,
 		Verbosity:       "medium",
 		MaxOutputTokens: tasteAnalystMaxOutputTokens,
@@ -331,20 +335,31 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	// Evidence discipline is structural, not just prompted: a profile that
 	// cites none of the supplied signal ids has no receipts — skip the pass
 	// (cursor untouched) rather than persist uncited claims.
-	if !tasteProfileCitesWindow(parsed.Profile, window) {
-		log.Errorf("%s profile for %s cited no supplied signal ids; skipping this pass", tasteAnalystAgentName, userName)
+	if !tasteProfileCitesWindow(parsed.Profile, append(append([]meetingMemoryEntry(nil), window...), decisions...)) {
+		log.Errorf("%s profile for %s cited no supplied signal or decision ids; skipping this pass", tasteAnalystAgentName, userName)
 		return false, fmt.Errorf("%s output rejected: no supplied evidence citation", tasteAnalystAgentName)
 	}
 
 	proposals := filterTasteProposals(app, parsed.Proposals, window)
-	lastSignal := window[len(window)-1]
 	title := tasteProfileTitle(userName)
 	metadataUpdates := map[string]string{
-		tasteAnalystCursorKey:      lastSignal.ID,
-		tasteProfileDistilledAtKey: now.Format(time.RFC3339Nano),
-		"signalCount":              strconv.Itoa(len(window)),
-		"source":                   agentThreadWorkerOpenAI,
-		"model":                    meetingBrainModel(),
+		tasteProfileDistilledAtKey:   now.Format(time.RFC3339Nano),
+		"signalCount":                strconv.Itoa(len(window)),
+		tasteProfileDecisionCountKey: strconv.Itoa(len(decisions)),
+		"source":                     agentThreadWorkerOpenAI,
+		"model":                      meetingBrainModel(),
+	}
+	if len(window) > 0 {
+		// The signal cursor only moves when signals were consumed; a
+		// decisions-only pass leaves it where it was.
+		metadataUpdates[tasteAnalystCursorKey] = window[len(window)-1].ID
+	}
+	if len(decisions) > 0 {
+		// The decision cursor mirrors the signal cursor discipline: it moves to
+		// the newest decision this pass actually CONSUMED, never to "now" —
+		// decisions beyond the batch, and any filed during the model call,
+		// stay unconsumed for the next pass instead of being skipped forever.
+		metadataUpdates[tasteDecisionsConsumedAtKey] = newestTasteDecisionAt(decisions).Format(time.RFC3339Nano)
 	}
 	if encoded := encodeTasteProposals(proposals, now); encoded != "" {
 		metadataUpdates[tasteProfileProposalsKey] = encoded
@@ -382,8 +397,10 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	// Stamp every consumed signal distilledInto=<profile> in ONE rewrite —
 	// the compaction trigger. A failed stamp is logged, never fatal: the
 	// cursor already advanced, the signals just stay uncompactable.
-	if err := app.memory.stampSignalsDistilled(memoryEntryIDs(window), profileID, now); err != nil {
-		log.Errorf("%s failed to stamp distilledInto on %d signal(s) for %s: %v", tasteAnalystAgentName, len(window), userName, err)
+	if len(window) > 0 {
+		if err := app.memory.stampSignalsDistilled(memoryEntryIDs(window), profileID, now); err != nil {
+			log.Errorf("%s failed to stamp distilledInto on %d signal(s) for %s: %v", tasteAnalystAgentName, len(window), userName, err)
+		}
 	}
 	return true, nil
 }
@@ -437,6 +454,128 @@ func (app *kanbanBoardApp) tasteProfileForUser(userName string) (meetingMemoryEn
 		}
 	}
 	return meetingMemoryEntry{}, false
+}
+
+// tasteAnalystRoster (Wave 8 D3) derives the people to model from the account
+// store instead of the hardcoded participant names. A seeded account resolves
+// to its participant name so existing profiles keep their key; any other
+// account models under its display name (or email). The roster names remain
+// the display fallback when the account store is empty.
+func tasteAnalystRoster() []string {
+	store := accountStore()
+	emails := store.accountEmails()
+	names := make([]string, 0, len(emails))
+	seen := map[string]struct{}{}
+	for _, email := range emails {
+		name := participantNameForEmail(email)
+		if name == "" {
+			if user := store.findUser(email); user != nil && strings.TrimSpace(user.Name) != "" {
+				name = strings.TrimSpace(user.Name)
+			} else {
+				name = normalizeAccountEmail(email)
+			}
+		}
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return append([]string(nil), meetingParticipantNames...)
+	}
+	return names
+}
+
+// decisionMadeBy reports whether a kind=decision entry's madeBy names this
+// person (display name, roster name, or account email).
+func decisionMadeBy(entry meetingMemoryEntry, userName string) bool {
+	madeBy := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(entry.Metadata["madeBy"]), digestAttributionHedge))
+	userName = strings.TrimSpace(userName)
+	if madeBy == "" || userName == "" {
+		return false
+	}
+	if strings.EqualFold(madeBy, userName) {
+		return true
+	}
+	if name := participantNameForEmail(madeBy); name != "" && strings.EqualFold(name, userName) {
+		return true
+	}
+	if email := participantEmail(userName); email != "" && normalizeAccountEmail(madeBy) == email {
+		return true
+	}
+	return false
+}
+
+// tasteDecisionsConsumedAt reads the per-profile decision cursor.
+func tasteDecisionsConsumedAt(profile meetingMemoryEntry, hasProfile bool) time.Time {
+	if !hasProfile {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(profile.Metadata[tasteDecisionsConsumedAtKey]))
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
+}
+
+// unconsumedDecisionsForPerson returns up to limit non-superseded decisions
+// this person made after the profile's decision cursor, oldest first — the
+// second feed of the person model (Wave 8 D3).
+func (app *kanbanBoardApp) unconsumedDecisionsForPerson(userName string, consumedAt time.Time, limit int) []meetingMemoryEntry {
+	if app == nil || app.memory == nil || limit <= 0 {
+		return nil
+	}
+	decisions := make([]meetingMemoryEntry, 0, 8)
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindDecision, 0) {
+		if memoryEntryHiddenFromRecall(entry) || !decisionMadeBy(entry, userName) {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(entry.Metadata["status"]), decisionStatusSuperseded) {
+			continue
+		}
+		if !consumedAt.IsZero() && !entry.CreatedAt.After(consumedAt) {
+			continue
+		}
+		decisions = append(decisions, entry)
+		if len(decisions) >= limit {
+			break
+		}
+	}
+	return decisions
+}
+
+// newestTasteDecisionAt is the decision-cursor value after a pass: the
+// CreatedAt of the newest consumed decision (unconsumedDecisionsForPerson
+// filters CreatedAt strictly after the cursor).
+func newestTasteDecisionAt(decisions []meetingMemoryEntry) time.Time {
+	newest := time.Time{}
+	for _, entry := range decisions {
+		if entry.CreatedAt.After(newest) {
+			newest = entry.CreatedAt
+		}
+	}
+	return newest.UTC()
+}
+
+// oldestTasteInput is the weekly-rule anchor across both feeds.
+func oldestTasteInput(signals []meetingMemoryEntry, decisions []meetingMemoryEntry) time.Time {
+	oldest := time.Time{}
+	for _, entry := range signals {
+		if oldest.IsZero() || entry.CreatedAt.Before(oldest) {
+			oldest = entry.CreatedAt
+		}
+	}
+	for _, entry := range decisions {
+		if oldest.IsZero() || entry.CreatedAt.Before(oldest) {
+			oldest = entry.CreatedAt
+		}
+	}
+	return oldest
 }
 
 // unconsumedSignalsForActor returns up to limit kind=signal entries belonging
@@ -711,8 +850,11 @@ func tasteAnalystInstructions() string {
 		"",
 		"## EVIDENCE DISCIPLINE (hard rule)",
 		"Every bullet MUST cite the signal id(s) it rests on, inline, e.g.",
-		"\"Cuts intro throat-clearing (signal-artifact_edited-...)\". A claim with no",
-		"signal id is forbidden. This is a six-person office: the data is THIN.",
+		"\"Cuts intro throat-clearing (signal-artifact_edited-...)\". A decision this",
+		"teammate made (supplied below with its entry id) or a recorded position",
+		"from the entity ledger counts as evidence too — cite the decision entry id",
+		"or position record id the same way. A claim with no cited id is forbidden.",
+		"This is a six-person office: the data is THIN.",
 		"Under-claim. Only patterns explicit in the signals — two or more consistent",
 		"signals for a habit, one strong explicit signal (a survey note, a stated",
 		"reason) for a preference. \"No clear pattern yet\" is a good section body.",
@@ -737,6 +879,14 @@ func tasteAnalystInstructions() string {
 // unconsumed signals — surveys and goal lessons ride the same actor-stamped
 // window as every other seam.
 func (app *kanbanBoardApp) buildTasteAnalystInput(userName string, priorProfile string, window []meetingMemoryEntry, now time.Time) string {
+	return app.buildTasteAnalystInputWithLedger(userName, priorProfile, window, nil, nil, now)
+}
+
+// buildTasteAnalystInputWithLedger (Wave 8 D3) adds the two ledger feeds: the
+// decisions this person made since the profile's decision cursor (cite their
+// entry ids) and their recorded positions from the entity ledger (cite the
+// record ids).
+func (app *kanbanBoardApp) buildTasteAnalystInputWithLedger(userName string, priorProfile string, window []meetingMemoryEntry, madeDecisions []meetingMemoryEntry, positions []ledgerRecord, now time.Time) string {
 	var builder strings.Builder
 	builder.WriteString("# Generated at\n")
 	builder.WriteString(now.Format(time.RFC3339))
@@ -761,6 +911,51 @@ func (app *kanbanBoardApp) buildTasteAnalystInput(userName string, priorProfile 
 		builder.WriteString(decision.ID)
 		builder.WriteString(" | ")
 		builder.WriteString(trimForStorage(normalizeMemoryText(decision.Text), 200))
+		builder.WriteByte('\n')
+	}
+
+	builder.WriteString("\n# Decisions this teammate made (cite entry ids as evidence)\n")
+	if len(madeDecisions) == 0 {
+		builder.WriteString("(none new)\n")
+	}
+	for _, decision := range madeDecisions {
+		builder.WriteString("- ")
+		builder.WriteString(decision.ID)
+		builder.WriteString(" | ")
+		builder.WriteString(decision.CreatedAt.UTC().Format(time.RFC3339))
+		if status := strings.TrimSpace(decision.Metadata["status"]); status != "" {
+			builder.WriteString(" | status=")
+			builder.WriteString(status)
+		}
+		builder.WriteString(" | ")
+		builder.WriteString(trimForStorage(normalizeMemoryText(decision.Text), 240))
+		if why := strings.TrimSpace(decision.Metadata["context"]); why != "" {
+			builder.WriteString(" (")
+			builder.WriteString(trimForStorage(why, 160))
+			builder.WriteByte(')')
+		}
+		builder.WriteByte('\n')
+	}
+
+	builder.WriteString("\n# Recorded positions from the entity ledger (cite record ids as evidence; closed = since changed)\n")
+	if len(positions) == 0 {
+		builder.WriteString("(none recorded)\n")
+	}
+	for _, position := range positions {
+		builder.WriteString("- ")
+		builder.WriteString(position.ID)
+		builder.WriteString(" | ")
+		if position.current() {
+			builder.WriteString("current")
+		} else {
+			builder.WriteString("closed")
+		}
+		builder.WriteString(" | ")
+		builder.WriteString(trimForStorage(position.Title, 240))
+		if position.UpdatedAt != "" {
+			builder.WriteString(" | ")
+			builder.WriteString(position.UpdatedAt)
+		}
 		builder.WriteByte('\n')
 	}
 

@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	openAIToolManifestVersion  = "stride-openai-tools-v1"
-	openAIToolSchemaVersion    = "strict-schema-v1"
-	openAIToolManifestV1SHA256 = "f579c6e7ffc09decfa726e50e344934b46cff0ebd6b6f05a3a28220831ed6a44"
+	openAIToolManifestVersion = "stride-openai-tools-v1"
+	openAIToolSchemaVersion   = "strict-schema-v1"
+	// Re-pinned 2026-09-02 after Wave 8 added the explicitly UNADMITTED
+	// remember_note tool (memory_remember.go); previous pin f579c6e7ffc09dec….
+	openAIToolManifestV1SHA256 = "c6b96b8bc4b0866fd2b7c7cb1a4afd09d43b9779384a9bd9fee43119939e9596"
 )
 
 var openAIAdmittedToolNames = map[string]struct{}{

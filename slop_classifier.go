@@ -54,7 +54,36 @@ const (
 	// slopArtifactScanLimit bounds the per-pass unpublished-artifact scan.
 	slopArtifactScanLimit = 200
 	reviewedByClassifier  = "classifier"
+	// brainDecayDaysEnv / defaultBrainDecayDays (Wave 8 D4): a kind=brain
+	// write-up older than this whose meeting has a CURRENT meeting_digest is
+	// decay-eligible — the digest is the compounding tier, the brain the raw
+	// intermediate. Same quarantine → 30-day reprieve → hard-delete path.
+	brainDecayDaysEnv     = "BRAIN_DECAY_DAYS"
+	defaultBrainDecayDays = 45
 )
+
+// brainDecayAge is the env-tunable brain decay threshold.
+func brainDecayAge() time.Duration {
+	return time.Duration(positiveIntEnv(brainDecayDaysEnv, defaultBrainDecayDays)) * 24 * time.Hour
+}
+
+// brainCoveredByCurrentDigest reports whether a brain's meeting has a current
+// meeting_digest generated at or after the brain landed — the digest is the
+// consolidated tier that makes the raw write-up redundant for recall.
+func (app *kanbanBoardApp) brainCoveredByCurrentDigest(entry meetingMemoryEntry) bool {
+	if app == nil || app.memory == nil || entry.Kind != meetingMemoryKindBrain {
+		return false
+	}
+	meetingID := strings.TrimSpace(entry.Metadata["meetingId"])
+	if meetingID == "" || meetingID == "none" {
+		return false
+	}
+	digest, ok := app.memory.currentDigest(meetingMemoryKindMeetingDigest, meetingID)
+	if !ok {
+		return false
+	}
+	return !digest.CreatedAt.Before(entry.CreatedAt)
+}
 
 func slopClassifierAgent() ambientAgentConfig {
 	return ambientAgentConfig{
@@ -293,6 +322,26 @@ func (app *kanbanBoardApp) buildSlopCandidates(agent ambientAgentConfig, now tim
 		}
 	}
 
+	// Wave 8 D4: decay above the transcript tier. Old brains whose meeting is
+	// fully covered by a current digest join the batch (bounded scan, no
+	// cursor — the classifierVerdict stamp keeps a keep verdict from
+	// re-billing). The deny-list still runs first; an uncovered brain never
+	// qualifies, and the quarantine/expiry path is the existing one.
+	if len(candidates) < agent.maxBatch() {
+		for _, entry := range app.memory.entriesOfKind(meetingMemoryKindBrain, slopArtifactScanLimit) {
+			if !slopCandidateEligible(entry, now) || !app.brainCoveredByCurrentDigest(entry) {
+				continue
+			}
+			if strings.TrimSpace(entry.Metadata["classifierVerdict"]) != "" {
+				continue
+			}
+			candidates = append(candidates, entry)
+			if len(candidates) >= agent.maxBatch() {
+				break
+			}
+		}
+	}
+
 	return candidates, transcriptCursor
 }
 
@@ -316,6 +365,14 @@ func slopCandidateEligible(entry meetingMemoryEntry, now time.Time) bool {
 			return false
 		}
 		if strings.TrimSpace(entry.Metadata["packageId"]) != "" {
+			return false
+		}
+	case meetingMemoryKindBrain:
+		// Wave 8 D4: a brain is a candidate only past the decay threshold
+		// (BRAIN_DECAY_DAYS, default 45). Digest coverage is the candidate
+		// builder's second gate (it needs the store); the deny-list below
+		// (pinned / relevance / 7-day settle) applies exactly as for the rest.
+		if now.Sub(entry.CreatedAt) < brainDecayAge() {
 			return false
 		}
 	default:
@@ -748,6 +805,10 @@ func slopClassifierInstructions() string {
 		"  at segment level; keep the substantive segments.",
 		"- Never quarantine anything a human published, pinned, or attached.",
 		"- Never quarantine anything ever attached to a package (archive instead).",
+		"- A kind=brain candidate is an old raw meeting write-up whose meeting already",
+		"  has a current digest carrying its facts: archive it when the digest covers",
+		"  it, quarantine only when it is pure filler, keep when it holds detail the",
+		"  digest could not (verbatim numbers, names, quotes).",
 		"",
 		"## OUTPUT (per candidate, machine-parseable):",
 		"Return STRICT JSON only: a JSON array where each element is",
@@ -789,6 +850,11 @@ func (app *kanbanBoardApp) buildSlopClassifierInput(candidates []meetingMemoryEn
 		builder.WriteString(entry.Kind)
 		builder.WriteString(" age_days=")
 		builder.WriteString(strconv.Itoa(ageDays))
+		if entry.Kind == meetingMemoryKindBrain {
+			builder.WriteString(" meeting=")
+			builder.WriteString(firstNonEmptyString(strings.TrimSpace(entry.Metadata["meetingId"]), "unknown"))
+			builder.WriteString(" digest_covered=true")
+		}
 		if entry.Kind == meetingMemoryKindOSArtifact {
 			builder.WriteString(" published=")
 			builder.WriteString(firstNonEmptyString(strings.TrimSpace(entry.Metadata["published"]), "false"))

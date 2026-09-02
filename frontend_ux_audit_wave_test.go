@@ -55,10 +55,12 @@ func TestMeasuredUXAuditFixesSurviveRadicalSimplification(t *testing.T) {
 		}
 	}
 
-	// Raw state hues remain text only on the two deliberately dark media
-	// surfaces documented by the audit. All light-surface text uses *-text.
+	// Raw state hues remain text only on the deliberately dark media surfaces
+	// documented in the CSS (muted-mic badge, translucent media badge, and —
+	// 2026-09-02 — the video-tile quality badge). All light-surface text uses
+	// *-text.
 	rawStateColor := regexp.MustCompile(`(?m)(^|[^-])color: var\(--(?:warn|danger|info|live|success)\);`)
-	if got := len(rawStateColor.FindAllString(html, -1)); got != 2 {
-		t.Fatalf("raw semantic text colors=%d, want the two documented dark-media exceptions", got)
+	if got := len(rawStateColor.FindAllString(html, -1)); got != 3 {
+		t.Fatalf("raw semantic text colors=%d, want the three documented dark-media exceptions", got)
 	}
 }

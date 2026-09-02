@@ -51,8 +51,9 @@ func (config googleCalendarConfig) configured() bool {
 // (stateless, no creds), Google sync only once OAuth creds exist.
 func calendarCapabilities() map[string]any {
 	return map[string]any{
-		"ics":    true,
-		"google": googleCalendarConfigFromEnv().configured(),
+		"ics":       true,
+		"scheduled": true,
+		"google":    googleCalendarConfigFromEnv().configured(),
 	}
 }
 
@@ -140,6 +141,49 @@ type icsEvent struct {
 	Title string
 	Label string
 	Date  time.Time
+	// Timed form (Wave 7 scheduled meetings): when End is set the event is
+	// rendered with UTC DTSTART/DTEND instead of an all-day date, carrying the
+	// join URL, one ATTENDEE per email, and a caller-pinned UID.
+	Start       time.Time
+	End         time.Time
+	Description string
+	Attendees   []string
+	UID         string
+	URL         string
+	// Sequence is the record revision (RFC 5545 SEQUENCE): calendars only
+	// apply an update or a cancel whose SEQUENCE is higher than the copy they
+	// hold, so an edited appointment re-imports instead of being ignored.
+	Sequence int
+	// Organizer is the organizer's email; OrganizerName its CN (falls back to
+	// the email). Emitted as ORGANIZER;CN="…":mailto:… on timed events.
+	Organizer     string
+	OrganizerName string
+	// Cancelled renders STATUS:CANCELLED (the calendar is then served as
+	// METHOD:CANCEL by the caller); live timed events carry STATUS:CONFIRMED.
+	Cancelled bool
+}
+
+// icsParamValue renders a property parameter value (e.g. CN=) as an RFC 5545
+// §3.2 quoted-string. Param values are NOT text values: TEXT escaping
+// (backslash-comma) is wrong here; instead the value is double-quoted and
+// anything a quoted-string may not contain — DQUOTE, CR/LF and other control
+// characters — is stripped.
+func icsParamValue(value string) string {
+	var builder strings.Builder
+	builder.WriteByte('"')
+	for _, char := range strings.TrimSpace(value) {
+		if char == '"' || char < 0x20 || char == 0x7f {
+			continue
+		}
+		builder.WriteRune(char)
+	}
+	builder.WriteByte('"')
+	return builder.String()
+}
+
+// timed reports whether the event renders as a DTSTART/DTEND appointment.
+func (event icsEvent) timed() bool {
+	return !event.End.IsZero()
 }
 
 // escapeICSText escapes text per RFC 5545 §3.3.11 (TEXT value type): backslash,
@@ -187,19 +231,39 @@ func foldICSLine(line string) string {
 // same key date re-imports as the same event (calendars dedupe on UID);
 // SUMMARY/DESCRIPTION are RFC-5545 escaped. now stamps DTSTAMP in UTC.
 func buildICSCalendar(events []icsEvent, now time.Time) []byte {
+	return buildICSCalendarWithMethod(events, now, icsMethodPublish)
+}
+
+const (
+	icsMethodPublish = "PUBLISH"
+	icsMethodCancel  = "CANCEL"
+)
+
+// buildICSCalendarWithMethod is buildICSCalendar with an explicit iTIP METHOD:
+// PUBLISH for a feed or a live appointment, CANCEL for a cancelled scheduled
+// meeting (the VEVENT keeps its UID and carries STATUS:CANCELLED + a bumped
+// SEQUENCE, which is how a subscribed calendar retracts the entry).
+func buildICSCalendarWithMethod(events []icsEvent, now time.Time, method string) []byte {
 	var builder strings.Builder
 	writeLine := func(line string) {
 		builder.WriteString(foldICSLine(line))
 		builder.WriteString("\r\n")
 	}
+	if strings.TrimSpace(method) == "" {
+		method = icsMethodPublish
+	}
 	writeLine("BEGIN:VCALENDAR")
 	writeLine("VERSION:2.0")
 	writeLine("PRODID:-//Bonfire//Meeting OS//EN")
 	writeLine("CALSCALE:GREGORIAN")
-	writeLine("METHOD:PUBLISH")
+	writeLine("METHOD:" + method)
 
 	stamp := now.UTC().Format("20060102T150405Z")
 	for _, event := range events {
+		if event.timed() {
+			writeTimedICSEvent(writeLine, event, stamp)
+			continue
+		}
 		day := event.Date.UTC()
 		start := day.Format("20060102")
 		end := day.AddDate(0, 0, 1).Format("20060102")
@@ -232,6 +296,72 @@ func buildICSCalendar(events []icsEvent, now time.Time) []byte {
 	}
 	writeLine("END:VCALENDAR")
 	return []byte(builder.String())
+}
+
+// writeTimedICSEvent renders one scheduled meeting as a timed VEVENT. Times
+// are emitted in UTC (the "Z" form needs no VTIMEZONE); the UID defaults to a
+// deterministic digest but callers pin a record-bound one so an edited
+// appointment re-imports as the same entry. ATTENDEE lines carry mailto: with
+// the address as CN — the roster's display names are not on the wire.
+func writeTimedICSEvent(writeLine func(string), event icsEvent, stamp string) {
+	start := event.Start.UTC()
+	end := event.End.UTC()
+	if !end.After(start) {
+		end = start.Add(30 * time.Minute)
+	}
+	summary := strings.TrimSpace(event.Title)
+	if summary == "" {
+		summary = strings.TrimSpace(event.Label)
+	}
+	if summary == "" {
+		summary = "Meeting"
+	}
+	uid := strings.TrimSpace(event.UID)
+	if uid == "" {
+		sum := sha256.Sum256([]byte(summary + "|" + start.Format("20060102T150405Z") + "|" + end.Format("20060102T150405Z")))
+		uid = hex.EncodeToString(sum[:]) + "@thebonfire.xyz"
+	}
+	description := strings.TrimSpace(event.Description)
+	if description == "" {
+		description = "Scheduled meeting from Bonfire (thebonfire.xyz)."
+	}
+	sequence := event.Sequence
+	if sequence < 0 {
+		sequence = 0
+	}
+	writeLine("BEGIN:VEVENT")
+	writeLine("UID:" + uid)
+	writeLine("DTSTAMP:" + stamp)
+	writeLine("SEQUENCE:" + strconv.Itoa(sequence))
+	writeLine("DTSTART:" + start.Format("20060102T150405Z"))
+	writeLine("DTEND:" + end.Format("20060102T150405Z"))
+	writeLine("SUMMARY:" + escapeICSText(summary))
+	writeLine("DESCRIPTION:" + escapeICSText(description))
+	if event.Cancelled {
+		writeLine("STATUS:CANCELLED")
+	} else {
+		writeLine("STATUS:CONFIRMED")
+	}
+	if joinURL := strings.TrimSpace(event.URL); joinURL != "" {
+		writeLine("URL:" + joinURL)
+		writeLine("LOCATION:" + escapeICSText(joinURL))
+	}
+	if organizer := normalizeAccountEmail(event.Organizer); organizer != "" {
+		organizerName := strings.TrimSpace(event.OrganizerName)
+		if organizerName == "" {
+			organizerName = organizer
+		}
+		writeLine("ORGANIZER;CN=" + icsParamValue(organizerName) + ":mailto:" + organizer)
+	}
+	for _, attendee := range event.Attendees {
+		email := normalizeAccountEmail(attendee)
+		if email == "" {
+			continue
+		}
+		writeLine("ATTENDEE;CN=" + icsParamValue(email) + ";ROLE=REQ-PARTICIPANT:mailto:" + email)
+	}
+	writeLine("TRANSP:OPAQUE")
+	writeLine("END:VEVENT")
 }
 
 // slugForFilename reduces a caller string to a lowercase ascii-and-digit slug

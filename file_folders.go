@@ -957,23 +957,13 @@ func authorizedFileRowForMove(ctx context.Context, user *userAccount, fileID str
 			}
 			header := meetingMemoryEntry{ID: entry.ID, Kind: entry.Kind, CreatedAt: entry.CreatedAt, Metadata: metadata}
 			kanbanApp.memory.mu.Unlock()
-			if _, promoted, valid := promotedChatFileBindingFromEntry(header); promoted {
-				if !valid {
-					return assistantFileRecord{}, false
-				}
-				if _, _, _, authorized := kanbanApp.promotedChatFileSource(ctx, user, header); !authorized {
-					return assistantFileRecord{}, false
-				}
+			// Per-file ACL (files.go): a trashed row is not a live Drive row, and
+			// a row outside the viewer's visibility/grants does not exist here.
+			// Write authority is the uploader's (legacy: or the approval admin).
+			if fileEntryTrashed(metadata) || !kanbanApp.fileEntryReadableByViewer(ctx, user, header) {
+				return assistantFileRecord{}, false
 			}
-			row := fileRecordFromEntry(header)
-			writable := false
-			if canonical {
-				writable = strings.TrimSpace(metadata["uploaderPersonId"]) == principal.PersonID
-				row.UploaderEmail = ""
-			} else {
-				writable = isArtifactApprovalAdmin(user) || normalizeAccountEmail(row.UploaderEmail) != "" && normalizeAccountEmail(row.UploaderEmail) == normalizeAccountEmail(user.Email)
-			}
-			return row, writable
+			return kanbanApp.decorateFileRowForViewer(ctx, user, header), authorizeFileEntry(ctx, user, ACLWrite, header)
 		}
 		kanbanApp.memory.mu.Unlock()
 	}

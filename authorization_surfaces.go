@@ -94,12 +94,18 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.board_card", AuthorizationHTTP, "/assistant/board/cards/", []string{"board_card"}, []ACLAction{ACLWrite, ACLDelete}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.board_drafts", AuthorizationHTTP, "/assistant/board/drafts/", []string{"board_card"}, []ACLAction{ACLWrite, ACLApprove}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.memory", AuthorizationHTTP, "/assistant/memory", []string{"memory", "meeting", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.remember", AuthorizationHTTP, "/assistant/remember", []string{"memory", "chat_thread"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.memory_inspect", AuthorizationHTTP, "/assistant/memory/inspect", []string{"memory", "decision", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.memory_inspect_action", AuthorizationHTTP, "/assistant/memory/inspect/action", []string{"memory", "decision"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.agent_mind", AuthorizationHTTP, "/assistant/agent-mind", []string{"agent_mind", "chat_thread"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.files", AuthorizationHTTP, "/assistant/files", []string{"file", "blob", "artifact", "folder", "chat_thread"}, []ACLAction{ACLReadContent, ACLWrite, ACLDelete}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.files_upload", AuthorizationHTTP, "/assistant/files/upload", []string{"file", "blob"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.file_folders", AuthorizationHTTP, "/assistant/files/folders", []string{"folder"}, []ACLAction{ACLCreateChild, ACLWrite, ACLDelete}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.file_move", AuthorizationHTTP, "/assistant/files/move", []string{"file", "folder", "artifact", "chat_thread"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.file_save", AuthorizationHTTP, "/assistant/files/save", []string{"artifact", "file", "folder", "chat_thread", "blob"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.file_restore", AuthorizationHTTP, "/assistant/files/restore", []string{"file", "blob"}, []ACLAction{ACLReadMetadata, ACLDelete}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.file_usage", AuthorizationHTTP, "/assistant/files/usage", []string{"file", "blob"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.file_trash_empty", AuthorizationHTTP, "/assistant/files/trash/empty", []string{"file", "blob"}, []ACLAction{ACLDelete}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifact_disposition", AuthorizationHTTP, "/api/artifact-dispositions/v1", []string{"artifact", "artifact_disposition", "file", "chat_thread"}, []ACLAction{ACLReadContent, ACLWrite, ACLDelete}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifact_drive_save", AuthorizationHTTP, "/api/artifact-drive-saves/v1", []string{"artifact", "artifact_drive_save", "file", "folder", "chat_thread", "blob"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.meetings", AuthorizationHTTP, "/assistant/meetings", []string{"meeting", "memory", "board_card"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
@@ -109,6 +115,15 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.assistant.meeting_records", AuthorizationHTTP, "/assistant/meetings/", []string{"meeting", "transcript", "analysis_projection", "board_card", "chat_thread"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.meeting_record", AuthorizationHTTP, "/assistant/meetings/{meetingId}", []string{"meeting", "transcript", "analysis_projection", "board_card"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.meeting_record_conversation", AuthorizationHTTP, "/assistant/meetings/{meetingId}/conversation", []string{"meeting", "transcript", "chat_thread"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	// Wave 7: scheduled meetings are room-bound appointments (organizer or room
+	// manager edits); recording settings are manager-only; the chunk upload
+	// re-authorizes participant membership and the recording consent lane on
+	// every part before any byte is appended.
+	authSurface("http.assistant.meetings_scheduled", AuthorizationHTTP, "/assistant/meetings/scheduled", []string{"meeting", "room", "membership"}, []ACLAction{ACLReadMetadata, ACLCreateChild}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.meetings_scheduled_item", AuthorizationHTTP, "/assistant/meetings/scheduled/", []string{"meeting", "room", "membership"}, []ACLAction{ACLReadMetadata, ACLWrite, ACLDelete}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.meeting_recording_settings", AuthorizationHTTP, "/assistant/meetings/recording/settings", []string{"room", "membership"}, []ACLAction{ACLReadMetadata, ACLManage}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.meeting_recording_upload", AuthorizationHTTP, "/assistant/meetings/recording/upload", []string{"meeting", "membership", "consent", "blob"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.calendar.meetings_ics", AuthorizationHTTP, "/calendar/meetings.ics", []string{"meeting", "room"}, []ACLAction{ACLReadMetadata, ACLExport}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
 	authSurface("http.assistant.mission", AuthorizationHTTP, "/assistant/mission", []string{"package", "artifact", "decision"}, []ACLAction{ACLReadContent}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.mission_refresh", AuthorizationHTTP, "/assistant/mission/refresh", []string{"package", "artifact", "decision"}, []ACLAction{ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.proposals", AuthorizationHTTP, "/assistant/proposals/", []string{"proposal", "workflow"}, []ACLAction{ACLApprove, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
@@ -126,6 +141,8 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.admin.brain_projection_backfill", AuthorizationHTTP, "/api/admin/brain-projection/backfill", []string{"memory", "artifact", "projection", "approval"}, []ACLAction{ACLApprove, ACLExecute}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
 	authSurface("http.admin.ambient_replay_plan", AuthorizationHTTP, "/api/admin/ambient-intelligence-replay/plan", []string{"memory", "meeting", "analysis_projection", "approval"}, []ACLAction{ACLReadContent, ACLApprove}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.admin.ambient_replay_execute", AuthorizationHTTP, "/api/admin/ambient-intelligence-replay/execute", []string{"memory", "meeting", "analysis_projection", "approval", "execution_receipt"}, []ACLAction{ACLReadContent, ACLApprove, ACLExecute}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.admin.accounts", AuthorizationHTTP, "/assistant/admin/accounts", []string{"account", "session"}, []ACLAction{ACLReadMetadata, ACLManage}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
+	authSurface("http.admin.blobs_sweep", AuthorizationHTTP, "/assistant/admin/blobs/sweep", []string{"blob", "artifact", "file", "chat_thread", "capability"}, []ACLAction{ACLDelete, ACLExecute}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.assistant.realtime_offer", AuthorizationHTTP, "/assistant/realtime-offer", []string{"room", "meeting"}, []ACLAction{ACLReadMetadata, ACLExecute}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.realtime_lease_renew", AuthorizationHTTP, "/assistant/realtime/lease/renew", []string{"meeting", "media_runtime"}, []ACLAction{ACLExecute, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.assistant.realtime_lease_stop", AuthorizationHTTP, "/assistant/realtime/lease/stop", []string{"meeting", "media_runtime"}, []ACLAction{ACLExecute, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
@@ -143,6 +160,9 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.artifacts.document_copies", AuthorizationHTTP, "/artifacts/document/copies", []string{"artifact", "revision", "file", "folder"}, []ACLAction{ACLReadContent, ACLWrite, ACLCreateChild}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.artifacts.document_new", AuthorizationHTTP, "/artifacts/document/new", []string{"artifact"}, []ACLAction{ACLCreateChild, ACLWrite}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.artifacts.document_images", AuthorizationHTTP, "/artifacts/document/images", []string{"artifact", "revision", "blob"}, []ACLAction{ACLReadContent, ACLWrite, ACLCreateChild}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
+	authSurface("http.artifacts.document_versions", AuthorizationHTTP, "/artifacts/document/versions", []string{"artifact", "revision", "blob"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.document_import", AuthorizationHTTP, "/artifacts/document/import", []string{"artifact", "file", "blob"}, []ACLAction{ACLReadContent, ACLCreateChild, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.deck_versions", AuthorizationHTTP, "/artifacts/deck/versions", []string{"artifact", "revision", "blob"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.deck_assets", AuthorizationHTTP, "/artifacts/deck/assets", []string{"artifact", "revision", "blob"}, []ACLAction{ACLReadContent, ACLWrite, ACLCreateChild}, []string{"user"}, true, false, AuthorizationCanonicalNeeded),
 	authSurface("http.artifacts.deck_image_generations", AuthorizationHTTP, "/artifacts/deck/image-generations", []string{"artifact", "revision", "blob"}, []ACLAction{ACLReadContent, ACLWrite, ACLCreateChild, ACLExecute}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.workstream_correction", AuthorizationHTTP, "/artifacts/workstream", []string{"artifact", "chat_thread", "project", "workstream_affinity"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
@@ -155,6 +175,7 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.artifacts.share", AuthorizationHTTP, "/artifacts/share", []string{"artifact", "revision", "capability"}, []ACLAction{ACLReadMetadata, ACLReadContent, ACLShare, ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.export_pdf", AuthorizationHTTP, "/artifacts/export-pdf", []string{"artifact", "revision", "blob"}, []ACLAction{ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.artifacts.export_pptx", AuthorizationHTTP, "/artifacts/export-pptx", []string{"artifact", "revision", "blob"}, []ACLAction{ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.export_docx", AuthorizationHTTP, "/artifacts/export-docx", []string{"artifact", "revision", "blob"}, []ACLAction{ACLExport}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.archives", AuthorizationHTTP, "/archives/", []string{"archive", "meeting", "blob"}, []ACLAction{ACLReadContent, ACLExport}, []string{"public_capability"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.participants", AuthorizationHTTP, "/participants", []string{"room", "membership"}, []ACLAction{ACLReadMetadata}, []string{"anonymous", "user"}, false, true, AuthorizationLegacyGuarded),
 	authSurface("http.rooms", AuthorizationHTTP, "/rooms", []string{"room", "membership"}, []ACLAction{ACLReadMetadata, ACLCreateChild}, []string{"user"}, false, false, AuthorizationCanonicalNeeded),
@@ -176,6 +197,7 @@ var authorizationWebSocketInboundEvents = []string{
 	"participant", "office", "office_ping", "chat_typing", "room_ping", "media_ready", "request_participant_tracks", "candidate", "answer", "restart_ice", "select_layer",
 	"assistant_query", "catch_me_up", "scout_chat_reset", "scout_chat", "room_chat", "room_chat_delete", "manual_create_ticket", "manual_update_ticket", "manual_delete_ticket",
 	"undo_delete_ticket", "archive_meeting", "set_recording", "participant_media_state", "voice_control", "media_quality", "media_error", "screen_share_started", "screen_share_stopped",
+	"room_reaction", "room_hand", "room_moderate",
 }
 
 func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
@@ -211,6 +233,11 @@ func websocketInboundAuthorizationSurfaces() []AuthorizationSurface {
 			action, families, status = ACLExport, []string{"meeting", "archive"}, AuthorizationCanonicalNeeded
 		case "set_recording", "voice_control":
 			action, families, status = ACLManage, []string{"room", "meeting"}, AuthorizationCanonicalNeeded
+		case "room_reaction", "room_hand":
+			readsBody = true
+		case "room_moderate":
+			action, families, readsBody, status = ACLManage, []string{"room", "meeting", "membership"}, true, AuthorizationCanonicalNeeded
+			principals = []string{"user"}
 		}
 		result = append(result, authSurface("ws.in."+event, AuthorizationWebSocketIn, event, families, []ACLAction{action}, principals, readsBody, authorizeBeforeBodyRead, status))
 	}

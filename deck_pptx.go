@@ -77,6 +77,9 @@ func compileDeckDocumentPPTX(deck deckDocument, allowedImageRefs map[string]stru
 	if err := validateDeckDocument(deck, allowedImageRefs); err != nil {
 		return nil, err
 	}
+	// Empty slide backgrounds / text colors take the theme values, exactly as
+	// the HTML projection does, so the PowerPoint matches the stage.
+	deck = deckWithThemeDefaults(deck)
 	for _, slide := range deck.Slides {
 		for _, element := range slide.Elements {
 			if element.Type == "text" && strings.TrimSpace(element.RichText) != "" {

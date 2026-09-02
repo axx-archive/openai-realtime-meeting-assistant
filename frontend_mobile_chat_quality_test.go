@@ -23,7 +23,7 @@ func TestPhoneChatKeepsBubbleMeasureAndRealHitTargets(t *testing.T) {
 		"width: var(--hit-min);\n          min-width: var(--hit-min);\n          height: var(--hit-min);\n          min-height: var(--hit-min);",
 		"#chatTool .scout-chat-send::before {\n          background: var(--accent);",
 		"#chatTool .stride-dictation-action::before {\n          content: none;",
-		"transform: scale(0.96);",
+		"transform: scale(var(--press-scale));", // plan 011: one press token
 	} {
 		if !strings.Contains(phone, want) {
 			t.Errorf("phone chat quality contract missing %q", want)

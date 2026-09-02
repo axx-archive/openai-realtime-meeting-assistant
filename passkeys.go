@@ -262,18 +262,38 @@ func handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusUnauthorized, "passkey sign-in failed")
 		return
 	}
+	completePasskeyLogin(w, r, matchedUser, credential)
+}
+
+// completePasskeyLogin is the post-ceremony half of passkey sign-in. A
+// disabled account (Wave 5 D11) is refused here with the SAME uniform 401
+// the password path gives — never the session-mint 500 — so an offboarded
+// passkey holder learns nothing beyond "sign-in failed". Only then is the
+// credential's signature counter persisted and the session minted.
+func completePasskeyLogin(w http.ResponseWriter, r *http.Request, matchedUser *userAccount, credential *webauthn.Credential) {
+	if matchedUser == nil || matchedUser.disabled() {
+		writeAuthError(w, http.StatusUnauthorized, "passkey sign-in failed")
+		return
+	}
 
 	// Persist the updated signature counter / backup flags.
-	_ = accountStore().updateCredentials(matchedUser.Email, func(account *userAccount) {
-		for index := range account.Credentials {
-			if passkeyID(account.Credentials[index]) == passkeyID(*credential) {
-				account.Credentials[index] = *credential
+	if credential != nil {
+		_ = accountStore().updateCredentials(matchedUser.Email, func(account *userAccount) {
+			for index := range account.Credentials {
+				if passkeyID(account.Credentials[index]) == passkeyID(*credential) {
+					account.Credentials[index] = *credential
+				}
 			}
-		}
-	})
+		})
+	}
 
 	token, err := strideE10CreatePasskeyAuthenticatedSession(matchedUser.Email)
 	if err != nil {
+		if accountIsDisabled(matchedUser.Email) {
+			// Disabled between the ceremony and the mint: still the uniform 401.
+			writeAuthError(w, http.StatusUnauthorized, "passkey sign-in failed")
+			return
+		}
 		writeAuthError(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}

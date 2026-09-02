@@ -72,3 +72,36 @@ func currentRoomScoutVoiceAvailability() roomScoutVoiceAvailability {
 	}
 	return roomScoutVoiceAvailability{Enabled: true, Reason: "qualified"}
 }
+
+// roomScoutTextAvailability is the chat-only Scout seat (Wave 6 D7): @Scout
+// answered through the server-owned room-chat path with no realtime lane and
+// no provider audio. It is reported separately from the voice gate so the
+// client can offer a text-only invite while voice stays unqualified.
+type roomScoutTextAvailability struct {
+	Enabled bool   `json:"enabled"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+// currentRoomScoutTextAvailability never consults the voice qualification:
+// the typed path is OpenAI-owned and needs only the provider key that the
+// existing @Scout room-chat turn already requires.
+func currentRoomScoutTextAvailability() roomScoutTextAvailability {
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+		return roomScoutTextAvailability{Status: "degraded", Reason: "provider_not_configured"}
+	}
+	return roomScoutTextAvailability{Enabled: true, Status: "available", Model: scoutChatModel()}
+}
+
+// snapshot is the /readyz projection of the text seat.
+func (availability roomScoutTextAvailability) snapshot() map[string]any {
+	snapshot := map[string]any{"status": availability.Status, "enabled": availability.Enabled}
+	if availability.Reason != "" {
+		snapshot["reason"] = availability.Reason
+	}
+	if availability.Model != "" {
+		snapshot["model"] = availability.Model
+	}
+	return snapshot
+}
