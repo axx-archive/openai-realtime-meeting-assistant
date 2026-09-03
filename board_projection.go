@@ -68,7 +68,9 @@ func (app *kanbanBoardApp) boardProjectionForViewer(ctx context.Context, user *u
 			channelByTitle[title] = thread
 		}
 		title := strings.TrimSpace(thread.Title)
-		if !thread.Table && !strings.EqualFold(title, "team") && !strings.EqualFold(title, "general") {
+		// Same fence as strideProductProjectDestinationEligible: the pinned org
+		// channels (Bonfire Chat, #meetings) are never board projects.
+		if !scoutChatThreadIsPinnedSystem(thread) && !strings.EqualFold(title, "team") && !strings.EqualFold(title, "general") {
 			projects[thread.ID] = title
 		}
 	}

@@ -939,7 +939,12 @@ type scoutChatThreadRecord struct {
 	// canvas live line and the mobile shell's chat control point at. omitempty
 	// for exactly the reason Intake above is: every pre-Table thread already on
 	// disk must round-trip unchanged.
-	Table    bool                     `json:"table,omitempty"`
+	Table bool `json:"table,omitempty"`
+	// System marks a permanent org channel other than the Table — today only
+	// "meetings" (meetings_channel.go, AJ 2026-09-02). Pinned, ember, never
+	// archived / renamed / member-edited. omitempty for the same round-trip
+	// reason as Table.
+	System   string                   `json:"system,omitempty"`
 	Messages []scoutChatMessageRecord `json:"messages,omitempty"`
 	// OpeningOperation binds the atomic home create+first-message request to
 	// one private thread. It contains hashes and deterministic ids only and is
@@ -1165,10 +1170,17 @@ func assistantChatThreadsHandler(w http.ResponseWriter, r *http.Request) {
 			indexEntries = kanbanApp.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0)
 			tableErr = kanbanApp.ensureTableForIndexEntries(user.Email, indexEntries)
 			if tableErr == nil {
+				// #meetings rides the same lazy provisioning (meetings_channel.go).
+				tableErr = kanbanApp.ensureMeetingsChannelForIndexEntries(user.Email, indexEntries)
+			}
+			if tableErr == nil {
 				indexEntries = kanbanApp.memory.metadataSnapshotOfKind(meetingMemoryKindScoutChat, 0)
 			}
 		} else {
 			_, tableErr = kanbanApp.ensureTable(user.Email)
+			if tableErr == nil {
+				_, tableErr = kanbanApp.ensureMeetingsChannel(user.Email)
+			}
 		}
 		if tableErr != nil {
 			log.Errorf("Failed to ensure the Table thread: %v", tableErr)
@@ -2214,6 +2226,12 @@ func scoutChatThreadMutationView(thread scoutChatThreadRecord) map[string]any {
 		"preview":    thread.Preview,
 		"table":      thread.Table,
 	}
+	if system := scoutChatThreadSystem(thread); system != "" {
+		row["system"] = system
+	}
+	if scoutChatThreadIsPinnedSystem(thread) {
+		row["pinned"] = true
+	}
 	if conversationKind := scoutChatThreadConversationKind(thread); conversationKind != "" {
 		row["conversationKind"] = conversationKind
 	}
@@ -2361,6 +2379,12 @@ func writeScoutChatThreadError(w http.ResponseWriter, err error) {
 	if strings.Contains(err.Error(), "your own") || strings.Contains(err.Error(), "admin-only") || strings.Contains(err.Error(), "public agent replies") {
 		status = http.StatusForbidden
 	}
+	// The two pinned org channels refuse archive / rename / member removal by
+	// policy, not because the request was malformed (AJ 2026-09-02: "Bonfire
+	// Chat and #meetings stay open for everyone").
+	if strings.Contains(err.Error(), scoutChatPermanentChannelCopy) {
+		status = http.StatusForbidden
+	}
 	if errors.Is(err, errWorkRequestContextRefForbidden) {
 		status = workRequestContextRefStatus(err)
 	}
@@ -2484,7 +2508,7 @@ func (app *kanbanBoardApp) ensureScoutChatThreadWithKind(threadID string, ownerE
 			continue
 		}
 		existing, ok := decodeScoutChatThreadEntry(entry)
-		if !ok || normalizeAccountEmail(existing.OwnerEmail) != ownerEmail || existing.Title != title || scoutChatThreadVisibility(existing) != visibility || scoutChatThreadConversationKind(existing) != conversationKind || strings.Join(scoutChatThreadMemberEmails(existing), "\x00") != strings.Join(members, "\x00") || existing.Table || existing.Intake != "" || existing.ArchivedAt != "" {
+		if !ok || normalizeAccountEmail(existing.OwnerEmail) != ownerEmail || existing.Title != title || scoutChatThreadVisibility(existing) != visibility || scoutChatThreadConversationKind(existing) != conversationKind || strings.Join(scoutChatThreadMemberEmails(existing), "\x00") != strings.Join(members, "\x00") || existing.Table || scoutChatThreadSystem(existing) != "" || existing.Intake != "" || existing.ArchivedAt != "" {
 			return scoutChatThreadRecord{}, false, fmt.Errorf("thread identity already exists with different authority")
 		}
 		return existing, false, nil
@@ -7708,6 +7732,15 @@ func scoutChatThreadEventPayload(thread scoutChatThreadRecord) map[string]any {
 		"visibility": scoutChatThreadVisibility(thread),
 		"updatedAt":  thread.UpdatedAt,
 	}
+	if thread.Table {
+		payload["table"] = true
+	}
+	if system := scoutChatThreadSystem(thread); system != "" {
+		payload["system"] = system
+	}
+	if scoutChatThreadIsPinnedSystem(thread) {
+		payload["pinned"] = true
+	}
 	if conversationKind := scoutChatThreadConversationKind(thread); conversationKind != "" {
 		payload["conversationKind"] = conversationKind
 	}
@@ -7903,8 +7936,8 @@ func (app *kanbanBoardApp) renameScoutChatThread(viewerEmail string, threadID st
 	if thread.ArchivedAt != "" {
 		return scoutChatThreadRecord{}, fmt.Errorf("chat thread is archived")
 	}
-	if thread.Table {
-		return scoutChatThreadRecord{}, fmt.Errorf("Bonfire Chat is permanent and cannot be renamed")
+	if scoutChatThreadIsPinnedSystem(thread) {
+		return scoutChatThreadRecord{}, fmt.Errorf("%s", scoutChatPermanentChannelCopy)
 	}
 	if thread.Title == title {
 		return thread, nil
@@ -7971,6 +8004,11 @@ func (app *kanbanBoardApp) updateScoutChatThreadMembers(viewerEmail string, thre
 	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
 	if err != nil {
 		return scoutChatThreadRecord{}, err
+	}
+	// The two pinned org channels have no roster to edit: nobody can be
+	// removed from Bonfire Chat or #meetings (AJ 2026-09-02).
+	if scoutChatThreadIsPinnedSystem(thread) {
+		return scoutChatThreadRecord{}, fmt.Errorf("%s", scoutChatPermanentChannelCopy)
 	}
 	kind := scoutChatThreadConversationKind(thread)
 	humanGroup := kind == scoutChatConversationKindHumanGroup
@@ -8063,8 +8101,8 @@ func (app *kanbanBoardApp) setScoutChatThreadArchived(ownerEmail string, threadI
 	if err != nil {
 		return scoutChatThreadRecord{}, err
 	}
-	if thread.Table {
-		return scoutChatThreadRecord{}, fmt.Errorf("Bonfire Chat is permanent and cannot be archived")
+	if scoutChatThreadIsPinnedSystem(thread) {
+		return scoutChatThreadRecord{}, fmt.Errorf("%s", scoutChatPermanentChannelCopy)
 	}
 	// Any signed-in user can read a public channel, but only its creator or the
 	// workspace administrator may archive (or restore) it.
@@ -8134,6 +8172,14 @@ func (app *kanbanBoardApp) scoutChatThreadsSnapshot(ownerEmail string, includeAr
 		// defeats the point of it being permanent.
 		if threads[i].Table != threads[j].Table {
 			return threads[i].Table
+		}
+		// #meetings is the second permanent channel and pins the same way. The
+		// pin has to live here rather than only in the client's comparator:
+		// this slice is truncated to `limit` below, and a channel that only
+		// moves when a meeting finalizes would otherwise be sliced out of the
+		// payload entirely on an account with more threads than the limit.
+		if scoutChatThreadIsPinnedSystem(threads[i]) != scoutChatThreadIsPinnedSystem(threads[j]) {
+			return scoutChatThreadIsPinnedSystem(threads[i])
 		}
 		return scoutChatThreadTime(threads[i]).After(scoutChatThreadTime(threads[j]))
 	})
@@ -8254,6 +8300,9 @@ func scoutChatThreadMetadata(thread scoutChatThreadRecord) map[string]string {
 	}
 	if thread.Table {
 		metadata["table"] = "true"
+	}
+	if system := scoutChatThreadSystem(thread); system != "" {
+		metadata["system"] = system
 	}
 	if len(thread.Messages) > 0 {
 		start := len(thread.Messages) - 100

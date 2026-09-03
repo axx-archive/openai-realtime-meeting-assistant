@@ -791,8 +791,15 @@ func strideProductReservedProjectTitle(value string) bool {
 	return title == "team" || title == "general"
 }
 
+// A Project destination is a channel work can be bound to. The two permanent
+// org channels are not projects: Bonfire Chat (the Table) never was, and
+// #meetings is the org-public recap channel, so binding a deliverable there
+// would silently move a private request's audience to the whole office. The
+// title matcher (strideProductOutcomeNamesProject) is a whole-word containment
+// test, and "meetings" is an ordinary English word, so the fence has to be on
+// the pinned flag rather than on the title list.
 func strideProductProjectDestinationEligible(thread scoutChatThreadRecord) bool {
-	return strings.TrimSpace(thread.ID) != "" && strings.TrimSpace(thread.Title) != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && thread.ArchivedAt == "" && !thread.Table && !strideProductReservedProjectTitle(thread.Title)
+	return strings.TrimSpace(thread.ID) != "" && strings.TrimSpace(thread.Title) != "" && scoutChatThreadVisibility(thread) == scoutChatVisibilityPublic && thread.ArchivedAt == "" && !scoutChatThreadIsPinnedSystem(thread) && !strideProductReservedProjectTitle(thread.Title)
 }
 
 func strideProductProjectDestinationAuthority(thread scoutChatThreadRecord) (STRIDEAudience, int64, error) {

@@ -123,6 +123,13 @@ type ambientHeldWindow struct {
 	WindowID          string `json:"windowId"`
 	BaselineID        string `json:"baselineId,omitempty"`
 	BlockedReason     string `json:"blockedReason,omitempty"`
+	// FirstRunAnchor records that this scope's baseline was set by the opt-in
+	// first-run anchor (ambientAgentConfig.firstRunAnchor) rather than resolved
+	// from consumption evidence: the worker had never produced for the scope
+	// and anchored at the pre-boot input instead of failing closed. Surfaced by
+	// the checkpoint diagnostics (firstRunAnchorScopes) so the choice is never
+	// silent.
+	FirstRunAnchor bool `json:"firstRunAnchor,omitempty"`
 }
 
 type ambientHeldWindowState struct {
@@ -231,6 +238,9 @@ func (app *kanbanBoardApp) persistAmbientHeldWindow(agent ambientAgentConfig, he
 	if err != nil {
 		return err
 	}
+	// The first-run anchor is a property of the scope, not of one window:
+	// every rewrite of the checkpoint keeps it so the diagnostics stay honest.
+	window.FirstRunAnchor = state.Windows[key].FirstRunAnchor
 	state.Windows[key] = window
 	return ambientHeldWindowStatePersist(path, state)
 }
@@ -307,6 +317,7 @@ func (app *kanbanBoardApp) persistAmbientCheckpointBaseline(agent ambientAgentCo
 		ArtifactKind:      agent.artifactKind,
 		CursorMetadataKey: agent.cursorMetadataKey,
 		BaselineID:        strings.TrimSpace(baselineID),
+		FirstRunAnchor:    state.Windows[key].FirstRunAnchor,
 	}
 	return ambientHeldWindowStatePersist(path, state)
 }
@@ -343,9 +354,87 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 	}
 	baselineID, _, ambiguous := app.memory.ambientContinuityBaseline(agent, roomID)
 	if ambiguous {
+		if anchor, ok := app.ambientFirstRunAnchor(agent, roomID); ok {
+			if err := app.persistAmbientFirstRunAnchor(agent, roomID, anchor); err != nil {
+				return anchor, "", err
+			}
+			log.Warnf("%s has never produced for scope %s; anchoring at its pre-boot input (first-run anchor) — earlier history is reachable only through the worker's own seeding or governed replay", agent.name, key)
+			return anchor, "", nil
+		}
 		return "", ambientContinuityAmbiguous, nil
 	}
 	return baselineID, "", nil
+}
+
+// ambientFirstRunAnchor resolves the opt-in first-run anchor for a scope the
+// worker has never produced for (ambientAgentConfig.firstRunAnchor): the
+// newest VISIBLE pre-boot input of the scope, so the anchor always validates
+// as a typed input cursor. ok=false when the worker did not opt in or has
+// produced for the scope before (hidden artifacts count as production — an
+// expired dossier still proves consumption). An empty anchor with ok=true is
+// a provably clean scope.
+func (app *kanbanBoardApp) ambientFirstRunAnchor(agent ambientAgentConfig, roomID string) (string, bool) {
+	if app == nil || app.memory == nil || !agent.firstRunAnchor {
+		return "", false
+	}
+	store := app.memory
+	windowRoomID := agent.windowRoomID(roomID)
+	matchesRoom := func(entry meetingMemoryEntry) bool {
+		return windowRoomID == "" || normalizeRoomID(entry.Metadata["roomId"]) == normalizeRoomID(windowRoomID)
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	bootLatest := store.bootLatestIDs[agent.inputKind]
+	if windowRoomID != "" {
+		bootLatest = ""
+		if rooms := store.bootLatestRoomIDs[agent.inputKind]; rooms != nil {
+			bootLatest = rooms[normalizeRoomID(windowRoomID)]
+		}
+	}
+	bootIndex := -1
+	for index, entry := range store.entries {
+		if entry.Kind == agent.artifactKind && !memoryEntryIsMediaSoakCanary(entry) && matchesRoom(entry) {
+			return "", false
+		}
+		if entry.ID == bootLatest && entry.Kind == agent.inputKind {
+			bootIndex = index
+		}
+	}
+	if strings.TrimSpace(bootLatest) == "" || bootIndex < 0 {
+		return "", true
+	}
+	for index := bootIndex; index >= 0; index-- {
+		entry := store.entries[index]
+		if entry.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(entry) && matchesRoom(entry) {
+			return entry.ID, true
+		}
+	}
+	return "", true
+}
+
+// persistAmbientFirstRunAnchor records the anchored baseline on the scope's
+// checkpoint with FirstRunAnchor set, before the caller's
+// ensureAmbientScopeCheckpoint rewrite (which preserves the flag).
+func (app *kanbanBoardApp) persistAmbientFirstRunAnchor(agent ambientAgentConfig, roomID string, anchor string) error {
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	ambientHeldWindowStateMu.Lock()
+	defer ambientHeldWindowStateMu.Unlock()
+	path := app.ambientHeldWindowPath()
+	state, err := loadAmbientHeldWindowState(path)
+	if err != nil {
+		return err
+	}
+	state.Windows[key] = ambientHeldWindow{
+		Agent:             agent.name,
+		RoomID:            roomID,
+		InputKind:         agent.inputKind,
+		ArtifactKind:      agent.artifactKind,
+		CursorMetadataKey: agent.cursorMetadataKey,
+		BaselineID:        strings.TrimSpace(anchor),
+		FirstRunAnchor:    true,
+	}
+	return ambientHeldWindowStatePersist(path, state)
 }
 
 // validateAndNormalizeAmbientCheckpoint upgrades legacy untyped checkpoints and
@@ -494,6 +583,18 @@ type ambientAgentConfig struct {
 	// company-global single-cursor behavior (day digest, entity ledger,
 	// company digest).
 	roomScoped bool
+	// firstRunAnchor (2026-09-02 follow-up) opts a worker into anchoring a scope
+	// it has NEVER produced for — no artifact of artifactKind in that scope,
+	// hidden rows included — at the scope's pre-boot input instead of failing
+	// closed as durable_cursor_ambiguous. Deliberately opt-in: the chassis
+	// default keeps the contract pinned by
+	// TestNoSidecarAmbiguousRawContinuityStaysFailClosedAcrossRestart (raw
+	// history with no consumption evidence is never silently consumed). A worker
+	// that opts in must make the skipped history reachable on its own terms —
+	// the channel digest seeds every thread's bounded live history through its
+	// produce/drainedWork path. The anchor is recorded on the checkpoint
+	// (FirstRunAnchor) and counted by the diagnostics, never silent.
+	firstRunAnchor bool
 	// defersWhenGuestsOnly (§6.5) holds the agent's scheduled/nudge passes for
 	// a room whose live seats are guests only — an unattended guest cannot
 	// drive summarization spend. Nudges accumulate (the ticker floor retries)
@@ -1688,7 +1789,7 @@ func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, h
 		// coverage machinery can see. Without it, meetingCoverageDetail would keep
 		// reading a "full" capture stamp for a meeting whose synthesis silently
 		// lost a window.
-		app.appendAmbientDeadLetterTombstone(agent, headID, roomID, attempts)
+		app.appendAmbientDeadLetterTombstone(agent, headID, roomID, attempts, "")
 	}
 }
 
@@ -1700,7 +1801,7 @@ func (app *kanbanBoardApp) recordAmbientAgentFailure(agent ambientAgentConfig, h
 // missing head input (already swept) still leaves a span-less stub so the FACT of
 // the skip survives. Best-effort: a write failure only loses the honesty flag,
 // never the dead-letter itself (the baseline already advanced above).
-func (app *kanbanBoardApp) appendAmbientDeadLetterTombstone(agent ambientAgentConfig, headID string, roomID string, attempts int) {
+func (app *kanbanBoardApp) appendAmbientDeadLetterTombstone(agent ambientAgentConfig, headID string, roomID string, attempts int, reason string) {
 	if app == nil || app.memory == nil {
 		return
 	}
@@ -1713,6 +1814,12 @@ func (app *kanbanBoardApp) appendAmbientDeadLetterTombstone(agent ambientAgentCo
 		deadLetterAttemptsMetadataKey:  strconv.Itoa(attempts),
 		"roomId":                       roomID,
 	}
+	// A truncation skip (ambient_truncation.go) is abandoned input too, but the
+	// reason lets the capability snapshot count it as stuckInputs rather than
+	// a poison dead letter.
+	if reason = strings.TrimSpace(reason); reason != "" {
+		metadata[deadLetterReasonMetadataKey] = reason
+	}
 	if head, ok := app.memory.entryByKindAndID(agent.inputKind, headID); ok {
 		if meetingID := strings.TrimSpace(head.Metadata["meetingId"]); meetingID != "" {
 			metadata["meetingId"] = meetingID
@@ -1722,6 +1829,9 @@ func (app *kanbanBoardApp) appendAmbientDeadLetterTombstone(agent ambientAgentCo
 		metadata[deadLetterSpanEndMetadataKey] = at
 	}
 	text := fmt.Sprintf("%s abandoned %s input %s after %d failed synthesis attempts; the raw window was captured but never folded in.", agent.name, agent.inputKind, headID, attempts)
+	if reason != "" {
+		text = fmt.Sprintf("%s skipped %s input %s after %d attempt(s) ended in %s; the raw window was captured but never folded in.", agent.name, agent.inputKind, headID, attempts, reason)
+	}
 	id := fmt.Sprintf("dead-letter-%s-%s-%s", agent.name, roomID, headID)
 	if _, _, err := app.memory.appendDeadLetter(id, text, metadata); err != nil {
 		log.Errorf("%s failed to write dead-letter tombstone for %s: %v", agent.name, headID, err)

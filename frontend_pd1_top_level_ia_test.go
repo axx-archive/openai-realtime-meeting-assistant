@@ -295,7 +295,9 @@ const server = http.createServer((req, res) => {
   // the name alone.
   // railWidth 168: AJ ratified the wide labelled rail 2026-09-02 (labels
   // visible at >=1180px; the slim 56px rail remains below that).
-  assert.deepEqual(shellChrome, {railWidth:168,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:4});
+  // organizationChildCount 3: AJ ratified the shell 2026-09-02 — the org
+  // button is wordmark + name + chevron; the letter badge tile is gone.
+  assert.deepEqual(shellChrome, {railWidth:168,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:3});
   await page.click('#topbarOrganizationSwitcher');
   await page.waitForFunction(() => !document.getElementById('topbarOrganizationMenu').hidden && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2);
   assert.equal(await page.locator('#topbarOrganizationMenu').evaluate(el => !el.hidden), true);

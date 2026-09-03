@@ -19,7 +19,12 @@ func TestChatColdIndexAndHydrationStayBodyFreeFencedAndBounded(t *testing.T) {
 		`if (chatThreadsRequest)`,
 		`if (options.queueIfBusy) chatThreadsRefreshQueued = true`,
 		`generation !== chatThreadsGeneration || account !== String(authedUser?.email || '').toLowerCase()`,
-		`if (existing?.messagesLoaded === true) return existing`,
+		// The index refresh must never drop a thread's already-loaded bodies.
+		// The single-line early return was replaced by a keyed merge that
+		// keeps the loaded messages AND folds in viewer state; both halves are
+		// pinned so neither can regress back to a body refetch.
+		`if (current?.messagesLoaded === true && revisionOrder === 0) {`,
+		`return { ...row, ...current, ...viewerState, messagesLoaded: current.messagesLoaded === true }`,
 		`new URLSearchParams({ view: 'tail', limit: String(scoutChatHydrationPageSize) })`,
 		`loadEarlierScoutChatMessages(thread.id, button)`,
 		`void hydrateScoutChatThread(nextThreadId)`,

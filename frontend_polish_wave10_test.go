@@ -68,10 +68,16 @@ func TestPolishWave10LightRampAndButtonHierarchy(t *testing.T) {
 		}
 	}
 	// ember for text goes through --ember-text; the two light-mode failures
-	// the contrast probe found were raw Stride Orange on putty
+	// the contrast probe found were raw Stride Orange on putty. The second one
+	// used to be the thread row's mono STRIDE badge; AJ cut that badge on
+	// 2026-09-02 (pinned channels wear the ember title alone), so the mono
+	// half of the contract is pinned on the chat unread seam instead — same
+	// rule, still ember-on-mono, still through the token.
 	for _, want := range []string{
 		".chat-thread-item__title--bonfire-chat {\n        color: var(--ember-text);",
-		"color: var(--ember-text);\n        font: 700 8px/1.4 var(--font-mono);",
+		"#chatTool .desktop-chat-unread {",
+		"color: var(--ember-text);\n        font: var(--type-label);",
+		"--type-label: 500 11px/1.2 var(--font-mono);",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("ember-text contract missing %q", want)

@@ -261,13 +261,23 @@ func TestIndexRoomsWave7RecordPlaybackAndRecapCard(t *testing.T) {
 		"roomMediaRecordingClock(", "roomMediaRecordingSizeLabel(Number(recording.size) || 0)",
 	)
 	requireAllWave7(t, html, "recording CSS", ".meeting-record__media {", "audio.meeting-record__media {")
-	// the recap card: ≤5 decisions, ≤5 actions with owners, Open record
+	// AJ 2026-09-02: compact recap card — the top THREE decisions, a mono
+	// overflow footer (+N decisions · M action items · K open), one primary
+	// Open record button; no action-item list (the record carries the lists)
 	card := functionBodyAfterSignature(html, "function meetingRecapCardNode(spec = {})")
 	requireAllWave7(t, card, "meetingRecapCardNode",
-		".slice(0, 5)", "listSection('Decisions', decisions, false)", "listSection('Action items', actions, true)",
-		"meeting-recap-card__owner", "'Open record'", "openMeetingRecordDeepLink(spec.meetingId)", "'Open in conversation'",
+		"const decisions = allDecisions.slice(0, 3)", "listSection('Decisions', decisions)", "meeting-recap-card__more",
+		"moreDecisions: allDecisions.length - decisions.length", "String(spec.footer || '').trim() || meetingRecapCardFooter({",
+		"'Open record'", "openMeetingRecordDeepLink(spec.meetingId)", "'Open in conversation'",
 	)
-	requireAllWave7(t, html, "recap CSS", ".meeting-recap-card {", ".meeting-recap-card__open {")
+	for _, gone := range []string{".slice(0, 5)", "listSection('Action items'", "meeting-recap-card__owner"} {
+		if strings.Contains(card, gone) {
+			t.Errorf("compact recap card (AJ 2026-09-02) must not contain %q", gone)
+		}
+	}
+	footer := functionBodyAfterSignature(html, "function meetingRecapCardFooter(counts = {})")
+	requireAllWave7(t, footer, "meetingRecapCardFooter", "parts.push(`+${plural(more, 'decision', 'decisions')}`)", "plural(actions, 'action item', 'action items')", "parts.push(`${open} open`)", "return parts.join(' · ')")
+	requireAllWave7(t, html, "recap CSS", ".meeting-recap-card {", ".meeting-recap-card__open {", ".meeting-recap-card__more {\n        font: var(--type-label);")
 	// the channel message meeting-recap-card-<id> renders as the card, in both
 	// the desktop thread and room chat; the text parser reads the server shape
 	requireAllWave7(t, html, "recap id", "if (!id.startsWith('meeting-recap-card-')) return ''")
@@ -276,9 +286,11 @@ func TestIndexRoomsWave7RecordPlaybackAndRecapCard(t *testing.T) {
 	room := functionBody(html, "function roomChatMessageNode(message)")
 	requireAllWave7(t, room, "roomChatMessageNode", "if (meetingRecapCardMessageId(message)) return meetingRecapCardMessageNode(message)")
 	parse := functionBody(html, "function parseMeetingRecapCardText(text)")
-	requireAllWave7(t, parse, "parseMeetingRecapCardText", "/^Meeting Record:/i", "/[?&]record=([^&\\s]+)/", "/^Decisions$/i", "/^Action items$/i", "body.lastIndexOf(' — ')")
+	requireAllWave7(t, parse, "parseMeetingRecapCardText", "/^Meeting Record:/i", "/[?&]record=([^&\\s]+)/", "/^Decisions$/i", "/^Action items$/i", "body.lastIndexOf(' — ')",
+		// the compact footer line parses as its own field (legacy Action items blocks still parse)
+		"out.footer = line")
 	block := functionBody(html, "function meetingRecordRecapBlockNode(meetingId, detail)")
-	requireAllWave7(t, block, "meetingRecordRecapBlockNode", "detail.decisions", "detail.commitments", "recapCardThreadId", "inRecord: true")
+	requireAllWave7(t, block, "meetingRecordRecapBlockNode", "detail.decisions", "detail.commitments", "recapCardThreadId", "inRecord: true", "openCount: Number(detail?.unresolvedCount) || 0")
 	// the Project reference chips and the recap card's channel link share one
 	// opener that exists (it used to be a dangling reference): Conversations
 	// forward, select + hydrate, honest toast when the thread is gone

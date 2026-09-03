@@ -185,10 +185,12 @@ func TestTableRejectsRenameAndArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := kanbanApp.renameScoutChatThread("aj@shareability.com", table.ID, "General"); err == nil || !strings.Contains(err.Error(), "cannot be renamed") {
+	// AJ 2026-09-02: one honest refusal for both pinned org channels
+	// ("Bonfire Chat and #meetings stay open for everyone").
+	if _, err := kanbanApp.renameScoutChatThread("aj@shareability.com", table.ID, "General"); err == nil || !strings.Contains(err.Error(), scoutChatPermanentChannelCopy) {
 		t.Fatalf("rename err=%v", err)
 	}
-	if _, err := kanbanApp.setScoutChatThreadArchived("aj@shareability.com", table.ID, true); err == nil || !strings.Contains(err.Error(), "cannot be archived") {
+	if _, err := kanbanApp.setScoutChatThreadArchived("aj@shareability.com", table.ID, true); err == nil || !strings.Contains(err.Error(), scoutChatPermanentChannelCopy) {
 		t.Fatalf("archive err=%v", err)
 	}
 	persisted, _, err := kanbanApp.scoutChatThreadByID("aj@shareability.com", table.ID)

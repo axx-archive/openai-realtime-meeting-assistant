@@ -1,19 +1,22 @@
 package main
 
 // Wave 7 D3 — the post-call recap card. When a meeting finalizes with a
-// digest, ONE Scout-authored message lands in the room's channel: title,
-// duration, up to five decisions, up to five action items, and a link to the
-// Meeting Record. Idempotent per meeting: the record stamps
-// recapCardPostedAt, the message id is deterministic, and the commit re-reads
-// the thread under its lock, so finalization retries and crash-replays can
-// never post twice. Rooms without a channel are skipped (no stamp, so a
-// channel created later still gets nothing retroactively — cards are live
-// announcements, not history backfill).
+// digest, ONE Scout-authored message lands in the meeting's channel. Compact
+// (AJ 2026-09-02): title, a mono meta line (room · duration · N people), the
+// top THREE decisions in the digest's own order, a mono footer counting what the
+// card leaves out (+N decisions · M action items · K open), and one link to
+// the Meeting Record, which carries the full lists. Idempotent per meeting:
+// the record stamps recapCardPostedAt, the message id is deterministic, and
+// the commit re-reads the thread under its lock, so finalization retries and
+// crash-replays can never post twice. Rooms without a channel are skipped (no
+// stamp, so a channel created later still gets nothing retroactively — cards
+// are live announcements, not history backfill).
 //
 // Channel mapping: room chat itself is sitting-scoped memory, not a thread,
-// so the card goes to the organization-public channel whose title matches
-// the room's name; the office maps to the Table (the team's permanent
-// channel).
+// so a named room's card goes to the organization-public channel whose title
+// matches the room's name; the office maps to #meetings (meetings_channel.go),
+// provisioned on the first recap if boot did not already create it. Recap
+// cards that already sit in Bonfire Chat stay where they are.
 
 import (
 	"context"
@@ -25,9 +28,93 @@ import (
 )
 
 const (
-	meetingRecapCardMaxItems      = 5
+	meetingRecapCardMaxDecisions  = 3
 	meetingRecapCardMessagePrefix = "meeting-recap-card-"
 )
+
+// meetingRecapCard is the compact card payload the channel message text is
+// rendered from (and the shape the web client parses back, index.html
+// parseMeetingRecapCardText).
+type meetingRecapCard struct {
+	Title         string
+	Meta          string
+	Decisions     []string
+	MoreDecisions int
+	ActionItems   int
+	OpenQuestions int
+	RecordPath    string
+}
+
+func pluralizeCount(count int, singular, plural string) string {
+	if count == 1 {
+		return fmt.Sprintf("%d %s", count, singular)
+	}
+	return fmt.Sprintf("%d %s", count, plural)
+}
+
+// Footer is the mono overflow line; empty when the card already shows
+// everything the digest captured.
+func (card meetingRecapCard) Footer() string {
+	parts := make([]string, 0, 3)
+	if card.MoreDecisions > 0 {
+		parts = append(parts, "+"+pluralizeCount(card.MoreDecisions, "decision", "decisions"))
+	}
+	if card.ActionItems > 0 {
+		parts = append(parts, pluralizeCount(card.ActionItems, "action item", "action items"))
+	}
+	if card.OpenQuestions > 0 {
+		parts = append(parts, fmt.Sprintf("%d open", card.OpenQuestions))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// Text renders the durable message body.
+func (card meetingRecapCard) Text() string {
+	var builder strings.Builder
+	builder.WriteString("**Meeting recap — " + card.Title + "**\n")
+	if card.Meta != "" {
+		builder.WriteString(card.Meta + "\n")
+	}
+	if len(card.Decisions) > 0 {
+		builder.WriteString("\nDecisions\n")
+		for _, decision := range card.Decisions {
+			builder.WriteString("• " + decision + "\n")
+		}
+	} else {
+		builder.WriteString("\nNo grounded decisions were captured.\n")
+	}
+	if footer := card.Footer(); footer != "" {
+		builder.WriteString("\n" + footer + "\n")
+	}
+	builder.WriteString("\nMeeting Record: " + card.RecordPath + "\n")
+	return strings.TrimSpace(builder.String())
+}
+
+// meetingRecapCardTopDecisions picks the card's three decisions: the SERVER
+// truncates, and the digest's own order is the authority (AJ 2026-09-02 — "the
+// top THREE decisions, by the digest's own order"). Deliberately not re-ranked
+// by decision.Importance: that field is optional and model-emitted, so ranking
+// on it would reorder the card away from the order the decisions were made in
+// and leave "+N decisions" ambiguous about which ones the reader is missing.
+// Blank entries never count — a digest that emitted three decisions and two
+// empties reads "3 decisions", not "+2".
+// Returns the picks and how many grounded decisions were left off.
+func meetingRecapCardTopDecisions(payload meetingDigestPayload) ([]string, int) {
+	picks := make([]string, 0, meetingRecapCardMaxDecisions)
+	dropped := 0
+	for _, decision := range payload.Decisions {
+		text := strings.TrimSpace(decision.D)
+		if text == "" {
+			continue
+		}
+		if len(picks) >= meetingRecapCardMaxDecisions {
+			dropped++
+			continue
+		}
+		picks = append(picks, trimForStorage(text, 240))
+	}
+	return picks, dropped
+}
 
 func meetingRecapCardMessageID(meetingID string) string {
 	return meetingRecapCardMessagePrefix + strings.TrimSpace(meetingID)
@@ -70,11 +157,13 @@ func (app *kanbanBoardApp) meetingRecapCardChannel(roomID string) (scoutChatThre
 	}
 	roomID = normalizeRoomID(roomID)
 	if roomID == officeRoomID {
-		table, ok := app.findTableThread()
-		if !ok || table.ArchivedAt != "" || !scoutChatThreadIsOrganizationPublic(table) {
+		// AJ 2026-09-02: office recaps go to #meetings, created on first recap
+		// when boot has not already provisioned it.
+		meetings, err := app.ensureMeetingsChannel(artifactLibraryAdminEmail)
+		if err != nil || meetings.ArchivedAt != "" || !scoutChatThreadIsOrganizationPublic(meetings) {
 			return scoutChatThreadRecord{}, false
 		}
-		return table, true
+		return meetings, true
 	}
 	store := appRoomStoreIfOpen()
 	if store == nil {
@@ -91,10 +180,11 @@ func (app *kanbanBoardApp) meetingRecapCardChannel(roomID string) (scoutChatThre
 	return thread, true
 }
 
-func buildMeetingRecapCardText(record meetingRecord, payload meetingDigestPayload, roomName string, now time.Time) string {
-	title := firstNonEmptyString(strings.TrimSpace(record.Title), strings.TrimSpace(payload.Title), "Meeting")
-	var builder strings.Builder
-	builder.WriteString("**Meeting recap — " + title + "**\n")
+func buildMeetingRecapCard(record meetingRecord, payload meetingDigestPayload, roomName string, now time.Time) meetingRecapCard {
+	card := meetingRecapCard{
+		Title:      firstNonEmptyString(strings.TrimSpace(record.Title), strings.TrimSpace(payload.Title), "Meeting"),
+		RecordPath: meetingRecordCardPath(record.ID),
+	}
 	meta := make([]string, 0, 3)
 	if roomName = strings.TrimSpace(roomName); roomName != "" {
 		meta = append(meta, roomName)
@@ -102,45 +192,26 @@ func buildMeetingRecapCardText(record meetingRecord, payload meetingDigestPayloa
 	if duration := formatMeetingRecapDuration(meetingRecordDuration(record, now)); duration != "" {
 		meta = append(meta, duration)
 	}
-	if count := len(record.Participants); count == 1 {
-		meta = append(meta, "1 person")
-	} else if count > 1 {
-		meta = append(meta, fmt.Sprintf("%d people", count))
+	if count := len(record.Participants); count > 0 {
+		meta = append(meta, pluralizeCount(count, "person", "people"))
 	}
-	if len(meta) > 0 {
-		builder.WriteString(strings.Join(meta, " · ") + "\n")
-	}
-	decisions := make([]string, 0, meetingRecapCardMaxItems)
-	for _, decision := range payload.Decisions {
-		text := strings.TrimSpace(decision.D)
-		if text == "" || len(decisions) >= meetingRecapCardMaxItems {
-			continue
-		}
-		decisions = append(decisions, "• "+trimForStorage(text, 240))
-	}
-	actions := make([]string, 0, meetingRecapCardMaxItems)
+	card.Meta = strings.Join(meta, " · ")
+	card.Decisions, card.MoreDecisions = meetingRecapCardTopDecisions(payload)
 	for _, action := range payload.ActionItems {
-		text := strings.TrimSpace(action.A)
-		if text == "" || len(actions) >= meetingRecapCardMaxItems {
-			continue
+		if strings.TrimSpace(action.A) != "" {
+			card.ActionItems++
 		}
-		line := "• " + trimForStorage(text, 240)
-		if owner := strings.TrimSpace(action.Owner); owner != "" {
-			line += " — " + owner
+	}
+	for _, question := range payload.OpenQuestions {
+		if strings.TrimSpace(question.Q) != "" {
+			card.OpenQuestions++
 		}
-		actions = append(actions, line)
 	}
-	if len(decisions) > 0 {
-		builder.WriteString("\nDecisions\n" + strings.Join(decisions, "\n") + "\n")
-	}
-	if len(actions) > 0 {
-		builder.WriteString("\nAction items\n" + strings.Join(actions, "\n") + "\n")
-	}
-	if len(decisions) == 0 && len(actions) == 0 {
-		builder.WriteString("\nNo grounded decisions or action items were captured.\n")
-	}
-	builder.WriteString("\nMeeting Record: " + meetingRecordCardPath(record.ID) + "\n")
-	return strings.TrimSpace(builder.String())
+	return card
+}
+
+func buildMeetingRecapCardText(record meetingRecord, payload meetingDigestPayload, roomName string, now time.Time) string {
+	return buildMeetingRecapCard(record, payload, roomName, now).Text()
 }
 
 // postMeetingRecapCardFailSoft never fails a finalization: the receipt is
@@ -193,6 +264,19 @@ func (app *kanbanBoardApp) postMeetingRecapCard(record meetingRecord) (bool, err
 		}
 	}
 	text := buildMeetingRecapCardText(record, payload, roomName, now)
+
+	// Office recaps used to land in Bonfire Chat. The stamp write is fail-soft
+	// (stampMeetingRecapCard only logs), so a meeting finalized before the move
+	// can have its card sitting in the Table with no RecapCardThreadID. The
+	// dedupe below re-reads the TARGET thread only, so without this probe the
+	// next finalization retry would post a second copy of the same card into
+	// #meetings. One extra read, on a path that already re-reads under a lock.
+	if strings.TrimSpace(record.RecapCardThreadID) == "" && normalizeRoomID(meetingRoomID(record)) == officeRoomID {
+		if table, found := app.findTableThread(); found && table.ID != thread.ID && scoutChatMessageIndex(table, messageID) >= 0 {
+			app.stampMeetingRecapCard(record.ID, table.ID, messageID, now)
+			return false, nil
+		}
+	}
 
 	lock := app.scoutChatThreadLock(thread.ID)
 	lock.Lock()

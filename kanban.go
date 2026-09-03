@@ -904,6 +904,8 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	app.reconcileGoalThreadsAtBoot()
 	app.reconcileRoomAgentThreadsAtBoot()
 	app.reconcilePublicConversationWorkAtBoot()
+	// #meetings exists before the first request (meetings_channel.go).
+	app.ensureMeetingsChannelAtBoot()
 
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	if apiKey == "" {

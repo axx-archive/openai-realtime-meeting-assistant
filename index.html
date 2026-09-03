@@ -4178,7 +4178,12 @@
         font: 400 13px/1.45 var(--font-sans);
         color: var(--text-1);
       }
-      .meeting-recap-card__owner { color: var(--text-3); }
+      /* the compact card's mono overflow line: "+N decisions · M action items · K open" */
+      .meeting-recap-card__more {
+        font: var(--type-label);
+        letter-spacing: var(--track-label);
+        color: var(--text-3);
+      }
       .meeting-recap-card__empty { font: 400 13px/1.45 var(--font-sans); color: var(--text-3); }
       .meeting-recap-card__open {
         flex: none;
@@ -12319,24 +12324,8 @@
         color: var(--ember-text);
       }
 
-      .chat-thread-item__stride-tag {
-        flex: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 2px 6px;
-        border-radius: var(--r-full);
-        background: color-mix(in srgb, var(--ember) 13%, transparent);
-        color: var(--ember-text);
-        font: 700 8px/1.4 var(--font-mono);
-        letter-spacing: 0.08em;
-      }
-
-      .chat-thread-item__stride-tag::before {
-        content: "\2022";
-        font-size: 12px;
-        line-height: 0;
-      }
+      /* AJ 2026-09-02: the pinned channels (Bonfire Chat, #meetings) carry
+         only the ember title — the dot + STRIDE badge is gone */
 
       /* kit ThreadItem meta — right-aligned mono timestamp on the title row */
       .chat-thread-item__time {
@@ -71522,7 +71511,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!thread.archivedAt) {
 	          scoutChatThreads.unshift(thread)
 	        }
-	        scoutChatThreads.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)))
+	        scoutChatThreads.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)) || Number(chatThreadIsSystemMeetings(right)) - Number(chatThreadIsSystemMeetings(left)))
 	        if (options.select !== false && !thread.archivedAt) {
 	          activeScoutThreadId = id
 	        } else if (thread.archivedAt && activeScoutThreadId === id) {
@@ -77422,8 +77411,20 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return Boolean(thread?.table) || title === 'team' || title === 'general' || title === 'bonfire chat'
 	      }
 
+	      // AJ 2026-09-02: #meetings is the second permanent org channel (server
+	      // flag system="meetings", meetings_channel.go) — office recaps land there
+	      function chatThreadIsSystemMeetings(thread) {
+	        return chatThreadIsChannel(thread) && String(thread?.system || '').toLowerCase() === 'meetings'
+	      }
+
+	      // the two pinned channels — Bonfire Chat + #meetings: first in the
+	      // list, ember titles, no dot / STRIDE badge, no archive, no rename
+	      function chatThreadIsPinnedChannel(thread) {
+	        return chatThreadIsTeam(thread) || chatThreadIsSystemMeetings(thread)
+	      }
+
 	      function chatThreadIsProject(thread) {
-	        return chatThreadIsChannel(thread) && !chatThreadIsTeam(thread) && !chatThreadIsHumanGroup(thread) && !thread?.archivedAt
+	        return chatThreadIsChannel(thread) && !chatThreadIsPinnedChannel(thread) && !chatThreadIsHumanGroup(thread) && !thread?.archivedAt
 	      }
 
 	      // ================================================================
@@ -79179,9 +79180,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        row.className = 'chat-thread-item__row'
 	        const titleEl = document.createElement('span')
 	        titleEl.className = 'chat-thread-item__title'
-	        titleEl.classList.toggle('chat-thread-item__title--bonfire-chat', chatThreadIsTeam(thread))
+	        // AJ 2026-09-02: both pinned channels wear ember — no dot, no STRIDE badge
+	        const isPinnedChannel = chatThreadIsPinnedChannel(thread)
+	        titleEl.classList.toggle('chat-thread-item__title--bonfire-chat', isPinnedChannel)
+	        item.classList.toggle('chat-thread-item--pinned', isPinnedChannel)
 	        titleEl.textContent = title
-	        const strideTag = chatThreadIsTeam(thread) ? bfEl('span', 'chat-thread-item__stride-tag', 'STRIDE') : null
 	        const activeWork = chatThreadActiveWork(thread)
 	        const isBonfireChat = chatThreadIsTeam(thread)
 	        const time = activeWork ? chatThreadWorkTimer(thread, activeWork) : document.createElement('span')
@@ -79197,12 +79200,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          unreadDot.className = 'chat-thread-item__unread-dot'
 	          unreadDot.setAttribute('aria-label', 'unread activity')
 	          row.append(unreadDot, titleEl)
-	          if (strideTag) row.appendChild(strideTag)
 	          if (mutedGlyph) row.appendChild(mutedGlyph)
 	          row.appendChild(time)
 	        } else {
 	          row.appendChild(titleEl)
-	          if (strideTag) row.appendChild(strideTag)
 	          if (mutedGlyph) row.appendChild(mutedGlyph)
 	          row.appendChild(time)
 	        }
@@ -79218,11 +79219,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        item.append(icon, body)
 
 	        // Channels archive server-side as creator-only; hide the affordance
-	        // from everyone else.
+	        // from everyone else. The pinned channels never get one — the server
+	        // refuses too ("Bonfire Chat and #meetings stay open for everyone").
 	        const ownEmail = String(authedUser?.email || '').toLowerCase()
 	        const ownerEmail = String(thread.ownerEmail || '').toLowerCase()
 	        const canAdminArchive = ownEmail === 'aj@shareability.com'
-	        if (!chatThreadIsTeam(thread) && (!isChannel || (ownEmail && ownerEmail === ownEmail) || canAdminArchive)) {
+	        if (!isPinnedChannel && (!isChannel || (ownEmail && ownerEmail === ownEmail) || canAdminArchive)) {
 	          const archive = document.createElement('button')
 	          archive.type = 'button'
 	          archive.className = 'chat-thread-item__archive'
@@ -79301,7 +79303,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // rows wear the member avatar cluster
 	        const channels = scoutChatThreads.filter(thread => chatThreadIsChannel(thread)).filter(thread => !chatThreadIsHumanGroup(thread))
 	        const groups = scoutChatThreads.filter(thread => chatThreadIsHumanGroup(thread))
-	        channels.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)))
+	        channels.sort((left, right) => Number(chatThreadIsTeam(right)) - Number(chatThreadIsTeam(left)) || Number(chatThreadIsSystemMeetings(right)) - Number(chatThreadIsSystemMeetings(left)))
 	        if (groups.length) void ensureDesktopChatParticipantDirectory()
 	        // A channel Riff is a contextual workspace, not a private-chat row.
 	        // It remains durable and directly addressable, but the channel guitar
@@ -79434,7 +79436,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (chatConvoRename) {
 	          // renamable on public + private threads alike; nothing to rename
 	          // before the first persisted thread exists
-	          chatConvoRename.hidden = !thread || chatRenameActive || chatThreadIsTeam(thread) || privateRiffThread(thread)
+	          chatConvoRename.hidden = !thread || chatRenameActive || chatThreadIsPinnedChannel(thread) || privateRiffThread(thread)
 	        }
 	        if (chatConvoRiff) {
 	          const messages = Array.isArray(thread?.messages) ? thread.messages : []
@@ -79442,19 +79444,22 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        }
 	        if (chatConvoMeta) {
 	          const isTeam = chatThreadIsTeam(thread)
+	          const isPinned = chatThreadIsPinnedChannel(thread)
 	          const groupCount = chatThreadMemberEmails(thread).length
 	          chatConvoMeta.textContent = thread?.riff
 	            ? `private Scout thread · #${thread.riff.sourceTitle || 'channel'}`
 	            : chatThreadIsHumanGroup(thread)
 	            ? `group · ${groupCount} ${groupCount === 1 ? 'person' : 'people'}`
 	            : isChannel
-	            ? (isTeam ? 'public · everyone in the office' : 'project · members only')
+	            ? (isTeam || isPinned ? 'public · everyone in the office' : 'project · members only')
 	            : 'private'
 	        }
 	        if (chatConvoContext) {
 	          const isTeam = chatThreadIsTeam(thread)
-	          const scope = !isChannel ? 'private' : isTeam ? 'pinned · Stride' : 'project channel'
-	          const policy = !isChannel ? `only you + ${privateTarget}` : isTeam ? 'whole office · shared memory' : 'members · project memory'
+	          // AJ 2026-09-02: no "Stride" — both pinned channels read the same
+	          const isPinned = isTeam || chatThreadIsPinnedChannel(thread)
+	          const scope = !isChannel ? 'private' : isPinned ? 'pinned · whole office' : 'project channel'
+	          const policy = !isChannel ? `only you + ${privateTarget}` : isPinned ? 'whole office · shared memory' : 'members · project memory'
 	          // W1 D1: a human group's eyebrow counts its people
 	          const groupCount = chatThreadIsHumanGroup(thread) ? chatThreadMemberEmails(thread).length : 0
 	          const scopeText = chatThreadIsHumanGroup(thread) ? 'group' : scope
@@ -102769,14 +102774,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const section = document.createElement('section')
         section.className = 'meeting-record__section meeting-record__recap'
         section.appendChild(bfEl('h4', 'meeting-record__heading', 'Recap card'))
+        // compact card (AJ 2026-09-02): the node keeps the top three decisions
+        // and folds the rest — plus the commitments and open items — into the
+        // mono footer; this block sits above the full lists on the record
         const decisions = (Array.isArray(detail?.decisions) ? detail.decisions : [])
           .map(claim => ({ text: String(claim?.text || '').trim() }))
           .filter(item => item.text)
-          .slice(0, 5)
         const actions = (Array.isArray(detail?.commitments) ? detail.commitments : [])
           .map(claim => ({ text: String(claim?.text || '').trim(), owner: String(claim?.owner || '').trim() }))
           .filter(item => item.text)
-          .slice(0, 5)
         const room = roomsList.find(candidate => candidate?.id === String(detail?.roomId || ''))
         const people = Array.isArray(detail?.participants) ? detail.participants.length : 0
         const meta = [
@@ -102784,15 +102790,34 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           Number(detail?.durationSeconds) ? roomMediaRecordingClock(Number(detail.durationSeconds) * 1000) : '',
           people ? `${people} ${people === 1 ? 'person' : 'people'}` : ''
         ].filter(Boolean).join(' · ')
+        const recapThread = scoutChatThreads.find(candidate => String(candidate?.id || '') === String(detail?.recapCardThreadId || ''))
         section.appendChild(meetingRecapCardNode({
           title: memoryMeetingTitle(detail), meta, decisions, actions, meetingId,
-          threadId: String(detail?.recapCardThreadId || ''), postedAt: String(detail?.recapCardPostedAt || ''), inRecord: true
+          actionCount: actions.length, openCount: Number(detail?.unresolvedCount) || 0,
+          threadId: String(detail?.recapCardThreadId || ''), threadTitle: recapThread ? chatThreadDisplayTitle(recapThread) : '',
+          postedAt: String(detail?.recapCardPostedAt || ''), inRecord: true
         }))
         return section
       }
 
+      // the mono overflow footer (mirrors meeting_recap_card.go Footer):
+      // "+N decisions · M action items · K open" — empty when nothing is left off
+      function meetingRecapCardFooter(counts = {}) {
+        const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`
+        const parts = []
+        const more = Number(counts.moreDecisions) || 0
+        const actions = Number(counts.actionItems) || 0
+        const open = Number(counts.open) || 0
+        if (more > 0) parts.push(`+${plural(more, 'decision', 'decisions')}`)
+        if (actions > 0) parts.push(plural(actions, 'action item', 'action items'))
+        if (open > 0) parts.push(`${open} open`)
+        return parts.join(' · ')
+      }
+
       // one card for both homes: the record block (posted-to link) and the
-      // channel message (Open record). Decisions/actions cap at five.
+      // channel message (Open record). Compact (AJ 2026-09-02): the top three
+      // decisions and a mono overflow footer; no action-item list — the full
+      // lists live on the Meeting Record behind the one primary button.
       function meetingRecapCardNode(spec = {}) {
         const card = document.createElement('article')
         card.className = 'meeting-recap-card'
@@ -102802,33 +102827,36 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         const head = bfEl('div', 'meeting-recap-card__head')
         head.append(bfEl('span', 'meeting-recap-card__kicker', 'meeting recap'), bfEl('span', 'meeting-recap-card__meta', String(spec.meta || '')))
         card.append(head, bfEl('h3', 'meeting-recap-card__title', title))
-        const decisions = (Array.isArray(spec.decisions) ? spec.decisions : []).slice(0, 5)
-        const actions = (Array.isArray(spec.actions) ? spec.actions : []).slice(0, 5)
-        const listSection = (heading, items, withOwner) => {
+        const allDecisions = (Array.isArray(spec.decisions) ? spec.decisions : []).filter(item => String(item?.text || '').trim())
+        const decisions = allDecisions.slice(0, 3)
+        const listSection = (heading, items) => {
           const section = bfEl('section', 'meeting-recap-card__section')
           section.appendChild(bfEl('h4', '', heading))
           const list = bfEl('ul', 'meeting-recap-card__list')
-          for (const item of items) {
-            const row = bfEl('li', '', String(item?.text || ''))
-            if (withOwner && item?.owner) row.appendChild(bfEl('span', 'meeting-recap-card__owner', ` — ${item.owner}`))
-            list.appendChild(row)
-          }
+          for (const item of items) list.appendChild(bfEl('li', '', String(item?.text || '')))
           section.appendChild(list)
           return section
         }
-        if (decisions.length) card.appendChild(listSection('Decisions', decisions, false))
-        if (actions.length) card.appendChild(listSection('Action items', actions, true))
-        if (!decisions.length && !actions.length) card.appendChild(bfEl('div', 'meeting-recap-card__empty', 'No grounded decisions or action items were captured.'))
+        if (decisions.length) card.appendChild(listSection('Decisions', decisions))
+        else card.appendChild(bfEl('div', 'meeting-recap-card__empty', 'No grounded decisions were captured.'))
+        // the server's footer line wins; a legacy five-and-five card (or the
+        // record block) derives the same line from what it knows
+        const footer = String(spec.footer || '').trim() || meetingRecapCardFooter({
+          moreDecisions: allDecisions.length - decisions.length,
+          actionItems: Number(spec.actionCount) || (Array.isArray(spec.actions) ? spec.actions.length : 0),
+          open: Number(spec.openCount) || 0
+        })
+        if (footer) card.appendChild(bfEl('div', 'meeting-recap-card__more', footer))
         const foot = bfEl('div', 'meeting-recap-card__foot')
         if (spec.inRecord) {
           if (spec.threadId) {
-            foot.appendChild(bfEl('span', 'meeting-recap-card__posted', `posted to the room channel${spec.postedAt ? ` · ${memoryClock(spec.postedAt)}` : ''}`))
+            foot.appendChild(bfEl('span', 'meeting-recap-card__posted', `posted to ${spec.threadTitle ? `#${String(spec.threadTitle).replace(/^#/, '')}` : 'the channel'}${spec.postedAt ? ` · ${memoryClock(spec.postedAt)}` : ''}`))
             const open = bfEl('button', 'meeting-recap-card__open', 'Open in conversation')
             open.type = 'button'
             open.addEventListener('click', () => { void openScoutChatThread(spec.threadId) })
             foot.appendChild(open)
           } else {
-            foot.appendChild(bfEl('span', 'meeting-recap-card__posted', 'not posted yet — it lands in the room channel once the record is finalized'))
+            foot.appendChild(bfEl('span', 'meeting-recap-card__posted', 'not posted yet — it lands in the channel once the record is finalized'))
           }
         } else {
           foot.appendChild(bfEl('span', 'meeting-recap-card__posted', spec.meetingId ? 'Meeting Record' : 'record unavailable'))
@@ -102851,11 +102879,14 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       }
 
       // the server's card text (meeting_recap_card.go): a bold title line, an
-      // optional "room · duration · people" line, "Decisions" / "Action items"
-      // bullet blocks ("• text — owner") and a "Meeting Record: /?record=<id>"
-      // tail. Anything else renders as plain text below the card.
+      // optional "room · duration · people" line, a "Decisions" bullet block,
+      // the mono "+N decisions · M action items · K open" footer and a
+      // "Meeting Record: /?record=<id>" tail. Legacy cards (pre 2026-09-02)
+      // also carried an "Action items" block ("• text — owner"); it still
+      // parses so old posts in Bonfire Chat render as the compact card.
+      // Anything else renders as plain text below the card.
       function parseMeetingRecapCardText(text) {
-        const out = { title: 'Meeting recap', meta: '', decisions: [], actions: [], meetingId: '', extra: [] }
+        const out = { title: 'Meeting recap', meta: '', decisions: [], actions: [], footer: '', meetingId: '', extra: [] }
         const lines = String(text || '').split('\n').map(line => line.trim())
         let section = ''
         let sawTitle = false
@@ -102875,6 +102906,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
           if (/^Decisions$/i.test(line)) { section = 'decisions'; continue }
           if (/^Action items$/i.test(line)) { section = 'actions'; continue }
           if (/^No grounded decisions/i.test(line)) { section = ''; continue }
+          if (/^(?:\+\d+ decisions?|\d+ action items?|\d+ open)(?: · |$)/.test(line)) { section = ''; out.footer = line; continue }
           if (line.startsWith('•') || line.startsWith('-')) {
             const body = line.slice(1).trim()
             if (section === 'actions') {
@@ -102900,7 +102932,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         node.classList.add('scout-chat-msg--recap')
         node.dataset.messageId = String(message?.id || '')
         const stack = node.querySelector('.scout-chat-msg__stack') || node
-        stack.appendChild(meetingRecapCardNode({ title: parsed.title, meta: parsed.meta, decisions: parsed.decisions, actions: parsed.actions, meetingId }))
+        stack.appendChild(meetingRecapCardNode({ title: parsed.title, meta: parsed.meta, decisions: parsed.decisions, actions: parsed.actions, footer: parsed.footer, meetingId }))
         if (parsed.extra.length) {
           const extra = bfEl('div', 'scout-chat-text chat-rich')
           appendChatRichTextNodes(extra, parsed.extra.join('\n'))

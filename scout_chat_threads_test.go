@@ -2168,3 +2168,380 @@ func TestScoutChatArtifactRefMessageMapsGoalDeliverables(t *testing.T) {
 		t.Fatalf("agent-thread ref=%+v, want the report's own identity", reportRef.Thread)
 	}
 }
+
+// AJ 2026-09-02: Bonfire Chat and #meetings are pinned system channels — no
+// archive, no rename, no member removal, never in the archived list — and
+// #meetings provisions idempotently (boot / first list / first recap).
+func TestPinnedChannelsRefuseArchiveRenameAndMemberRemoval(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	table, err := app.ensureTable("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := app.ensureMeetingsChannel("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again, err := app.ensureMeetingsChannel("tim@shareability.com"); err != nil || again.ID != meetings.ID {
+		t.Fatalf("second ensure=%+v err=%v, want the same #meetings %s", again, err, meetings.ID)
+	}
+	if meetings.ID == table.ID || meetings.Title != meetingsChannelTitle || scoutChatThreadSystem(meetings) != scoutChatSystemMeetings || !scoutChatThreadIsOrganizationPublic(meetings) {
+		t.Fatalf("#meetings=%+v, want a distinct public system channel", meetings)
+	}
+	if !scoutChatThreadIsPinnedSystem(table) || !scoutChatThreadIsPinnedSystem(meetings) {
+		t.Fatal("both org channels must be pinned system channels")
+	}
+	if !strings.Contains(scoutChatPermanentChannelCopy, "#meetings") || !strings.Contains(scoutChatPermanentChannelCopy, "Bonfire Chat") {
+		t.Fatalf("refusal copy=%q must name both channels", scoutChatPermanentChannelCopy)
+	}
+
+	for _, thread := range []scoutChatThreadRecord{table, meetings} {
+		for _, viewer := range []string{"aj@shareability.com", "tim@shareability.com"} {
+			if _, err := app.setScoutChatThreadArchived(viewer, thread.ID, true); err == nil || !strings.Contains(err.Error(), scoutChatPermanentChannelCopy) {
+				t.Fatalf("%s archive by %s err=%v, want %q", thread.Title, viewer, err, scoutChatPermanentChannelCopy)
+			}
+			if _, err := app.renameScoutChatThread(viewer, thread.ID, "renamed"); err == nil || !strings.Contains(err.Error(), scoutChatPermanentChannelCopy) {
+				t.Fatalf("%s rename by %s err=%v, want %q", thread.Title, viewer, err, scoutChatPermanentChannelCopy)
+			}
+			if _, err := app.updateScoutChatThreadMembers(viewer, thread.ID, nil, []string{"tim@shareability.com"}); err == nil || !strings.Contains(err.Error(), scoutChatPermanentChannelCopy) {
+				t.Fatalf("%s member removal by %s err=%v, want %q", thread.Title, viewer, err, scoutChatPermanentChannelCopy)
+			}
+		}
+	}
+
+	// The HTTP routes surface the same honest copy.
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	for _, thread := range []scoutChatThreadRecord{table, meetings} {
+		for _, attempt := range []struct{ path, body string }{
+			{"/assistant/chat-threads/" + thread.ID, `{"archived":true}`},
+			{"/assistant/chat-threads/" + thread.ID + "/members", `{"remove":["tim@shareability.com"]}`},
+		} {
+			req := httptest.NewRequest(http.MethodPatch, attempt.path, strings.NewReader(attempt.body))
+			for _, cookie := range cookies {
+				req.AddCookie(cookie)
+			}
+			rec := httptest.NewRecorder()
+			assistantChatThreadHandler(rec, req)
+			// 403, not 400: the request is well formed, the policy refuses it.
+			if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), scoutChatPermanentChannelCopy) {
+				t.Fatalf("%s %s status=%d body=%s, want 403 + refusal %q", thread.Title, attempt.path, rec.Code, rec.Body.String(), scoutChatPermanentChannelCopy)
+			}
+		}
+	}
+
+	// Never archived: absent from the archived-only view, present and pinned in
+	// both list projections.
+	for _, thread := range []scoutChatThreadRecord{table, meetings} {
+		current, _, err := app.scoutChatThreadByID("tim@shareability.com", thread.ID)
+		if err != nil || current.ArchivedAt != "" {
+			t.Fatalf("%s after refusals=%+v err=%v, want open", thread.Title, current, err)
+		}
+	}
+	rowFor := func(rows []map[string]any, id string) map[string]any {
+		for _, row := range rows {
+			if row["id"] == id {
+				return row
+			}
+		}
+		return nil
+	}
+	full := app.scoutChatThreadsView("tim@shareability.com", false, 100)
+	index := app.scoutChatThreadsIndexView("tim@shareability.com", false, 100)
+	for _, thread := range []scoutChatThreadRecord{table, meetings} {
+		if row := rowFor(index, thread.ID); row == nil || row["pinned"] != true {
+			t.Fatalf("index row for %s=%v, want pinned", thread.Title, row)
+		}
+		if row := rowFor(full, thread.ID); row == nil {
+			t.Fatalf("full view is missing %s", thread.Title)
+		}
+	}
+	if row := rowFor(index, meetings.ID); row["system"] != "meetings" || row["title"] != "meetings" {
+		t.Fatalf("#meetings index row=%v, want system=meetings title=meetings", row)
+	}
+	if row := rowFor(full, meetings.ID); row["system"] != "meetings" {
+		t.Fatalf("#meetings full row=%v, want system=meetings", row)
+	}
+	if view := scoutChatThreadMutationView(meetings); view["system"] != "meetings" || view["pinned"] != true {
+		t.Fatalf("mutation view=%v, want system + pinned", view)
+	}
+	archivedOnly := 0
+	for _, row := range app.scoutChatThreadsIndexView("tim@shareability.com", true, 100) {
+		if row["archivedAt"] != nil && (row["id"] == table.ID || row["id"] == meetings.ID) {
+			archivedOnly++
+		}
+	}
+	if archivedOnly != 0 {
+		t.Fatalf("%d system channels carry archivedAt, want none", archivedOnly)
+	}
+}
+
+// Boot provisions #meetings before the first request, and running it again
+// (a restart on an existing store) adopts the one that is already there.
+func TestPinnedChannelMeetingsProvisionsAtBootAndSurvivesRestart(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	if _, ok := app.findMeetingsChannelThread(); ok {
+		t.Fatal("#meetings must not exist before boot")
+	}
+	app.ensureMeetingsChannelAtBoot()
+	first, ok := app.findMeetingsChannelThread()
+	if !ok || scoutChatThreadSystem(first) != scoutChatSystemMeetings || first.Title != meetingsChannelTitle || !scoutChatThreadIsOrganizationPublic(first) {
+		t.Fatalf("boot #meetings=%+v ok=%v, want a flagged public channel", first, ok)
+	}
+	app.ensureMeetingsChannelAtBoot()
+	again, ok := app.findMeetingsChannelThread()
+	if !ok || again.ID != first.ID {
+		t.Fatalf("second boot=%+v ok=%v, want the same #meetings %s", again, ok, first.ID)
+	}
+	count := 0
+	for _, row := range app.scoutChatThreadsIndexView("aj@shareability.com", true, 100) {
+		if row["system"] == "meetings" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("%d #meetings rows after two boots, want exactly one", count)
+	}
+}
+
+// A pre-existing unflagged public "meetings" channel is adopted rather than
+// duplicated, and the thread-list route provisions #meetings on first load.
+func TestPinnedChannelMeetingsAdoptsExistingTitleAndProvisionsOnList(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	legacy, err := app.createScoutChatThread("tim@shareability.com", "Tim", "meetings", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := app.findMeetingsChannelThread(); !ok {
+		t.Fatal("an unflagged public #meetings must be adoptable")
+	}
+	cookies := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	for _, view := range []string{"", "index"} {
+		req := httptest.NewRequest(http.MethodGet, "/assistant/chat-threads?view="+view, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		assistantChatThreadsHandler(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list view=%q status=%d body=%s", view, rec.Code, rec.Body.String())
+		}
+	}
+	adopted, ok := app.findMeetingsChannelThread()
+	if !ok || adopted.ID != legacy.ID || scoutChatThreadSystem(adopted) != scoutChatSystemMeetings {
+		t.Fatalf("adopted=%+v ok=%v, want legacy %s flagged system=meetings", adopted, ok, legacy.ID)
+	}
+	count := 0
+	for _, row := range app.scoutChatThreadsIndexView("aj@shareability.com", true, 100) {
+		if row["system"] == "meetings" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("%d #meetings rows, want exactly one", count)
+	}
+}
+
+// commitTestChatMessage posts one durable message into a thread the way the
+// server does (lock + locked commit), without going through Scout's reply path.
+func commitTestChatMessage(t *testing.T, app *kanbanBoardApp, thread scoutChatThreadRecord, messageID, text string) {
+	t.Helper()
+	lock := app.scoutChatThreadLock(thread.ID)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := app.commitScoutChatThreadMessagesLockedWithContext(context.Background(), thread.OwnerEmail, thread.ID, scoutChatMessageRecord{
+		ID: messageID, Kind: "message", Role: "scout", Text: text,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: scoutParticipantName,
+	}); err != nil {
+		t.Fatalf("commit %s into %s: %v", messageID, thread.Title, err)
+	}
+}
+
+// The pin is a SERVER sort key in BOTH list projections, not only in the
+// client's comparators. Both projections truncate to `limit`, and #meetings
+// only moves when a meeting finalizes, so a client-only pin would be sorting a
+// channel that the server had already sliced out of the payload.
+func TestPinnedChannelsSurviveListTruncation(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	table, err := app.ensureTable("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := app.ensureMeetingsChannel("aj@shareability.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Noise channels created after #meetings all carry a newer updatedAt, so
+	// the plain recency sort would rank every one of them above it.
+	for _, title := range []string{"noise-a", "noise-b", "noise-c", "noise-d", "noise-e"} {
+		if _, err := app.createScoutChatThread("tim@shareability.com", "Tim", title, scoutChatVisibilityPublic); err != nil {
+			t.Fatalf("create %s: %v", title, err)
+		}
+	}
+
+	const limit = 3
+	rowFor := func(rows []map[string]any, id string) map[string]any {
+		for _, row := range rows {
+			if row["id"] == id {
+				return row
+			}
+		}
+		return nil
+	}
+	for _, projection := range []struct {
+		name string
+		rows []map[string]any
+	}{
+		{"index", app.scoutChatThreadsIndexView("tim@shareability.com", false, limit)},
+		{"full", app.scoutChatThreadsView("tim@shareability.com", false, limit)},
+	} {
+		if len(projection.rows) != limit {
+			t.Fatalf("%s view returned %d rows, want the truncated %d", projection.name, len(projection.rows), limit)
+		}
+		if rowFor(projection.rows, table.ID) == nil {
+			t.Fatalf("%s view dropped Bonfire Chat: %v", projection.name, projection.rows)
+		}
+		if rowFor(projection.rows, meetings.ID) == nil {
+			t.Fatalf("%s view dropped #meetings under the %d-row limit: %v", projection.name, limit, projection.rows)
+		}
+		// Bonfire Chat still precedes #meetings, and both precede recency.
+		if projection.rows[0]["id"] != table.ID || projection.rows[1]["id"] != meetings.ID {
+			t.Fatalf("%s view order=%v %v, want Bonfire Chat then #meetings", projection.name, projection.rows[0]["id"], projection.rows[1]["id"])
+		}
+	}
+}
+
+// "meetings" is an ordinary English word and the destination matcher is a
+// whole-word containment test, so the org-public recap channel must be fenced
+// out of every project surface by its pinned flag — otherwise an objective that
+// merely says "meetings" binds a private request's deliverable to the whole
+// office.
+func TestPinnedChannelsAreNeverProjectDestinations(t *testing.T) {
+	setupAuthTestEnv(t)
+	previousAuthorizer := artifactObjectAuthorizer
+	artifactObjectAuthorizer = LegacyCompatibleObjectAuthorizer{}
+	t.Cleanup(func() { artifactObjectAuthorizer = previousAuthorizer })
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	user := accountStore().findUser("aj@shareability.com")
+	if user == nil {
+		t.Fatal("seeded AJ account missing")
+	}
+	table, err := app.ensureTable(user.Email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meetings, err := app.ensureMeetingsChannel(user.Email)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := app.createScoutChatThread(user.Email, user.Name, "Country Golf", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The matcher itself still names the channel — the fence is the flag.
+	if !strideProductOutcomeNamesProject("summarize this week's meetings", meetings.Title) {
+		t.Fatal("the whole-word matcher no longer matches #meetings; this test guards the wrong gap")
+	}
+	for _, pinned := range []scoutChatThreadRecord{table, meetings} {
+		if strideProductProjectDestinationEligible(pinned) {
+			t.Fatalf("%s is project-destination eligible, want the pinned org channels fenced out", pinned.Title)
+		}
+	}
+	if !strideProductProjectDestinationEligible(project) {
+		t.Fatalf("ordinary channel %s must stay eligible", project.Title)
+	}
+
+	projection := app.boardProjectionForViewer(context.Background(), user)
+	for _, option := range projection.Projects {
+		if option.ID == meetings.ID || option.ID == table.ID {
+			t.Fatalf("board project picker offers pinned channel %+v, want it fenced out: %+v", option, projection.Projects)
+		}
+	}
+	offersProject := false
+	for _, option := range projection.Projects {
+		if option.ID == project.ID {
+			offersProject = true
+		}
+	}
+	if !offersProject {
+		t.Fatalf("board project picker=%+v, want ordinary channel %s", projection.Projects, project.Title)
+	}
+}
+
+// Adoption is a self-heal for a create whose flag write failed — an EMPTY
+// stub. A public channel people have posted in belongs to them: adopting it
+// would rewrite its title and make rename/archive refuse forever, with no way
+// back.
+func TestPinnedChannelMeetingsNeverAdoptsAChannelWithMessages(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	human, err := app.createScoutChatThread("tim@shareability.com", "Tim", "Meetings", scoutChatVisibilityPublic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitTestChatMessage(t, app, human, "human-meetings-1", "standing sync notes live here")
+
+	app.ensureMeetingsChannelAtBoot()
+
+	current, _, err := app.scoutChatThreadByID("tim@shareability.com", human.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Title != "Meetings" || scoutChatThreadSystem(current) != "" || scoutChatThreadIsPinnedSystem(current) {
+		t.Fatalf("human channel after boot=%+v, want it untouched and unflagged", current)
+	}
+	if len(current.Messages) != 1 {
+		t.Fatalf("human channel messages=%d, want the one that was there", len(current.Messages))
+	}
+	flagged, ok := app.findMeetingsChannelThread()
+	if !ok || flagged.ID == human.ID || scoutChatThreadSystem(flagged) != scoutChatSystemMeetings {
+		t.Fatalf("#meetings=%+v ok=%v, want a fresh channel alongside %s", flagged, ok, human.ID)
+	}
+	// The human channel keeps every door open.
+	renamed, err := app.renameScoutChatThread("tim@shareability.com", human.ID, "Standing syncs")
+	if err != nil || renamed.Title != "Standing syncs" {
+		t.Fatalf("rename human channel=%+v err=%v, want it still renameable", renamed, err)
+	}
+	if _, err := app.setScoutChatThreadArchived("tim@shareability.com", human.ID, true); err != nil {
+		t.Fatalf("archive human channel err=%v, want it still archivable", err)
+	}
+	// Exactly one flagged channel, and boot is still idempotent.
+	app.ensureMeetingsChannelAtBoot()
+	count := 0
+	for _, row := range app.scoutChatThreadsIndexView("aj@shareability.com", true, 100) {
+		if row["system"] == "meetings" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("%d #meetings rows, want exactly one", count)
+	}
+}

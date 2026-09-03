@@ -303,6 +303,12 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail stri
 		}
 		if strings.EqualFold(strings.TrimSpace(entry.Metadata["table"]), "true") || strings.EqualFold(strings.TrimSpace(entry.Metadata["title"]), "Bonfire Chat") {
 			row["table"] = true
+			row["pinned"] = true
+		}
+		// #meetings (meetings_channel.go): the second pinned org channel.
+		if system := strings.ToLower(strings.TrimSpace(entry.Metadata["system"])); system != "" {
+			row["system"] = system
+			row["pinned"] = true
 		}
 		if activeWork := strings.TrimSpace(entry.Metadata["activeWork"]); activeWork != "" {
 			var projected struct {
@@ -348,6 +354,16 @@ func (app *kanbanBoardApp) scoutChatThreadsIndexViewFromEntries(viewerEmail stri
 		rightTable, _ := view[right]["table"].(bool)
 		if leftTable != rightTable {
 			return leftTable
+		}
+		// #meetings pins server-side too, not only in the client's comparator.
+		// This list is truncated to `limit` right below, and #meetings only
+		// moves when a meeting finalizes, so on an account with more than
+		// `limit` threads a client-only pin would sort a channel that was
+		// already sliced out of the payload.
+		leftPinned, _ := view[left]["pinned"].(bool)
+		rightPinned, _ := view[right]["pinned"].(bool)
+		if leftPinned != rightPinned {
+			return leftPinned
 		}
 		return strings.Compare(fmt.Sprint(view[left]["updatedAt"]), fmt.Sprint(view[right]["updatedAt"])) > 0
 	})

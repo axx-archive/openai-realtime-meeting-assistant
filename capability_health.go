@@ -456,6 +456,16 @@ func ambientCapabilityEvidence(name string, agent ambientAgentConfig, now time.T
 	if kanbanApp.memory != nil {
 		deadLetters = kanbanApp.memory.countEntriesOfKindByMetadata(meetingMemoryKindDeadLetter, deadLetterAgentMetadataKey, agent.name)
 		out["deadLetter"] = deadLetters
+		// stuckInputs (ambient_truncation.go): inputs the worker skipped because
+		// max_output_truncation survived the halved-window retry. A subset of
+		// deadLetter, surfaced separately so a truncation skip reads as "moved
+		// on" rather than as a poison window or an open circuit.
+		out["stuckInputs"] = kanbanApp.memory.countStuckInputs(agent.name)
+		if agent.name == channelDigestAgentName {
+			// first-run history still waiting for the oldest-first catch-up
+			// (channel_digest.go withChannelDigestRebuilds)
+			out["seedPendingRows"] = kanbanApp.channelDigestSeedPendingRows()
+		}
 	}
 	kanbanApp.mu.Lock()
 	retries := 0
@@ -656,13 +666,16 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 		return map[string]any{"checkpointStatus": "unreadable", "checkpointError": true}
 	}
 	prefix := agent.name + "@"
-	checkpoints, held, blocked, invalid := 0, 0, 0, 0
+	checkpoints, held, blocked, invalid, firstRun := 0, 0, 0, 0, 0
 	continuityScopes := make([]map[string]any, 0)
 	for key, checkpoint := range state.Windows {
 		if key != agent.name && !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		checkpoints++
+		if checkpoint.FirstRunAnchor {
+			firstRun++
+		}
 		expectedRoom := officeRoomID
 		if key != agent.name {
 			expectedRoom = strings.TrimPrefix(key, prefix)
@@ -718,6 +731,11 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 		"blockedScopeCount":        blocked,
 		"invalidScopeCount":        invalid,
 		"ambientContinuityHealthy": invalid == 0 && blocked == 0,
+	}
+	if firstRun > 0 {
+		// Scopes the worker anchored at boot instead of failing closed
+		// (ambientAgentConfig.firstRunAnchor): healthy, but never silent.
+		out["firstRunAnchorScopes"] = firstRun
 	}
 	if len(continuityScopes) > 0 {
 		out["continuityScopes"] = continuityScopes

@@ -36,6 +36,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -840,10 +841,25 @@ func groupBrainsForDigest(inputs []meetingMemoryEntry) []brainDigestGroup {
 // an empty cursor would be interpreted as "consumed through my own position"
 // (unconsumedEntriesAfter's position fallback), so the current group's own
 // window is the defensive floor.
+//
+// group.brains is the window the ACCEPTED output actually covers, which the
+// truncation chassis (ambient_truncation.go) may have halved to a prefix of
+// the group. A brain of this group outside that folded set therefore ends the
+// prefix: the cursor must follow the window that produced the digest, never
+// the window the pass started with, or the dropped half would be silently
+// consumed by a digest that never saw it.
 func digestPassCursor(inputs []meetingMemoryEntry, processed map[string]bool, group brainDigestGroup) string {
+	folded := make(map[string]bool, len(group.brains))
+	for _, brain := range group.brains {
+		folded[brain.ID] = true
+	}
 	cursor := ""
 	for _, input := range inputs {
-		if !processed[digestKeyForBrain(input)] {
+		key := digestKeyForBrain(input)
+		if !processed[key] {
+			break
+		}
+		if key == group.key && !folded[input.ID] {
 			break
 		}
 		cursor = input.ID
@@ -1130,17 +1146,40 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 				return json.Unmarshal([]byte(strings.TrimSpace(text)), &payload)
 			},
 		}
-		text, err := responder(ctx, apiKey, request)
-		truncationRecovered := false
-		if reason, rejected := openAIOutputRejectionReason(err); rejected && reason == "max_output_truncation" {
-			// Wave 8 D11: reasoning tokens share the output envelope; a dense
-			// window can exhaust it before the JSON closes. Retry once with 50%
-			// more headroom — same model, same input, same reasoning policy — and
-			// only count the rejection if the retry truncates too.
-			recordMeetingDigestOutput("truncation_retry", reason, attemptHash, group.key, false)
-			request.MaxOutputTokens = meetingDigestTruncationRetryOutputTokens
-			text, err = responder(ctx, apiKey, request)
-			truncationRecovered = err == nil
+		// Wave 8 D11, generalised 2026-09-02 (ambient_truncation.go): reasoning
+		// tokens share the output envelope, and a dense window can exhaust it
+		// before the JSON closes. The shared envelope halves THIS meeting's brain
+		// group once (oldest half, so the cursor stays contiguous) or, for a lone
+		// brain, raises the budget 1.5x — the original D11 retry. If the output
+		// still truncates, the group's head brain is skipped with a tombstone
+		// (stuckInputs) instead of being held toward the restart-required
+		// provider circuit — the gen-248 incident class. The Meeting Record
+		// keeps its Stuck badge as the surfaced state until the next accepted
+		// digest clears it.
+		fullGroup := group.brains
+		outcome, err := ambientTruncationRetry(meetingDigestAgent(), group.brains, meetingDigestMaxOutputTokens, false, func(window []meetingMemoryEntry, maxOutputTokens int) (string, error) {
+			attempt := request
+			if len(window) != len(fullGroup) || maxOutputTokens != meetingDigestMaxOutputTokens {
+				recordMeetingDigestOutput("truncation_retry", ambientTruncationReason, attemptHash, group.key, false)
+				attempt.Input = app.buildMeetingDigestInput(group.key, prior, hasPrior, window, generatedAt)
+				attempt.MaxOutputTokens = maxOutputTokens
+			}
+			return responder(ctx, apiKey, attempt)
+		}, func(attempts int) error {
+			recordMeetingDigestOutput("rejected", ambientTruncationReason, attemptHash, group.key, false)
+			app.markMeetingDigestStuck(group.key, ambientTruncationReason)
+			return app.skipAmbientStuckInput(meetingDigestAgent(), group.brains[0], ambientWindowRoomID(group.brains), ambientTruncationReason, attempts)
+		})
+		if err == nil && outcome.Skipped {
+			// The head brain is behind the advanced baseline; the rest of this
+			// group and every later group re-feed next pass — landing a later
+			// group now would stamp a cursor past the unfolded remainder.
+			break
+		}
+		text, truncationRecovered := outcome.Value, outcome.Recovered
+		halved := err == nil && len(outcome.Inputs) < len(fullGroup)
+		if halved {
+			group.brains = outcome.Inputs
 		}
 		if err != nil {
 			if isProviderInvocationFailure(err) {
@@ -1150,9 +1189,6 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			if reason, rejected := openAIOutputRejectionReason(err); rejected {
 				meetingDigestCircuitReject(attemptHash)
 				recordMeetingDigestOutput("rejected", reason, attemptHash, group.key, false)
-				if reason == "max_output_truncation" {
-					app.markMeetingDigestStuck(group.key, reason)
-				}
 				return newest, &ambientAgentHoldError{err: &ambientOutputRejection{agent: meetingDigestAgentName, reason: reason}}
 			}
 			return newest, err
@@ -1279,6 +1315,11 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		recordMeetingDigestOutput("accepted", "", attemptHash, group.key, meetingDigestCircuitAccept(attemptHash) || truncationRecovered)
 		app.clearMeetingDigestStuck(group.key)
 		newest = entry
+		if halved {
+			// The digest's cursor stops at the halved window; the dropped newer
+			// half (and every later group) re-feeds next pass.
+			break
+		}
 	}
 	if newest.ID != "" {
 		// The interval floor is recovery insurance, not freshness cadence. A
@@ -1623,6 +1664,39 @@ func (app *kanbanBoardApp) runDayDigestPass(ctx context.Context, apiKey string, 
 	return passEntry, nil
 }
 
+// reflectionStuckDayMetadataKey stamps the dead-letter tombstone
+// markDailyReflectionStuck leaves for a day whose reflection truncated after
+// the retry; maybeEmitDailyReflection reads it to skip that day.
+const reflectionStuckDayMetadataKey = "reflectionDay"
+
+// markDailyReflectionStuck records the abandoned reflection durably: a
+// dead-letter tombstone on the day-digest worker (reason max_output_truncation,
+// so the capability snapshot counts it as stuckInputs). The day's digests stay
+// current; only the reflection is missing, and the tombstone says so.
+func (app *kanbanBoardApp) markDailyReflectionStuck(day string, attempts int) error {
+	if app == nil || app.memory == nil {
+		return nil
+	}
+	agent := dayDigestAgent()
+	metadata := map[string]string{
+		relevanceMetadataKey:           relevanceExpired,
+		deadLetterAgentMetadataKey:     agent.name,
+		deadLetterRoomMetadataKey:      officeRoomID,
+		deadLetterInputKindMetadataKey: meetingMemoryKindReflection,
+		deadLetterAttemptsMetadataKey:  strconv.Itoa(attempts),
+		deadLetterReasonMetadataKey:    ambientTruncationReason,
+		reflectionStuckDayMetadataKey:  day,
+		digestDayMetadataKey:           day,
+		"roomId":                       officeRoomID,
+	}
+	text := fmt.Sprintf("%s abandoned the %s reflection after %d attempt(s) ended in %s; the day's digests stay current, only the reflection is missing.", agent.name, day, attempts, ambientTruncationReason)
+	if _, _, err := app.memory.appendDeadLetter("dead-letter-"+agent.name+"-reflection-"+day, text, metadata); err != nil {
+		return err
+	}
+	log.Errorf("%s skipped the %s reflection: %s persisted across %d attempt(s); counted as stuckInputs", agent.name, day, ambientTruncationReason, attempts)
+	return nil
+}
+
 /* ---------- end-of-day reflection (amendment A3) ---------- */
 
 func reflectionInstructions() string {
@@ -1705,6 +1779,12 @@ func (app *kanbanBoardApp) maybeEmitDailyReflection(ctx context.Context, apiKey 
 	if app.memory.hasReflectionForDay(day) {
 		return meetingMemoryEntry{}, false, nil
 	}
+	if app.memory.countEntriesOfKindByMetadata(meetingMemoryKindDeadLetter, reflectionStuckDayMetadataKey, day) > 0 {
+		// The reflection for this day truncated even after the halved-window
+		// retry and was abandoned (stuckInputs); a fresh attempt would spend the
+		// same calls on the same envelope every tick that lands a pass.
+		return meetingMemoryEntry{}, false, nil
+	}
 	// material gate: reflect only on a completed day that produced rollups.
 	// §6.4 (RATIFIED 2026-07-09): listen-only sittings count as material and
 	// enter the synthesis window like any other digest — their listenOnly
@@ -1737,19 +1817,37 @@ func (app *kanbanBoardApp) maybeEmitDailyReflection(ctx context.Context, apiKey 
 	}
 
 	model := meetingBrainModel()
-	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           model,
-		Seat:            seatMeetingDigest,
-		Instructions:    reflectionInstructions(),
-		Input:           buildReflectionInput(day, digests, decisions, prior, hasPrior, now.UTC()),
-		ReasoningEffort: meetingBrainReasoningEffort(),
-		Verbosity:       "low",
-		MaxOutputTokens: reflectionMaxOutputTokens,
+	// Wave 8 D11 follow-up (ambient_truncation.go): production logged
+	// `day digest reflection failed: max_output_truncation` twice in one
+	// minute. Truncation halves the digest look-back once (keeping the NEWEST
+	// half — the day-digest cursor already moved past these digests, so the
+	// chassis head-skip must not run here) AND raises the output budget, or
+	// raises the budget alone for a lone digest: the symptom was output-envelope
+	// exhaustion, so the one retry must change the envelope and not only the
+	// input density (ambientTruncationLookbackRetryPlan). A reflection that
+	// still truncates is abandoned for the day with a tombstone
+	// (markDailyReflectionStuck) instead of retrying every tick.
+	outcome, err := ambientTruncationRetry(dayDigestAgent(), digests, reflectionMaxOutputTokens, true, func(window []meetingMemoryEntry, maxOutputTokens int) (string, error) {
+		return responder(ctx, apiKey, openAITextRequest{
+			Model:           model,
+			Seat:            seatMeetingDigest,
+			Instructions:    reflectionInstructions(),
+			Input:           buildReflectionInput(day, window, decisions, prior, hasPrior, now.UTC()),
+			ReasoningEffort: meetingBrainReasoningEffort(),
+			Verbosity:       "low",
+			MaxOutputTokens: maxOutputTokens,
+		})
+	}, func(attempts int) error {
+		return app.markDailyReflectionStuck(day, attempts)
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, false, err
 	}
-	text = strings.TrimSpace(text)
+	if outcome.Skipped {
+		return meetingMemoryEntry{}, false, nil
+	}
+	digests = outcome.Inputs
+	text := strings.TrimSpace(outcome.Value)
 	if text == "" {
 		return meetingMemoryEntry{}, false, nil
 	}
