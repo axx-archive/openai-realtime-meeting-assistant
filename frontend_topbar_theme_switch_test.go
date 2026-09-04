@@ -60,6 +60,7 @@ const fs=require('fs');const http=require('http');const path=require('path');con
 const idx=process.env.THEME_SWITCH_INDEX;const html=fs.readFileSync(idx,'utf8');
 const dictation=fs.readFileSync(path.join(path.dirname(idx),'public','composer-dictation.js'),'utf8');
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation)}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full',organization:'Bonfire'}))}
  if(req.url.startsWith('/assistant/')||req.url.startsWith('/api/')||req.url.startsWith('/rooms')||req.url.startsWith('/notifications')||req.url.startsWith('/auth/theme')){res.writeHead(200,{'content-type':'application/json'});return res.end('{}')}

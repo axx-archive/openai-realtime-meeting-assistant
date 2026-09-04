@@ -89,6 +89,7 @@ const assert=require('assert/strict');
 const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.MEETING_CONTROL_INDEX,'utf8');
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ'}));}
   if(req.url.startsWith('/participants')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({roomId:'office',participants:['AJ'],occupiedSeats:1,capacity:10,mediaStates:{},endpointMediaStates:{},endpointCounts:{AJ:1},recording:{enabled:true}}));}

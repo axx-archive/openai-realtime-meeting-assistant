@@ -155,6 +155,7 @@ const detail={...row,
 let detailHits=0;
 let signedOut=false;
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url.startsWith('/public/')){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){
     if(signedOut){res.writeHead(401,{'content-type':'application/json'});return res.end('{"error":"not signed in"}');}

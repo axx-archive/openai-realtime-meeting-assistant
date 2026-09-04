@@ -61,6 +61,7 @@ const release=(kind,index=0)=>{const item=held[kind][index];assert.ok(item,'miss
 const waitHeld=async(kind,count=1)=>{const until=Date.now()+5000;while(held[kind].length<count&&Date.now()<until)await new Promise(r=>setTimeout(r,10));assert.ok(held[kind].length>=count,'timed out waiting for '+kind)};
 const json=(res,status,payload)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(payload))};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation)}
  if(req.url==='/auth/me')return json(res,200,{email:authEmail,name:authEmail.startsWith('tyler')?'Tyler':'AJ',shellAccess:'full'});
  if(req.url==='/assistant/chat-threads?view=index')return json(res,200,{ok:true,threads:authEmail.startsWith('tyler')?[sharedB]:[aBase,bBase]});

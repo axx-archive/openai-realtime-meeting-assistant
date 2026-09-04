@@ -22,6 +22,7 @@ const assert = require('assert/strict');
 const { webkit } = require('playwright');
 const html = fs.readFileSync(process.env.IPAD_LONG_CHANNEL_INDEX, 'utf8');
 const server = http.createServer((req, res) => {
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if (req.url === '/public/composer-dictation.js') {
     res.writeHead(200, {'content-type':'application/javascript'});
     return res.end('');

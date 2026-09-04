@@ -26,6 +26,7 @@ const html = fs.readFileSync(process.env.CHAT_MENU_INDEX, 'utf8');
 const deleted = [];
 const thread = {id:'menu-qa',title:'Message menu QA',visibility:'private',messagesLoaded:true,messages:[0,1].map(i=>({id:'own-'+i,kind:'message',role:'user',authorName:'QA owner',authorEmail:'menu@example.test',text:'Synthetic menu message '+i,createdAt:'2026-09-04T19:0'+i+':00Z'}))};
 const server = http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  const json=(code,body)=>{res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body));};
  const url=new URL(req.url,'http://fixture.test');
  if(url.pathname==='/auth/me')return json(200,{email:'menu@example.test',name:'QA owner',shellAccess:'full'});

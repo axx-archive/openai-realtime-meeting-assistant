@@ -1,3 +1,5 @@
+> Historical visual reference. STRIDE 3 uses [the canonical design contract](../docs/plans/stride-3-design-system.md) and `design/stride.tokens.json`. The palette, brand, navigation and light-default prescriptions below are superseded. Media continuity invariants remain applicable.
+
 # BonfireOS Glass & Ink Design System
 
 BonfireOS is a light-first agentic operating system with a live WebRTC room as one first-class tool. The deployed `index.html` is the visual source of truth. Do not revive the retired warm-dark Bonfire room, parchment board, fireplace/hearth ornament, serif display type, or ember-heavy styling.

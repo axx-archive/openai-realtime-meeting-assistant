@@ -27,11 +27,11 @@ The marketing repo is absent from the business-kernel checkout. It remains a sep
 
 ## Canonical token source and generation contract
 
-Implementation target: `design/stride.tokens.json`, `schemaVersion:1`, as the only editable cross-platform values. Structure: `color.{light,dark,constant}`, `space`, `radius`, `size`, `typography.{family,role}`, `motion`, `layout`, `icon`. Use semantic keys in camelCase; colors are opaque sRGB hex, dimensions are logical px/pt numbers, line heights are ratios, motion times milliseconds. No CSS variables, DynamicColorIOS values, platform names, or JSX in the source.
+Implementation target: `design/stride.tokens.json`, `schemaVersion:1`, as the only editable cross-platform values. Structure: `color.{light,dark,constant}`, `space`, `radius`, `size`, `typography.{family,role}`, `motion`, `layout`, `icon`. Use semantic keys in camelCase; colors are opaque sRGB hex, dimensions are logical px/pt numbers, web line heights are ratios and tracking is in em; native role line heights/tracking are logical points, motion times milliseconds. No CSS variables, DynamicColorIOS objects, or JSX in the source; native font keys identify the existing bundled files.
 
 Generate deterministically into `public/design/stride-tokens.css` (`--stride-color-canvas`, etc.), `mobile/src/theme/generatedTokens.ts` (plain values/role data), and an exported `stride-tokens.css` with schema version and source SHA for the separately versioned site. Site checks in that exact generated artifact under `app/generated/stride-tokens.css`; its release records the source SHA. Generator check mode rejects drift. Root owns implementation; these paths are proposed new files, not existing artifacts.
 
-Native `tokens.ts` becomes a small platform adapter using generated roles, DynamicColorIOS/appearance preference and bundled font names. Native `RootNavigator` and native sheets must consume that adapter. Web theme uses one shared appearance preference/resolver across legacy and Business routes, default system, with light/dark/system choices. Appearance can persist as a preference; authority, drafts acknowledged as saved, and business data cannot be fabricated through local persistence. Marketing may deliberately remain fixed ink with an explicit theme root; it still consumes the same ink/brand roles.
+Native `tokens.ts` becomes a small platform adapter using generated roles, DynamicColorIOS/appearance preference and bundled font names. Native `RootNavigator` and native sheets must consume that adapter. Web theme uses one shared appearance preference/resolver across legacy and Business routes, default dark, with saved light/dark/system choices preserved. Appearance can persist as a preference; authority, drafts acknowledged as saved, and business data cannot be fabricated through local persistence. Marketing may deliberately remain fixed ink with an explicit theme root; it still consumes the same ink/brand roles.
 
 Legacy names map through a temporary compatibility stylesheet/adapter: `--bg-app → canvas`, `--surface-1/2 → surface`, `--surface-3 → surfaceInset`, `--text-1/2/3 → text/textSecondary/textMuted`, `--ring → focus`. Do **not** alias every `ember` reference to cobalt: classify existing usages as action, agent activity, capture activity or decoration; rebind the semantic role and remove obsolete decoration. No new raw palette literals outside generated files, approved media constants and third-party content. Lock explicit exceptions instead of pretending a grep can prove visual parity.
 
@@ -46,7 +46,7 @@ Legacy names map through a temporary compatibility stylesheet/adapter: `--bg-app
 | textSecondary | `#515C70` | `#B6C0D2` |
 | textMuted | `#5E6A7F` | `#99A6BD` |
 | border, decorative | `#D7DDEA` | `#333E53` |
-| borderControl | `#78859E` | `#71809B` |
+| borderControl | `#78859E` | `#7C8BA6` |
 | action | `#2D4FE7` | `#A8B8FF` |
 | onAction | `#FFFFFF` | `#10182F` |
 | actionHover | `#2442C8` | `#BCC8FF` |

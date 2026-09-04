@@ -77,6 +77,7 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.CHANNEL_CHECKPOINT_INDEX,'utf8');
 const requests=[];let attempts=0;
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts/action'&&req.method==='POST'){

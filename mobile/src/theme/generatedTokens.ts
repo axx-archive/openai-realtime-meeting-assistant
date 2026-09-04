@@ -1,0 +1,306 @@
+// Generated from design/stride.tokens.json · schema 1 · sha256 251d2efdf113fede0e95c05a9a83fc3d1340861a2e487ee5360111e3b4c1fe87. DO NOT EDIT.
+export const strideTokenSourceSHA = '251d2efdf113fede0e95c05a9a83fc3d1340861a2e487ee5360111e3b4c1fe87';
+export const strideTokens = {
+  "schemaVersion": 1,
+  "color": {
+    "light": {
+      "canvas": "#F6F7FB",
+      "surface": "#FFFFFF",
+      "surfaceInset": "#EDF0F7",
+      "text": "#151823",
+      "textSecondary": "#515C70",
+      "textMuted": "#5E6A7F",
+      "textDisabled": "#5E6A7F",
+      "border": "#D7DDEA",
+      "borderControl": "#78859E",
+      "action": "#2D4FE7",
+      "onAction": "#FFFFFF",
+      "actionHover": "#2442C8",
+      "actionPressed": "#1E36A8",
+      "selection": "#E5EBFF",
+      "focus": "#2D4FE7",
+      "success": "#17623D",
+      "successSurface": "#E5F3EB",
+      "warning": "#795100",
+      "warningSurface": "#FFF1D6",
+      "danger": "#B42335",
+      "dangerSurface": "#FFE9ED",
+      "info": "#2D4FE7",
+      "infoSurface": "#E5EBFF",
+      "live": "#17623D",
+      "liveSurface": "#E5F3EB",
+      "brandText": "#2D4FE7",
+      "wordmark": "#151823",
+      "onActionBrand": "#FFFFFF",
+      "shadowColor": "#080B12",
+      "glassPanel": "#FFFFFFED",
+      "glassBorder": "#D7DDEA",
+      "scrim": "#080B1266"
+    },
+    "dark": {
+      "canvas": "#10131B",
+      "surface": "#191E2A",
+      "surfaceInset": "#131824",
+      "text": "#F5F7FC",
+      "textSecondary": "#B6C0D2",
+      "textMuted": "#99A6BD",
+      "textDisabled": "#99A6BD",
+      "border": "#333E53",
+      "borderControl": "#7C8BA6",
+      "action": "#A8B8FF",
+      "onAction": "#10182F",
+      "actionHover": "#BCC8FF",
+      "actionPressed": "#92A6FF",
+      "selection": "#27365C",
+      "focus": "#A8B8FF",
+      "success": "#8FE2B2",
+      "successSurface": "#183326",
+      "warning": "#FFD082",
+      "warningSurface": "#382C16",
+      "danger": "#FFACB6",
+      "dangerSurface": "#3B2029",
+      "info": "#A8B8FF",
+      "infoSurface": "#27365C",
+      "live": "#8FE2B2",
+      "liveSurface": "#183326",
+      "brandText": "#A8B8FF",
+      "wordmark": "#F5F7FC",
+      "onActionBrand": "#10182F",
+      "shadowColor": "#000000",
+      "glassPanel": "#191E2AED",
+      "glassBorder": "#333E53",
+      "scrim": "#000000A3"
+    },
+    "constant": {
+      "brandCobalt": "#2D4FE7",
+      "onBrand": "#FFFFFF",
+      "stage": "#080B12",
+      "stageChrome": "#151C2B",
+      "stageText": "#F5F7FC",
+      "stageTextSecondary": "#B6C0D2",
+      "stageControlBorder": "#9AADCA",
+      "videoLetterbox": "#000000",
+      "speaking": "#67DAA0",
+      "leaveFill": "#B42335",
+      "onLeave": "#FFFFFF"
+    }
+  },
+  "space": {
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48,
+    "16": 64,
+    "24": 96
+  },
+  "radius": {
+    "control": 8,
+    "surface": 12,
+    "sheet": 20,
+    "pill": 999
+  },
+  "size": {
+    "hitMin": 44,
+    "control": 48,
+    "controlCompact": 44,
+    "icon": 20,
+    "iconNav": 24,
+    "avatarSmall": 32,
+    "avatar": 40
+  },
+  "typography": {
+    "family": {
+      "sans": "Google Sans Flex",
+      "mono": "Geist Mono"
+    },
+    "nativeFonts": {
+      "sansRegular": "GoogleSansFlex_400Regular",
+      "sansMedium": "GoogleSansFlex_500Medium",
+      "sansSemiBold": "GoogleSansFlex_600SemiBold",
+      "sansBold": "GoogleSansFlex_700Bold",
+      "monoRegular": "GeistMono_400Regular",
+      "monoMedium": "GeistMono_500Medium",
+      "monoSemiBold": "GeistMono_600SemiBold"
+    },
+    "role": {
+      "display": {
+        "size": 64,
+        "sizeWide": 140,
+        "weight": 550,
+        "lineHeight": 1.02,
+        "tracking": -0.035
+      },
+      "pageTitle": {
+        "size": 32,
+        "sizeWide": 40,
+        "weight": 500,
+        "lineHeight": 1.18,
+        "tracking": -0.03
+      },
+      "sectionTitle": {
+        "size": 22,
+        "sizeWide": 24,
+        "weight": 600,
+        "lineHeight": 1.25,
+        "tracking": -0.015
+      },
+      "itemTitle": {
+        "size": 17,
+        "sizeWide": 18,
+        "weight": 600,
+        "lineHeight": 1.35,
+        "tracking": -0.005
+      },
+      "body": {
+        "size": 16,
+        "weight": 400,
+        "lineHeight": 1.5,
+        "tracking": 0
+      },
+      "reading": {
+        "size": 17,
+        "weight": 400,
+        "lineHeight": 1.65,
+        "tracking": 0
+      },
+      "secondary": {
+        "size": 14,
+        "weight": 400,
+        "lineHeight": 1.4,
+        "tracking": 0
+      },
+      "button": {
+        "size": 16,
+        "weight": 500,
+        "lineHeight": 1.4,
+        "tracking": 0
+      },
+      "label": {
+        "size": 12,
+        "weight": 500,
+        "lineHeight": 1.4,
+        "tracking": 0.02
+      }
+    },
+    "nativeRole": {
+      "title1": {
+        "font": "sansMedium",
+        "size": 32,
+        "lineHeight": 38,
+        "weight": "500",
+        "tracking": -0.96
+      },
+      "title2": {
+        "font": "sansSemiBold",
+        "size": 22,
+        "lineHeight": 28,
+        "weight": "600",
+        "tracking": -0.33
+      },
+      "wordmark": {
+        "font": "sansSemiBold",
+        "size": 22,
+        "lineHeight": 26,
+        "weight": "600",
+        "tracking": -0.48
+      },
+      "headline": {
+        "font": "sansSemiBold",
+        "size": 17,
+        "lineHeight": 23,
+        "weight": "600",
+        "tracking": -0.085
+      },
+      "body": {
+        "font": "sansRegular",
+        "size": 17,
+        "lineHeight": 25,
+        "weight": "400",
+        "tracking": 0
+      },
+      "bodyMedium": {
+        "font": "sansMedium",
+        "size": 17,
+        "lineHeight": 25,
+        "weight": "500",
+        "tracking": 0
+      },
+      "bodySm": {
+        "font": "sansRegular",
+        "size": 15,
+        "lineHeight": 22,
+        "weight": "400",
+        "tracking": 0
+      },
+      "caption": {
+        "font": "sansRegular",
+        "size": 13,
+        "lineHeight": 19,
+        "weight": "400",
+        "tracking": 0
+      },
+      "captionMedium": {
+        "font": "sansMedium",
+        "size": 13,
+        "lineHeight": 19,
+        "weight": "500",
+        "tracking": 0
+      },
+      "label": {
+        "font": "monoMedium",
+        "size": 12,
+        "lineHeight": 17,
+        "weight": "500",
+        "tracking": 0.24
+      },
+      "labelLg": {
+        "font": "monoMedium",
+        "size": 13,
+        "lineHeight": 18,
+        "weight": "500",
+        "tracking": 0.26
+      },
+      "button": {
+        "font": "sansMedium",
+        "size": 17,
+        "lineHeight": 24,
+        "weight": "500",
+        "tracking": 0
+      }
+    }
+  },
+  "motion": {
+    "feedback": 120,
+    "transition": 220,
+    "reveal": 320,
+    "ease": [
+      0.2,
+      0,
+      0,
+      1
+    ],
+    "pressScale": 0.98
+  },
+  "layout": {
+    "compactMax": 743,
+    "wideMin": 1024,
+    "gutterCompact": 20,
+    "gutterMedium": 32,
+    "gutterWide": 48,
+    "sidebarMedium": 208,
+    "sidebarWide": 224,
+    "canvasMax": 1440,
+    "readingMaxCh": 72
+  },
+  "icon": {
+    "viewBox": 24,
+    "strokeWidth": 1.75
+  }
+} as const;
+export const strideLight = strideTokens.color.light;
+export const strideDark = strideTokens.color.dark;

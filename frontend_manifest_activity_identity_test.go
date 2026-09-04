@@ -105,6 +105,7 @@ const goals={
 };
 const artifacts={...goals,[currentDeck.id]:currentDeck,[fallbackDeck.id]:fallbackDeck,[rerunOldDeck.id]:rerunOldDeck,[rerunNewDeck.id]:rerunNewDeck,[switchDeck.id]:switchDeck,[revokedDeck.id]:revokedDeck};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
 	  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
 	  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
 	  if(req.url.startsWith('/artifacts/final-export-capability')){

@@ -250,6 +250,7 @@ const html = fs.readFileSync(process.env.PD1_INDEX, 'utf8');
 const projectionRequests = [];
 let shellAccess = 'full';
 const server = http.createServer((req, res) => {
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if (req.url === '/public/composer-dictation.js') { res.writeHead(200, {'content-type':'application/javascript'}); return res.end(''); }
   if (req.url === '/auth/me') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify({email:'synthetic@example.test',name:'Synthetic',shellAccess})); }
   if (req.url === '/api/stride/v1/mobile/surfaces/organizations') {

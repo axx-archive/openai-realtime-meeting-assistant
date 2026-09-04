@@ -86,6 +86,7 @@ let deniedReads=0;
 let driftReads=0;
 const deck=(id,version,digest,title)=>({id,kind:'os_artifact',text:'<!doctype html><html><body><main><h1>'+title+'</h1></main></body></html>',metadata:{title,type:'html_deck',status:'complete',threadStatus:'complete',artifactVersion:String(version),contentDigest:digest}});
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@example.test',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts?id=room-denied'){

@@ -29,6 +29,7 @@ const deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#15191f'},
 const deckArtifact={id:deckId,title:'Deep-link deck',version:2,savedToFiles:true,metadata:{title:'Deep-link deck',type:'html_deck',savedToFiles:'true',artifactVersion:'2'}};
 const documentArtifact={id:documentId,title:'Insights report',version:3,contentDigest:documentDigest,savedToFiles:true,metadata:{title:'Insights report',type:'markdown',savedToFiles:'true',artifactVersion:'3',contentDigest:documentDigest}};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){
     if(req.headers['x-test-auth']==='denied'){res.writeHead(401,{'content-type':'application/json'});return res.end(JSON.stringify({error:'not signed in'}));}

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#10131B">
     <meta name="application-name" content="Stride">
     <meta name="apple-mobile-web-app-title" content="Stride">
     <!-- iOS home-screen install (card 089): launching standalone is a hard
@@ -29,26 +29,8 @@
     <link rel="apple-touch-icon" href="/public/apple-touch-icon.png">
     <link rel="manifest" href="/public/manifest.webmanifest">
     <script src="/public/composer-dictation.js"></script>
-    <script>
-      /* pre-paint theme: stored choice wins (the signed-in account preference
-         re-applies after session bootstrap), else DARK — the product default
-         (AJ, Wave 10, 2026-09-02: "a beautiful product with a light/dark mode,
-         dark as default"; supersedes the light default of 2026-07-10). A saved
-         'light' still wins. OS dark preference is deliberately not consulted
-         unless the stored choice is 'system'. */
-      (() => {
-        let theme = null
-        try { theme = window.localStorage?.getItem('bonfire.theme.v1') } catch (err) { theme = null }
-        if (theme === 'system') {
-          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        } else if (theme !== 'light' && theme !== 'dark') {
-          theme = 'dark'
-        }
-        if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
-        const meta = document.querySelector('meta[name="theme-color"]')
-        if (meta) meta.setAttribute('content', theme === 'dark' ? '#000000' : '#DDD4C6')
-      })()
-    </script>
+    <link rel="stylesheet" href="/public/design/stride-tokens.css">
+    <script src="/public/design/appearance.js"></script>
     <style>
       @font-face { font-family: "Google Sans Flex"; src: url("/public/fonts/google-sans-flex-400.ttf") format("truetype"); font-style: normal; font-weight: 400; font-display: swap; }
       @font-face { font-family: "Google Sans Flex"; src: url("/public/fonts/google-sans-flex-500.ttf") format("truetype"); font-style: normal; font-weight: 500; font-display: swap; }
@@ -39484,6 +39466,7 @@
 
     </style>
     <link rel="stylesheet" href="/public/stride-operating.css">
+    <link rel="stylesheet" href="/public/design/legacy-tokens.css">
   </head>
   <body>
     <main id="appShell" data-tool="office" data-pd1-destination="Home">
@@ -42076,14 +42059,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          signed-in user's choice also syncs to their account (pushThemePref /
          session bootstrap re-apply), so it follows them across devices. */
       function renderTheme(theme) {
-        const next = theme === 'dark' ? 'dark' : 'light'
-        if (next === 'dark') {
-          document.documentElement.dataset.theme = 'dark'
-        } else {
-          delete document.documentElement.dataset.theme
-        }
-        if (themeColorMeta) themeColorMeta.setAttribute('content', next === 'dark' ? '#000000' : '#DDD4C6')
-        return next
+        return window.StrideAppearance.apply(theme === 'dark' ? 'dark' : 'light')
       }
       var themeTransitionTimer = 0
       function applyTheme(theme) {

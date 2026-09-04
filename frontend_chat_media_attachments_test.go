@@ -86,6 +86,7 @@ const messages=[
 const row={id:'media-thread',title:'Media',preview:'a clip',ownerEmail:'aj@shareability.com',visibility:'public',createdAt:new Date(base).toISOString(),updatedAt:new Date(base+4000).toISOString()};
 const blobHits=[];const previewHits=[];let tailHits=0;const held=new Map();
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation)}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}))}
  if(req.url==='/assistant/chat-threads?view=index'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,threads:[row]}))}

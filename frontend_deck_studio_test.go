@@ -115,6 +115,7 @@ let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},sl
 let patches=[];let imageRequests=[];let uploadRequests=[];let copies=[];let fileRetries=[];let pptxRequests=[];
 const artifact=()=>({id:artifactId,title:deckTitle,version,sceneRef,metadata:{title:deckTitle,type:'html_deck',savedToFiles:'true',artifactVersion:String(version),deckSceneRef:sceneRef}});
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts/deck?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),deck,canWrite,managed,qualityState:managed?(publicationReady?'admitted':'draft_needs_attention'):'',canPresent:managed?publicationReady:true,canExport:managed?publicationReady:true}));}
@@ -552,6 +553,7 @@ const deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},
   {id:'two',background:'#f2eee5',elements:[{id:'second',type:'text',x:120,y:160,width:1200,height:220,z:1,opacity:1,text:'Move this slide',fontSize:76,fontWeight:700,color:'#111'}]}
 ]};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts/deck?id='+artifactId){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:artifactId,title:'Phone proof',version:1,sceneRef:'e'.repeat(64),metadata:{savedToFiles:'true'}},deck,canWrite:true}));}
@@ -670,6 +672,7 @@ const original='Lead <span style="color:#ff6600;font-family:Georgia;font-size:64
 let deck={schemaVersion:1,width:1920,height:1080,theme:{background:'#10141c'},slides:[{id:'slide-one',background:'#10141c',elements:[{id:'mixed-runs',type:'text',x:140,y:180,width:1200,height:260,z:1,opacity:1,rotation:0,text:'Lead Proof now',richText:original,fontSize:40,fontFamily:'Arial',fontWeight:600,color:'#ffffff',textAlign:'left',lineHeight:1.08,letterSpacing:'normal'}]}]};
 const artifact=()=>({id:artifactId,title:'Rich text proof',version,sceneRef:'d'.repeat(64),metadata:{type:'html_deck',artifactVersion:String(version),savedToFiles:'true'}});
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts/deck?id='+artifactId&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:artifact(),deck,canWrite:true}));}

@@ -68,6 +68,7 @@ const assert=require('assert/strict');
 const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.CALL_PIP_INDEX,'utf8');
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts/document?id=pip-stage'&&req.method==='GET'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifact:{id:'pip-stage',title:'Call notes',type:'markdown',version:1,savedToFiles:true},document:{schemaVersion:1,markdown:'# Active call\n\nThe document stays open beside the call.'},canWrite:true}));}

@@ -28,20 +28,20 @@ func readIndexForTheme(t *testing.T) string {
 func TestIndexThemeDefaultsToDark(t *testing.T) {
 	html := readIndexForTheme(t)
 
-	// pre-paint script: absent/unknown key = dark; matchMedia consulted ONLY
-	// for a stored 'system' choice; a stored 'light' is honored as-is
-	if !strings.Contains(html, "if (theme === 'system') {") {
-		t.Error("pre-paint script must honor an explicit stored 'system' choice")
+	// All surfaces consume the same generated palette and synchronous resolver.
+	for _, asset := range []string{"/public/design/stride-tokens.css", "/public/design/appearance.js", "/public/design/legacy-tokens.css"} {
+		if !strings.Contains(html, asset) {
+			t.Errorf("shared appearance asset missing: %s", asset)
+		}
 	}
-	if !strings.Contains(html, "} else if (theme !== 'light' && theme !== 'dark') {\n          theme = 'dark'\n        }") {
-		t.Error("pre-paint script must default an absent/unknown stored theme to DARK")
+	if strings.Index(html, "/public/design/stride-tokens.css") > strings.Index(html, "/public/design/appearance.js") {
+		t.Error("palette must load before prepaint resolution")
 	}
-	if !strings.Contains(html, "if (theme === 'dark') document.documentElement.dataset.theme = 'dark'") {
-		t.Error("pre-paint script must stamp data-theme=dark before first paint")
+	if strings.Index(html, "/public/design/legacy-tokens.css") < strings.Index(html, "/public/stride-operating.css") {
+		t.Error("compatibility must follow inherited surface styles")
 	}
-	// the tab strip colour before any script runs is the dark ground
-	if !strings.Contains(html, `<meta name="theme-color" content="#000000">`) {
-		t.Error("theme-color meta must start on the dark ground")
+	if !strings.Contains(html, `window.StrideAppearance.apply(`) {
+		t.Error("runtime theme must use shared resolver")
 	}
 
 	// runtime resolution mirrors it
@@ -119,43 +119,20 @@ func TestIndexRoomThemeTokens(t *testing.T) {
 	}
 }
 
-func TestIndexDarkThemeUsesNativeParityBlackCanvas(t *testing.T) {
-	html := readIndexForTheme(t)
-	darkStart := strings.Index(html, "[data-theme=\"dark\"] {")
-	if darkStart == -1 {
-		t.Fatal("dark theme block missing")
+func TestIndexUsesSharedNativeParityCanvas(t *testing.T) {
+	css, err := os.ReadFile("public/design/legacy-tokens.css")
+	if err != nil {
+		t.Fatal(err)
 	}
-	darkEnd := strings.Index(html[darkStart:], "\n      }")
-	if darkEnd == -1 {
-		t.Fatal("dark theme block is not bounded")
-	}
-	dark := html[darkStart : darkStart+darkEnd]
 	for _, want := range []string{
-		"--bg-app: #000000;",
-		// AJ ratified dark ladder v2 2026-09-02: the canvas stays true black;
-		// the chrome is one plane above it, cards and wells one step each
-		// above that (was #050506 / #0A0A0C / #141416 and rgba(8, 8, 10, 0.82)).
-		"--surface-1: #0E0E10;",
-		"--surface-2: #151518;",
-		"--surface-3: #1C1C20;",
-		"--glass-chrome: rgba(14, 14, 16, 0.86);",
-		"--glass-panel: rgba(8, 8, 10, 0.62);",
+		"--bg-app: var(--stride-color-canvas);",
+		"--surface-1: var(--stride-color-surface);",
+		"--surface-3: var(--stride-color-surface-inset);",
+		"--text-1: var(--stride-color-text);",
+		"--ring: var(--stride-color-focus);",
 	} {
-		if !strings.Contains(dark, want) {
-			t.Errorf("native-parity dark ramp missing %q", want)
+		if !strings.Contains(string(css), want) {
+			t.Errorf("canonical alias missing %q", want)
 		}
-	}
-
-	for _, selector := range []string{
-		`[data-theme="dark"] #chatTool .chat-threads`,
-		`[data-theme="dark"] #chatTool .chat-conversation`,
-		`[data-theme="dark"] #chatTool .chat-convo-head`,
-	} {
-		if !strings.Contains(html, selector) {
-			t.Errorf("dark chat structural black override missing %q", selector)
-		}
-	}
-	if !strings.Contains(html, `background: var(--bg-app);`) {
-		t.Error("dark chat structural panes must use the true-black app canvas")
 	}
 }

@@ -61,6 +61,7 @@ const rows=[
 const messages=Array.from({length:1200},(_,i)=>({id:'m'+i,kind:'message',role:i%2?'scout':'user',authorEmail:i%2?'':'aj@shareability.com',authorName:i%2?'Scout':'AJ',text:'Message '+i,createdAt:new Date(Date.UTC(2026,7,12,0,0,i)).toISOString()}));
 messages[1188].files=[{ref:'late-channel-media',name:'dense-slide.svg',mime:'image/svg+xml',size:4096}];
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation)}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}))}
  if(req.url==='/assistant/chat-threads?view=index'){indexRequests++;return setTimeout(()=>{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,threads:rows}))},600)}

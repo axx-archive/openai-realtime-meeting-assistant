@@ -1,0 +1,154 @@
+/* Compatibility boundary for inherited web surfaces. The editable palette is
+   design/stride.tokens.json. Component migration is tracked in the design plan;
+   authored documents and third-party embeds keep their own colors. */
+html:root,
+html[data-theme="dark"] {
+  --paper-0: var(--stride-color-surface);
+  --paper-25: var(--stride-color-surface);
+  --paper-50: var(--stride-color-canvas);
+  --paper-100: var(--stride-color-surface-inset);
+  --paper-200: var(--stride-color-surface-inset);
+  --bg-app: var(--stride-color-canvas);
+  --bg-room-canvas: var(--stride-color-canvas); /* Call canvas migrates with its foregrounds. */
+  --bg-stage: var(--stride-constant-video-letterbox);
+  --surface-1: var(--stride-color-surface);
+  --surface-2: var(--stride-color-surface);
+  --surface-3: var(--stride-color-surface-inset);
+  --surface-flood: var(--stride-color-surface);
+  --ground: var(--bg-app);
+  --surface-0: var(--bg-app);
+  --well: var(--surface-3);
+  --text-1: var(--stride-color-text);
+  --text-2: var(--stride-color-text-secondary);
+  --text-3: var(--stride-color-text-muted);
+  --text-disabled: var(--stride-color-text-disabled);
+  --ink-1: var(--text-1);
+  --ink-2: var(--text-2);
+  --ink-3: var(--text-3);
+  --ink-4: var(--text-disabled);
+  --line-1: var(--stride-color-border);
+  --line-2: var(--stride-color-border-control);
+  --line: var(--line-1);
+  --line-strong: var(--line-2);
+  --selection: var(--stride-color-selection);
+  --accent: var(--stride-color-action);
+  --accent-hover: var(--stride-color-action-hover);
+  --accent-press: var(--stride-color-action-pressed);
+  --accent-soft: var(--stride-color-selection);
+  --on-accent: var(--stride-color-on-action);
+  --ring: var(--stride-color-focus);
+  --live-text: var(--stride-color-live);
+  --live-soft: var(--stride-color-live-surface);
+  --success-text: var(--stride-color-success);
+  --success-soft: var(--stride-color-success-surface);
+  --danger-text: var(--stride-color-danger);
+  --danger-soft: var(--stride-color-danger-surface);
+  --warn-text: var(--stride-color-warning);
+  --warn-soft: var(--stride-color-warning-surface);
+  --info-text: var(--stride-color-info);
+  --info-soft: var(--stride-color-info-surface);
+  --speaker-accent: var(--stride-constant-speaking);
+  --scrim: var(--stride-color-scrim);
+  --wordmark: var(--stride-color-wordmark);
+  --backdrop-ambient: var(--stride-color-canvas);
+  --glass-chrome: var(--stride-color-surface);
+  --glass-panel: var(--stride-color-surface);
+  --glass-border: var(--stride-color-border);
+  --glass-highlight: inset 0 0 0 transparent;
+  --glass-blur: none;
+  --glass-blur-chrome: none;
+  --glass-chrome-fill: var(--stride-color-surface);
+  --glass-float-fill: var(--stride-color-surface);
+  --glass-sheet-fill: var(--stride-color-surface);
+  --glass-opaque-fill: var(--stride-color-surface);
+  --glass-chrome-filter: none;
+  --glass-float-filter: none;
+  --glass-sheet-filter: none;
+  --glass-media: var(--stride-constant-stage-chrome);
+  --glass-media-hover: var(--stride-constant-stage-chrome);
+  --glass-media-border: var(--stride-constant-stage-control-border);
+  --glass-media-highlight: inset 0 0 0 transparent;
+  --shadow-1: 0 1px 2px color-mix(in srgb, var(--stride-color-shadow-color) 8%, transparent);
+  --shadow-2: 0 8px 32px color-mix(in srgb, var(--stride-color-shadow-color) 14%, transparent);
+  --shadow-3: 0 16px 48px color-mix(in srgb, var(--stride-color-shadow-color) 20%, transparent);
+  --shadow-float: var(--shadow-2);
+  --glass-shadow: var(--shadow-2);
+  --glass-float-shadow: var(--shadow-2);
+  --glass-sheet-shadow: var(--shadow-3);
+  --glow-accent: 0 0 0 1.5px var(--accent);
+  --r-sm: var(--stride-radius-control);
+  --r-md: var(--stride-radius-control);
+  --r-lg: var(--stride-radius-surface);
+  --r-xl: var(--stride-radius-sheet);
+  --r-2xl: var(--stride-radius-sheet);
+  --r-full: var(--stride-radius-pill);
+  --hit-min: var(--stride-size-hit-min);
+  --dur-fast: var(--stride-motion-feedback);
+  --dur-med: var(--stride-motion-transition);
+  --dur-slow: var(--stride-motion-reveal);
+  --ease: var(--stride-motion-ease);
+}
+
+html[data-theme="dark"] {
+  --shadow-2: 0 8px 32px color-mix(in srgb, var(--stride-color-shadow-color) 36%, transparent);
+  --shadow-3: 0 16px 48px color-mix(in srgb, var(--stride-color-shadow-color) 46%, transparent);
+}
+
+/* Navigation, search matches and agent activity are separate semantic roles.
+   Retain inherited ember aliases only outside these migrated surfaces until
+   their capture/brand/decorative usages have been classified. */
+:is(.pd1-primary-nav, .tool-rail, .topbar, #accessPanel, .stride-operating-home) {
+  --ember: var(--stride-color-action);
+  --ember-text: var(--stride-color-action);
+  --ember-hover: var(--stride-color-action-hover);
+  --ember-press: var(--stride-color-action-pressed);
+  --ember-soft: var(--stride-color-selection);
+  --on-ember: var(--stride-color-on-action);
+}
+.wordmark {
+  background: var(--stride-color-wordmark);
+  mask: url(/public/stride-wordmark-black.png) no-repeat center / contain;
+  -webkit-mask: url(/public/stride-wordmark-black.png) no-repeat center / contain;
+}
+.stride-operating-home .office-launch__line {
+  font-size: clamp(32px, 3.3vw, 40px);
+  line-height: 1.18;
+  letter-spacing: -0.03em;
+}
+.stride-operating-home .home-scout-composer { border-radius: var(--stride-radius-sheet); }
+.operating-work { border-radius: var(--stride-radius-surface); }
+.operating-work__status[data-state="running"]::before {
+  background: var(--stride-color-action);
+  border-color: var(--stride-color-action);
+}
+.operating-work__title { letter-spacing: -0.005em; }
+.operating-section-head h2 { letter-spacing: -0.015em; }
+.operating-eyebrow,
+.operating-section-head .operating-eyebrow { font-size: 12px; letter-spacing: 0.02em; }
+.operating-work__status,
+.operating-work__foot { font-size: 12px; }
+.work-review__submit {
+  background: var(--stride-color-action);
+  color: var(--stride-color-on-action);
+  border-color: var(--stride-color-action);
+  border-radius: var(--stride-radius-control);
+}
+.work-review__select,
+.work-review__note {
+  border-color: var(--stride-color-border-control);
+  border-radius: var(--stride-radius-control);
+}
+@media (prefers-reduced-motion: reduce) {
+  html:root,
+  html[data-theme="dark"] {
+    --dur-fast: 0ms;
+    --dur-med: 0ms;
+    --dur-slow: 0ms;
+    --dur-breathe: 0ms;
+  }
+}
+
+/* Theme foreground and background change together; do not crossfade contrast. */
+html[data-stride-appearance-updating] *,
+html[data-stride-appearance-updating] *::before,
+html[data-stride-appearance-updating] *::after { transition: none !important; }

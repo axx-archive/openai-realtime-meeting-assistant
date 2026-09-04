@@ -184,6 +184,7 @@ const raceDigest='b'.repeat(64);
 const historicalDeck={id:'historical-deck',kind:'os_artifact',text:'<!doctype html><html><body><main><h1>Historical exact deck</h1></main></body></html>',metadata:{title:'Historical exact deck',type:'html_deck',status:'complete',threadStatus:'complete',artifactVersion:'4',contentDigest:historicalDigest}};
 const raceDeck={id:'race-deck',kind:'os_artifact',text:'<!doctype html><html><body><main><h1>Stale race deck</h1></main></body></html>',metadata:{title:'Stale race deck',type:'html_deck',status:'complete',threadStatus:'complete',artifactVersion:'2',contentDigest:raceDigest}};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@example.test',name:'AJ',shellAccess:'full'}));}
   if(req.url==='/artifacts?id=historical-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({artifacts:[historicalDeck]}));}
@@ -434,6 +435,7 @@ const {chromium}=require('playwright');
 const html=fs.readFileSync(process.env.ACTIVITY_PILL_INDEX,'utf8');
 const digest='d'.repeat(64);
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@example.test',name:'AJ',shellAccess:'full'}));}
   if(req.url.startsWith('/api/')||req.url.startsWith('/assistant/')||req.url.startsWith('/artifacts')||req.url.startsWith('/notifications')||req.url.startsWith('/rooms')||req.url.startsWith('/brain/')){res.writeHead(503,{'content-type':'application/json'});return res.end('{}');}

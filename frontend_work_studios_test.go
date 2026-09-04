@@ -111,6 +111,7 @@ const receiptOnlyProject={...olderProject,id:'receipt-only-deck',title:'Receipt-
 const transientExactProject={...olderProject,id:'transient-deck',title:'Recovered exact presentation',rootRunId:'transient-run',rootArtifactId:'transient-deck',href:'/work?project=transient-deck'};
 const firstRenderDocument={schemaVersion:1,id:'doc-render-root',kind:'document',title:'First-render report',revision:1,status:'ready',progressPercent:100,phase:'ready',phases:phases(4).map(item=>({...item,status:'complete'})),createdAt:'2026-08-23T12:00:00Z',updatedAt:'2026-08-23T12:10:00Z',rootRunId:'doc-render-run',rootArtifactId:'doc-render-root',href:'/research?project=doc-render-root',source:{threadId:'private-scout'},result:{artifactId:'doc-render',type:'markdown',version:3,digest:documentDigest,title:'First-render report',qualityState:'admitted',canEdit:true,canPresent:false,canExport:true},canRename:true};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
 	requestLog.push(req.url);
  if(req.url==='/public/stride-operating.css'){res.writeHead(200,{'content-type':'text/css'});return res.end(fs.readFileSync(path.join(path.dirname(process.env.STUDIO_INDEX),'public/stride-operating.css')));}
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}

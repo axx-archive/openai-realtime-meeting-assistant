@@ -34,6 +34,7 @@ let exportRequests=0;
 const deck={schemaVersion:1,width:1920,height:1080,slides:[{id:'cover',background:'#15191f',elements:[{id:'title',type:'text',x:160,y:160,width:1200,height:220,z:1,opacity:1,rotation:0,text:'Reviewed deck',fontSize:84,fontFamily:'Arial',fontWeight:700,color:'#fff',textAlign:'left',lineHeight:1.05,letterSpacing:'normal'}]}]};
 const json=(res,status,payload)=>{res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(payload));};
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
   if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
   if(req.url==='/auth/me')return json(res,200,{email:'aj@shareability.com',name:'AJ',shellAccess:'full'});
   if(req.url==='/readyz')return json(res,200,{ok:true,checks:{agents:{renderRunner:{heartbeatOK:true}}}});

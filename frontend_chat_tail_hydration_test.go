@@ -23,6 +23,7 @@ const all=Array.from({length:240},(_,index)=>({id:'m'+index,kind:'message',role:
 const row={id:'dense-tail',title:'Like A Farmer',preview:'Message 239',ownerEmail:'aj@shareability.com',visibility:'public',createdAt:new Date(base).toISOString(),updatedAt:new Date(base+239000).toISOString()};
 const detailRequests=[];
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end(dictation)}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'aj@shareability.com',name:'AJ',shellAccess:'full'}))}
  if(req.url==='/assistant/chat-threads?view=index'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,threads:[row]}))}

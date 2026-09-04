@@ -22,6 +22,7 @@ let oldMessages=[{id:'own-old',kind:'message',role:'user',authorEmail:'owner@exa
 const project=episode=>({id:'riff-private',title:'Riff on source',ownerEmail:'owner@example.test',visibility:'private',messagesLoaded:true,messages:episode==='old'?oldMessages:[],riff:{sourceThreadId:source.id,sourceTitle:source.title,sourceAvailable:true,activeEpisodeId:'current',viewedEpisodeId:episode,episodeCount:2,episodes}});
 const mutations=[];
 const server=http.createServer((req,res)=>{
+ if(require('./scripts/frontend-design-assets.cjs')(req,res))return;
  const json=(code,body)=>{res.writeHead(code,{'content-type':'application/json'});res.end(JSON.stringify(body));};
  const u=new URL(req.url,'http://fixture.test');
  if(req.method!=='GET')mutations.push({method:req.method,path:u.pathname});
