@@ -85238,7 +85238,15 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const response = await fetch(`/assistant/chat-threads/${encodeURIComponent(thread.id)}/messages/${encodeURIComponent(message.id)}`, { method: 'DELETE' })
 		          const payload = await response.json().catch(() => ({}))
 		          if (!response.ok || !payload?.thread) throw new Error(payload?.error || 'reply could not be deleted')
-		          upsertScoutChatThread(payload.thread, { select: false })
+		          const updated = upsertScoutChatThread(payload.thread, { select: false })
+		          if (thread?.riff) {
+		            const episodeId = String(thread.riff.viewedEpisodeId || thread.riff.activeEpisodeId || '')
+		            if (chatContextState?.mode === 'riff' && String(chatContextState.threadId || '') === String(thread.id) &&
+		                String(chatContextState.viewedEpisodeId || thread.riff.activeEpisodeId || '') === episodeId) {
+		              await viewPrivateRiffEpisode(updated, episodeId, control)
+		            }
+		            return
+		          }
 		          const root = desktopChatReplyTopology(thread.messages).rootFor(message)
 		          syncDesktopReplySurfaces(payload.thread, root?.id || message?.replyTo?.messageId)
 	        } catch (error) {
@@ -85511,7 +85519,10 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	      }
 
 	      function attachDesktopContextMessageActions(thread, message, card, options = {}) {
-	        if (options.root || options.readOnly || !message?.id) return null
+	        if (options.root || !message?.id) return null
+	        const isOwn = desktopChatMessageIsOwn(thread, message)
+	        const deleteOnly = options.readOnly === true && options.allowOwnDelete === true && isOwn
+	        if (options.readOnly && !deleteOnly) return null
 	        const interactions = bfEl('span', 'chat-context-card__interactions')
 	        interactions.setAttribute('aria-label', 'Reply interactions')
 	        const messageActions = bfEl('span', 'chat-context-card__message-actions')
@@ -85519,24 +85530,23 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        const grouped = desktopChatReactionSummaries(message)
 	        const reactionRow = desktopContextReactionRowNode(message)
 	        interactions.dataset.hasReactions = String(!reactionRow.hidden)
-	        messageActions.appendChild(desktopChatReactionPickerControl(message, grouped, { contextOnly: true }))
+	        if (!deleteOnly) messageActions.appendChild(desktopChatReactionPickerControl(message, grouped, { contextOnly: true }))
 	        const reply = bfEl('button', 'chat-context-card__message-action', 'reply')
 	        reply.type = 'button'
 	        reply.setAttribute('aria-label', 'Reply in this thread')
 	        reply.addEventListener('click', () => chatContextReplyInput?.focus())
-	        messageActions.appendChild(reply)
+	        if (!deleteOnly) messageActions.appendChild(reply)
 	        let moreControl = null
-	        const isOwn = desktopChatMessageIsOwn(thread, message)
-	        const hasShare = options.onShareAll || options.onShareReply
-	        const canRemember = chatMessageCanBeRemembered(thread, message)
+	        const hasShare = !deleteOnly && (options.onShareAll || options.onShareReply)
+	        const canRemember = !deleteOnly && chatMessageCanBeRemembered(thread, message)
 	        if (isOwn || hasShare || canRemember) {
 	          moreControl = desktopChatMoreMenuControl({
 	            label: 'More reply actions',
-	            onEdit: isOwn ? () => beginDesktopContextMessageEdit(thread, message, card) : null,
+	            onEdit: isOwn && !deleteOnly ? () => beginDesktopContextMessageEdit(thread, message, card) : null,
 	            onDelete: isOwn ? remove => deleteDesktopContextMessage(thread, message, remove) : null,
 	            onRemember: canRemember ? trigger => rememberChatMessage(thread, message, trigger) : null,
-	            onShareAll: options.onShareAll,
-	            onShareReply: options.onShareReply
+	            onShareAll: deleteOnly ? null : options.onShareAll,
+	            onShareReply: deleteOnly ? null : options.onShareReply
 	          })
 	          messageActions.appendChild(moreControl.node)
 	        }
@@ -85556,7 +85566,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        })
 	        card.addEventListener('pointerup', cancelPress)
 	        card.addEventListener('pointercancel', cancelPress)
-	        interactions.append(reactionRow, messageActions)
+	        if (!deleteOnly) interactions.appendChild(reactionRow)
+	        interactions.appendChild(messageActions)
 	        return interactions
 	      }
 
@@ -85730,7 +85741,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            ? () => void publishPrivateRiffConversation(thread, message, null, 'reply')
 	            : null
 	        } : {}
-	        const card = desktopContextMessageCard(thread, message, { readOnly: !shareable, ...shareOptions })
+	        const card = desktopContextMessageCard(thread, message, { readOnly: !shareable, allowOwnDelete: true, ...shareOptions })
 	        return card
 	      }
 
