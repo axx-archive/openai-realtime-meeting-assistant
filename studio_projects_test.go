@@ -1149,3 +1149,39 @@ func TestStudioProjectStepsFollowGoalPlanSubtasks(t *testing.T) {
 		}
 	}
 }
+
+// TestStudioProjectCommissionRefReadsTheStoryOutlineThread pins the id the
+// hub's "Open the outline" / "Open the thread" actions read. Story Studio
+// stamps its bound thread under storyThreadId only, so reading
+// packagingCommissionThreadId alone leaves commission.threadId empty and the
+// client refuses to open a conversation the viewer can actually read.
+func TestStudioProjectCommissionRefReadsTheStoryOutlineThread(t *testing.T) {
+	cookies, aj := setupPackagingStudioTest(t)
+	_ = cookies
+	story, thread, err := kanbanApp.createPackagingStory(aj, packagingStoryBrief{Subject: "Why now for compute credits"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(story.Metadata[packagingCommissionThreadIDMetadataKey]) != "" {
+		t.Fatalf("fixture: the outline already carries a commission thread id: %v", story.Metadata)
+	}
+	ref := studioProjectCommissionRefFor(context.Background(), kanbanApp, aj, story)
+	if ref == nil || ref.Kind != packagingCommissionKindStory {
+		t.Fatalf("story commission ref=%+v", ref)
+	}
+	if ref.ThreadID != thread.ID {
+		t.Fatalf("story commission threadId=%q, want the bound outline thread %q", ref.ThreadID, thread.ID)
+	}
+	// A commission that carries its own thread id keeps using it.
+	research, _, err := kanbanApp.createOSArtifactWithMetadata("research", "Nordic mid-market", "# Nordic", "Scout", map[string]string{
+		"source": "scout_thread", "mode": "research", "status": artifactStatusComplete, "threadStatus": artifactStatusComplete,
+		packagingCommissionKindMetadataKey:     packagingCommissionKindResearch,
+		packagingCommissionThreadIDMetadataKey: "agent-thread-commission-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref = studioProjectCommissionRefFor(context.Background(), kanbanApp, aj, research); ref == nil || ref.ThreadID != "agent-thread-commission-1" {
+		t.Fatalf("research commission ref=%+v", ref)
+	}
+}

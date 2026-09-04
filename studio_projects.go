@@ -89,6 +89,55 @@ type studioProjectView struct {
 	// the same subtasks the chat goalcard renders from the goal plan.
 	Steps     []studioProjectStepView `json:"steps,omitempty"`
 	CanRename bool                    `json:"canRename"`
+	// Wave 11 (Packaging Studio): the structured brief a commission was
+	// launched from (provenance, shown on the row), the commission identity
+	// (thread + message the brief was posted as), and the project tag the
+	// deliverable is filed under (artifact_projects.go).
+	Brief      map[string]any              `json:"brief,omitempty"`
+	Commission *studioProjectCommissionRef `json:"commission,omitempty"`
+	Project    string                      `json:"project,omitempty"`
+}
+
+// studioProjectCommissionRef is the row-level receipt of a Packaging Studio
+// commission: ids only, the brief itself rides on the view's Brief field.
+type studioProjectCommissionRef struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	ThreadID  string `json:"threadId,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
+	// Chain names the presentation a commissionFirst research launched (or
+	// "waiting" until the research result exists).
+	ChainState     string `json:"chainState,omitempty"`
+	PresentationID string `json:"presentationId,omitempty"`
+	// Waiting state from the chat-intake record bound to this commission
+	// (viewer-fenced): "waiting on <name> · N questions" survives reload.
+	packagingCommissionWaitingState
+}
+
+func studioProjectCommissionRefFor(ctx context.Context, app *kanbanBoardApp, viewer *userAccount, entry meetingMemoryEntry) *studioProjectCommissionRef {
+	kind, ok := packagingCommissionMetadata(entry)
+	if !ok {
+		return nil
+	}
+	ref := &studioProjectCommissionRef{
+		ID: entry.ID, Kind: kind,
+		// A story outline records its bound thread under storyThreadId (the
+		// Story Studio mint stamps only that key), so read both: an empty
+		// threadId here is what makes "Open the outline" refuse a thread the
+		// viewer can actually read.
+		ThreadID: strings.TrimSpace(firstNonEmptyString(
+			entry.Metadata[packagingCommissionThreadIDMetadataKey],
+			entry.Metadata[packagingStoryThreadIDMetadataKey],
+		)),
+		MessageID:                       strings.TrimSpace(entry.Metadata[packagingCommissionMessageIDMetadataKey]),
+		ChainState:                      strings.TrimSpace(entry.Metadata[packagingChainStateMetadataKey]),
+		PresentationID:                  strings.TrimSpace(entry.Metadata[packagingChainPresentationIDMetadataKey]),
+		packagingCommissionWaitingState: packagingCommissionWaitingState{BriefComplete: true},
+	}
+	if app != nil && viewer != nil {
+		ref.packagingCommissionWaitingState = app.packagingCommissionWaitingStateFor(ctx, viewer, entry)
+	}
+	return ref
 }
 
 type studioProjectPhaseView struct {
@@ -1007,6 +1056,9 @@ func studioProjectViewForCandidateProjectionWithApp(app *kanbanBoardApp, ctx con
 	view.Attention = studioProjectAttention(status, plan, resultReady)
 	view.CanRename = studioProjectCanRename(ctx, viewer, candidate, status)
 	view.Origin = studioProjectOrigin(entry)
+	view.Brief = packagingBriefMap(decodePackagingBriefMetadata(entry.Metadata))
+	view.Commission = studioProjectCommissionRefFor(ctx, app, viewer, entry)
+	view.Project = strings.TrimSpace(entry.Metadata[artifactProjectMetadataKey])
 	if canonical {
 		view.Steps = studioProjectSteps(plan, resultIndex)
 	}
@@ -1037,12 +1089,22 @@ func authorizedStudioProjectCandidates(ctx context.Context, viewer *userAccount,
 }
 
 func studioProjectList(ctx context.Context, viewer *userAccount, kind string) []studioProjectView {
+	return studioProjectListFiltered(ctx, viewer, kind, "")
+}
+
+// studioProjectListFiltered adds the Wave 11 project filter: an exact
+// (case-insensitive) project tag name; "" lists every project.
+func studioProjectListFiltered(ctx context.Context, viewer *userAccount, kind string, project string) []studioProjectView {
 	candidates, index := studioProjectProjectionDirectory()
 	sourceCache := newStudioProjectSourceAccessCache()
 	companyCache := newStudioProjectCompanyAccessCache()
 	views := make([]studioProjectView, 0)
+	project = strings.Join(strings.Fields(project), " ")
 	for _, candidate := range authorizedStudioProjectCandidates(ctx, viewer, candidates) {
 		if studioProjectArchived(candidate.Entry) {
+			continue
+		}
+		if project != "" && !strings.EqualFold(strings.TrimSpace(candidate.Entry.Metadata[artifactProjectMetadataKey]), project) {
 			continue
 		}
 		view, ok := studioProjectViewForCandidateWithAccessCache(ctx, viewer, candidate, index, sourceCache, companyCache)
@@ -1227,7 +1289,19 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusNotFound, "studio project not found")
 		return
 	}
-	projects := studioProjectList(r.Context(), viewer, kind)
+	projectFilter := strings.TrimSpace(r.URL.Query().Get("project"))
+	if len([]rune(projectFilter)) > fileFolderNameMaxLen {
+		writeAuthError(w, http.StatusBadRequest, "project filter is too long")
+		return
+	}
+	if !kanbanApp.artifactProjectVisibleToViewer(r.Context(), viewer, projectFilter) {
+		writeAuthError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	// A commissionFirst chain advances on the requester's next read of the
+	// list: the waiting deck launches once its research result is complete.
+	kanbanApp.advancePackagingCommissionChainsForViewer(r.Context(), viewer)
+	projects := studioProjectListFiltered(r.Context(), viewer, kind, projectFilter)
 	limit := studioProjectDefaultLimit
 	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 		parsed, err := strconv.Atoi(raw)

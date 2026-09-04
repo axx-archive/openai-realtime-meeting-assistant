@@ -91,7 +91,15 @@ const (
 	// signalDistilledIntoKey/-AtKey stamp a consumed signal with the profile
 	// that absorbed it — the §5 compaction trigger (slop_classifier.go).
 	signalDistilledIntoKey = "distilledInto"
-	signalDistilledAtKey   = "distilledAt"
+	// tasteStuckInputKey (Wave 8 D11 follow-up, ambient_truncation.go) marks a
+	// signal or decision the analyst skipped after max_output_truncation
+	// survived the halved-window retry; unconsumedSignalsForActor and
+	// unconsumedDecisionsForPerson exclude it so one dense row can never wedge
+	// a user's distillation. The skip is also a dead-letter tombstone
+	// (stuckInputs on the capability snapshot).
+	tasteStuckInputKey   = "distillationStuck"
+	tasteStuckInputAtKey = "distillationStuckAt"
+	signalDistilledAtKey = "distilledAt"
 
 	tasteProposalStatusProposed = "proposed"
 )
@@ -311,16 +319,38 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 	if hasProfile {
 		priorBody = profile.Text
 	}
-	output, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           meetingBrainModel(),
-		Instructions:    tasteAnalystInstructions(),
-		Input:           app.buildTasteAnalystInputWithLedger(userName, priorBody, window, decisions, positions, now),
-		ReasoningEffort: tasteAnalystEffort,
-		Verbosity:       "medium",
-		MaxOutputTokens: tasteAnalystMaxOutputTokens,
-		Seat:            seatTaste,
-		Workflow:        "taste_analyst",
-	})
+	attempt := func(signals []meetingMemoryEntry, decisionRows []meetingMemoryEntry, maxOutputTokens int) (string, error) {
+		return responder(ctx, apiKey, openAITextRequest{
+			Model:           meetingBrainModel(),
+			Instructions:    tasteAnalystInstructions(),
+			Input:           app.buildTasteAnalystInputWithLedger(userName, priorBody, signals, decisionRows, positions, now),
+			ReasoningEffort: tasteAnalystEffort,
+			Verbosity:       "medium",
+			MaxOutputTokens: maxOutputTokens,
+			Seat:            seatTaste,
+			Workflow:        "taste_analyst",
+		})
+	}
+	output, err := attempt(window, decisions, tasteAnalystMaxOutputTokens)
+	if isAmbientTruncation(err) {
+		// Wave 8 D11 follow-up: halve the signal + decision window once (or
+		// raise the budget for a lone row); a row that still truncates is
+		// skipped (tasteStuckInputKey) and counted as stuckInputs instead of
+		// failing this user's pass on every tick.
+		attempts := 1
+		retrySignals, retryDecisions, retryBudget, ok := tasteTruncationRetryPlan(window, decisions, tasteAnalystMaxOutputTokens)
+		if ok {
+			attempts++
+			log.Warnf("%s output for %s truncated over %d signal(s) and %d decision(s); retrying once with %d and %d rows and a %d-token output budget", tasteAnalystAgentName, userName, len(window), len(decisions), len(retrySignals), len(retryDecisions), retryBudget)
+			output, err = attempt(retrySignals, retryDecisions, retryBudget)
+			if !isAmbientTruncation(err) {
+				window, decisions = retrySignals, retryDecisions
+			}
+		}
+		if isAmbientTruncation(err) {
+			return false, app.skipStuckTasteInput(agent, userName, window, decisions, attempts, now)
+		}
+	}
 	if err != nil {
 		return false, err
 	}
@@ -403,6 +433,50 @@ func (app *kanbanBoardApp) runTasteAnalystForUser(agent ambientAgentConfig, ctx 
 		}
 	}
 	return true, nil
+}
+
+// tasteTruncationRetryPlan is the analyst's shape of the shared halving
+// (ambient_truncation.go): keep the oldest half of the signals (rounded up)
+// and of the decisions (rounded down) so the combined window shrinks; a lone
+// row raises the output budget once instead. ok=false when neither differs
+// from the attempt that just truncated.
+func tasteTruncationRetryPlan(signals []meetingMemoryEntry, decisions []meetingMemoryEntry, maxOutputTokens int) ([]meetingMemoryEntry, []meetingMemoryEntry, int, bool) {
+	keepSignals := (len(signals) + 1) / 2
+	keepDecisions := len(decisions) / 2
+	if keepSignals+keepDecisions > 0 && keepSignals+keepDecisions < len(signals)+len(decisions) {
+		return signals[:keepSignals], decisions[:keepDecisions], maxOutputTokens, true
+	}
+	raised := ambientTruncationRaisedOutputBudget(maxOutputTokens)
+	if raised <= maxOutputTokens {
+		return signals, decisions, maxOutputTokens, false
+	}
+	return signals, decisions, raised, true
+}
+
+// skipStuckTasteInput abandons the head row (the oldest signal, else the
+// oldest decision) whose distillation truncates even after the retry: the row
+// is stamped tasteStuckInputKey so the per-user window moves past it, and a
+// dead-letter tombstone records the reason for stuckInputs. The pass returns
+// clean; the user's next pass runs over what remains.
+func (app *kanbanBoardApp) skipStuckTasteInput(agent ambientAgentConfig, userName string, signals []meetingMemoryEntry, decisions []meetingMemoryEntry, attempts int, now time.Time) error {
+	var head meetingMemoryEntry
+	switch {
+	case len(signals) > 0:
+		head = signals[0]
+	case len(decisions) > 0:
+		head = decisions[0]
+	default:
+		return nil
+	}
+	if _, _, err := app.memory.updateEntryWithMetadata(head.Kind, head.ID, head.Text, map[string]string{
+		tasteStuckInputKey:   ambientTruncationReason,
+		tasteStuckInputAtKey: now.UTC().Format(time.RFC3339Nano),
+	}); err != nil {
+		return fmt.Errorf("%s could not mark stuck %s %s for %s: %w", tasteAnalystAgentName, head.Kind, head.ID, userName, err)
+	}
+	log.Errorf("%s skipped stuck %s %s for %s: %s persisted across %d attempt(s); the row is counted as stuckInputs", tasteAnalystAgentName, head.Kind, head.ID, userName, ambientTruncationReason, attempts)
+	app.appendAmbientDeadLetterTombstone(agent, head.ID, officeRoomID, attempts, ambientTruncationReason)
+	return nil
 }
 
 // tasteAnalystShouldRun is the gate (spec: >= minBatch unconsumed signals OR
@@ -538,6 +612,9 @@ func (app *kanbanBoardApp) unconsumedDecisionsForPerson(userName string, consume
 		if strings.EqualFold(strings.TrimSpace(entry.Metadata["status"]), decisionStatusSuperseded) {
 			continue
 		}
+		if strings.TrimSpace(entry.Metadata[tasteStuckInputKey]) != "" {
+			continue
+		}
 		if !consumedAt.IsZero() && !entry.CreatedAt.After(consumedAt) {
 			continue
 		}
@@ -605,7 +682,7 @@ func (store *meetingMemoryStore) unconsumedSignalsForActor(actor string, cursorI
 		if entry.Kind != meetingMemoryKindSignal {
 			continue
 		}
-		if strings.TrimSpace(entry.Metadata[signalDistilledIntoKey]) != "" {
+		if strings.TrimSpace(entry.Metadata[signalDistilledIntoKey]) != "" || strings.TrimSpace(entry.Metadata[tasteStuckInputKey]) != "" {
 			continue
 		}
 		if !signalActorMatches(entry, actor) {

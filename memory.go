@@ -3154,7 +3154,7 @@ func isMeetingDigestKind(kind string) bool {
 // in-flight meeting id across a restart.
 func isAmbientBookkeepingMemoryKind(kind string) bool {
 	switch kind {
-	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindChannelDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass, meetingMemoryKindAmbientReplayPromotion:
+	case meetingMemoryKindReflection, meetingMemoryKindDayDigestPass, meetingMemoryKindChannelDigestPass, meetingMemoryKindLedgerEvent, meetingMemoryKindLedgerPass, meetingMemoryKindAmbientReplayPromotion, meetingMemoryKindScoutFollowupPass, meetingMemoryKindScoutFollowupState, meetingMemoryKindPackagingIntake:
 		return true
 	}
 	return isMeetingDigestKind(kind)
@@ -4054,7 +4054,7 @@ func (store *meetingMemoryStore) recoverJournaledMemoryDeletionsLocked() error {
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
-	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindChannelDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete || kind == meetingMemoryKindAmbientReplayPromotion
+	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindChannelDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete || kind == meetingMemoryKindAmbientReplayPromotion || kind == meetingMemoryKindPackagingIntake || kind == meetingMemoryKindScoutFollowupPass || kind == meetingMemoryKindScoutFollowupState
 }
 
 func (store *meetingMemoryStore) search(query string, limit int) []meetingMemoryMatch {

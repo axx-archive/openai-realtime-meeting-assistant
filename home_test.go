@@ -410,14 +410,14 @@ func TestHomeOmitsOwnerOnlyPrivateScoutThreadsFromCompanyHome(t *testing.T) {
 		ID: "private-scout", Title: "Private strategy", OwnerEmail: owner,
 		Visibility: scoutChatVisibilityPrivate,
 		CreatedAt:  now.Add(-time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
-		Messages:   []scoutChatMessageRecord{{ID: "private-message", Role: "user", Text: "Review my confidential notes.", CreatedAt: now.Format(time.RFC3339Nano)}},
+		Messages: []scoutChatMessageRecord{{ID: "private-message", Role: "user", Text: "Review my confidential notes.", CreatedAt: now.Format(time.RFC3339Nano)}},
 	}
 	// Organization-wide public channel (should appear in Home)
 	orgChannel := scoutChatThreadRecord{
 		ID: "org-channel", Title: "Team updates", OwnerEmail: owner,
 		Visibility: scoutChatVisibilityPublic,
 		CreatedAt:  now.Add(-2 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
-		Messages:   []scoutChatMessageRecord{{ID: "channel-message", Role: "user", Text: "Team standup notes.", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}},
+		Messages: []scoutChatMessageRecord{{ID: "channel-message", Role: "user", Text: "Team standup notes.", CreatedAt: now.Add(-time.Minute).Format(time.RFC3339Nano)}},
 	}
 	// Project thread with member emails (should appear in Home for members)
 	projectThread := scoutChatThreadRecord{
@@ -425,7 +425,7 @@ func TestHomeOmitsOwnerOnlyPrivateScoutThreadsFromCompanyHome(t *testing.T) {
 		Visibility:   scoutChatVisibilityPublic,
 		MemberEmails: []string{owner, other},
 		CreatedAt:    now.Add(-3 * time.Hour).Format(time.RFC3339Nano), UpdatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
-		Messages:     []scoutChatMessageRecord{{ID: "project-message", Role: "user", Text: "Project kickoff.", CreatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano)}},
+		Messages: []scoutChatMessageRecord{{ID: "project-message", Role: "user", Text: "Project kickoff.", CreatedAt: now.Add(-2 * time.Minute).Format(time.RFC3339Nano)}},
 	}
 
 	for _, thread := range []scoutChatThreadRecord{privateThread, orgChannel, projectThread} {

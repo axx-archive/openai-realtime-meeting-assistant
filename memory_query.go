@@ -225,24 +225,40 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		}
 	}
 
+	// Structured timing (2026-09-02): production measured a 41 s private
+	// answer with no way to tell router, recall lanes and model apart. One
+	// INFO line per answer below carries every stage; the router is timed at
+	// its own call site (scout_chat.go "Scout router timing") because it runs
+	// in the chat turn before this path is entered.
+	startedAt := time.Now()
 	matches, contextEntries := []meetingMemoryMatch(nil), []meetingMemoryEntry(nil)
+	var laneTimings recallLaneTimings
+	recallMs, fileLaneMs := int64(0), int64(0)
 	includeAuthorizedRecall := !assistantExactSourceContext(ctx) || assistantAuthorizedRecall(ctx)
 	if includeAuthorizedRecall {
-		matches, contextEntries = recallApp.memoryMatchesAndContext(recallQuery)
+		recallStarted := time.Now()
+		matches, contextEntries, laneTimings = recallApp.memoryMatchesAndContextTimed(recallQuery)
 		matches = filterAssistantConversationRecallMatches(ctx, matches)
 		contextEntries = filterAssistantConversationRecallEntries(ctx, contextEntries)
+		recallMs = time.Since(recallStarted).Milliseconds()
 	}
 	// Files is a first-class Scout source, not just a visual tab. Relevance
 	// search remains useful for broad company recall, but an exact file ref
 	// selected by chat (or an explicit Files/catalog question) is pinned ahead
 	// of the fuzzy lane after the same principal-scoped authorization pass.
 	if includeAuthorizedRecall {
+		fileStarted := time.Now()
 		contextEntries = appendUniqueFileContextEntries(app.assistantFileContextEntries(ctx, principal, recallQuery), contextEntries)
+		fileLaneMs = time.Since(fileStarted).Milliseconds()
 	}
 	if recallModelContextProbe != nil {
 		recallModelContextProbe(contextEntries)
 	}
-	answer, modelErr := recallApp.answerAssistantQueryWithModelAttachments(ctx, requester, query, nil, contextEntries, history, attachments)
+	telemetry := &assistantAnswerTelemetry{}
+	modelStarted := time.Now()
+	answer, modelErr := recallApp.answerAssistantQueryWithModelAttachments(withAssistantAnswerTelemetry(ctx, telemetry), requester, query, nil, contextEntries, history, attachments)
+	modelMs := time.Since(modelStarted).Milliseconds()
+	answerLane := "model"
 	if modelErr != nil {
 		log.Errorf("Failed to answer assistant query with model: %v", modelErr)
 		if assistantModelSuccessRequired(ctx) {
@@ -258,15 +274,18 @@ func (app *kanbanBoardApp) resolveAssistantQueryContextForPrincipalWithAttachmen
 		// A5 keeps current-state questions on the deterministic ledger fold.
 		// Only queries neither lane serves keep the 8-keyword-hit last resort.
 		if briefingAnswer, ok := recallApp.rangedBriefingAnswer(recallQuery); ok {
-			answer = briefingAnswer
+			answer, answerLane = briefingAnswer, "ranged_briefing"
 		} else if ledgerAnswer, ok := recallApp.ledgerStatusAnswer(recallQuery); ok {
-			answer = ledgerAnswer
+			answer, answerLane = ledgerAnswer, "ledger_status"
 		} else {
-			answer = buildMemoryAnswer(recallQuery, matches)
+			answer, answerLane = buildMemoryAnswer(recallQuery, matches), "keyword_fallback"
 		}
 	}
 
 	coverage := recallApp.answerRecallCoverage(recallQuery, matches, contextEntries, time.Now())
+	log.Infof("Scout answer timing: class=%s recallMs=%d searchMs=%d ledgerLaneMs=%d contextMs=%d fileLaneMs=%d matches=%d contextEntries=%d modelMs=%d model=%s providerCalls=%d retried=%t outputTokens=%d maxOutputTokens=%d lane=%s coverage=%s reason=%q totalMs=%d",
+		classifyRecallQuery(recallQuery, time.Now()), recallMs, laneTimings.SearchMs, laneTimings.LedgerLaneMs, laneTimings.ContextMs, fileLaneMs, len(matches), len(contextEntries),
+		modelMs, telemetry.model, telemetry.providerCalls, telemetry.retried, telemetry.outputTokens, telemetry.maxOutputTokens, answerLane, coverage.Status, coverage.Reason, time.Since(startedAt).Milliseconds())
 	return assistantQueryResult{
 		query:          recallQuery,
 		answer:         answer,
@@ -590,14 +609,25 @@ func (app *kanbanBoardApp) answerAssistantQueryWithModelAttachments(ctx context.
 		MaxOutputTokens: scoutChatMaxOutputTokens,
 		Attachments:     attachments,
 	}
-	answer, err := createOpenAITextResponse(ctx, apiKey, request)
+	telemetry := assistantAnswerTelemetryFromContext(ctx)
+	usage := &providerUsageCapture{}
+	callCtx := withProviderUsageCapture(ctx, usage)
+	answer, err := createOpenAITextResponse(callCtx, apiKey, request)
 	if reason, rejected := openAIOutputRejectionReason(err); rejected && reason == "max_output_truncation" {
 		// Terra/high can legitimately spend much of the output allowance on
 		// reasoning before emitting visible text. Retry once with the same fixed
 		// reasoning policy and a larger output envelope; this is budget recovery,
 		// not an unreported change of model or reasoning effort.
 		request.MaxOutputTokens = scoutChatRetryMaxOutputTokens
-		answer, err = createOpenAITextResponse(ctx, apiKey, request)
+		if telemetry != nil {
+			telemetry.retried = true
+		}
+		answer, err = createOpenAITextResponse(callCtx, apiKey, request)
+	}
+	if telemetry != nil {
+		telemetry.model = request.Model
+		telemetry.maxOutputTokens = request.MaxOutputTokens
+		telemetry.providerCalls, _, telemetry.outputTokens = usage.snapshot()
 	}
 	if err != nil {
 		recordCapabilityFailure(capabilityTypedScoutAnswer, time.Now().UTC(), err)
@@ -2014,11 +2044,57 @@ func (app *kanbanBoardApp) currentSourceRecallEntries(entries []meetingMemoryEnt
 }
 
 func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemoryMatch, []meetingMemoryEntry) {
+	matches, entries, _ := app.memoryMatchesAndContextTimed(query)
+	return matches, entries
+}
+
+// recallLaneTimings is the per-lane wall time of one context assembly, for
+// the answer timing line (2026-09-02).
+type recallLaneTimings struct {
+	SearchMs     int64
+	LedgerLaneMs int64
+	ContextMs    int64
+}
+
+// assistantAnswerTelemetry is filled by answerAssistantQueryWithModelAttachments
+// for the caller's timing line: which model answered, whether the truncation
+// retry fired, and the tokens the provider reported.
+type assistantAnswerTelemetry struct {
+	model           string
+	maxOutputTokens int
+	providerCalls   int
+	retried         bool
+	outputTokens    int64
+}
+
+type assistantAnswerTelemetryContextKey struct{}
+
+func withAssistantAnswerTelemetry(ctx context.Context, telemetry *assistantAnswerTelemetry) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if telemetry == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, assistantAnswerTelemetryContextKey{}, telemetry)
+}
+
+func assistantAnswerTelemetryFromContext(ctx context.Context) *assistantAnswerTelemetry {
+	if ctx == nil {
+		return nil
+	}
+	telemetry, _ := ctx.Value(assistantAnswerTelemetryContextKey{}).(*assistantAnswerTelemetry)
+	return telemetry
+}
+
+func (app *kanbanBoardApp) memoryMatchesAndContextTimed(query string) ([]meetingMemoryMatch, []meetingMemoryEntry, recallLaneTimings) {
+	var timings recallLaneTimings
 	if app == nil || app.memory == nil {
-		return nil, nil
+		return nil, nil, timings
 	}
 
 	now := time.Now()
+	searchStarted := time.Now()
 	rawMatches := app.memory.search(query, 8)
 	matchEntries := make([]meetingMemoryEntry, 0, len(rawMatches))
 	for _, match := range rawMatches {
@@ -2036,20 +2112,25 @@ func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemor
 			matches = append(matches, match)
 		}
 	}
+	timings.SearchMs = time.Since(searchStarted).Milliseconds()
 	// A5 recall routing: a current-state question ("status of X", "what's
 	// decided on Y") answers LEDGER-first — the canonical fold leads the
 	// context (status/owner/validity computed in Go, never by the model)
 	// with verbatim anchor drill-down, and the store lanes fill the rest.
+	laneStarted := time.Now()
 	lane := app.ledgerContextLane(query, now)
+	timings.LedgerLaneMs = time.Since(laneStarted).Milliseconds()
 	// Wave 8 D10: the raw-entry budget follows the query class (recall_budget.go)
 	// instead of one fixed 60 for every shape of question.
 	budget := recallContextBudget(query, now) - len(lane)
 	if budget < 0 {
 		budget = 0
 	}
+	contextStarted := time.Now()
 	contextEntries := app.currentSourceRecallEntries(app.memory.contextEntriesForQuery(query, budget, now))
+	timings.ContextMs = time.Since(contextStarted).Milliseconds()
 	if len(lane) == 0 {
-		return matches, contextEntries
+		return matches, contextEntries, timings
 	}
 
 	laneIDs := make(map[string]struct{}, len(lane))
@@ -2065,7 +2146,7 @@ func (app *kanbanBoardApp) memoryMatchesAndContext(query string) ([]meetingMemor
 		merged = append(merged, entry)
 	}
 
-	return matches, merged
+	return matches, merged, timings
 }
 
 /* ---------- A5 current-state recall routing (Track-2 Wave 5) ----------

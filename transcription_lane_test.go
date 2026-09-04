@@ -1,11 +1,22 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 func TestTranscriptionLaneSessionConfigUsesStreamingTranscription(t *testing.T) {
@@ -246,6 +257,11 @@ func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) 
 	app := newKanbanBoardApp()
 	admitMemberWithTranscriptConsentForTest(t, app, officeRoomID, "tom@shareability.com")
 	attributeNextTranscriptForTest(app, officeRoomID, "Tom")
+	app.mu.Lock()
+	state := app.roomLiveLocked(officeRoomID)
+	state.captureStalledSince = time.Now().UTC().Add(-time.Second)
+	state.captureStallReason = transcriptDropQueueFull
+	app.mu.Unlock()
 	app.handleTranscriptionLaneEvent([]byte(`{
 		"type":"conversation.item.input_audio_transcription.completed",
 		"event_id":"event-transcript-1",
@@ -266,6 +282,103 @@ func TestTranscriptionLaneCompletedTranscriptWritesSourceMetadata(t *testing.T) 
 	}
 	if model := entry.Metadata["model"]; model != defaultTranscriptionLaneModel {
 		t.Fatalf("model=%q, want %s", model, defaultTranscriptionLaneModel)
+	}
+	app.mu.Lock()
+	stalled := state.captureStalledSince
+	app.mu.Unlock()
+	if !stalled.IsZero() {
+		t.Fatalf("durably persisted completion did not clear the capture stall: %s", stalled)
+	}
+}
+
+// TestProviderCompletionWithoutDurableTranscriptCannotClearCaptureStall pins
+// the distinction the live incident exposed: OpenAI can complete a segment
+// while the application rejects it at a downstream source/sitting/consent
+// gate. That is provider success, not transcript recovery, and must never put
+// the room back to green.
+func TestProviderCompletionWithoutDurableTranscriptCannotClearCaptureStall(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state.captureStalledSince = now.Add(-2 * time.Minute)
+	state.captureStallReason = transcriptDropConsentDenied
+	state.lastTranscriptCommitAt = state.captureStalledSince
+	scope := RoomScoutScope{
+		RoomID: officeRoomID, SittingID: state.mediaSittingID, MediaGeneration: state.mediaGen,
+	}
+	app.mu.Unlock()
+
+	bindings := newTranscriptionSegmentBindings()
+	if err := bindings.Commit("segment-unpersisted", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bindings.BindCommitted("item-unpersisted", ""); err != nil {
+		t.Fatal(err)
+	}
+	// The source binding is deliberately absent. This is one of the real
+	// downstream refusal paths and, before the fix, noteTranscriptCommit ran
+	// before this lookup and cleared the stall anyway.
+	app.handleTranscriptionLaneEventForScopeWithSourceBindings(scope, []byte(`{
+		"type":"conversation.item.input_audio_transcription.completed",
+		"event_id":"event-unpersisted",
+		"item_id":"item-unpersisted",
+		"transcript":"This provider completion must not manufacture recovery."
+	}`), "gpt-transcribe", bindings, newSourceTranscriptBindings())
+
+	app.mu.Lock()
+	stalled := state.captureStalledSince
+	app.mu.Unlock()
+	if stalled.IsZero() {
+		t.Fatal("provider completion cleared the capture stall although no transcript row was persisted")
+	}
+	if app.transcriptionEventPersisted(officeRoomID, scope.SittingID, "event-unpersisted", "item-unpersisted") {
+		t.Fatal("the test's refusal arm persisted a transcript and no longer proves the false-green path")
+	}
+}
+
+// TestDuplicateProviderCompletionCannotBorrowOldDurabilityForRecovery proves
+// the exact-event check is an edge, not mere existence. A replay of an event
+// already stored before the stall does not mean the transcript advanced now.
+func TestDuplicateProviderCompletionCannotBorrowOldDurabilityForRecovery(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state.captureStalledSince = now.Add(-2 * time.Minute)
+	state.captureStallReason = transcriptDropQueueFull
+	scope := RoomScoutScope{
+		RoomID: officeRoomID, SittingID: state.mediaSittingID, MediaGeneration: state.mediaGen,
+	}
+	app.mu.Unlock()
+
+	app.memory.mu.Lock()
+	if app.memory.seen == nil {
+		app.memory.seen = map[string]struct{}{}
+	}
+	app.memory.seen["event-duplicate-before-stall"] = struct{}{}
+	app.memory.entries = append(app.memory.entries, meetingMemoryEntry{
+		ID: "event-duplicate-before-stall", Kind: meetingMemoryKindTranscript,
+		Text:      "AJ: this row was already durable before the stall",
+		CreatedAt: now.Add(-3 * time.Minute),
+		Metadata: map[string]string{
+			"roomId": officeRoomID, "meetingId": scope.SittingID, "itemId": "item-duplicate-before-stall",
+		},
+	})
+	app.memory.mu.Unlock()
+
+	app.handleTranscriptionLaneEventForScopeWithSourceBindings(scope, []byte(`{
+		"type":"conversation.item.input_audio_transcription.completed",
+		"event_id":"event-duplicate-before-stall",
+		"item_id":"item-duplicate-before-stall",
+		"transcript":"This is only a replay of the old completion."
+	}`), "gpt-transcribe", nil, nil)
+
+	app.mu.Lock()
+	stalled := state.captureStalledSince
+	app.mu.Unlock()
+	if stalled.IsZero() {
+		t.Fatal("a duplicate provider completion borrowed an old transcript row and manufactured recovery")
 	}
 }
 
@@ -420,5 +533,203 @@ func TestTranscriptionLaneSessionExpiredRequestsReconnect(t *testing.T) {
 	}`))
 	if reconnect {
 		t.Fatal("non-expiry errors should not request transcript lane reconnect")
+	}
+}
+
+/* ---------- Fix 6: the segment cap ---------- */
+
+// fakeTranscriptionProvider is a loopback stand-in for the OpenAI Realtime
+// transcription websocket. It records the appended audio and the commits so a
+// test can assert both that segments are being cut and that no audio is lost
+// across the cut.
+type fakeTranscriptionProvider struct {
+	server *httptest.Server
+
+	mu             sync.Mutex
+	commits        int
+	appendedBase64 int
+	appendedBytes  int
+}
+
+func newFakeTranscriptionProvider(t *testing.T) *fakeTranscriptionProvider {
+	t.Helper()
+	provider := &fakeTranscriptionProvider{}
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	provider.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var payload struct {
+				Type  string `json:"type"`
+				Audio string `json:"audio"`
+			}
+			if json.Unmarshal(raw, &payload) != nil {
+				continue
+			}
+			provider.mu.Lock()
+			switch payload.Type {
+			case "input_audio_buffer.append":
+				provider.appendedBase64++
+				decoded, decodeErr := base64.StdEncoding.DecodeString(payload.Audio)
+				if decodeErr == nil {
+					provider.appendedBytes += len(decoded)
+				}
+			case "input_audio_buffer.commit":
+				provider.commits++
+			}
+			provider.mu.Unlock()
+		}
+	}))
+	t.Cleanup(provider.server.Close)
+
+	address := strings.TrimPrefix(provider.server.URL, "https://")
+	dialer := *websocket.DefaultDialer
+	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // #nosec G402 -- loopback test server
+	dialer.NetDialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+	t.Cleanup(swapAIProviderWebSocketDialer(&dialer))
+	return provider
+}
+
+func (provider *fakeTranscriptionProvider) snapshot() (commits int, appends int, bytes int) {
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	return provider.commits, provider.appendedBase64, provider.appendedBytes
+}
+
+// TestSegmentCapCommitsMidMonologueWithoutLosingAudio is the production defect
+// in miniature. A source-bound lane's only other commit trigger is the 800ms
+// silence timer, re-armed by every accepted frame, so unbroken speech used to
+// arrive as one enormous block (212.6 audio-seconds on 2026-09-02). The cap
+// cuts it, and every sample still reaches the provider.
+//
+// The cap is scaled down for the test; the behaviour — continuous audio with
+// no silence gap still commits repeatedly — is timescale-independent.
+func TestSegmentCapCommitsMidMonologueWithoutLosingAudio(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	binding := consentLaneTestBinding("user-monologue", officeRoomID, "sitting-monologue")
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
+	authority.CaptureCutoff = func() (uint64, error) { return 0, nil }
+	installConsentAuthorityForTest(t, authority)
+	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription} {
+		grantConsentScope(t, authority, binding, scope)
+	}
+	decision, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+	if err != nil || !decision.Allowed {
+		t.Fatalf("authorize=%+v err=%v", decision, err)
+	}
+
+	provider := newFakeTranscriptionProvider(t)
+
+	previousCap := transcriptionLaneMaxSegmentDuration
+	transcriptionLaneMaxSegmentDuration = 250 * time.Millisecond
+	t.Cleanup(func() { transcriptionLaneMaxSegmentDuration = previousCap })
+
+	lane := newMeetingTranscriptionLaneForRoom(app, "test-key", "gpt-transcribe", officeRoomID)
+	lane.fixedSource = &sourceTranscriptIdentity{TrackKey: "track-1", Speaker: "AJ", Fence: decision.Fence, RecordingEpoch: 1}
+	lane.sourceBindings = newSourceTranscriptBindings()
+	lane.start()
+	t.Cleanup(lane.close)
+
+	// Wait for the provider handshake so the first frames are not dropped
+	// against a lane that has not connected yet.
+	connectDeadline := time.Now().Add(5 * time.Second)
+	for !lane.isConnected() && time.Now().Before(connectDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !lane.isConnected() {
+		t.Fatal("transcription lane never connected to the fake provider")
+	}
+
+	// An unbroken monologue: a 20ms frame every 10ms of wall clock, with no
+	// gap ever longer than the 800ms silence timer.
+	frame := make([]int16, roomAudioMixFrameSize)
+	for index := range frame {
+		frame[index] = 6000
+	}
+	frames := 0
+	monologueUntil := time.Now().Add(1500 * time.Millisecond)
+	refreshedAt := time.Now()
+	current := decision.Fence
+	for time.Now().Before(monologueUntil) {
+		// Fences expire after 2 refresh intervals by design, so a live speaker
+		// is one whose gate keeps re-authorizing. Mirror that here or every
+		// frame past 500ms is dropped as fence_stale — which is precisely the
+		// production failure Fix 3 addresses, not the cap under test.
+		if time.Since(refreshedAt) >= consentIngressRefreshInterval {
+			refreshedAt = time.Now()
+			refreshed, refreshErr := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+			if refreshErr != nil || !refreshed.Allowed {
+				t.Fatalf("re-authorize=%+v err=%v", refreshed, refreshErr)
+			}
+			current = refreshed.Fence
+		}
+		if lane.enqueueWithConsent(frame, []ConsentFence{current}) {
+			frames++
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if frames == 0 {
+		t.Fatal("no frames were accepted by the lane")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	commits := 0
+	for time.Now().Before(deadline) {
+		commits, _, _ = provider.snapshot()
+		if commits >= 3 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if commits < 3 {
+		t.Fatalf("continuous speech produced %d commits over %s of audio with a %s cap; the monologue was never cut", commits, 1500*time.Millisecond, transcriptionLaneMaxSegmentDuration)
+	}
+
+	// Nothing was lost at the cut: every accepted frame's downsampled PCM
+	// reached the provider. roomPCMForTranscription already returns wire bytes.
+	wantBytes := frames * len(roomPCMForTranscription(frame))
+	appendedBytes := 0
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, appendedBytes = provider.snapshot()
+		if appendedBytes >= wantBytes {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if appendedBytes < wantBytes {
+		t.Fatalf("provider received %d audio bytes for %d accepted frames, want at least %d; the segment cap dropped audio", appendedBytes, frames, wantBytes)
+	}
+}
+
+// TestSegmentCapIsArmedOncePerSegmentNotPerFrame guards the one way this fix
+// silently un-fixes itself: re-arming the ceiling on every accepted frame
+// turns it back into the silence timer it exists to backstop.
+func TestSegmentCapIsArmedOncePerSegmentNotPerFrame(t *testing.T) {
+	raw, err := os.ReadFile("transcription_lane.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	if strings.Count(source, "segmentTimer.Reset(") != 1 {
+		t.Fatalf("segmentTimer is reset %d times; the cap must be armed exactly once, on the transition into pendingAudio", strings.Count(source, "segmentTimer.Reset("))
+	}
+	acceptFrame := sourceSectionForAdmissionTest(t, source, "acceptFrame := func(frame consentAudioFrame) error {", "\tfor {\n\t\tselect {")
+	armAt := strings.Index(acceptFrame, "segmentTimer.Reset(")
+	pendingAt := strings.Index(acceptFrame, "if !pendingAudio {")
+	if armAt < 0 || pendingAt < 0 || armAt < pendingAt {
+		t.Fatalf("the segment cap is not armed inside the !pendingAudio transition (arm=%d transition=%d)", armAt, pendingAt)
+	}
+	if !strings.Contains(source, "case <-segmentTimer.C:") {
+		t.Fatal("the segment cap has no commit arm in the run loop")
 	}
 }

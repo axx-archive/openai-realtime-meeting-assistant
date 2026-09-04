@@ -3,9 +3,16 @@ package main
 // Wave 7 D3 — the post-call recap card. When a meeting finalizes with a
 // digest, ONE Scout-authored message lands in the meeting's channel. Compact
 // (AJ 2026-09-02): title, a mono meta line (room · duration · N people), the
-// top THREE decisions in the digest's own order, a mono footer counting what the
-// card leaves out (+N decisions · M action items · K open), and one link to
-// the Meeting Record, which carries the full lists. Idempotent per meeting:
+// top THREE decisions in the digest's own order, and a mono footer counting what
+// the card leaves out (+N decisions · M action items · K open).
+//
+// AJ 2026-09-03: the posted text no longer carries a "Meeting Record: …" tail.
+// It read as a raw URL in a conversation and sent readers to a surface that
+// means nothing to them; the web client now expands the card in place instead
+// (index.html meetingRecapCardMessageNode). The meeting id still reaches every
+// client through the deterministic message id — meeting-recap-card-<meetingID>,
+// which is what gates the card render in the first place — so nothing needed a
+// new metadata field. Idempotent per meeting:
 // the record stamps recapCardPostedAt, the message id is deterministic, and
 // the commit re-reads the thread under its lock, so finalization retries and
 // crash-replays can never post twice. Rooms without a channel are skipped (no
@@ -42,7 +49,11 @@ type meetingRecapCard struct {
 	MoreDecisions int
 	ActionItems   int
 	OpenQuestions int
-	RecordPath    string
+	// RecordPath is the canonical `?record=<id>` deep link for the meeting.
+	// It is NOT written into the posted message any more (AJ 2026-09-03 — see
+	// the file comment); it stays on the payload as the one place that shape is
+	// spelled, for the boot param and any non-chat consumer that needs a link.
+	RecordPath string
 }
 
 func pluralizeCount(count int, singular, plural string) string {
@@ -68,7 +79,8 @@ func (card meetingRecapCard) Footer() string {
 	return strings.Join(parts, " · ")
 }
 
-// Text renders the durable message body.
+// Text renders the durable message body. Self-contained: no trailing link out
+// of the conversation (AJ 2026-09-03).
 func (card meetingRecapCard) Text() string {
 	var builder strings.Builder
 	builder.WriteString("**Meeting recap — " + card.Title + "**\n")
@@ -86,7 +98,6 @@ func (card meetingRecapCard) Text() string {
 	if footer := card.Footer(); footer != "" {
 		builder.WriteString("\n" + footer + "\n")
 	}
-	builder.WriteString("\nMeeting Record: " + card.RecordPath + "\n")
 	return strings.TrimSpace(builder.String())
 }
 
@@ -120,8 +131,9 @@ func meetingRecapCardMessageID(meetingID string) string {
 	return meetingRecapCardMessagePrefix + strings.TrimSpace(meetingID)
 }
 
-// meetingRecordCardPath is the Meeting Record deep link the card carries.
-// The web client owns the `?record=` boot param (frontend half of Wave 7).
+// meetingRecordCardPath is the canonical Meeting Record deep link. The web
+// client owns the `?record=` boot param (frontend half of Wave 7); since
+// 2026-09-03 the recap card message no longer prints it.
 func meetingRecordCardPath(meetingID string) string {
 	path := "/?record=" + url.QueryEscape(strings.TrimSpace(meetingID))
 	if base := strings.TrimRight(strings.TrimSpace(os.Getenv("BONFIRE_PUBLIC_URL")), "/"); base != "" {

@@ -86,46 +86,29 @@ func TestPolishRunCardFieldsNoIOSZoom(t *testing.T) {
 	}
 }
 
-// Wave 4 — task discovery. The empty private thread must seed tappable run
-// starters (the visible signpost the gesture-gated palette lacked), the
-// composer must hint the launcher, and the '+' door must be labeled.
+// Wave 4 seeded four prefill starter pills on the empty private thread. Wave 11
+// D14 retired them (AJ 2026-09-02: "clicking these buttons doesn't do anything
+// really other than type a few words in"): the empty state keeps the continuity
+// row and offers only doors that DO something — the three studios' brief sheets
+// scoped to this thread, Attach from Drive, Ask about a meeting.
 
-func TestDiscoveryStartersSeeded(t *testing.T) {
+func TestDiscoveryStartersRetiredForRealDoors(t *testing.T) {
 	html := readIndexForComposerPolish(t)
-	if !strings.Contains(html, "function buildScoutStarterRow(") {
-		t.Fatal("buildScoutStarterRow missing — the empty thread has no discovery starters")
-	}
-	if !strings.Contains(html, ".scout-starters {") {
-		t.Error(".scout-starters CSS missing — starter chips have no styling")
+	for _, gone := range []string{"function buildScoutStarterRow(", ".scout-starters {", "prompt: 'Create a polished 10-slide pitch deck for '", "'Model the business'", "'Shape the visual direction'"} {
+		if strings.Contains(html, gone) {
+			t.Errorf("Wave 11 D14 retired the prefill starter pills; found %q", gone)
+		}
 	}
 	empty := functionBody(html, "function ensureScoutChatEmptyState(")
 	if empty == "" {
 		t.Fatal("ensureScoutChatEmptyState not found")
 	}
-	if !strings.Contains(empty, "buildScoutStarterRow()") {
-		t.Error("ensureScoutChatEmptyState must seed starters on the private empty state")
+	if strings.Contains(empty, "buildScoutStarterRow()") {
+		t.Error("ensureScoutChatEmptyState must not seed starters")
 	}
-	for _, want := range []string{"What do you want to accomplish?", "Scout can answer, start private work, or ask for approval when it actually matters."} {
+	for _, want := range []string{"What do you want to accomplish?", "Scout can answer, start private work, or ask for approval when it actually matters.", "inner.appendChild(buildPrivateThreadActionsRow(selectedScoutChatThread()))"} {
 		if !strings.Contains(empty, want) {
-			t.Errorf("private empty state missing conversation-first copy %q", want)
-		}
-	}
-	// The starters must lifecycle with the empty state (torn down together when
-	// a message arrives), not linger orphaned.
-	if !strings.Contains(html, "'.scout-chat-empty, .scout-starters'") {
-		t.Error("starters are not removed alongside .scout-chat-empty — they will orphan after the first message")
-	}
-	// Starters place ordinary recurring requests in the composer; they never
-	// select a capability or expose internal process names.
-	row := functionBody(html, "function buildScoutStarterRow(")
-	for _, want := range []string{"Create a polished 10-slide pitch deck", "Research ", "Build a financial model", "Design ", "scout-starter__label", "scout-starter__example", "scoutChatInput.value = s.prompt"} {
-		if !strings.Contains(row, want) {
-			t.Errorf("buildScoutStarterRow missing %q", want)
-		}
-	}
-	for _, forbidden := range []string{"packaging studio", "openToolPalette(", "Browse all tasks"} {
-		if strings.Contains(row, forbidden) {
-			t.Errorf("buildScoutStarterRow exposes internal tool choice %q", forbidden)
+			t.Errorf("private empty state missing %q", want)
 		}
 	}
 }

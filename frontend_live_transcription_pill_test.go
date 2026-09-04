@@ -101,7 +101,7 @@ const server=http.createServer((req,res)=>{
    activeJoin={roomId:'office',passcode:'',guest:false};guestMode=false;
    localStream={};pc={connectionState:'connected'};
    ws={readyState:WebSocket.OPEN,send:raw=>{window.__lastRecordingFrame=JSON.parse(raw)}};
-   applyRoomRecordingState({enabled:true,available:true,connected:true,revision:8,statusRevision:8,updatedAt:'2026-08-22T11:00:00Z',updatedBy:'AJ'},'office');
+   applyRoomRecordingState({enabled:true,available:true,connected:true,revision:8,statusRevision:8,capturing:true,updatedAt:'2026-08-22T11:00:00Z',updatedBy:'AJ'},'office');
    syncToolTopbar();
  });
  let state=await page.evaluate(()=>{const pill=document.getElementById('roomTranscriptPill');const rect=pill.getBoundingClientRect();return {hidden:pill.hidden,label:pill.textContent.trim(),state:pill.dataset.state,expanded:pill.getAttribute('aria-expanded'),rect:rect.toJSON(),revision:roomRecordingRevision}});
@@ -114,7 +114,7 @@ const server=http.createServer((req,res)=>{
  assert.deepEqual(state,{label:'Connecting transcription…',kind:'pending',revision:8});
  await page.evaluate(()=>applyRoomRecordingState({enabled:true,available:true,connected:true,revision:8,statusRevision:8,updatedAt:'2026-08-22T11:00:00Z',updatedBy:'AJ'},'office'));
  assert.equal(await page.locator('#roomTranscriptPillLabel').textContent(),'Connecting transcription…');
- await page.evaluate(()=>applyRoomRecordingState({enabled:true,available:true,connected:true,revision:8,statusRevision:10,updatedAt:'2026-08-22T11:00:00Z',updatedBy:'AJ'},'office'));
+ await page.evaluate(()=>applyRoomRecordingState({enabled:true,available:true,connected:true,revision:8,statusRevision:10,capturing:true,updatedAt:'2026-08-22T11:00:00Z',updatedBy:'AJ'},'office'));
  assert.equal(await page.locator('#roomTranscriptPillLabel').textContent(),'Live transcription');
 
  // An older participant snapshot may update the roster, never recording truth.
@@ -141,12 +141,12 @@ const server=http.createServer((req,res)=>{
  assert.deepEqual(state,{mode:'transcript',panelHidden:false,expanded:'true'});
 
  // Pause/resume lives contextually inside Transcript and remains acknowledgement-driven.
- const transcriptControl=page.locator('.room-meeting-transcription-action');
+ const transcriptControl=page.locator('#roomMeetingTranscript .room-meeting-transcription-action');
  assert.equal(await transcriptControl.textContent(),'Resume transcription');
- state=await page.evaluate(()=>{document.querySelector('.room-meeting-transcription-action').click();syncRoomTranscriptionPill();return {enabled:roomRecordingEnabled,pending:roomRecordingPendingDesired,label:document.querySelector('.room-meeting-transcription-action')?.textContent}});
+ state=await page.evaluate(()=>{document.querySelector('#roomMeetingTranscript .room-meeting-transcription-action').click();syncRoomTranscriptionPill();return {enabled:roomRecordingEnabled,pending:roomRecordingPendingDesired,label:document.querySelector('#roomMeetingTranscript .room-meeting-transcription-action')?.textContent}});
  assert.deepEqual(state,{enabled:false,pending:true,label:'Updating transcription…'});
- await page.evaluate(()=>applyRoomRecordingState({enabled:true,available:true,connected:true,revision:10,statusRevision:12,updatedAt:'2026-08-22T11:02:00Z',updatedBy:'AJ'},'office'));
- assert.equal(await page.locator('.room-meeting-transcription-action').textContent(),'Pause transcription');
+ await page.evaluate(()=>applyRoomRecordingState({enabled:true,available:true,connected:true,revision:10,statusRevision:12,capturing:true,updatedAt:'2026-08-22T11:02:00Z',updatedBy:'AJ'},'office'));
+ assert.equal(await page.locator('#roomMeetingTranscript .room-meeting-transcription-action').textContent(),'Pause transcription');
 
  // A stale frame from the room just left is ignored after a room change.
  await page.evaluate(()=>{activeJoin={roomId:'room-b',passcode:'',guest:false};resetRoomRecordingAuthority('room-b');applyRoomRecordingState({enabled:true,available:true,connected:true,revision:99,statusRevision:99,updatedAt:'2026-08-22T12:00:00Z'},'office');syncRoomTranscriptionPill()});
@@ -154,7 +154,7 @@ const server=http.createServer((req,res)=>{
  assert.deepEqual(state,{known:false,room:'room-b',label:'Transcription unavailable'});
 
  await page.setViewportSize({width:320,height:700});
- await page.evaluate(()=>{activeJoin={roomId:'room-b',passcode:'',guest:false};localStream={};pc={connectionState:'connected'};ws={readyState:WebSocket.OPEN,send:()=>{}};applyRoomRecordingState({enabled:true,available:true,connected:true,revision:1,statusRevision:1,updatedAt:'2026-08-22T12:01:00Z'},'room-b');syncToolTopbar()});
+ await page.evaluate(()=>{activeJoin={roomId:'room-b',passcode:'',guest:false};localStream={};pc={connectionState:'connected'};ws={readyState:WebSocket.OPEN,send:()=>{}};applyRoomRecordingState({enabled:true,available:true,connected:true,revision:1,statusRevision:1,capturing:true,updatedAt:'2026-08-22T12:01:00Z'},'room-b');syncToolTopbar()});
  state=await page.evaluate(()=>{const pill=document.getElementById('roomTranscriptPill');const rect=pill.getBoundingClientRect();return {hidden:pill.hidden,label:pill.textContent.trim(),left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:innerWidth,height:innerHeight}});
  assert.equal(state.hidden,false,JSON.stringify(state));assert.equal(state.label,'Live transcription');assert.ok(state.left>=0&&state.right<=state.width&&state.top>=0&&state.bottom<=state.height,JSON.stringify(state));
  if(String(process.env.TRANSCRIPTION_PILL_RENDER_PATH||'').trim())await page.screenshot({path:process.env.TRANSCRIPTION_PILL_RENDER_PATH});

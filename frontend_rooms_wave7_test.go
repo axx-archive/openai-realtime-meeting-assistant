@@ -262,13 +262,16 @@ func TestIndexRoomsWave7RecordPlaybackAndRecapCard(t *testing.T) {
 	)
 	requireAllWave7(t, html, "recording CSS", ".meeting-record__media {", "audio.meeting-record__media {")
 	// AJ 2026-09-02: compact recap card — the top THREE decisions, a mono
-	// overflow footer (+N decisions · M action items · K open), one primary
-	// Open record button; no action-item list (the record carries the lists)
+	// overflow footer (+N decisions · M action items · K open); no action-item
+	// list. AJ 2026-09-03: in chat the rest is a disclosure inside the message,
+	// NOT a route to the record surface ("users shouldn't be taken to") — the
+	// full contract lives in frontend_meeting_recap_card_expand_test.go. The
+	// record's own block keeps 'Open in conversation'.
 	card := functionBodyAfterSignature(html, "function meetingRecapCardNode(spec = {})")
 	requireAllWave7(t, card, "meetingRecapCardNode",
 		"const decisions = allDecisions.slice(0, 3)", "listSection('Decisions', decisions)", "meeting-recap-card__more",
 		"moreDecisions: allDecisions.length - decisions.length", "String(spec.footer || '').trim() || meetingRecapCardFooter({",
-		"'Open record'", "openMeetingRecordDeepLink(spec.meetingId)", "'Open in conversation'",
+		"meeting-recap-card__disclose", "toggleMeetingRecapCardDetail(card, meetingId, disclose, title)", "'Open in conversation'",
 	)
 	for _, gone := range []string{".slice(0, 5)", "listSection('Action items'", "meeting-recap-card__owner"} {
 		if strings.Contains(card, gone) {

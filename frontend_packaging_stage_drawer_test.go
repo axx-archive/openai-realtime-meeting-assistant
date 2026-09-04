@@ -82,7 +82,8 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 	}
 	html := string(body)
 	for _, want := range []string{
-		`data-pd1-destination="Work" aria-label="Work"`,
+		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
+		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
 		`function openContentStudio(returnFocus)`,
 		`function closeContentStudio()`,
 		`frame.referrerPolicy = 'strict-origin-when-cross-origin'`,
@@ -162,7 +163,7 @@ const server=http.createServer((req,res)=>{
  assert.equal(await work.getAttribute('aria-current'),'page');
  assert.equal(await page.locator('#appShell').getAttribute('data-tool'),'research');
  assert.equal(await page.locator('#researchTool').isVisible(),true);
- assert.equal(await page.locator('#studioAppsTitle').textContent(),'Installed apps');
+ assert.equal(await page.locator('#studioAppsTitle').textContent(),'Studios'); // Wave 11 D2: the launcher row became the three studios
  assert.equal(await page.locator('#contentStudioDrawer').count(),0);
  await browser.close();server.close();return;
  await page.evaluate(()=>{localStorage.removeItem('stride.content-studio.layout.v1');contentStudioLayoutPreference=null;});

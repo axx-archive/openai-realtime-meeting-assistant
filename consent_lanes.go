@@ -222,6 +222,41 @@ type ConsentLaneAuthority struct {
 const consentIngressRefreshInterval = 250 * time.Millisecond
 const consentAuthorityLockTimeout = 5 * time.Second
 
+// consentIngressRefreshTimeout is the refresh path's own, much tighter budget.
+//
+// refresh() runs SYNCHRONOUSLY inside the 250ms ticker loop, so its context
+// timeout is also the maximum time the loop can go without issuing a fence.
+// At the old shared 5s budget one slow durable-authority call stopped fence
+// issuance for five seconds while ValidateIngressFence declared a fence stale
+// after 500ms — a single Postgres hiccup muted every participant in the room
+// for ~4.5s, with no log line anywhere. 750ms cannot outlive the staleness
+// window it feeds by more than a single refresh interval.
+const consentIngressRefreshTimeout = 750 * time.Millisecond
+
+// consentIngressFenceGraceAttempts / consentIngressFenceGraceWindow bound how
+// long a failed refresh may keep the PREVIOUS fence map rather than replacing
+// it with an empty one.
+//
+// This grace cannot extend anyone's authorization by a single millisecond, and
+// that is the point. ValidateIngressFence independently rejects any fence
+// older than 2*consentIngressRefreshInterval (500ms), and ValidateFenceLocal
+// independently rejects any fence whose consent generation has moved — so a
+// held fence still dies of its own staleness, and a withdrawal still takes
+// effect on the next frame. All the grace does is stop refresh() from
+// DISCARDING a fence that is still inside its own validity window merely
+// because one authority call was slow. Audio stays fenced, authorized, and
+// revocable within half a second; a sustained authority outage still mutes the
+// room in <=500ms exactly as before.
+const consentIngressFenceGraceAttempts = 3
+const consentIngressFenceGraceWindow = 3 * time.Second
+
+// consentIngressGraceWarnQuietWindow is how long a gate must refresh cleanly
+// before the grace warn is allowed to announce itself again. It bounds the log
+// rate of a flapping authority to one line per quiet period per gate; every
+// attempt is still counted, and the give-up line (which is what actually names
+// a starved room) is unaffected.
+const consentIngressGraceWarnQuietWindow = 5 * time.Second
+
 // AuthorizeIngress resolves the whole dependency stack in one store read and
 // derives lane-specific fences from the exact record subsets. This avoids
 // issuing three overlapping durable queries for every refresh tick.
@@ -354,6 +389,110 @@ type consentAudioIngressGate struct {
 	closeOnce sync.Once
 	mu        sync.RWMutex
 	fences    map[ConsentLane]ConsentFence
+	// refreshMu serializes refresh() so the capture-stall recovery ladder's
+	// synchronous call cannot interleave with the ticker's.
+	refreshMu sync.Mutex
+	// failedRefreshes / graceStartedAt bound the last-known-good grace.
+	failedRefreshes int
+	graceStartedAt  time.Time
+	// graceWarned / graceWarnedFailure latch the grace warn. refresh() runs
+	// every 250ms, so logging every failed attempt turned a flapping consent
+	// authority into a sustained storm of up to 4 lines per second per gate —
+	// which buries the one line (consent_ingress_fences_cleared) that actually
+	// names a starved room. The line now fires on ENTRY into grace and again
+	// only when the failure changes level.
+	graceWarnedFailure string
+	graceWarned        bool
+	// graceLastFailureAt gives the latch hysteresis. Releasing it on the very
+	// next success would not fix a FLAP: alternate success/failure at the
+	// refresh cadence and every failure is once again the entry to a fresh
+	// episode. So the latch is released only after the gate has been quiet for
+	// consentIngressGraceWarnQuietWindow — the same shape the transcript drop
+	// log gets from the watchdog sweep, which retires its latch only after the
+	// drops stop for a whole offer window.
+	graceLastFailureAt time.Time
+	// graceWarnNotices counts the edges that produce a log line, incremented
+	// in exactly the branch that logs, so "latched, not per attempt" is
+	// assertable without swapping the process-wide logger out from under live
+	// goroutines.
+	graceWarnNotices uint64
+}
+
+// applyRefreshSuccessLocked installs a good fence set and releases the grace
+// bounds. Callers hold gate.mu. The authorization bounds (failedRefreshes,
+// graceStartedAt) always reset — a healthy refresh must always restore the
+// full grace budget — while the LOG latch releases only after a quiet window,
+// so a flapping authority is counted without being narrated.
+func (gate *consentAudioIngressGate) applyRefreshSuccessLocked(now time.Time, fences map[ConsentLane]ConsentFence) {
+	gate.failedRefreshes = 0
+	gate.graceStartedAt = time.Time{}
+	if gate.graceWarned && (gate.graceLastFailureAt.IsZero() || now.Sub(gate.graceLastFailureAt) >= consentIngressGraceWarnQuietWindow) {
+		gate.graceWarned = false
+		gate.graceWarnedFailure = ""
+	}
+	gate.fences = fences
+}
+
+// consentIngressGateRegistry lets the capture-stall recovery ladder force a
+// synchronous refresh for every seated principal in a room. Gates are minted
+// per socket by the websocket handler, which holds the only other reference;
+// registering here is what makes them reachable from the watchdog.
+var consentIngressGateRegistry = struct {
+	mu    sync.Mutex
+	rooms map[string]map[*consentAudioIngressGate]struct{}
+}{rooms: map[string]map[*consentAudioIngressGate]struct{}{}}
+
+func registerConsentIngressGate(gate *consentAudioIngressGate) {
+	if gate == nil {
+		return
+	}
+	consentIngressGateRegistry.mu.Lock()
+	defer consentIngressGateRegistry.mu.Unlock()
+	room := consentIngressGateRegistry.rooms[gate.roomID]
+	if room == nil {
+		room = map[*consentAudioIngressGate]struct{}{}
+		consentIngressGateRegistry.rooms[gate.roomID] = room
+	}
+	room[gate] = struct{}{}
+}
+
+func unregisterConsentIngressGate(gate *consentAudioIngressGate) {
+	if gate == nil {
+		return
+	}
+	consentIngressGateRegistry.mu.Lock()
+	defer consentIngressGateRegistry.mu.Unlock()
+	room := consentIngressGateRegistry.rooms[gate.roomID]
+	if room == nil {
+		return
+	}
+	delete(room, gate)
+	if len(room) == 0 {
+		delete(consentIngressGateRegistry.rooms, gate.roomID)
+	}
+}
+
+// refreshConsentIngressGatesForRoom is recovery-ladder step 1: re-authorize
+// every seated principal synchronously and report how many gates were asked and
+// how many came back holding a usable capture fence. A stall whose cause is
+// fence starvation clears here; one whose cause is anything else does not, and
+// the caller escalates.
+func refreshConsentIngressGatesForRoom(roomID string) (int, int) {
+	roomID = normalizeRoomID(roomID)
+	consentIngressGateRegistry.mu.Lock()
+	gates := make([]*consentAudioIngressGate, 0, len(consentIngressGateRegistry.rooms[roomID]))
+	for gate := range consentIngressGateRegistry.rooms[roomID] {
+		gates = append(gates, gate)
+	}
+	consentIngressGateRegistry.mu.Unlock()
+	granted := 0
+	for _, gate := range gates {
+		gate.refresh()
+		if _, ok := gate.admittedFences(); ok {
+			granted++
+		}
+	}
+	return len(gates), granted
 }
 
 func newConsentAudioIngressGate(app *kanbanBoardApp, principal CanonicalPrincipalRef, roomID string) *consentAudioIngressGate {
@@ -361,6 +500,7 @@ func newConsentAudioIngressGate(app *kanbanBoardApp, principal CanonicalPrincipa
 		authority: currentConsentLaneAuthority(), app: app, principal: principal,
 		roomID: normalizeRoomID(roomID), stop: make(chan struct{}), done: make(chan struct{}),
 	}
+	registerConsentIngressGate(gate)
 	go gate.run()
 	return gate
 }
@@ -380,25 +520,85 @@ func (gate *consentAudioIngressGate) run() {
 }
 
 func (gate *consentAudioIngressGate) refresh() {
+	if gate == nil {
+		return
+	}
+	gate.refreshMu.Lock()
+	defer gate.refreshMu.Unlock()
+
 	fences := map[ConsentLane]ConsentFence{}
-	if gate.app != nil && gate.authority != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), consentAuthorityLockTimeout)
+	failure := ""
+	if gate.app == nil || gate.authority == nil {
+		failure = "authority_unavailable"
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), consentIngressRefreshTimeout)
 		defer cancel()
-		if meeting, ok := gate.app.meetings.activeRecord(gate.roomID); ok {
-			if binding, err := gate.app.consentBindingForPrincipal(ctx, gate.principal, gate.roomID, meeting.ID); err == nil {
-				if decisions, err := gate.authority.AuthorizeIngress(ctx, binding); err == nil {
-					for lane, decision := range decisions {
-						if decision.Allowed {
-							fences[lane] = decision.Fence
-						}
-					}
+		meeting, ok := gate.app.meetings.activeRecord(gate.roomID)
+		if !ok {
+			failure = "no_active_sitting"
+		} else if binding, err := gate.app.consentBindingForPrincipal(ctx, gate.principal, gate.roomID, meeting.ID); err != nil {
+			failure = "binding: " + err.Error()
+		} else if decisions, err := gate.authority.AuthorizeIngress(ctx, binding); err != nil {
+			failure = "authorize_ingress: " + err.Error()
+		} else {
+			for lane, decision := range decisions {
+				if decision.Allowed {
+					fences[lane] = decision.Fence
 				}
 			}
 		}
 	}
+
+	now := time.Now()
 	gate.mu.Lock()
+	if failure == "" {
+		gate.applyRefreshSuccessLocked(now, fences)
+		gate.mu.Unlock()
+		return
+	}
+	// Fix 3. A failed refresh no longer throws away a fence that is still
+	// inside its own 500ms validity window. The grace is bounded twice over
+	// (attempts AND wall clock) and, critically, it does not touch
+	// ValidateIngressFence: a held fence expires on schedule and a withdrawal
+	// still invalidates it immediately through the generation check. What the
+	// grace removes is only the extra, gratuitous mute caused by refresh()
+	// clearing the map early.
+	gate.failedRefreshes++
+	gate.graceLastFailureAt = now
+	if gate.graceStartedAt.IsZero() {
+		gate.graceStartedAt = now
+	}
+	withinGrace := gate.failedRefreshes <= consentIngressFenceGraceAttempts &&
+		now.Sub(gate.graceStartedAt) < consentIngressFenceGraceWindow &&
+		len(gate.fences) > 0
+	if withinGrace {
+		attempts, since := gate.failedRefreshes, now.Sub(gate.graceStartedAt)
+		// Latched like the drop log: entry into grace, or a change of failure,
+		// and nothing in between. Every attempt is still counted and still
+		// published in the line that does fire.
+		announce := !gate.graceWarned || gate.graceWarnedFailure != failure
+		gate.graceWarned = true
+		gate.graceWarnedFailure = failure
+		if announce {
+			gate.graceWarnNotices++
+		}
+		gate.mu.Unlock()
+		if announce {
+			log.Warnf("consent_ingress_refresh_failed room=%s principal=%s/%s attempt=%d/%d grace=%s reason=%s; holding the last fence inside its own staleness window", gate.roomID, gate.principal.Kind, gate.principal.ID, attempts, consentIngressFenceGraceAttempts, since.Round(time.Millisecond), failure)
+		}
+		return
+	}
+	held := len(gate.fences) > 0
+	attempts, since := gate.failedRefreshes, now.Sub(gate.graceStartedAt)
 	gate.fences = fences
 	gate.mu.Unlock()
+	if held {
+		// This is the line whose absence cost a three-agent forensic sweep.
+		log.Warnf("consent_ingress_fences_cleared room=%s principal=%s/%s attempts=%d grace=%s reason=%s; audio for this principal is now unfenced and will be dropped as %s", gate.roomID, gate.principal.Kind, gate.principal.ID, attempts, since.Round(time.Millisecond), failure, transcriptDropFenceRefresh)
+		if gate.app != nil {
+			gate.app.noteTranscriptFenceCleared(gate.roomID)
+		}
+	}
 }
 
 func (gate *consentAudioIngressGate) admittedFences() (map[ConsentLane]ConsentFence, bool) {
@@ -440,7 +640,11 @@ func (gate *consentAudioIngressGate) close() {
 	if gate == nil {
 		return
 	}
-	gate.closeOnce.Do(func() { close(gate.stop); <-gate.done })
+	gate.closeOnce.Do(func() {
+		close(gate.stop)
+		<-gate.done
+		unregisterConsentIngressGate(gate)
+	})
 }
 
 // ConsentWithdrawalNotice is emitted only after the immutable withdrawal is

@@ -2298,6 +2298,12 @@ func (app *kanbanBoardApp) sweepFileTrashOnce(now time.Time) int {
 	if purged > 0 {
 		log.Infof("Drive trash sweep purged %d upload(s) trashed longer than %s", purged, fileTrashRetention)
 	}
+	// Wave 11 D18: chat media bodies past their retention window are marked
+	// (first sighting) or expired + deleted (second sighting) before the
+	// weekly GC looks, so the GC never resurrects a reference to them.
+	if _, err := app.sweepChatMediaRetentionOnce(now); err != nil {
+		log.Errorf("Chat media retention pass failed: %v", err)
+	}
 	if _, _, err := app.runScheduledBlobSweep(now); err != nil {
 		log.Errorf("Scheduled blob sweep after Drive trash purge failed: %v", err)
 	}

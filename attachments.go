@@ -986,8 +986,13 @@ func webpDimensions(data []byte) (int, int) {
 	}
 	switch string(data[12:16]) {
 	case "VP8X":
-		width := 1 + int(data[24]) | int(data[25])<<8 | int(data[26])<<16
-		height := 1 + int(data[27]) | int(data[28])<<8 | int(data[29])<<16
+		// VP8X stores canvas width/height MINUS ONE as 24-bit little-endian.
+		// The parentheses are load-bearing: in Go `+` and `|` share precedence
+		// and associate left, so `1 + int(data[24]) | ...` grouped as
+		// `(1+low) | mid<<8 | high<<16` and silently halved every size whose
+		// low byte is 0xFF (512, 768, 1024, … px read back as 256, 512, …).
+		width := 1 + (int(data[24]) | int(data[25])<<8 | int(data[26])<<16)
+		height := 1 + (int(data[27]) | int(data[28])<<8 | int(data[29])<<16)
 		return width, height
 	case "VP8L":
 		bits := uint32(data[21]) | uint32(data[22])<<8 | uint32(data[23])<<16 | uint32(data[24])<<24
@@ -1379,6 +1384,19 @@ func (app *kanbanBoardApp) deriveAttachmentTextAuthorized(ctx context.Context, u
 }
 
 func (app *kanbanBoardApp) committedChatAttachmentAuthorized(viewerEmail string, threadID string, messageID string, file scoutChatFileAttachment) bool {
+	return app.committedChatAttachmentAuthorizedWithBody(viewerEmail, threadID, messageID, file, true)
+}
+
+// committedChatAttachmentAuthorizedWithBody is the shared committed-grant
+// check. requireBody=false drops ONLY the blob-backed half (stat, revision,
+// mime, size) and exists for exactly one caller: projecting an attachment
+// whose body chat media retention already deleted. Without it the vanished
+// body failed the stat, the whole record was stripped from every viewer
+// projection, and the "expired · not saved to Drive" placeholder — plus the
+// caption retention promises to keep forever — could never render. Every path
+// that can serve, copy, or feed the bytes keeps requireBody=true, so an
+// expired attachment still fails closed there.
+func (app *kanbanBoardApp) committedChatAttachmentAuthorizedWithBody(viewerEmail string, threadID string, messageID string, file scoutChatFileAttachment, requireBody bool) bool {
 	if app == nil || strings.TrimSpace(file.SourceID) == "" || strings.TrimSpace(file.Ref) == "" {
 		return false
 	}
@@ -1390,9 +1408,11 @@ func (app *kanbanBoardApp) committedChatAttachmentAuthorized(viewerEmail string,
 		grant.SourceRevision != strings.TrimSpace(file.SourceRevision) || grant.Ref != strings.TrimSpace(file.Ref) || grant.DestinationID != strings.TrimSpace(threadID) {
 		return false
 	}
-	meta, err := blobStatForRef(grant.Ref)
-	if err != nil || attachmentSourceRevision(grant.Ref, meta) != grant.SourceRevision || strings.ToLower(strings.TrimSpace(meta.Mime)) != grant.Mime || meta.Size != grant.Size {
-		return false
+	if requireBody {
+		meta, err := blobStatForRef(grant.Ref)
+		if err != nil || attachmentSourceRevision(grant.Ref, meta) != grant.SourceRevision || strings.ToLower(strings.TrimSpace(meta.Mime)) != grant.Mime || meta.Size != grant.Size {
+			return false
+		}
 	}
 	thread, _, err := app.scoutChatThreadByID(viewerEmail, threadID)
 	if err != nil || scoutChatAttachmentDestinationRevision(thread) != grant.DestinationRevision {
@@ -1867,6 +1887,22 @@ func (app *kanbanBoardApp) projectScoutChatThreadForViewerEpisodeWithResults(vie
 		}
 		files := make([]scoutChatFileAttachment, 0, len(original.Files))
 		for _, file := range original.Files {
+			if file.Expired {
+				// Wave 11 D18: retention deleted the body, deliberately keeping
+				// the record and its caption. The blob checks can only fail
+				// now, so authorize on the grant + destination + membership
+				// half and emit a byte-free placeholder — the reader gets
+				// "expired · not saved to Drive" instead of a message that
+				// silently loses the fact an attachment was ever there.
+				if !app.committedChatAttachmentAuthorizedWithBody(viewerEmail, thread.ID, original.ID, file, false) {
+					continue
+				}
+				files = append(files, scoutChatFileAttachment{
+					Name: file.Name, Kind: file.Kind, Size: file.Size, Text: file.Text,
+					ExpiresAt: file.ExpiresAt, Expired: true,
+				})
+				continue
+			}
 			if app.committedChatAttachmentAuthorized(viewerEmail, thread.ID, original.ID, file) {
 				files = append(files, file)
 			}

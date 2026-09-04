@@ -51,7 +51,8 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
 		`data-pd1-destination="Video" aria-label="Rooms"`,
 		`data-pd1-destination="Conversations" aria-label="Conversations"`,
-		`data-pd1-destination="Work" aria-label="Work"`,
+		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
+		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
 		`data-pd1-destination="Drive" aria-label="Drive"`,
 		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Conversations', 'Work', 'Drive'])`,
 		`aria-label="Application navigation"`,
@@ -295,8 +296,8 @@ const server = http.createServer((req, res) => {
   // the name alone.
   // railWidth 168: AJ ratified the wide labelled rail 2026-09-02 (labels
   // visible at >=1180px; the slim 56px rail remains below that).
-  // organizationChildCount 3: AJ ratified the shell 2026-09-02 — the org
-  // button is wordmark + name + chevron; the letter badge tile is gone.
+  // AJ ratified shell 2026-09-02: the organization button is the wordmark
+  // + name + chevron (the letter badge / avatar tile is gone), so 3 children.
   assert.deepEqual(shellChrome, {railWidth:168,navInsideRail:true,navInsideHeader:false,organizationText:'Synthetic Lab',organizationChildCount:3});
   await page.click('#topbarOrganizationSwitcher');
   await page.waitForFunction(() => !document.getElementById('topbarOrganizationMenu').hidden && document.querySelectorAll('#topbarOrganizationMenu [role="menuitemradio"]').length === 2);

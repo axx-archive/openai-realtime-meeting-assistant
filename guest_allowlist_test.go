@@ -228,6 +228,7 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 		"/api/admin/ambient-intelligence-replay/execute": {handler: ambientReplayExecuteHandler, memberGated: true},
 		"/assistant/admin/accounts":                      {handler: adminAccountsHandler, memberGated: true},
 		"/assistant/admin/blobs/sweep":                   {handler: adminBlobSweepHandler, memberGated: true},
+		"/assistant/admin/storage":                       {handler: adminStorageHandler, memberGated: true},
 		"/api/artifact-dispositions/v1":                  {handler: artifactDispositionHandler, memberGated: true},
 		artifactDriveSavePath:                            {handler: artifactDriveSaveHandler, memberGated: true},
 		"/assistant/realtime-offer":                      {handler: assistantRealtimeOfferHandler, memberGated: true},
@@ -301,6 +302,16 @@ func TestGuestRouteWalkAllowlistFailsClosed(t *testing.T) {
 	probes["/assistant/meetings/recording/settings"] = guestRouteProbe{handler: meetingRecordingSettingsHandler, memberGated: true}
 	probes["/assistant/meetings/recording/upload"] = guestRouteProbe{handler: meetingRecordingUploadHandler, memberGated: true}
 	probes["/calendar/meetings.ics"] = guestRouteProbe{handler: calendarMeetingsICSHandler, memberGated: true}
+
+	// Wave 11 (Packaging Studio): commissions, story outlines, project tags and
+	// the duplicate door are member surfaces — never guest.
+	probes["/assistant/packaging/commissions"] = guestRouteProbe{handler: packagingCommissionsHandler, memberGated: true}
+	probes["/assistant/packaging/commissions/"] = guestRouteProbe{handler: packagingCommissionHandler, memberGated: true, path: "/assistant/packaging/commissions/os-artifact-1"}
+	probes["/assistant/packaging/stories"] = guestRouteProbe{handler: packagingStoriesHandler, memberGated: true}
+	probes["/assistant/packaging/stories/"] = guestRouteProbe{handler: packagingStoryHandler, memberGated: true, path: "/assistant/packaging/stories/os-artifact-1"}
+	probes["/assistant/projects"] = guestRouteProbe{handler: assistantProjectsHandler, memberGated: true}
+	probes["/artifacts/project"] = guestRouteProbe{handler: artifactProjectHandler, memberGated: true}
+	probes["/artifacts/duplicate"] = guestRouteProbe{handler: artifactDuplicateHandler, memberGated: true}
 
 	// ---- fail closed in BOTH directions.
 	routes := registeredHTTPRoutes(t)

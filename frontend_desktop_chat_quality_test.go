@@ -89,9 +89,17 @@ func TestDesktopChatHeaderAndMessageHierarchyWiring(t *testing.T) {
 func TestDesktopChatChromeKeepsOneUsefulConversationIdentity(t *testing.T) {
 	html := desktopChatQualityHTML(t)
 	css := desktopChatQualitySection(t, html)
+	// Wave 11 D15: the topbar now reads "Conversations" + the destination
+	// subline on every tab, so the chat-only heading suppression is gone.
+	for _, gone := range []string{
+		`#appShell[data-tool="chat"] .topbar__heading,`,
+		`#appShell[data-tool="chat"] .topbar__subtitle {`,
+	} {
+		if strings.Contains(css, gone) {
+			t.Errorf("Wave 11 D15: the chat tab must not hide the topbar title (%q)", gone)
+		}
+	}
 	for _, want := range []string{
-		`#appShell[data-tool="chat"] .topbar__heading`,
-		`#appShell[data-tool="chat"] .topbar__subtitle`,
 		`#chatTool .chat-convo-head__meta`,
 		`#chatTool .desktop-chat-context__scope`,
 		`#chatTool .desktop-chat-context__policy`,

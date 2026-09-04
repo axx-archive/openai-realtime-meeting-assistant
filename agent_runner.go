@@ -344,6 +344,19 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 			}
 			checkpoint = normalized
 		}
+		// A stale block written by an earlier release must not be permanent.
+		// Gen 249 shipped the first-run anchor reachable only when NO
+		// checkpoint existed, so every scope that already carried a blocked
+		// window stayed blocked and the fix ran zero times. A scope that has
+		// never produced may supersede such a block exactly once (see
+		// ambientFirstRunAnchorSupersedesCheckpoint for the full gate).
+		if anchor, anchored, anchorErr := app.supersedeBlockedAmbientCheckpointWithFirstRunAnchor(agent, roomID, checkpoint); anchorErr != nil {
+			// The stale block is the safe floor when the supersession cannot
+			// be made durable: nothing is consumed and the next boot retries.
+			return checkpoint.BaselineID, checkpoint.BlockedReason, anchorErr
+		} else if anchored {
+			return anchor, "", nil
+		}
 		return checkpoint.BaselineID, checkpoint.BlockedReason, nil
 	}
 	if boolEnv(agent.backfillEnv) {
@@ -435,6 +448,145 @@ func (app *kanbanBoardApp) persistAmbientFirstRunAnchor(agent ambientAgentConfig
 		FirstRunAnchor:    true,
 	}
 	return ambientHeldWindowStatePersist(path, state)
+}
+
+// ambientAnchorSupersedesBlockedReason reports whether a persisted block means
+// "I cannot resolve where to start" — the only class of block a first-run
+// anchor genuinely answers. ambientContinuityHeldWindowInvalid is deliberately
+// absent: it means a start WAS resolved and a held provider window no longer
+// validates, which the anchor does not repair and must never paper over. An
+// unrecognized reason fails closed.
+func ambientAnchorSupersedesBlockedReason(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case ambientContinuityAmbiguous, ambientContinuityCheckpointInvalid, ambientContinuityContractMismatch:
+		return true
+	default:
+		return false
+	}
+}
+
+// ambientFirstRunAnchorSupersedesCheckpoint decides whether a scope's persisted
+// blocked checkpoint may be superseded by the opt-in first-run anchor, and
+// returns the anchor it would take. Production (gen 249) proved why this has to
+// exist: release 8c7344d1 shipped the anchor reachable only when NO checkpoint
+// existed, while every live scope still carried the previous release's
+// durable_cursor_ambiguous window — so the fix was inert, and a blocked
+// never-produced scope was a permanent trap no future release could repair.
+//
+// Every condition is enforced here, none assumed:
+//   - the worker opted in (agent.firstRunAnchor);
+//   - no provider window is held — anchoring past held work would drop it;
+//   - the checkpoint carries no FirstRunAnchor marker WHOSE BASELINE STILL
+//     RESOLVES — a checkpoint written BY the anchor path can never be
+//     re-anchored while its anchor row is still a resolvable visible input:
+//     that is the anchor-loop stop. The marker is narrowed rather than
+//     absolute because an absolute stop re-opens the very trap this exists to
+//     remove: a scope that anchored, still produced nothing, and whose anchor
+//     row was LATER hidden (expired, quarantined, superseded) has an
+//     unresolvable baseline, is graded durable_cursor_ambiguous again, and
+//     with an absolute marker could never be repaired. See
+//     ambientCheckpointBaselineResolves for why that extra supersession can
+//     neither skip nor loop;
+//   - the blocked reason is one the anchor supersedes (see above); and
+//   - the scope has genuinely never produced an artifact of its kind.
+//     ambientFirstRunAnchor is the evidence-based resolver and counts hidden and
+//     expired artifacts as production, so "no visible artifact" is never
+//     mistaken for "never produced".
+func (app *kanbanBoardApp) ambientFirstRunAnchorSupersedesCheckpoint(agent ambientAgentConfig, roomID string, checkpoint ambientHeldWindow) (string, bool) {
+	if app == nil || !agent.firstRunAnchor {
+		return "", false
+	}
+	if checkpoint.FirstRunAnchor && app.ambientCheckpointBaselineResolves(agent, roomID, checkpoint) {
+		return "", false
+	}
+	if strings.TrimSpace(checkpoint.WindowID) != "" {
+		return "", false
+	}
+	if !ambientAnchorSupersedesBlockedReason(checkpoint.BlockedReason) {
+		return "", false
+	}
+	return app.ambientFirstRunAnchor(agent, roomID)
+}
+
+// ambientCheckpointBaselineResolves reports whether the checkpoint's recorded
+// baseline still resolves to a visible typed input cursor in this scope. It is
+// the narrowing term on the anchor-loop stop above, and the two properties that
+// make the extra supersession it permits safe are structural, not incidental:
+//
+//   - CANNOT SKIP. ambientFirstRunAnchor returns the newest VISIBLE pre-boot
+//     input at or before the same boot head. Hiding a row only removes
+//     candidates, so the re-anchored baseline is always at or before the marked
+//     one: the cursor moves BACKWARD (replay), never forward (skip). The
+//     degenerate case — no visible pre-boot input left — anchors at the empty
+//     baseline, which replays the scope from the start.
+//   - CANNOT LOOP. The anchor it writes is by construction a visible input, or
+//     empty; either resolves, so the very next evaluation refuses again and the
+//     scope is a fixed point. A further supersession is possible only if that
+//     new row is hidden too, and each one walks strictly further back through a
+//     finite store — a strictly decreasing measure whose floor, the empty
+//     baseline, always resolves. So the number of extra supersessions is
+//     bounded by the number of inputs that actually leave recall.
+//
+// Without the store nothing can be proven unresolvable, so it fails closed and
+// leaves the marker its absolute stop.
+func (app *kanbanBoardApp) ambientCheckpointBaselineResolves(agent ambientAgentConfig, roomID string, checkpoint ambientHeldWindow) bool {
+	if app == nil || app.memory == nil {
+		return true
+	}
+	_, baselineOK, _ := app.memory.normalizeAmbientCheckpointReferences(agent, roomID, checkpoint.BaselineID, checkpoint.WindowID)
+	return baselineOK
+}
+
+// supersedeBlockedAmbientCheckpointWithFirstRunAnchor writes the superseding
+// checkpoint — baseline = anchor, FirstRunAnchor set, blocked reason cleared —
+// so the decision is auditable and idempotent, and logs it plainly once. The
+// marker it writes, together with the visible anchor row it points at, is what
+// makes a second supersession impossible while that row keeps resolving.
+func (app *kanbanBoardApp) supersedeBlockedAmbientCheckpointWithFirstRunAnchor(agent ambientAgentConfig, roomID string, checkpoint ambientHeldWindow) (string, bool, error) {
+	anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(agent, roomID, checkpoint)
+	if !ok {
+		return "", false, nil
+	}
+	if err := app.persistAmbientFirstRunAnchor(agent, roomID, anchor); err != nil {
+		return "", false, err
+	}
+	log.Warnf("%s has never produced for scope %s and its checkpoint was blocked as %s; superseding that stale block by anchoring at its pre-boot input (first-run anchor) — earlier history is reachable only through the worker's own seeding or governed replay",
+		agent.name, ambientAgentScopeKey(agent, roomID), strings.TrimSpace(checkpoint.BlockedReason))
+	return anchor, true, nil
+}
+
+// repairBlockedAmbientContinuityWithFirstRunAnchor is the live-pass twin of the
+// boot path (repairAmbientContinuityFromCurrentMeeting's precedent): a scope
+// blocked inside an already-running process anchors on its NEXT pass instead of
+// waiting for a restart. A persistence-open circuit is left untouched — its
+// durable write would fail anyway and the block is the safe floor.
+func (app *kanbanBoardApp) repairBlockedAmbientContinuityWithFirstRunAnchor(agent ambientAgentConfig, roomID string) bool {
+	if app == nil || !agent.firstRunAnchor {
+		return false
+	}
+	roomID = agent.scopeRoomID(roomID)
+	key := ambientAgentScopeKey(agent, roomID)
+	checkpoint, ok, err := app.ambientScopeCheckpoint(key)
+	if err != nil || !ok {
+		return false
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[key]
+	persistenceBlocked := failure != nil && failure.persistenceOpen
+	app.mu.Unlock()
+	if persistenceBlocked {
+		return false
+	}
+	anchor, anchored, err := app.supersedeBlockedAmbientCheckpointWithFirstRunAnchor(agent, roomID, checkpoint)
+	if err != nil {
+		app.recordAmbientAgentCheckpointFailure(agent, "", roomID, err)
+		return false
+	}
+	if !anchored {
+		return false
+	}
+	app.setAmbientAgentBaselineID(key, anchor)
+	return app.clearAmbientAgentFailure(key) == nil
 }
 
 // validateAndNormalizeAmbientCheckpoint upgrades legacy untyped checkpoints and
@@ -645,6 +797,25 @@ func ambientAgentScopeKey(agent ambientAgentConfig, roomID string) string {
 // A consumed-through artifact is authoritative; no input at all is a provably
 // clean install. Existing raw input without such evidence is ambiguous and
 // must not be silently treated as already consumed.
+//
+// 2026-09-02 (gen-248 post-deploy `continuity_error` on narrative /
+// meetingDigest): the resolver reads consumption evidence the way the worker
+// actually left it.
+//   - EVERY artifact the worker produced for the scope counts, whatever its
+//     recall relevance: an expired narrative dossier or a superseded digest
+//     still proves the inputs it folded were consumed. Production narrative
+//     rooms whose dossiers had all expired were graded ambiguous because the
+//     old walk skipped hidden artifacts.
+//   - A cursor resolves ANYWHERE in the store. A dossier updated in place
+//     legitimately carries a cursor newer than its own slot, which the old
+//     before-the-artifact scan could never find (two more production rooms).
+//   - A cursor whose target input is hidden normalizes to the newest visible
+//     input at or before it, so the baseline the sidecar records always
+//     validates as a visible typed input.
+//   - The baseline is the furthest resolved cursor across all artifacts, the
+//     same max the window read applies. Only a newest artifact whose cursor
+//     resolves to nothing in this scope (wrong kind, wrong room, unknown id)
+//     stays ambiguous — that is a broken cursor, not hidden evidence.
 func (store *meetingMemoryStore) ambientContinuityBaseline(agent ambientAgentConfig, roomID string) (baselineID string, clean bool, ambiguous bool) {
 	if store == nil {
 		return "", true, false
@@ -657,38 +828,67 @@ func (store *meetingMemoryStore) ambientContinuityBaseline(agent ambientAgentCon
 	defer store.mu.Unlock()
 
 	hasInput := false
-	for _, entry := range store.entries {
-		if entry.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(entry) && matchesRoom(entry) {
-			hasInput = true
-		}
-	}
-	for index := len(store.entries) - 1; index >= 0; index-- {
-		artifact := store.entries[index]
-		if artifact.Kind != agent.artifactKind || memoryEntryHiddenFromRecall(artifact) || !matchesRoom(artifact) {
+	visibleInputs := map[string]int{}
+	scopeInputs := map[string]int{}
+	for index, entry := range store.entries {
+		if entry.Kind != agent.inputKind || !matchesRoom(entry) || memoryEntryIsMediaSoakCanary(entry) {
 			continue
 		}
+		scopeInputs[entry.ID] = index
+		if !memoryEntryHiddenFromRecall(entry) {
+			hasInput = true
+			visibleInputs[entry.ID] = index
+		}
+	}
+	newestVisibleInputAtOrBefore := func(position int) (string, int) {
+		for index := position; index >= 0; index-- {
+			input := store.entries[index]
+			if input.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(input) && matchesRoom(input) {
+				return input.ID, index
+			}
+		}
+		return "", -1
+	}
+
+	producedAny := false
+	resolvedBaseline, resolvedIndex := "", -1
+	newestArtifactIndex, newestArtifactResolved := -1, false
+	for index, artifact := range store.entries {
+		if artifact.Kind != agent.artifactKind || memoryEntryIsMediaSoakCanary(artifact) || !matchesRoom(artifact) {
+			continue
+		}
+		producedAny = true
+		candidate, candidateIndex, resolved := "", -1, false
 		cursorID := strings.TrimSpace(artifact.Metadata[agent.cursorMetadataKey])
 		if cursorID == "" {
-			// Normalize a cursorless legacy artifact to the newest matching input
-			// at or before that artifact. Persisting the artifact id itself keeps
-			// the sidecar untyped and can skip unrelated raw inputs after a config
-			// change.
-			for inputIndex := index; inputIndex >= 0; inputIndex-- {
-				input := store.entries[inputIndex]
-				if input.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(input) && matchesRoom(input) {
-					return input.ID, false, false
-				}
-			}
-			if !hasInput {
-				return "", true, false
-			}
+			// A cursorless legacy artifact consumed through the newest input at
+			// or before its own slot (persisting the artifact id itself would
+			// keep the sidecar untyped and could skip unrelated raw inputs after
+			// a config change); nothing before it means it consumed nothing.
+			candidate, candidateIndex = newestVisibleInputAtOrBefore(index)
+			resolved = true
+		} else if inputIndex, ok := visibleInputs[cursorID]; ok {
+			candidate, candidateIndex, resolved = cursorID, inputIndex, true
+		} else if targetIndex, ok := scopeInputs[cursorID]; ok {
+			candidate, candidateIndex = newestVisibleInputAtOrBefore(targetIndex)
+			resolved = true
+		}
+		if index > newestArtifactIndex {
+			newestArtifactIndex, newestArtifactResolved = index, resolved
+		}
+		if resolved && candidateIndex > resolvedIndex {
+			resolvedBaseline, resolvedIndex = candidate, candidateIndex
+		}
+	}
+	if producedAny {
+		if !newestArtifactResolved {
 			return "", false, true
 		}
-		for inputIndex := index; inputIndex >= 0; inputIndex-- {
-			input := store.entries[inputIndex]
-			if input.ID == cursorID && input.Kind == agent.inputKind && !memoryEntryHiddenFromRecall(input) && matchesRoom(input) {
-				return cursorID, false, false
-			}
+		if resolvedIndex >= 0 {
+			return resolvedBaseline, false, false
+		}
+		if !hasInput {
+			return "", true, false
 		}
 		return "", false, true
 	}
@@ -1173,6 +1373,7 @@ func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, c
 	// scheduler return at peek/budget forever even after a new active sitting
 	// supplied the exact clean suffix required for a safe baseline.
 	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
+	app.repairBlockedAmbientContinuityWithFirstRunAnchor(agent, roomID)
 
 	headID, count, _, ok := app.peekUnconsumedWindow(agent, roomID)
 	if !ok || count < minBatch {
@@ -1458,6 +1659,7 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgent
 		return meetingMemoryEntry{}, pauseErr
 	}
 	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
+	app.repairBlockedAmbientContinuityWithFirstRunAnchor(agent, roomID)
 
 	servicePrincipal := app.currentRoomMediaRecallPrincipal(roomID, app.memory.currentMeetingID(roomID))
 	baselineID := app.ambientAgentWindowBaseline(agent, roomID)
@@ -2040,9 +2242,16 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterFiltered(inputKind string
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	entries := store.entries
+	// inputIndexes spans EVERY row of inputKind — hidden, other-room and
+	// principal-denied rows included — because a baseline or artifact cursor
+	// is a POSITION marker, not content. A cursor stamped at a row that later
+	// became hidden (retained raw, expired, quarantined) or that the ambient
+	// service principal may not read must keep its place; before 2026-09-02 an
+	// unresolvable cursor silently rewound the window to the start of history.
+	// Only the inputs collected below honor visibility, room and ACL.
 	inputIndexes := make(map[string]int)
 	for index, entry := range entries {
-		if entry.Kind != inputKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
+		if entry.Kind != inputKind || memoryEntryIsMediaSoakCanary(entry) {
 			continue
 		}
 		inputIndexes[entry.ID] = index

@@ -15,7 +15,8 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 	}
 	html := string(raw)
 	for _, marker := range []string{
-		`data-pd1-destination="Work" aria-label="Work"`,
+		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
+		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
 		`'/presentations': { destination: 'Work', output: 'presentation' }`,
 		`'/research': { destination: 'Work', output: 'document' }`,
 		`id="studioProjectList"`,
@@ -23,7 +24,7 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 		`const params = new URLSearchParams({ limit: '200' })`,
 		`function scoutStudioReceiptNode(message)`,
 		`scout-studio-receipt__progress`,
-		`View in Work`,
+		`View in Packaging Studio`, // Wave 11 D1
 		`selectPD1Destination('Work', { projectId: selectedStudioProjectId })`,
 		`if (message?.studioProject?.id) return scoutStudioReceiptIsLatest(message)`,
 		`openDeckStudio(result.artifactId`,
@@ -243,7 +244,7 @@ const server=http.createServer((req,res)=>{
  if(renderDir){await page.evaluate(()=>document.querySelectorAll('.toast').forEach(node=>node.remove()));await page.locator('.scout-studio-receipt').last().screenshot({path:path.join(renderDir,'chat-work-receipt.png')});}
  assert.equal(receipt.oldChildren,0,JSON.stringify(receipt));
  assert.equal(receipt.newChildren,1,JSON.stringify(receipt));
- assert.match(receipt.text,/Receipt-only presentation/);assert.match(receipt.text,/Ready/);assert.match(receipt.text,/View in Work/);
+ assert.match(receipt.text,/Receipt-only presentation/);assert.match(receipt.text,/Ready/);assert.match(receipt.text,/View in Packaging Studio/);
  assert.equal(receipt.path,'/work');assert.equal(receipt.deckCards,0);
  assert.equal(receipt.projectParam,'receipt-only-deck',JSON.stringify(receipt));
  assert.equal(receipt.selectedProjectId,'receipt-only-deck',JSON.stringify(receipt));

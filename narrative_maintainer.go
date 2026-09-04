@@ -295,22 +295,30 @@ func (app *kanbanBoardApp) produceNarrativeUpdates(ctx context.Context, apiKey s
 		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
 	}
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
-	input := contextApp.buildNarrativeMaintainerInput(inputs, time.Now().UTC())
 	model := narrativeMaintainerModel()
 	effort := narrativeMaintainerEffort()
-	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           model,
-		Seat:            seatNarrative,
-		Workflow:        "narrative_maintainer",
-		Instructions:    narrativeMaintainerInstructions(),
-		Input:           input,
-		ReasoningEffort: effort,
-		Verbosity:       "low",
-		MaxOutputTokens: narrativeMaintainerMaxOutputTokens,
+	// Wave 8 D11 follow-up (ambient_truncation.go): truncation halves the brain
+	// window once (or raises the budget for a single brain) before the stuck
+	// head is skipped — never a four-strike provider circuit.
+	outcome, err := ambientWindowWithTruncationRecovery(app, narrativeMaintainerAgent(), inputs, narrativeMaintainerMaxOutputTokens, func(window []meetingMemoryEntry, maxOutputTokens int) (string, error) {
+		return responder(ctx, apiKey, openAITextRequest{
+			Model:           model,
+			Seat:            seatNarrative,
+			Workflow:        "narrative_maintainer",
+			Instructions:    narrativeMaintainerInstructions(),
+			Input:           contextApp.buildNarrativeMaintainerInput(window, time.Now().UTC()),
+			ReasoningEffort: effort,
+			Verbosity:       "low",
+			MaxOutputTokens: maxOutputTokens,
+		})
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
+	if outcome.Skipped {
+		return meetingMemoryEntry{}, nil
+	}
+	inputs, text := outcome.Inputs, outcome.Value
 	output, ok := parseNarrativeUpdates(text)
 	if !ok {
 		// Never persist unparseable output: the cursor stays put, so the next

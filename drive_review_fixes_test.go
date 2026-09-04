@@ -109,9 +109,9 @@ func TestBlobSweepKeepsDeckSceneRefsAndVersionSceneRefs(t *testing.T) {
 	}
 }
 
-// D3 fail-safe: rows exist but the walk produced no refs at all — a broken
-// walk, not an empty workspace. Both the admin sweep and the weekly job must
-// refuse rather than orphan-classify every blob.
+// D3 fail-safe: rows that CLAIM blob bytes exist but the walk produced no refs
+// at all — a broken walk, not an empty workspace. Both the admin sweep and the
+// weekly job must refuse rather than orphan-classify every blob.
 func TestBlobSweepRefusesWhenReferenceWalkYieldsNoRefs(t *testing.T) {
 	setupAuthTestEnv(t)
 	app := newIsolatedKanbanBoardApp(t)
@@ -119,8 +119,14 @@ func TestBlobSweepRefusesWhenReferenceWalkYieldsNoRefs(t *testing.T) {
 	kanbanApp = app
 	t.Cleanup(func() { kanbanApp = previousApp })
 
-	if _, _, err := app.createOSArtifact("research", "plain notes", "# Notes with no blobs", "AJ"); err != nil {
-		t.Fatal(err)
+	// 2026-09-02: the trigger is now a row whose ref-bearing metadata is
+	// present but no longer decodes, not merely an artifact that holds no
+	// blobs — that second shape is an ordinary chat-only workspace, and
+	// counting it refused the chat-media retention walk every single day.
+	if _, appended, err := app.memory.appendOSArtifact("artifact-undecodable-assets", "# Notes with no readable blobs", map[string]string{
+		"title": "Notes", "mode": "research", artifactAssetsMetadataKey: "{not json at all",
+	}); err != nil || !appended {
+		t.Fatalf("append artifact claiming undecodable assets: appended=%v err=%v", appended, err)
 	}
 	orphan, err := putBlob([]byte("would be an orphan if the walk were trusted"), "image/png")
 	if err != nil {

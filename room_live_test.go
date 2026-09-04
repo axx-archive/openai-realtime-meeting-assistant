@@ -13,7 +13,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1374,5 +1376,708 @@ func TestLivenessReapIsRoomScoped(t *testing.T) {
 	}
 	if app.activeParticipantCount("room-b") != 1 {
 		t.Fatal("room B's fresh participant was reaped by room A's sweep")
+	}
+}
+
+/* ---------- transcript capture accounting + stall watchdog (2026-09-02) ---------- */
+
+// seatRoomForCaptureTest puts one live seat in a room with recording on, which
+// is the "live" half of the watchdog's trip condition.
+func seatRoomForCaptureTest(t *testing.T, app *kanbanBoardApp, roomID string) *roomLiveState {
+	t.Helper()
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	state := app.roomLiveLocked(roomID)
+	state.participants["AJ"] = time.Now().UTC()
+	state.recordingEnabled = true
+	state.mediaSittingID = "sitting-capture-test"
+	// An admitted seat always has a media plane (ensureRoomMedia runs on every
+	// admission). Leaving mediaActor nil would make the /readyz media row
+	// honestly degraded and mask what these tests are asserting.
+	if state.mediaActor == nil {
+		state.mediaGen++
+		state.mediaActor = &roomMediaActor{}
+	}
+	return state
+}
+
+// TestCaptureWatchdogNeverTripsOnAQuietRoom is the non-negotiable one. A room
+// where nobody speaks for five minutes offers the transcription sink zero
+// frames — the mixer's speech gate suppresses silent sources before they ever
+// reach it — so the watchdog has no evidence of dropped audio and must stay
+// completely silent. A watchdog that cries wolf on a quiet room is worse than
+// no watchdog at all.
+func TestCaptureWatchdogNeverTripsOnAQuietRoom(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+	// The office's audio really is wired to the shared mixer for this sitting,
+	// which is what the media row is judged against.
+	mixer := &audioMixer{sinks: map[string]audioMixerSink{}, stop: make(chan struct{})}
+	installRoomMixerForTest(t, mixer)
+	app.mu.Lock()
+	generation := state.mediaGen
+	app.mu.Unlock()
+	mixer.setActivityListener(&roomAudioActivityListener{app: app, roomID: officeRoomID, sittingID: state.mediaSittingID, generation: generation})
+
+	start := time.Now().UTC()
+	// Someone speaks briefly, it lands, and then the room goes quiet.
+	app.noteTranscriptFrameOffered(officeRoomID)
+	app.noteTranscriptFrameAccepted(officeRoomID)
+	app.noteTranscriptCommit(officeRoomID)
+
+	// The transcript row that speech produced is aged ten minutes, so the
+	// /readyz stale arm below is actually exercised instead of passing
+	// vacuously on a fresh row. A quiet meeting whose last words were ten
+	// minutes ago is the single most common shape a real meeting takes.
+	app.memory.mu.Lock()
+	app.memory.entries = append(app.memory.entries, meetingMemoryEntry{
+		ID: "tx-quiet", Kind: meetingMemoryKindTranscript, Text: "the last thing anyone said",
+		CreatedAt: start.Add(-10 * time.Minute),
+		Metadata:  map[string]string{"roomId": officeRoomID, "meetingId": state.mediaSittingID},
+	})
+	app.memory.mu.Unlock()
+
+	// Five minutes of nobody talking, swept on the production cadence.
+	for elapsed := time.Duration(0); elapsed <= 5*time.Minute; elapsed += transcriptCaptureWatchdogTick {
+		app.sweepTranscriptCaptureStalls(start.Add(elapsed))
+	}
+
+	app.mu.Lock()
+	state = app.roomLiveLocked(officeRoomID)
+	stalled := state.captureStalledSince
+	drops := len(state.transcriptFrameDrops)
+	commitAge := start.Add(5 * time.Minute).Sub(state.lastTranscriptCommitAt)
+	recording := app.roomRecordingStateLocked(state)
+	app.mu.Unlock()
+	// This is what makes the test load-bearing: the commit clock IS far past
+	// the 45s threshold and the room IS live and recording. The offered-frame
+	// clause is the only thing standing between a quiet room and a false trip.
+	if commitAge <= transcriptCaptureStallAfter {
+		t.Fatalf("commit age %s never crossed the stall threshold; the test proves nothing", commitAge)
+	}
+	if !stalled.IsZero() {
+		t.Fatalf("quiet room tripped the capture watchdog at %s; the offered-frame clause did not hold", stalled)
+	}
+	if drops != 0 {
+		t.Fatalf("quiet room recorded %d drop reasons, want none", drops)
+	}
+	if !recording.Capturing {
+		t.Fatal("quiet room published capturing=false; the pill would have gone amber with nobody talking")
+	}
+	if recording.StalledSince != "" || recording.StallReason != "" {
+		t.Fatalf("quiet room published stall state stalledSince=%q reason=%q", recording.StalledSince, recording.StallReason)
+	}
+
+	// And /readyz must not report the room degraded either. The transcript row
+	// is ten minutes stale here and STILL must not escalate: stale means
+	// "nobody has spoken", and only audio arriving with nothing landing is a
+	// fault.
+	rows, degraded := roomOperationalCapabilityRows(app, start.Add(5*time.Minute), true, nil)
+	var row map[string]any
+	for _, candidate := range rows {
+		if candidate["roomId"] == officeRoomID {
+			row = candidate
+		}
+	}
+	if row == nil || row["transcript"].(map[string]any)["status"] != "stale" {
+		t.Fatalf("the aged transcript row is not stale, so the escalation branch was never exercised: %+v", row)
+	}
+	// Asserted on the WHOLE slice, not just the transcript prefix. Filtering
+	// by prefix is exactly how two permanent false alarms (rooms.office.media
+	// and rooms.office.scout) shipped unnoticed inside this very test. The one
+	// remaining entry is honest: an isolated app has no API key, so a room
+	// with recording ON genuinely has no transcription lane.
+	for _, entry := range degraded {
+		if entry != "rooms."+officeRoomID+".stt" {
+			t.Fatalf("quiet room appeared in /readyz degraded: %v", degraded)
+		}
+	}
+}
+
+// TestCaptureWatchdogTripsWhenFramesAreOfferedButNothingCommits is the
+// blackout, reproduced: audio keeps arriving at the mixer, the lane keeps
+// looking connected, and nothing lands.
+func TestCaptureWatchdogTripsWhenFramesAreOfferedButNothingCommits(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state.lastTranscriptFrameAt = now
+	state.lastTranscriptCommitAt = now.Add(-46 * time.Second)
+	state.transcriptFrameDrops = map[string]uint64{transcriptDropNoFence: 900, transcriptDropZeroPCM: 3}
+	app.mu.Unlock()
+
+	app.sweepTranscriptCaptureStalls(now)
+
+	app.mu.Lock()
+	stalledSince := state.captureStalledSince
+	reason := state.captureStallReason
+	recording := app.roomRecordingStateLocked(state)
+	app.mu.Unlock()
+	if stalledSince.IsZero() {
+		t.Fatal("offered-but-uncommitted audio did not trip the capture watchdog")
+	}
+	if reason != transcriptDropNoFence {
+		t.Fatalf("stall reason=%q, want the dominant drop reason %q", reason, transcriptDropNoFence)
+	}
+	if recording.Capturing {
+		t.Fatal("stalled room still published capturing=true; the pill would have stayed green over the hole")
+	}
+	if recording.StalledSince == "" || recording.StallReason != transcriptDropNoFence {
+		t.Fatalf("recording snapshot did not carry the stall: %+v", recording)
+	}
+	if recording.StatusRevision == 0 {
+		t.Fatal("stall snapshot carried no status revision to order it on the client")
+	}
+
+	rows, degraded := roomOperationalCapabilityRows(app, now, true, nil)
+	foundTranscript := false
+	for _, entry := range degraded {
+		if entry == "rooms."+officeRoomID+".transcript" {
+			foundTranscript = true
+		}
+	}
+	if !foundTranscript {
+		t.Fatalf("stalled room missing from /readyz degraded: %v", degraded)
+	}
+	var row map[string]any
+	for _, candidate := range rows {
+		if candidate["roomId"] == officeRoomID {
+			row = candidate
+		}
+	}
+	if row == nil {
+		t.Fatal("no /readyz row for the office room")
+	}
+	if row["transcriptCapturing"] != false {
+		t.Fatalf("readyz transcriptCapturing=%v, want false", row["transcriptCapturing"])
+	}
+	if row["transcriptStallReason"] != transcriptDropNoFence {
+		t.Fatalf("readyz transcriptStallReason=%v", row["transcriptStallReason"])
+	}
+	drops, _ := row["transcriptFrameDrops"].(map[string]uint64)
+	if drops[transcriptDropNoFence] != 900 {
+		t.Fatalf("readyz drop census=%v, want no_fence=900", drops)
+	}
+}
+
+// TestCaptureWatchdogRecoveryLadderLogsEveryStepAndNeverGoesSilentlyGreen
+// walks the ladder rung by rung and then proves the two things that matter
+// most about it: accepted frames alone do NOT clear a stall, and a stall that
+// cannot be recovered stays visible.
+func TestCaptureWatchdogRecoveryLadderLogsEveryStepAndNeverGoesSilentlyGreen(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	base := time.Now().UTC()
+	commitAt := base.Add(-46 * time.Second)
+	offer := func(at time.Time) {
+		app.mu.Lock()
+		state.lastTranscriptFrameAt = at
+		state.lastTranscriptCommitAt = commitAt
+		app.mu.Unlock()
+	}
+
+	offer(base)
+	app.sweepTranscriptCaptureStalls(base)
+
+	// 90s: consent refresh, three attempts five seconds apart.
+	for _, offset := range []time.Duration{0, 5 * time.Second, 10 * time.Second, 15 * time.Second} {
+		at := commitAt.Add(90*time.Second + offset)
+		offer(at)
+		app.sweepTranscriptCaptureStalls(at)
+	}
+	app.mu.Lock()
+	refreshes := state.captureStallRefreshes
+	app.mu.Unlock()
+	if refreshes != transcriptCaptureLadderRefreshes {
+		t.Fatalf("consent refresh attempts=%d, want %d", refreshes, transcriptCaptureLadderRefreshes)
+	}
+
+	// 105s: rebuild the source lanes / force a provider reconnect.
+	at := commitAt.Add(106 * time.Second)
+	offer(at)
+	app.sweepTranscriptCaptureStalls(at)
+	app.mu.Lock()
+	rebuilt := state.captureStallRebuilt
+	app.mu.Unlock()
+	if !rebuilt {
+		t.Fatal("recovery ladder never reached the lane-rebuild rung")
+	}
+
+	// The epoch is attribution ordering, not a repair lever, and the ladder
+	// must not have touched it.
+	app.mu.Lock()
+	epoch := state.recordingEpoch
+	app.mu.Unlock()
+	if epoch != 1 {
+		t.Fatalf("recovery ladder bumped recordingEpoch to %d; the epoch is not a repair lever", epoch)
+	}
+
+	// 180s: give up loudly and HOLD.
+	at = commitAt.Add(181 * time.Second)
+	offer(at)
+	app.sweepTranscriptCaptureStalls(at)
+	app.mu.Lock()
+	escalated := state.captureStallEscalated
+	stillStalled := !state.captureStalledSince.IsZero()
+	app.mu.Unlock()
+	if !escalated {
+		t.Fatal("recovery ladder never escalated at 3 minutes")
+	}
+	if !stillStalled {
+		t.Fatal("an unrecovered stall cleared itself")
+	}
+
+	// Frames flowing again is NOT recovery: nothing has landed.
+	app.noteTranscriptFrameAccepted(officeRoomID)
+	at = commitAt.Add(186 * time.Second)
+	offer(at)
+	app.sweepTranscriptCaptureStalls(at)
+	app.mu.Lock()
+	stillStalled = !state.captureStalledSince.IsZero()
+	recording := app.roomRecordingStateLocked(state)
+	app.mu.Unlock()
+	if !stillStalled || recording.Capturing {
+		t.Fatal("accepted frames silently returned the room to green without a single transcription landing")
+	}
+
+	// Only a provider completion clears it.
+	app.noteTranscriptCommit(officeRoomID)
+	app.mu.Lock()
+	cleared := state.captureStalledSince.IsZero()
+	recording = app.roomRecordingStateLocked(state)
+	app.mu.Unlock()
+	if !cleared || !recording.Capturing {
+		t.Fatal("a provider completion did not clear the stall")
+	}
+
+	// Every rung must announce itself. The ladder's side effects run outside
+	// app.mu in one action loop, so the structural assertion is that each
+	// action branch carries its own log call.
+	source := readRoomLiveSourceForTest(t)
+	ladder := sourceSectionForAdmissionTest(t, source, "for _, action := range actions {", "// startTranscriptCaptureWatchdog")
+	for _, want := range []string{
+		`if action.starveCleared {`, `log.Infof("transcript_frames_flowing`,
+		`if action.abandoned {`, `log.Infof("transcript_capture_stall_ended`,
+		`if action.trip {`, `log.Warnf("transcript_capture_stalled`,
+		`if action.refresh {`, `step=consent_refresh`,
+		`if action.rebuild {`, `step=lane_rebuild`,
+		`if action.escalate {`, `log.Errorf("transcript_capture_unrecovered`,
+	} {
+		if !strings.Contains(ladder, want) {
+			t.Fatalf("recovery ladder is missing %q; a step that does not log is a step that did not happen", want)
+		}
+	}
+	if !strings.Contains(source, `log.Infof("transcript_capture_recovered`) {
+		t.Fatal("recovery does not log the starved duration")
+	}
+}
+
+// readRoomLiveSourceForTest reads room_live.go so structural invariants (a log
+// line per recovery step, a single guarded transition log) can be asserted
+// without swapping the process-wide logger out from under live goroutines.
+func readRoomLiveSourceForTest(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("room_live.go")
+	if err != nil {
+		t.Fatalf("read room_live.go: %v", err)
+	}
+	return string(raw)
+}
+
+// TestTranscriptDropLoggingIsTransitionOnlyNotPerFrame pins the one property
+// that makes Fix 1 shippable: 900 dropped frames is one log line, not 900.
+func TestTranscriptDropLoggingIsTransitionOnlyNotPerFrame(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	// noteTranscriptFrameDropped must contain exactly one log call, guarded by
+	// the transition latch. 900 drops is one line, not 900.
+	source := readRoomLiveSourceForTest(t)
+	dropFn := sourceSectionForAdmissionTest(t, source, "func (app *kanbanBoardApp) noteTranscriptFrameDropped(", "// noteTranscriptCommit records")
+	if strings.Count(dropFn, "log.") != 1 {
+		t.Fatalf("noteTranscriptFrameDropped has %d log calls, want exactly one", strings.Count(dropFn, "log."))
+	}
+	guardAt := strings.LastIndex(dropFn, "if transition {")
+	logAt := strings.Index(dropFn, "log.Warnf(")
+	if guardAt < 0 || logAt < 0 || guardAt > logAt {
+		t.Fatalf("the drop log is not behind the transition latch (guard=%d log=%d)", guardAt, logAt)
+	}
+
+	for index := 0; index < 900; index++ {
+		app.noteTranscriptFrameOffered(officeRoomID)
+		app.noteTranscriptFrameDropped(officeRoomID, transcriptDropNoFence)
+	}
+	app.mu.Lock()
+	transitions := state.transcriptStarveTransitions
+	app.mu.Unlock()
+	if transitions != 1 {
+		t.Fatalf("drop transition fired %d times for 900 dropped frames, want exactly 1", transitions)
+	}
+
+	// Interleaving an accepted frame must not re-arm the transition either:
+	// two publishers with different fence health would otherwise log at 50Hz.
+	for index := 0; index < 200; index++ {
+		app.noteTranscriptFrameOffered(officeRoomID)
+		app.noteTranscriptFrameAccepted(officeRoomID)
+		app.noteTranscriptFrameOffered(officeRoomID)
+		app.noteTranscriptFrameDropped(officeRoomID, transcriptDropFenceStale)
+	}
+	app.mu.Lock()
+	transitions = state.transcriptStarveTransitions
+	app.mu.Unlock()
+	if transitions != 1 {
+		t.Fatalf("interleaved accept/drop fired %d transitions, want 1", transitions)
+	}
+
+	app.mu.Lock()
+	drops := map[string]uint64{}
+	for reason, count := range state.transcriptFrameDrops {
+		drops[reason] = count
+	}
+	offered, accepted := state.transcriptFramesOffered, state.transcriptFramesAccepted
+	app.mu.Unlock()
+	if drops[transcriptDropNoFence] != 900 || drops[transcriptDropFenceStale] != 200 {
+		t.Fatalf("drop census=%v, want no_fence=900 fence_stale=200", drops)
+	}
+	if offered != 1300 || accepted != 200 {
+		t.Fatalf("offered=%d accepted=%d, want 1300/200", offered, accepted)
+	}
+
+	// Recovery is announced once, from the sweep, after drops stop.
+	now := time.Now().UTC().Add(2 * transcriptCaptureOfferWindow)
+	app.noteTranscriptFrameAccepted(officeRoomID)
+	app.sweepTranscriptCaptureStalls(now)
+	app.sweepTranscriptCaptureStalls(now.Add(transcriptCaptureWatchdogTick))
+	app.mu.Lock()
+	notices := state.transcriptFlowNotices
+	app.mu.Unlock()
+	if notices != 1 {
+		t.Fatalf("recovery announced %d times, want exactly 1", notices)
+	}
+}
+
+// TestCaptureRecoveryRecordsTheUncapturedWindow pins the honesty half: a recap
+// built from a transcript with a hole must be able to say so.
+func TestCaptureRecoveryRecordsTheUncapturedWindow(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state.captureStalledSince = now.Add(-10 * time.Minute)
+	state.captureStallReason = transcriptDropFenceStale
+	state.lastTranscriptCommitAt = now.Add(-11 * time.Minute)
+	app.mu.Unlock()
+
+	app.noteTranscriptCommit(officeRoomID)
+
+	entries := app.memory.entriesOfKind(meetingMemoryKindTranscriptCoverage, 0)
+	if len(entries) != 1 {
+		t.Fatalf("transcript coverage rows=%d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if !strings.Contains(entry.Text, "not captured") {
+		t.Fatalf("coverage text=%q", entry.Text)
+	}
+	if entry.Metadata[relevanceMetadataKey] != relevanceExpired {
+		t.Fatalf("coverage row relevance=%q, want the recall-hidden marker", entry.Metadata[relevanceMetadataKey])
+	}
+	if entry.Metadata["roomId"] != officeRoomID {
+		t.Fatalf("coverage roomId=%q", entry.Metadata["roomId"])
+	}
+	gap, err := strconv.Atoi(entry.Metadata["gapSeconds"])
+	if err != nil || gap < 600 {
+		t.Fatalf("coverage gapSeconds=%q err=%v, want >= 600 (the whole window since the last landed transcription)", entry.Metadata["gapSeconds"], err)
+	}
+	// Recall-hidden: it must never ground an answer.
+	for _, visible := range app.memorySnapshot(50) {
+		if visible.Kind == meetingMemoryKindTranscriptCoverage {
+			t.Fatal("coverage row leaked into the recall timeline")
+		}
+	}
+}
+
+// TestRecordingToggleWritesDurableAuditRow closes the hypothesis the incident
+// could not close: recordingEpoch proved two toggles happened and nothing said
+// when or by whom.
+func TestRecordingToggleWritesDurableAuditRow(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+
+	app.setTranscriptRecording(false, "AJ")
+	app.setTranscriptRecording(true, "Tyler")
+
+	rows := app.memory.entriesOfKind(meetingMemoryKindRecordingAudit, 0)
+	if len(rows) != 2 {
+		t.Fatalf("recording audit rows=%d, want one per transition", len(rows))
+	}
+	off, on := rows[0], rows[1]
+	if off.Metadata["enabled"] != "false" || off.Metadata["actor"] != "AJ" {
+		t.Fatalf("off row metadata=%v", off.Metadata)
+	}
+	if on.Metadata["enabled"] != "true" || on.Metadata["actor"] != "Tyler" {
+		t.Fatalf("on row metadata=%v", on.Metadata)
+	}
+	if off.Metadata["recordingEpoch"] == on.Metadata["recordingEpoch"] {
+		t.Fatalf("both audit rows carry epoch %q; the toggles are indistinguishable", off.Metadata["recordingEpoch"])
+	}
+	for _, row := range rows {
+		if row.Metadata["roomId"] != officeRoomID {
+			t.Fatalf("audit row roomId=%q", row.Metadata["roomId"])
+		}
+		if strings.TrimSpace(row.Metadata["toggledAt"]) == "" {
+			t.Fatal("audit row has no timestamp; it answers 'that' but not 'when'")
+		}
+		if row.Metadata[relevanceMetadataKey] != relevanceExpired {
+			t.Fatalf("audit row relevance=%q, want the recall-hidden marker", row.Metadata[relevanceMetadataKey])
+		}
+	}
+	// A no-op toggle must not manufacture an audit row.
+	before := len(app.memory.entriesOfKind(meetingMemoryKindRecordingAudit, 0))
+	app.setTranscriptRecording(true, "Tyler")
+	if after := len(app.memory.entriesOfKind(meetingMemoryKindRecordingAudit, 0)); after != before {
+		t.Fatalf("a no-op toggle wrote %d extra audit rows", after-before)
+	}
+}
+
+// TestCaptureWatchdogTripsWhenConsentDeniesEveryFrame is the failure the
+// watchdog was BUILT for, and the one it could not see. main.go's read loop
+// refuses audio at the consent gate with a bare `continue`, upstream of the
+// mixer — and the liveness signal was stamped by the mixer path. So consent
+// starvation offered zero frames, read as a quiet room, and left the pill
+// green over the hole for the whole sitting.
+func TestCaptureWatchdogTripsWhenConsentDeniesEveryFrame(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	// One second of 20ms packets arriving and being refused before the mixer.
+	app.noteRoomAudioIngressBlocked(officeRoomID, transcriptDropConsentDenied, 50)
+
+	app.mu.Lock()
+	arrivedAt := state.lastAudioIngressAt
+	offered := state.transcriptFramesOffered
+	frameAt := state.lastTranscriptFrameAt
+	drops := state.transcriptFrameDrops[transcriptDropConsentDenied]
+	// Nothing has landed for 46s while that audio keeps arriving.
+	state.lastTranscriptCommitAt = arrivedAt.Add(-46 * time.Second)
+	app.mu.Unlock()
+
+	// This is the pre-fix blindness, asserted: the mixer seam saw nothing at
+	// all, so a watchdog that only reads lastTranscriptFrameAt has no
+	// evidence and cannot trip.
+	if !frameAt.IsZero() || offered != 0 {
+		t.Fatalf("blocked audio touched the mixer counters (frameAt=%v offered=%d); the accepted/offered ratio must stay uncorrupted", frameAt, offered)
+	}
+	if drops != 50 {
+		t.Fatalf("drop census consent_denied=%d, want the exact 50 frames the caller accumulated", drops)
+	}
+
+	app.sweepTranscriptCaptureStalls(arrivedAt)
+
+	app.mu.Lock()
+	stalledSince := state.captureStalledSince
+	reason := state.captureStallReason
+	recording := app.roomRecordingStateLocked(state)
+	app.mu.Unlock()
+	if stalledSince.IsZero() {
+		t.Fatal("consent-starved audio did not trip the capture watchdog; the pill stays green over the hole")
+	}
+	if reason != transcriptDropConsentDenied {
+		t.Fatalf("stall reason=%q, want %q — the operator must be told WHY", reason, transcriptDropConsentDenied)
+	}
+	if recording.Capturing {
+		t.Fatal("consent-starved room still published capturing=true")
+	}
+
+	rows, degraded := roomOperationalCapabilityRows(app, arrivedAt, true, nil)
+	found := false
+	for _, entry := range degraded {
+		if entry == "rooms."+officeRoomID+".transcript" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("consent-starved room missing from /readyz degraded: %v", degraded)
+	}
+	var row map[string]any
+	for _, candidate := range rows {
+		if candidate["roomId"] == officeRoomID {
+			row = candidate
+		}
+	}
+	if row == nil || row["lastBlockedAudioAt"] == nil {
+		t.Fatalf("the /readyz row does not report where the audio was refused: %+v", row)
+	}
+	if row["transcriptStallReason"] != transcriptDropConsentDenied {
+		t.Fatalf("readyz transcriptStallReason=%v", row["transcriptStallReason"])
+	}
+}
+
+// TestConsentStarvationIsStampedBeforeTheRTPDrop closes the integration hole
+// in the behavioural test above. Calling noteRoomAudioIngressBlocked directly
+// proves the watchdog can consume the signal; this test proves the real WebRTC
+// read loop actually emits it before the consent/mixer `continue` that used to
+// make the entire blackout invisible.
+func TestConsentStarvationIsStampedBeforeTheRTPDrop(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	loop := sourceSectionForAdmissionTest(t, source,
+		"fences, allowed := consentGate.admittedFences()",
+		"pcm, decodeErr := decodeOpusToRoomPCM")
+
+	guardAt := strings.Index(loop, "if !allowed || !roomAudioMixer.admitsAnalysis(audioTrackKey) {")
+	consentReasonAt := strings.Index(loop, "reason := transcriptDropConsentDenied")
+	mixerReasonAt := strings.Index(loop, "reason = transcriptDropMixerSaturated")
+	countAt := strings.Index(loop, "blockedAudioFrames[reason]++")
+	flushAt := strings.Index(loop, "flushBlockedAudioFrames(blockedAt)")
+	continueAt := strings.LastIndex(loop, "continue")
+	if guardAt < 0 || consentReasonAt < guardAt || mixerReasonAt < consentReasonAt || countAt < mixerReasonAt || flushAt < countAt || continueAt < flushAt {
+		t.Fatalf("blocked RTP is not stamped before its drop: guard=%d consent=%d mixer=%d count=%d flush=%d continue=%d", guardAt, consentReasonAt, mixerReasonAt, countAt, flushAt, continueAt)
+	}
+
+	flush := sourceSectionForAdmissionTest(t, source,
+		"flushBlockedAudioFrames := func(at time.Time) {",
+		"onTrackStartedAt := time.Now()")
+	if !strings.Contains(flush, "kanbanApp.noteRoomAudioIngressBlocked(connRoomID, reason, frames)") {
+		t.Fatal("blocked RTP flush no longer reaches the watchdog's upstream liveness seam")
+	}
+	if !strings.Contains(loop, "blockedAudioFlushedAt.IsZero()") {
+		t.Fatal("the first denied packet is not flushed immediately; a short all-denied burst can disappear")
+	}
+}
+
+// TestNewSittingDoesNotInheritThePreviousLastSegmentTime pins the one capture
+// field the sitting reset forgot. recording.lastSegmentAt is published to every
+// seated client; carrying it across a sitting boundary made a fresh meeting
+// advertise the PREVIOUS meeting's last transcript time — a green-looking
+// timestamp for audio this sitting never captured.
+func TestNewSittingDoesNotInheritThePreviousLastSegmentTime(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	app.noteTranscriptCommit(officeRoomID)
+	app.mu.Lock()
+	before := state.captureStallLastSegment
+	publishedBefore := app.roomRecordingStateLocked(state).LastSegmentAt
+	resetTranscriptCaptureLocked(state)
+	after := state.captureStallLastSegment
+	publishedAfter := app.roomRecordingStateLocked(state).LastSegmentAt
+	app.mu.Unlock()
+
+	if before.IsZero() || publishedBefore == "" {
+		t.Fatal("a landed transcription stamped no last segment; the test proves nothing")
+	}
+	if !after.IsZero() {
+		t.Fatalf("a new sitting inherited the previous meeting's last segment %s", after)
+	}
+	if publishedAfter != "" {
+		t.Fatalf("recording.lastSegmentAt published the previous sitting's transcript time %q", publishedAfter)
+	}
+}
+
+// TestUnrecoveredCaptureStallStillRecordsTheHole is the case that matters
+// most: a hole that runs to the end of the meeting. recordTranscriptCoverageGap
+// was reachable only from the recovery path, so the blackout's actual shape —
+// capture dies and never comes back — left the recap free to summarize a
+// truncated transcript as if it were complete.
+func TestUnrecoveredCaptureStallStillRecordsTheHole(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state.lastTranscriptFrameAt = now
+	state.lastTranscriptCommitAt = now.Add(-10 * time.Minute)
+	state.transcriptFrameDrops = map[string]uint64{transcriptDropFenceStale: 900}
+	app.mu.Unlock()
+
+	app.sweepTranscriptCaptureStalls(now)
+	app.mu.Lock()
+	stalled := state.captureStalledSince
+	app.mu.Unlock()
+	if stalled.IsZero() {
+		t.Fatal("the stall never tripped; the test proves nothing")
+	}
+	if rows := app.memory.entriesOfKind(meetingMemoryKindTranscriptCoverage, 0); len(rows) != 0 {
+		t.Fatalf("the trip alone wrote %d coverage rows; the row belongs to the END of the hole", len(rows))
+	}
+
+	// The meeting ends with capture still dead: the seat empties and recording
+	// goes off. Nothing ever recovers.
+	app.mu.Lock()
+	delete(state.participants, "AJ")
+	state.recordingEnabled = false
+	app.mu.Unlock()
+	app.sweepTranscriptCaptureStalls(now.Add(transcriptCaptureWatchdogTick))
+
+	rows := app.memory.entriesOfKind(meetingMemoryKindTranscriptCoverage, 0)
+	if len(rows) != 1 {
+		t.Fatalf("an abandoned stall wrote %d coverage rows, want exactly 1 naming the hole", len(rows))
+	}
+	entry := rows[0]
+	if !strings.Contains(entry.Text, "not captured") {
+		t.Fatalf("coverage text=%q", entry.Text)
+	}
+	// It must not claim a recovery that never happened.
+	if strings.Contains(entry.Text, "Transcription recovered") || entry.Metadata["recovered"] != "false" {
+		t.Fatalf("an unrecovered hole was announced as recovered: text=%q metadata=%v", entry.Text, entry.Metadata)
+	}
+	if entry.Metadata["roomId"] != officeRoomID || entry.Metadata[relevanceMetadataKey] != relevanceExpired {
+		t.Fatalf("coverage row metadata=%v", entry.Metadata)
+	}
+	gap, err := strconv.Atoi(entry.Metadata["gapSeconds"])
+	if err != nil || gap < 600 {
+		t.Fatalf("coverage gapSeconds=%q err=%v, want >= 600 (the whole window since the last landed transcription)", entry.Metadata["gapSeconds"], err)
+	}
+
+	// And the hole is recorded once, not once per sweep.
+	app.sweepTranscriptCaptureStalls(now.Add(2 * transcriptCaptureWatchdogTick))
+	if again := app.memory.entriesOfKind(meetingMemoryKindTranscriptCoverage, 0); len(again) != 1 {
+		t.Fatalf("the same hole was recorded %d times", len(again))
+	}
+}
+
+// TestMixedLaneCountsOfferedFramesBeforeAnyConsentCheck closes a structural
+// blindness on the mixed lane: it counted accepted and dropped frames but
+// never OFFERED ones, so transcriptFramesAccepted could exceed
+// transcriptFramesOffered and the watchdog's offer window never opened here.
+func TestMixedLaneCountsOfferedFramesBeforeAnyConsentCheck(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	state := seatRoomForCaptureTest(t, app, officeRoomID)
+	sink := &roomLaneAudioSink{app: app, roomID: officeRoomID, lane: ConsentLaneTranscription}
+
+	speech := make([]int16, roomAudioMixFrameSize)
+	for index := range speech {
+		speech[index] = 1200
+	}
+	// Unfenced audio: refused, but it was still handed to the sink.
+	if err := sink.WriteMixedPCMWithConsent(speech, nil); err != nil {
+		t.Fatalf("WriteMixedPCMWithConsent: %v", err)
+	}
+	app.mu.Lock()
+	offered, accepted := state.transcriptFramesOffered, state.transcriptFramesAccepted
+	noFence := state.transcriptFrameDrops[transcriptDropNoFence]
+	app.mu.Unlock()
+	if offered != 1 || noFence != 1 || accepted != 0 {
+		t.Fatalf("offered=%d accepted=%d no_fence=%d, want 1/0/1 — offered must be stamped before any consent check", offered, accepted, noFence)
+	}
+
+	// Silence is still an offer (the sink was handed audio); an empty call is not.
+	if err := sink.WriteMixedPCMWithConsent(make([]int16, roomAudioMixFrameSize), nil); err != nil {
+		t.Fatalf("WriteMixedPCMWithConsent: %v", err)
+	}
+	if err := sink.WriteMixedPCMWithConsent(nil, nil); err != nil {
+		t.Fatalf("WriteMixedPCMWithConsent: %v", err)
+	}
+	app.mu.Lock()
+	offered, zeroPCM := state.transcriptFramesOffered, state.transcriptFrameDrops[transcriptDropZeroPCM]
+	app.mu.Unlock()
+	if offered != 2 || zeroPCM != 1 {
+		t.Fatalf("offered=%d zero_pcm=%d, want 2/1", offered, zeroPCM)
 	}
 }

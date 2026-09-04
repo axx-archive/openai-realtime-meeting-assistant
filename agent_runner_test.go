@@ -1694,3 +1694,458 @@ func TestArchiveMeetingFlushSkipsWithoutAPIKey(t *testing.T) {
 		t.Fatalf("archiveMeeting: %v", err)
 	}
 }
+
+// The supersession gate is enumerated, not assumed. Gen 249's trap was a scope
+// that could NEVER anchor; the opposite failures — anchoring past unprocessed
+// input for a worker that has produced, papering over a bad held head, or
+// looping on the anchor's own checkpoint — are worse, so every condition that
+// permits a supersession and every condition that must refuse one is pinned.
+func TestAmbientContinuityFirstRunAnchorSupersedesOnlyUnresolvableBlocks(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "anchor-gate-pre-boot", officeRoomID)
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newKanbanBoardApp()
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		_ = app.Close()
+	})
+
+	optedIn := newHeldWindowTestAgent("anchor gate opted in", false, new([][]string))
+	optedIn.firstRunAnchor = true
+	optedOut := newHeldWindowTestAgent("anchor gate opted out", false, new([][]string))
+	produced := newHeldWindowTestAgent("anchor gate produced", false, new([][]string))
+	produced.firstRunAnchor = true
+	// An expired artifact still proves consumption: "no VISIBLE artifact" is
+	// never "never produced".
+	appendContinuityArtifact(t, app, produced, "anchor-gate-produced-artifact", officeRoomID, "", true)
+
+	checkpoint := func(agent ambientAgentConfig, reason string) ambientHeldWindow {
+		return ambientHeldWindow{
+			Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind,
+			ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey,
+			BlockedReason: reason,
+		}
+	}
+	marked := checkpoint(optedIn, ambientContinuityAmbiguous)
+	marked.FirstRunAnchor = true
+	held := checkpoint(optedIn, ambientContinuityAmbiguous)
+	held.WindowID = "anchor-gate-pre-boot"
+
+	for _, testCase := range []struct {
+		name       string
+		agent      ambientAgentConfig
+		checkpoint ambientHeldWindow
+		wantAnchor string
+		wantOK     bool
+	}{
+		{"the opt-in is required", optedOut, checkpoint(optedOut, ambientContinuityAmbiguous), "", false},
+		{"production's shape anchors", optedIn, checkpoint(optedIn, ambientContinuityAmbiguous), "anchor-gate-pre-boot", true},
+		{"an unresolvable checkpoint anchors", optedIn, checkpoint(optedIn, ambientContinuityCheckpointInvalid), "anchor-gate-pre-boot", true},
+		{"a contract mismatch anchors", optedIn, checkpoint(optedIn, ambientContinuityContractMismatch), "anchor-gate-pre-boot", true},
+		{"a bad held head is not an unresolved start", optedIn, checkpoint(optedIn, ambientContinuityHeldWindowInvalid), "", false},
+		{"an unrecognized reason fails closed", optedIn, checkpoint(optedIn, "provider_wedged"), "", false},
+		{"an unblocked checkpoint is left alone", optedIn, checkpoint(optedIn, ""), "", false},
+		{"the anchor's own marker stops a second anchor", optedIn, marked, "", false},
+		{"held work is never anchored past", optedIn, held, "", false},
+		{"a scope that has produced never anchors", produced, checkpoint(produced, ambientContinuityAmbiguous), "", false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(testCase.agent, officeRoomID, testCase.checkpoint)
+			if ok != testCase.wantOK || anchor != testCase.wantAnchor {
+				t.Fatalf("anchor=%q ok=%v, want %q/%v", anchor, ok, testCase.wantAnchor, testCase.wantOK)
+			}
+		})
+	}
+}
+
+// A scope blocked inside an ALREADY-RUNNING process must anchor on its next
+// pass, not wait for a restart: production sat blocked for the whole life of
+// the release, and the ticker is the only thing that fires on its own.
+func TestAmbientContinuityBlockedScopeAnchorsOnTheNextPass(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	seed := newKanbanBoardApp()
+	appendHeldWindowBrain(t, seed, "live-repair-pre-boot", officeRoomID)
+	holdPath := seed.ambientHeldWindowPath()
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var observed [][]string
+	agent := newHeldWindowTestAgent("live repair anchor", false, &observed)
+	agent.firstRunAnchor = true
+	if err := persistAmbientHeldWindowState(holdPath, ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		agent.name: {
+			Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind,
+			ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey,
+			BlockedReason: ambientContinuityAmbiguous,
+		},
+	}}); err != nil {
+		t.Fatalf("persist the stale checkpoint: %v", err)
+	}
+
+	app := newKanbanBoardApp()
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		_ = app.Close()
+	})
+
+	// the state a running worker is left in by a blocked boot
+	app.setAmbientAgentBaselineID(agent.name, "")
+	app.recordAmbientAgentContinuityFailure(agent, officeRoomID)
+	appendHeldWindowBrain(t, app, "live-repair-post-boot", officeRoomID)
+
+	responder := func(context.Context, string, openAITextRequest) (string, error) { return "injected", nil }
+	if _, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "injected-only", responder, 1, officeRoomID); err != nil {
+		t.Fatalf("next pass after the block: %v", err)
+	}
+	if len(observed) != 1 || len(observed[0]) != 1 || observed[0][0] != "live-repair-post-boot" {
+		t.Fatalf("observed=%v, want only the post-boot input; pre-boot history is never replayed by an anchor", observed)
+	}
+	checkpoint, ok, err := app.ambientScopeCheckpoint(agent.name)
+	if err != nil || !ok || !checkpoint.FirstRunAnchor || checkpoint.BlockedReason != "" {
+		t.Fatalf("checkpoint=%+v ok=%v err=%v, want the live supersession recorded", checkpoint, ok, err)
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[agent.name]
+	app.mu.Unlock()
+	if failure != nil {
+		t.Fatalf("continuity circuit still open after the repair: %+v", failure)
+	}
+}
+
+// hideHeldWindowBrain expires a seeded held-window input in place, which is how
+// a row leaves recall in production (expiry, quarantine, supersession). The
+// entry keeps its slot, so its store index stays comparable across the change.
+func hideHeldWindowBrain(t *testing.T, app *kanbanBoardApp, id string) {
+	t.Helper()
+	text, found := "", false
+	app.memory.mu.RLock()
+	for _, entry := range app.memory.entries {
+		if entry.ID == id && entry.Kind == meetingMemoryKindBrain {
+			text, found = entry.Text, true
+		}
+	}
+	app.memory.mu.RUnlock()
+	if !found {
+		t.Fatalf("brain %s is not in the store", id)
+	}
+	if _, updated, err := app.memory.updateEntryWithMetadata(meetingMemoryKindBrain, id, text, map[string]string{relevanceMetadataKey: relevanceExpired}); err != nil || !updated {
+		t.Fatalf("hide brain %s: updated=%v err=%v", id, updated, err)
+	}
+}
+
+// heldWindowInputIndex is the scope-ordered position of a baseline, so a test
+// can assert the ORDER of two cursors rather than merely that they differ. The
+// empty baseline is the start of the stream (replay everything), so it ranks
+// before every real input.
+func heldWindowInputIndex(t *testing.T, app *kanbanBoardApp, id string) int {
+	t.Helper()
+	if strings.TrimSpace(id) == "" {
+		return -1
+	}
+	app.memory.mu.RLock()
+	defer app.memory.mu.RUnlock()
+	for index, entry := range app.memory.entries {
+		if entry.ID == id {
+			return index
+		}
+	}
+	t.Fatalf("baseline %q is not in the store", id)
+	return 0
+}
+
+// newAnchorLoopTestApp seeds three pre-boot inputs and restarts the app so the
+// boot head is real (the anchor resolves against store.bootLatestIDs, which is
+// only populated by a load).
+func newAnchorLoopTestApp(t *testing.T, inputs ...string) (*kanbanBoardApp, string) {
+	t.Helper()
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("HELD_WINDOW_INTERVAL", "1h")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	seed := newKanbanBoardApp()
+	for _, id := range inputs {
+		appendHeldWindowBrain(t, seed, id, officeRoomID)
+	}
+	holdPath := seed.ambientHeldWindowPath()
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newKanbanBoardApp()
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		_ = app.Close()
+	})
+	return app, holdPath
+}
+
+// persistStaleBlockedCheckpoint writes the gen-248 shape production carried:
+// blocked, unmarked, no held window.
+func persistStaleBlockedCheckpoint(t *testing.T, holdPath string, agents ...ambientAgentConfig) {
+	t.Helper()
+	windows := map[string]ambientHeldWindow{}
+	for _, agent := range agents {
+		windows[ambientAgentScopeKey(agent, officeRoomID)] = ambientHeldWindow{
+			Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind,
+			ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey,
+			BlockedReason: ambientContinuityAmbiguous,
+		}
+	}
+	if err := persistAmbientHeldWindowState(holdPath, ambientHeldWindowState{Version: 1, Windows: windows}); err != nil {
+		t.Fatalf("persist the stale checkpoints: %v", err)
+	}
+}
+
+// THE RESIDUAL (verifier finding, 2026-09-03). The anchor-loop stop used to
+// refuse ANY checkpoint carrying FirstRunAnchor. That re-opened the exact class
+// of permanent trap the supersession exists to remove: a scope that anchored,
+// still produced nothing, and whose anchor ROW later left recall (expired,
+// quarantined, superseded) has an unresolvable baseline, is re-graded
+// durable_cursor_ambiguous, and under an absolute marker could never be
+// repaired by any future release.
+//
+// CANNOT SKIP is asserted structurally, not by "a pass ran": the re-anchored
+// baseline's position in the input stream must be at or before the position of
+// the baseline it replaces, so the cursor only ever moves BACKWARD (replay).
+func TestAmbientContinuityFirstRunAnchorReanchorsWhenItsOwnAnchorRowIsHidden(t *testing.T) {
+	app, holdPath := newAnchorLoopTestApp(t, "reanchor-a", "reanchor-b", "reanchor-c")
+	agent := newHeldWindowTestAgent("reanchor hidden row", false, new([][]string))
+	agent.firstRunAnchor = true
+	scope := ambientAgentScopeKey(agent, officeRoomID)
+	persistStaleBlockedCheckpoint(t, holdPath, agent)
+
+	firstBaseline, blocked, err := app.bootstrapAmbientContinuity(agent, officeRoomID)
+	if err != nil || blocked != "" || firstBaseline != "reanchor-c" {
+		t.Fatalf("first anchor baseline=%q blocked=%q err=%v, want the newest pre-boot input", firstBaseline, blocked, err)
+	}
+	marked, ok, err := app.ambientScopeCheckpoint(scope)
+	if err != nil || !ok || !marked.FirstRunAnchor || marked.BaselineID != firstBaseline {
+		t.Fatalf("checkpoint=%+v ok=%v err=%v, want the anchor recorded", marked, ok, err)
+	}
+
+	// A marked checkpoint whose anchor row STILL RESOLVES is refused — even
+	// while it carries a supersedable block, which is the only shape where the
+	// refusal is load-bearing. The stop is narrowed, not removed.
+	blockedButResolvable := marked
+	blockedButResolvable.BlockedReason = ambientContinuityAmbiguous
+	for _, refused := range []ambientHeldWindow{marked, blockedButResolvable} {
+		if anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(agent, officeRoomID, refused); ok {
+			t.Fatalf("a marked checkpoint with a resolvable baseline re-anchored to %q (checkpoint=%+v)", anchor, refused)
+		}
+	}
+	if !app.ambientCheckpointBaselineResolves(agent, officeRoomID, blockedButResolvable) {
+		t.Fatalf("baseline %q must still resolve; the refusal above would otherwise be vacuous", blockedButResolvable.BaselineID)
+	}
+
+	// Live input keeps arriving after boot: the re-anchor must NOT reach it.
+	// This is what makes the backward-order assertion below load-bearing rather
+	// than a restatement of the expected id.
+	appendHeldWindowBrain(t, app, "reanchor-post-boot", officeRoomID)
+
+	// The anchor row leaves recall. Under the absolute marker this scope was
+	// blocked forever.
+	hideHeldWindowBrain(t, app, "reanchor-c")
+
+	secondBaseline, blocked, err := app.bootstrapAmbientContinuity(agent, officeRoomID)
+	if err != nil || blocked != "" {
+		t.Fatalf("baseline=%q blocked=%q err=%v, want the hidden anchor row repaired rather than a permanent block", secondBaseline, blocked, err)
+	}
+	// CANNOT SKIP, asserted as an ORDER between the two cursors: the new
+	// baseline sits at or before the one it replaces, so every input the old
+	// cursor had passed is replayed and none is stepped over.
+	if before, after := heldWindowInputIndex(t, app, firstBaseline), heldWindowInputIndex(t, app, secondBaseline); after > before {
+		t.Fatalf("re-anchor moved the cursor FORWARD (%s@%d -> %s@%d); a re-anchor may only replay, never skip",
+			firstBaseline, before, secondBaseline, after)
+	}
+	if secondBaseline != "reanchor-b" {
+		t.Fatalf("re-anchored baseline=%q, want the newest still-visible pre-boot input reanchor-b", secondBaseline)
+	}
+	repaired, ok, err := app.ambientScopeCheckpoint(scope)
+	if err != nil || !ok || !repaired.FirstRunAnchor || repaired.BlockedReason != "" || repaired.BaselineID != secondBaseline {
+		t.Fatalf("checkpoint=%+v ok=%v err=%v, want the re-anchor recorded and the block cleared", repaired, ok, err)
+	}
+
+	// The live pass recovers on the same terms, without a restart: a running
+	// process left blocked by the hidden row anchors on its next pass.
+	if err := persistAmbientHeldWindowState(holdPath, ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		scope: {
+			Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind,
+			ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey,
+			BaselineID: "reanchor-c", BlockedReason: ambientContinuityAmbiguous, FirstRunAnchor: true,
+		},
+	}}); err != nil {
+		t.Fatalf("persist the re-blocked live checkpoint: %v", err)
+	}
+	app.recordAmbientAgentContinuityFailure(agent, officeRoomID)
+	// The operator signal moves with the behaviour: gen 249 was only
+	// diagnosable because a stuck scope and a self-repairing one looked
+	// identical. A marked scope whose anchor row went hidden must report as
+	// anchorable, not as one more permanently blocked scope.
+	diagnostics := ambientWorkerCheckpointDiagnostics(app, agent)
+	if diagnostics["blockedScopeCount"] != 1 || diagnostics["blockedAnchorableScopes"] != 1 || diagnostics["firstRunAnchorScopes"] != 1 {
+		t.Fatalf("diagnostics=%v, want the re-blocked marked scope counted as blocked AND anchorable", diagnostics)
+	}
+	if !app.repairBlockedAmbientContinuityWithFirstRunAnchor(agent, officeRoomID) {
+		t.Fatal("the live pass refused to repair a marked checkpoint whose anchor row is hidden")
+	}
+	live, ok, err := app.ambientScopeCheckpoint(scope)
+	if err != nil || !ok || live.BlockedReason != "" || live.BaselineID != "reanchor-b" {
+		t.Fatalf("live checkpoint=%+v ok=%v err=%v, want the same backward re-anchor", live, ok, err)
+	}
+}
+
+// CANNOT LOOP. Narrowing the stop is only safe if the re-anchor is a fixed
+// point: it must settle the moment the baseline resolves again, walk strictly
+// backward while it does not, and stop dead the moment the scope has produced.
+// All three are driven here as repeated passes, because a one-shot assertion
+// cannot tell a converging repair from an oscillating one.
+func TestAmbientContinuityFirstRunAnchorReanchorConvergesAndCannotLoop(t *testing.T) {
+	app, holdPath := newAnchorLoopTestApp(t, "loop-a", "loop-b", "loop-c")
+	settled := newHeldWindowTestAgent("reanchor converges", false, new([][]string))
+	settled.firstRunAnchor = true
+	drained := newHeldWindowTestAgent("reanchor drains backward", false, new([][]string))
+	drained.firstRunAnchor = true
+	produced := newHeldWindowTestAgent("reanchor stops on production", false, new([][]string))
+	produced.firstRunAnchor = true
+	persistStaleBlockedCheckpoint(t, holdPath, settled, drained, produced)
+
+	// 1. RESOLVABLE AGAIN => converged. Anchor, hide the anchor row once, then
+	//    run three more consecutive passes with the new baseline resolvable.
+	if baseline, blocked, err := app.bootstrapAmbientContinuity(settled, officeRoomID); err != nil || blocked != "" || baseline != "loop-c" {
+		t.Fatalf("settled first anchor baseline=%q blocked=%q err=%v", baseline, blocked, err)
+	}
+	hideHeldWindowBrain(t, app, "loop-c")
+	reanchored, blocked, err := app.bootstrapAmbientContinuity(settled, officeRoomID)
+	if err != nil || blocked != "" || reanchored != "loop-b" {
+		t.Fatalf("settled re-anchor baseline=%q blocked=%q err=%v, want loop-b", reanchored, blocked, err)
+	}
+	settledScope := ambientAgentScopeKey(settled, officeRoomID)
+	for pass := 1; pass <= 3; pass++ {
+		baseline, blocked, err := app.bootstrapAmbientContinuity(settled, officeRoomID)
+		if err != nil || blocked != "" || baseline != reanchored {
+			t.Fatalf("settled pass %d baseline=%q blocked=%q err=%v, want the checkpoint fixed at %q", pass, baseline, blocked, err, reanchored)
+		}
+		checkpoint, ok, err := app.ambientScopeCheckpoint(settledScope)
+		if err != nil || !ok || checkpoint.BaselineID != reanchored || checkpoint.BlockedReason != "" || !checkpoint.FirstRunAnchor {
+			t.Fatalf("settled pass %d checkpoint=%+v ok=%v err=%v, want a stable marked checkpoint", pass, checkpoint, ok, err)
+		}
+		blockedCheckpoint := checkpoint
+		blockedCheckpoint.BlockedReason = ambientContinuityAmbiguous
+		for _, refused := range []ambientHeldWindow{checkpoint, blockedCheckpoint} {
+			if anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(settled, officeRoomID, refused); ok {
+				t.Fatalf("settled pass %d re-anchored a resolvable marked checkpoint to %q (checkpoint=%+v)", pass, anchor, refused)
+			}
+		}
+		if !app.ambientCheckpointBaselineResolves(settled, officeRoomID, blockedCheckpoint) {
+			t.Fatalf("settled pass %d: baseline %q must still resolve", pass, blockedCheckpoint.BaselineID)
+		}
+	}
+
+	// 2. STILL UNRESOLVABLE => strictly backward, and it terminates. Each hide
+	//    may buy exactly one more supersession, walking toward the empty
+	//    baseline, which always resolves.
+	drainedScope := ambientAgentScopeKey(drained, officeRoomID)
+	if baseline, blocked, err := app.bootstrapAmbientContinuity(drained, officeRoomID); err != nil || blocked != "" || baseline != "loop-b" {
+		// loop-c is already hidden above, so the first anchor is loop-b.
+		t.Fatalf("drained first anchor baseline=%q blocked=%q err=%v, want loop-b", baseline, blocked, err)
+	}
+	previous := "loop-b"
+	for _, hidden := range []string{"loop-b", "loop-a"} {
+		hideHeldWindowBrain(t, app, hidden)
+		baseline, blocked, err := app.bootstrapAmbientContinuity(drained, officeRoomID)
+		if err != nil || blocked != "" {
+			t.Fatalf("drained baseline=%q blocked=%q err=%v after hiding %s, want another backward re-anchor", baseline, blocked, err, hidden)
+		}
+		if after, before := heldWindowInputIndex(t, app, baseline), heldWindowInputIndex(t, app, previous); after >= before {
+			t.Fatalf("re-anchor after hiding %s did not move strictly backward (%s@%d -> %s@%d)", hidden, previous, before, baseline, after)
+		}
+		previous = baseline
+	}
+	if previous != "" {
+		t.Fatalf("final drained baseline=%q, want the empty baseline once no visible pre-boot input remains", previous)
+	}
+	// The empty baseline is the terminal state: it resolves, so three more
+	// passes change nothing and the scope is not blocked.
+	for pass := 1; pass <= 3; pass++ {
+		baseline, blocked, err := app.bootstrapAmbientContinuity(drained, officeRoomID)
+		if err != nil || blocked != "" || baseline != "" {
+			t.Fatalf("drained terminal pass %d baseline=%q blocked=%q err=%v, want a settled empty baseline", pass, baseline, blocked, err)
+		}
+		checkpoint, ok, err := app.ambientScopeCheckpoint(drainedScope)
+		if err != nil || !ok || checkpoint.BaselineID != "" || checkpoint.BlockedReason != "" {
+			t.Fatalf("drained terminal pass %d checkpoint=%+v ok=%v err=%v", pass, checkpoint, ok, err)
+		}
+		blockedCheckpoint := checkpoint
+		blockedCheckpoint.BlockedReason = ambientContinuityAmbiguous
+		for _, refused := range []ambientHeldWindow{checkpoint, blockedCheckpoint} {
+			if anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(drained, officeRoomID, refused); ok {
+				t.Fatalf("drained terminal pass %d re-anchored to %q; the empty baseline resolves and must stop (checkpoint=%+v)", pass, anchor, refused)
+			}
+		}
+	}
+
+	// 3. HAS PRODUCED => stops immediately, hidden anchor row or not. The
+	//    already-produced guard is untouched by the narrowing, and an EXPIRED
+	//    artifact still proves consumption.
+	producedScope := ambientAgentScopeKey(produced, officeRoomID)
+	appendHeldWindowBrain(t, app, "loop-d", officeRoomID)
+	if baseline, blocked, err := app.bootstrapAmbientContinuity(produced, officeRoomID); err != nil || blocked != "" || baseline != "" {
+		t.Fatalf("produced first anchor baseline=%q blocked=%q err=%v, want the empty anchor (no visible pre-boot input)", baseline, blocked, err)
+	}
+	// A hidden artifact with a cursor that resolves to nothing: production
+	// evidence for the anchor, still ambiguous for the resolver.
+	appendContinuityArtifact(t, app, produced, "loop-produced-artifact", officeRoomID, "no-such-brain", true)
+	if err := persistAmbientHeldWindowState(holdPath, ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		producedScope: {
+			Agent: produced.name, RoomID: officeRoomID, InputKind: produced.inputKind,
+			ArtifactKind: produced.artifactKind, CursorMetadataKey: produced.cursorMetadataKey,
+			BaselineID: "loop-c", BlockedReason: ambientContinuityAmbiguous, FirstRunAnchor: true,
+		},
+	}}); err != nil {
+		t.Fatalf("persist the produced scope's blocked marked checkpoint: %v", err)
+	}
+	for pass := 1; pass <= 3; pass++ {
+		baseline, blocked, err := app.bootstrapAmbientContinuity(produced, officeRoomID)
+		if err != nil || blocked != ambientContinuityAmbiguous || baseline != "loop-c" {
+			t.Fatalf("produced pass %d baseline=%q blocked=%q err=%v, want the block held: a scope that has produced never anchors past unprocessed input",
+				pass, baseline, blocked, err)
+		}
+	}
+	if app.repairBlockedAmbientContinuityWithFirstRunAnchor(produced, officeRoomID) {
+		t.Fatal("the live pass anchored a scope that has already produced")
+	}
+	// ...and the same is true of a VISIBLE artifact.
+	appendContinuityArtifact(t, app, produced, "loop-produced-visible", officeRoomID, "no-such-brain", false)
+	if baseline, blocked, err := app.bootstrapAmbientContinuity(produced, officeRoomID); err != nil || blocked != ambientContinuityAmbiguous || baseline != "loop-c" {
+		t.Fatalf("visible-artifact baseline=%q blocked=%q err=%v, want the block held", baseline, blocked, err)
+	}
+}

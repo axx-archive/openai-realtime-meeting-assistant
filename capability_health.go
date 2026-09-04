@@ -666,7 +666,7 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 		return map[string]any{"checkpointStatus": "unreadable", "checkpointError": true}
 	}
 	prefix := agent.name + "@"
-	checkpoints, held, blocked, invalid, firstRun := 0, 0, 0, 0, 0
+	checkpoints, held, blocked, invalid, firstRun, anchorable := 0, 0, 0, 0, 0, 0
 	continuityScopes := make([]map[string]any, 0)
 	for key, checkpoint := range state.Windows {
 		if key != agent.name && !strings.HasPrefix(key, prefix) {
@@ -687,8 +687,18 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 			(strings.TrimSpace(checkpoint.ArtifactKind) != "" && checkpoint.ArtifactKind != agent.artifactKind) ||
 			(strings.TrimSpace(checkpoint.CursorMetadataKey) != "" && checkpoint.CursorMetadataKey != agent.cursorMetadataKey)
 		reason := strings.TrimSpace(checkpoint.BlockedReason)
+		// A blocked scope is not necessarily stuck: one this worker has never
+		// produced for, whose block only means "I cannot resolve where to
+		// start", anchors itself on the next pass. Gen 249's whole failure was
+		// that the two states looked identical from outside, so they are
+		// distinguished here, per scope and in the counts.
+		scopeAnchorable := false
 		if reason != "" {
 			blocked++
+			if _, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(agent, expectedRoom, checkpoint); ok {
+				scopeAnchorable = true
+				anchorable++
+			}
 		}
 		_, baselineOK, windowOK := app.memory.normalizeAmbientCheckpointReferences(agent, expectedRoom, checkpoint.BaselineID, checkpoint.WindowID)
 		if strings.TrimSpace(checkpoint.WindowID) != "" {
@@ -708,6 +718,7 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 				"inputKind":     agent.inputKind,
 				"artifactKind":  agent.artifactKind,
 				"heldWindow":    strings.TrimSpace(checkpoint.WindowID) != "",
+				"anchorable":    scopeAnchorable,
 			})
 		}
 	}
@@ -720,6 +731,12 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 	}
 	if blocked > 0 {
 		status = "blocked"
+		if anchorable == blocked {
+			// Blocked, but every blocked scope supersedes itself on the next
+			// pass — an operator reading this needs no intervention, only the
+			// next tick.
+			status = "blocked_anchorable"
+		}
 	}
 	if invalid > 0 {
 		status = "invalid"
@@ -729,12 +746,16 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 		"checkpointScopes":         checkpoints,
 		"heldScopeCount":           held,
 		"blockedScopeCount":        blocked,
+		"blockedAnchorableScopes":  anchorable,
 		"invalidScopeCount":        invalid,
 		"ambientContinuityHealthy": invalid == 0 && blocked == 0,
 	}
-	if firstRun > 0 {
-		// Scopes the worker anchored at boot instead of failing closed
-		// (ambientAgentConfig.firstRunAnchor): healthy, but never silent.
+	if firstRun > 0 || agent.firstRunAnchor {
+		// Scopes the worker anchored instead of failing closed
+		// (ambientAgentConfig.firstRunAnchor): healthy, but never silent. Gen
+		// 249 could only be diagnosed because this key was ABSENT, so every
+		// opted-in worker now publishes it even at zero — absent means "does
+		// not opt in", 0 means "opted in and has not anchored yet".
 		out["firstRunAnchorScopes"] = firstRun
 	}
 	if len(continuityScopes) > 0 {
@@ -761,6 +782,7 @@ func ambientWorkersCapabilitySnapshot(now time.Time, openAIReady bool) map[strin
 	add("slopClassifier", slopClassifierAgent(), providerOpenAI, openAIReady)
 	add("tasteAnalyst", tasteAnalystAgent(), providerOpenAI, openAIReady)
 	add("houseStyle", houseStyleDistillerAgent(), providerOpenAI, openAIReady)
+	add("scoutFollowup", scoutFollowupAgent(), providerOpenAI, openAIReady)
 	return workers
 }
 
@@ -813,12 +835,32 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 	degraded := []string{}
 
 	roomVoice := capabilityEvidence(capabilityRoomVoice, now, 5*time.Minute)
-	roomVoice["enabled"] = true
+	// In-room Scout speech is an optional qualified layer: JoinConferenceRoom
+	// only installs app.roomScoutFactory when currentRoomScoutVoiceAvailability
+	// says the receipt is current (kanban.go), so with the gate closed no room
+	// realtime session can ever exist and the lane's own success writer
+	// (handleRealtimeEventForGeneration) is unreachable. That is configured
+	// off, not unasked — say so.
+	roomVoiceGate := currentRoomScoutVoiceAvailability()
+	roomVoice["enabled"] = roomVoiceGate.Enabled
+	if !roomVoiceGate.Enabled && strings.TrimSpace(roomVoiceGate.Reason) != "" {
+		roomVoice["reason"] = roomVoiceGate.Reason
+	}
 	roomVoice["connected"] = false
 	roomVoice["provider"] = providerOpenAI
 	roomVoice["model"] = realtimeModel()
 	privateVoice := capabilityEvidence(capabilityPrivateVoice, now, 5*time.Minute)
-	privateVoice["enabled"] = true
+	// The private realtime voice lane sits behind a server-owned release gate
+	// (PRIVATE_REALTIME_VOICE_QUALIFIED). While that gate is closed every offer
+	// 503s at assistantRealtimeOfferHandler before the provider is touched, so
+	// the lane is configured off — not merely unasked. Reporting "idle" there
+	// would tell an operator nothing has wanted the lane recently when in fact
+	// nothing is permitted to use it; capabilityStatus turns enabled=false into
+	// the honest word "disabled".
+	privateVoice["enabled"] = privateRealtimeVoiceQualified()
+	if privateVoice["enabled"] != true {
+		privateVoice["reason"] = "awaiting_qualification"
+	}
 	privateVoice["provider"] = providerOpenAI
 	privateVoice["model"] = realtimeModel()
 	meetingSTT := capabilityEvidence(capabilityMeetingSTT, now, 5*time.Minute)
@@ -864,6 +906,16 @@ func capabilitySnapshot(now time.Time) (map[string]any, []string) {
 			roomVoice["circuit"] = "open"
 			roomVoice["retrySuppressed"] = true
 		}
+	}
+	// A closed gate reads "disabled" only while nothing is running behind it.
+	// If a room session is still live — a rollback, a mid-flight revocation, an
+	// operator flipping the env under a running room — the lane must keep
+	// reporting what that session is actually doing. Letting enabled=false win
+	// there would mask a failing live session as a deliberate switch-off, which
+	// is the same lie in the other direction.
+	if roomVoice["enabled"] != true && capabilityLaneLive(roomVoice) {
+		roomVoice["enabled"] = true
+		delete(roomVoice, "reason")
 	}
 	if at, ok := latestCapabilityArtifact(meetingMemoryKindTranscript); ok {
 		if _, reported := meetingSTT["lastSuccessAt"]; !reported {

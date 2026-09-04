@@ -1,6 +1,6 @@
 package main
 
-// report_print.go — the branded Stride print document for markdown
+// report_print.go — the organization-branded print document for markdown
 // research reports ("Download PDF" for research briefs). The export trigger
 // (artifactExportPDFHandler) has always shipped deck/paper-kit HTML straight
 // to the render sidecar; a research report is a MARKDOWN os_artifact body
@@ -28,9 +28,12 @@ import (
 	"encoding/base64"
 	"html"
 	"net/url"
+	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -178,62 +181,448 @@ func newReportPrintRenderer(artifact meetingMemoryEntry) *reportPrintRenderer {
 	return renderer
 }
 
-// renderResearchReportPrintHTML assembles the complete branded print document
-// for one markdown research artifact: Stride masthead
-// mark + wordmark + mono kicker), title, meta line (date · requested by ·
-// model/worker), gate-result strip, search-tag chips, the converted sections,
-// and the Scout colophon footer.
-func renderResearchReportPrintHTML(artifact meetingMemoryEntry) string {
-	renderer := newReportPrintRenderer(artifact)
-	title := firstNonEmptyString(artifact.Metadata["title"], "Research brief")
+// researchReportBrand is the organization identity every research export
+// carries (Wave 11 D4). Name comes from workspaceOrganizationName(); the
+// wordmark asset is used ONLY when that name is the brand the asset spells
+// (researchReportWordmarkBrand) — every other organization gets its own name
+// set as the text wordmark rather than somebody else's logo under its label.
+// The cover, table of contents, sources appendix and colophon are rendered by
+// ONE pass (researchReportBrandedDocument) that both the PDF print document
+// and the DOCX export consume, so the two exports never drift. The print
+// document is light-only, so there is no per-ground wordmark variant here.
+type researchReportBrand struct {
+	Organization string
+	Date         string
+}
+
+func researchReportBrandFor(artifact meetingMemoryEntry) researchReportBrand {
 	created := artifact.CreatedAt
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	date := created.Format("January 2, 2006")
-	requestedBy := firstNonEmptyString(artifact.Metadata["requestedBy"], artifact.Metadata["createdBy"])
-	worker := firstNonEmptyString(artifact.Metadata["model"], artifact.Metadata["orchestratorModel"], artifact.Metadata["worker"])
+	return researchReportBrand{Organization: firstNonEmptyString(strings.TrimSpace(workspaceOrganizationName()), defaultWorkspaceOrganizationName), Date: created.Format("January 2, 2006")}
+}
 
+// researchReportSection is one heading-delimited slice of the report body,
+// the unit the table of contents and the DOCX/PDF section flow share.
+type researchReportSection struct {
+	Level   int
+	Title   string
+	Anchor  string
+	Content string
+}
+
+// researchReportSource is one row of the sources appendix: the citation
+// receipt's exact URLs (with titles when the receipt carried them), or —
+// only when no receipt proved the report — the links the model itself listed
+// under its "## Sources" heading. Verified says which, and the appendix says
+// so on the page: an unproven link must never read as a proven one.
+type researchReportSource struct {
+	Title    string
+	URL      string
+	Verified bool
+}
+
+// researchReportBrandedDocument is the single render pass: the report split
+// into cover facts, body sections, the sources appendix and the colophon.
+type researchReportBrandedDocument struct {
+	Brand       researchReportBrand
+	Title       string
+	Kicker      string
+	RequestedBy string
+	Worker      string
+	GateResult  string
+	SearchTags  []string
+	Sections    []researchReportSection
+	Sources     []researchReportSource
+	// SourcesVerified is true when a provider citation receipt proved every
+	// row of Sources. False means the rows are the report's own claims.
+	SourcesVerified bool
+	Colophon        string
+}
+
+const researchReportKicker = "RESEARCH REPORT"
+
+func researchReportAnchor(index int, title string) string {
+	slug := strings.ToLower(strings.Join(strings.Fields(title), "-"))
+	cleaned := make([]rune, 0, len(slug))
+	for _, character := range slug {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' {
+			cleaned = append(cleaned, character)
+		}
+	}
+	return "section-" + strconv.Itoa(index+1) + "-" + strings.Trim(string(cleaned), "-")
+}
+
+// researchReportSections splits markdown on #/##/### headings. Text before
+// the first heading becomes an untitled lead section so nothing is lost. A
+// fenced code block is opaque: a `#` comment inside ``` is code, not a
+// heading, so splitting there would both invent a heading and tear the fence
+// in half for the DOCX compiler downstream (compileBody consumes whole
+// fences). Fence state is tracked exactly the way compileBody tracks it.
+func researchReportSections(body string) []researchReportSection {
+	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\r", "\n"), "\n")
+	sections := make([]researchReportSection, 0)
+	current := researchReportSection{}
+	var content []string
+	flush := func() {
+		text := strings.TrimSpace(strings.Join(content, "\n"))
+		if current.Title == "" && text == "" {
+			content = content[:0]
+			return
+		}
+		current.Content = text
+		if current.Title != "" {
+			current.Anchor = researchReportAnchor(len(sections), current.Title)
+		}
+		sections = append(sections, current)
+		content = content[:0]
+	}
+	fence := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if fence != "" {
+			if strings.HasPrefix(trimmed, fence) {
+				fence = ""
+			}
+			content = append(content, line)
+			continue
+		}
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fence = trimmed[:3]
+			content = append(content, line)
+			continue
+		}
+		match := reportPrintHeadingPattern.FindStringSubmatch(line)
+		if match != nil && len(match[1]) <= 3 {
+			flush()
+			current = researchReportSection{Level: len(match[1]), Title: strings.TrimSuffix(strings.TrimSpace(match[2]), ":")}
+			continue
+		}
+		content = append(content, line)
+	}
+	flush()
+	return sections
+}
+
+// researchReportSources reads the citation receipt when the report carries a
+// verified one, and otherwise every safe http(s) link under a Sources
+// heading, so the appendix never invents a source. The two are never mixed:
+// a verified receipt IS the proven set, while the model-authored "## Sources"
+// list is a claim about sources. Printing an unproven link beside a
+// receipt-proven one under one numbered list would lend the report's own
+// text the provider's authority — and the receipt block itself is stripped
+// from the exported body, so the reader would have no way to tell them apart.
+// The bool reports whether a receipt proved every returned row.
+func researchReportSources(body string) ([]researchReportSource, bool) {
+	sources := make([]researchReportSource, 0)
+	seen := map[string]bool{}
+	if receipt, err := verifiedResearchCitationReceipt(body); err == nil {
+		// The verified receipt proves the set; the receipt section's own line
+		// order is the author's order, so walk it rather than the URL map.
+		ordered := make([]string, 0, len(receipt.CitationURLs))
+		if heading := strings.LastIndex(body, "## Scout source receipt"); heading >= 0 {
+			for _, line := range strings.Split(body[heading:], "\n") {
+				line = strings.TrimSpace(line)
+				if !strings.HasPrefix(line, "- ") {
+					continue
+				}
+				source := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+				if delimiter := strings.LastIndex(source, " — "); delimiter >= 0 && !receipt.CitationURLs[source] {
+					source = strings.TrimSpace(source[delimiter+len(" — "):])
+				}
+				if receipt.CitationURLs[source] && !seen[source] {
+					seen[source] = true
+					ordered = append(ordered, source)
+				}
+			}
+		}
+		rest := make([]string, 0)
+		for citedURL := range receipt.CitationURLs {
+			if !seen[citedURL] {
+				rest = append(rest, citedURL)
+			}
+		}
+		sort.Strings(rest)
+		for _, citedURL := range append(ordered, rest...) {
+			seen[citedURL] = true
+			sources = append(sources, researchReportSource{Title: receipt.CitationTitles[citedURL], URL: citedURL, Verified: true})
+		}
+		return sources, true
+	}
+	for _, section := range researchReportSections(stripOpenAIWebCitationReceipt(body)) {
+		if !strings.EqualFold(strings.TrimSpace(section.Title), "sources") {
+			continue
+		}
+		for _, match := range reportPrintInlinePattern.FindAllStringSubmatchIndex(section.Content, -1) {
+			if !reportPrintMatchPresent(match, reportPrintLinkLabelGroup) {
+				continue
+			}
+			href := reportPrintMatchText(section.Content, match, reportPrintLinkHrefGroup)
+			if !strings.HasPrefix(strings.ToLower(href), "http") || seen[href] {
+				continue
+			}
+			seen[href] = true
+			sources = append(sources, researchReportSource{Title: reportPrintMatchText(section.Content, match, reportPrintLinkLabelGroup), URL: href})
+		}
+	}
+	return sources, false
+}
+
+// researchReportUnverifiedSourcesNote is the one sentence that keeps an
+// unproven appendix honest, printed identically by the PDF and DOCX passes.
+const researchReportUnverifiedSourcesNote = "Unverified: these links were listed by the report itself. No provider citation receipt proved them."
+
+func researchReportBrandedDocumentFor(artifact meetingMemoryEntry) researchReportBrandedDocument {
+	brand := researchReportBrandFor(artifact)
 	body, gateResult, searchTags := splitResearchReportPreamble(artifact.Text)
 	if gateResult == "" {
 		if reviewGate := strings.TrimSpace(artifact.Metadata["reviewGate"]); reviewGate != "" && reviewGate != "pending" {
 			gateResult = reviewGate
 		}
 	}
+	sources, sourcesVerified := researchReportSources(body)
+	body = stripOpenAIWebCitationReceipt(body)
+	return researchReportBrandedDocument{
+		Brand:           brand,
+		Title:           firstNonEmptyString(strings.TrimSpace(artifact.Metadata["studioTitle"]), strings.TrimSpace(artifact.Metadata["title"]), "Research report"),
+		Kicker:          researchReportKicker,
+		RequestedBy:     firstNonEmptyString(artifact.Metadata["requestedBy"], artifact.Metadata["createdBy"]),
+		Worker:          firstNonEmptyString(artifact.Metadata["model"], artifact.Metadata["orchestratorModel"], artifact.Metadata["worker"]),
+		GateResult:      gateResult,
+		SearchTags:      searchTags,
+		Sections:        researchReportSections(body),
+		Sources:         sources,
+		SourcesVerified: sourcesVerified,
+		Colophon:        "Prepared by Scout for " + brand.Organization + " · " + brand.Date,
+	}
+}
+
+// researchReportBrandedMarkdown serializes the same pass as Markdown — the
+// DOCX export compiles exactly this, so Word and PDF carry the same cover,
+// contents, sections, sources appendix and colophon.
+func researchReportBrandedMarkdown(artifact meetingMemoryEntry) string {
+	doc := researchReportBrandedDocumentFor(artifact)
+	var out strings.Builder
+	if wordmark, ok := researchReportWordmarkDataURI(doc.Brand.Organization); ok {
+		out.WriteString("![" + doc.Brand.Organization + " wordmark](" + wordmark + ")\n\n")
+	}
+	out.WriteString("*" + doc.Kicker + "*\n\n")
+	out.WriteString("# " + doc.Title + "\n\n")
+	out.WriteString("**Prepared for " + doc.Brand.Organization + "** · " + doc.Brand.Date)
+	if doc.RequestedBy != "" {
+		out.WriteString(" · Requested by " + doc.RequestedBy)
+	}
+	out.WriteString("\n\n")
+	if doc.GateResult != "" {
+		out.WriteString("**Gate result:** " + doc.GateResult + "\n\n")
+	}
+	if len(doc.SearchTags) > 0 {
+		out.WriteString("Search tags: " + strings.Join(doc.SearchTags, ", ") + "\n\n")
+	}
+	out.WriteString("---\n\n## Contents\n\n")
+	for _, section := range doc.Sections {
+		if section.Title == "" {
+			continue
+		}
+		indent := strings.Repeat("  ", maxInt(section.Level-2, 0))
+		out.WriteString(indent + "- " + section.Title + "\n")
+	}
+	out.WriteString("\n---\n\n")
+	for _, section := range doc.Sections {
+		if section.Title != "" {
+			out.WriteString(strings.Repeat("#", maxInt(section.Level, 2)) + " " + section.Title + "\n\n")
+		}
+		if section.Content != "" {
+			out.WriteString(section.Content + "\n\n")
+		}
+	}
+	out.WriteString("---\n\n## Sources appendix\n\n")
+	if len(doc.Sources) == 0 {
+		out.WriteString("No verified external sources were recorded on this report.\n\n")
+	} else if !doc.SourcesVerified {
+		out.WriteString(researchReportUnverifiedSourcesNote + "\n\n")
+	}
+	for index, source := range doc.Sources {
+		label := firstNonEmptyString(strings.TrimSpace(source.Title), source.URL)
+		row := strconv.Itoa(index+1) + ". [" + label + "](" + source.URL + ")"
+		if !source.Verified {
+			row += " · unverified"
+		}
+		out.WriteString(row + "\n")
+	}
+	out.WriteString("\n---\n\n*" + doc.Colophon + "*\n")
+	return out.String()
+}
+
+// researchReportBrandedArtifact is the ONE predicate that decides whether an
+// artifact is a research report. Both exports ask it — the DOCX pass to
+// choose the branded body, the print pass to gate the research-only chrome —
+// so a memo can never be a report in one export and a memo in the other.
+// Recognition is by durable stamp (the studio contract) or by research mode,
+// never by prose or title.
+func researchReportBrandedArtifact(artifact meetingMemoryEntry) bool {
+	return studioResearchReportArtifact(artifact.Metadata) || strings.EqualFold(strings.TrimSpace(artifact.Metadata["mode"]), "research")
+}
+
+// documentExportMarkdown is the one body the DOCX export compiles: research
+// reports export branded, ordinary documents export their own Markdown.
+func documentExportMarkdown(artifact meetingMemoryEntry) string {
+	if researchReportBrandedArtifact(artifact) {
+		return researchReportBrandedMarkdown(artifact)
+	}
+	return documentStudioDocumentFromEntry(artifact).Markdown
+}
+
+// researchReportWordmarkBrand is the name the shipped wordmark asset spells.
+// The asset is a picture of a name, so it identifies exactly one
+// organization: printing it under a different organization's label would put
+// the wrong logo on every page of that organization's report.
+const researchReportWordmarkBrand = "Stride"
+
+var (
+	researchReportWordmarkMu     sync.Mutex
+	researchReportWordmarkLoaded bool
+	researchReportWordmarkURI    string
+)
+
+// researchReportWordmarkDataURI loads the wordmark PNG once
+// (public/stride-wordmark-black.png — the print document is light-only) as a
+// data URI, and only for the organization the asset actually spells. Any
+// other organization, and a missing asset, degrade to the text wordmark of
+// that organization's own name; it never fails an export.
+func researchReportWordmarkDataURI(organization string) (string, bool) {
+	if !strings.EqualFold(strings.TrimSpace(organization), researchReportWordmarkBrand) {
+		return "", false
+	}
+	researchReportWordmarkMu.Lock()
+	defer researchReportWordmarkMu.Unlock()
+	if researchReportWordmarkLoaded {
+		return researchReportWordmarkURI, researchReportWordmarkURI != ""
+	}
+	researchReportWordmarkLoaded = true
+	data, err := os.ReadFile("public/stride-wordmark-black.png")
+	if err != nil || len(data) == 0 || len(data) > reportPrintMaxInlineImageBytes {
+		researchReportWordmarkURI = ""
+		return "", false
+	}
+	researchReportWordmarkURI = "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
+	return researchReportWordmarkURI, true
+}
+
+// renderResearchReportPrintHTML assembles the complete organization-branded
+// print document for one markdown artifact: masthead (wordmark + ember
+// hairline), the cover block (title, prepared for <org>, date,
+// requested by, worker), gate strip, search-tag chips, the converted sections
+// with anchors and the "Prepared by Scout for <org> · date" colophon.
+//
+// Every markdown artifact prints through here (POST /artifacts/export-pdf),
+// not only research reports, so the three pieces of chrome that ASSERT a
+// report — the mono "RESEARCH REPORT" kicker, the Contents nav and the
+// sources appendix — are gated on researchReportBrandedArtifact, the same
+// predicate the DOCX pass uses. An ordinary Document Studio memo prints as
+// itself in both exports; the two never drift.
+func renderResearchReportPrintHTML(artifact meetingMemoryEntry) string {
+	renderer := newReportPrintRenderer(artifact)
+	doc := researchReportBrandedDocumentFor(artifact)
+	research := researchReportBrandedArtifact(artifact)
+	organization := html.EscapeString(doc.Brand.Organization)
 
 	var page strings.Builder
 	page.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
-	page.WriteString("<title>" + html.EscapeString(title) + " · Stride</title>")
+	page.WriteString("<title>" + html.EscapeString(doc.Title) + " · " + organization + "</title>")
 	page.WriteString("<style>" + reportPrintCSS + "</style></head><body>")
 
 	page.WriteString("<header class=\"masthead\">")
-	page.WriteString("<div class=\"brand\"><span class=\"mark\" aria-hidden=\"true\">▲</span>")
-	page.WriteString("<span class=\"wordmark\">Stride</span>")
-	page.WriteString("<span class=\"kicker\">RESEARCH BRIEF</span></div>")
-	page.WriteString("<h1 class=\"title\">" + html.EscapeString(title) + "</h1>")
-	page.WriteString("<div class=\"meta\"><span>" + html.EscapeString(date) + "</span>")
-	if requestedBy != "" {
-		page.WriteString("<span>Requested by " + html.EscapeString(requestedBy) + "</span>")
+	page.WriteString("<div class=\"brand\">")
+	if wordmark, ok := researchReportWordmarkDataURI(doc.Brand.Organization); ok {
+		// A background-image span rather than <img>: the print document must
+		// never contain a live <img tag (the hostile-markdown law pins that).
+		page.WriteString("<span class=\"wordmark-image\" role=\"img\" aria-label=\"" + organization + "\" style=\"background-image:url(" + html.EscapeString(wordmark) + ")\"></span>")
+	} else {
+		page.WriteString("<span class=\"wordmark\">" + organization + "</span>")
 	}
-	if worker != "" {
-		page.WriteString("<span>" + html.EscapeString(worker) + "</span>")
+	if research {
+		page.WriteString("<span class=\"kicker\">" + html.EscapeString(doc.Kicker) + "</span>")
 	}
 	page.WriteString("</div>")
-	if gateResult != "" {
-		page.WriteString("<div class=\"gate\"><span class=\"gate-label\">Gate result</span>" + renderer.inlineHTML(gateResult) + "</div>")
+	page.WriteString("<div class=\"hairline\" aria-hidden=\"true\"></div>")
+	page.WriteString("<section class=\"cover\">")
+	page.WriteString("<h1 class=\"title\">" + html.EscapeString(doc.Title) + "</h1>")
+	page.WriteString("<p class=\"prepared\">Prepared for " + organization + "</p>")
+	page.WriteString("<div class=\"meta\"><span>" + html.EscapeString(doc.Brand.Date) + "</span>")
+	if doc.RequestedBy != "" {
+		page.WriteString("<span>Requested by " + html.EscapeString(doc.RequestedBy) + "</span>")
 	}
-	if len(searchTags) > 0 {
+	if doc.Worker != "" {
+		page.WriteString("<span>" + html.EscapeString(doc.Worker) + "</span>")
+	}
+	page.WriteString("</div></section>")
+	if doc.GateResult != "" {
+		page.WriteString("<div class=\"gate\"><span class=\"gate-label\">Gate result</span>" + renderer.inlineHTML(doc.GateResult) + "</div>")
+	}
+	if len(doc.SearchTags) > 0 {
 		page.WriteString("<div class=\"tags\">")
-		for _, tag := range searchTags {
+		for _, tag := range doc.SearchTags {
 			page.WriteString("<span class=\"tag\">" + html.EscapeString(tag) + "</span>")
 		}
 		page.WriteString("</div>")
 	}
 	page.WriteString("</header>")
 
-	page.WriteString("<main class=\"report\">" + renderer.bodyHTML(body) + "</main>")
+	titled := 0
+	for _, section := range doc.Sections {
+		if section.Title != "" {
+			titled++
+		}
+	}
+	if research && titled > 0 {
+		page.WriteString("<nav class=\"contents\"><h2>Contents</h2><ol>")
+		for _, section := range doc.Sections {
+			if section.Title == "" {
+				continue
+			}
+			page.WriteString("<li class=\"contents-level-" + strconv.Itoa(maxInt(section.Level, 2)) + "\"><a href=\"#" + html.EscapeString(section.Anchor) + "\">" + renderer.inlineHTML(section.Title) + "</a></li>")
+		}
+		page.WriteString("</ol></nav>")
+	}
 
-	page.WriteString("<footer class=\"colophon\">Generated by Scout · Stride · workinstride.xyz · " + html.EscapeString(date) + "</footer>")
+	page.WriteString("<main class=\"report\">")
+	for _, section := range doc.Sections {
+		body := section.Content
+		if section.Title != "" {
+			body = strings.Repeat("#", maxInt(section.Level, 2)) + " " + section.Title + "\n\n" + body
+		}
+		sectionHTML := renderer.bodyHTML(body)
+		if section.Anchor != "" {
+			sectionHTML = strings.Replace(sectionHTML, "<section>", "<section id=\""+html.EscapeString(section.Anchor)+"\">", 1)
+		}
+		page.WriteString(sectionHTML)
+	}
+	if research {
+		page.WriteString("<section class=\"sources\" id=\"sources-appendix\"><h2>Sources appendix</h2>")
+		if len(doc.Sources) == 0 {
+			page.WriteString("<p>No verified external sources were recorded on this report.</p>")
+		} else {
+			if !doc.SourcesVerified {
+				page.WriteString("<p class=\"sources-note\">" + html.EscapeString(researchReportUnverifiedSourcesNote) + "</p>")
+			}
+			page.WriteString("<ol>")
+			for _, source := range doc.Sources {
+				label := firstNonEmptyString(strings.TrimSpace(source.Title), source.URL)
+				row := "<li>" + html.EscapeString(label) + " <a href=\"" + html.EscapeString(source.URL) + "\">" + html.EscapeString(source.URL) + "</a>"
+				if !source.Verified {
+					row += " <span class=\"sources-unverified\">unverified</span>"
+				}
+				page.WriteString(row + "</li>")
+			}
+			page.WriteString("</ol>")
+		}
+		page.WriteString("</section>")
+	}
+	page.WriteString("</main>")
+
+	page.WriteString("<footer class=\"colophon\">" + html.EscapeString(doc.Colophon) + "</footer>")
 	page.WriteString("</body></html>")
 	return page.String()
 }
@@ -308,9 +697,34 @@ func (renderer *reportPrintRenderer) bodyHTML(body string) string {
 	index := 0
 	for index < len(lines) {
 		line := lines[index]
-		if strings.TrimSpace(line) == "" {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
 			flushParagraph()
 			index++
+			continue
+		}
+		// Fence before every other block, exactly as compileBody orders it: a
+		// fenced block is opaque, so a `#` comment inside ``` is code and not
+		// an <h2>, and the delimiter lines are the fence rather than two
+		// paragraphs of backticks. Without this the PDF disagreed with its own
+		// Contents nav, which is built from researchReportSections — and that
+		// splitter already refuses to split inside a fence.
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			flushParagraph()
+			fence := trimmed[:3]
+			index++
+			code := []string{}
+			for index < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[index]), fence) {
+				code = append(code, lines[index])
+				index++
+			}
+			if index < len(lines) {
+				index++
+			}
+			openSection()
+			// Code is never inline-rendered: a `*` or `[x](y)` inside a fence
+			// is source text, not markup.
+			out.WriteString("<pre><code>" + html.EscapeString(strings.Join(code, "\n")) + "</code></pre>")
 			continue
 		}
 		if reportPrintTableRowPattern.MatchString(line) && index+1 < len(lines) && reportPrintTableSepPattern.MatchString(lines[index+1]) {
@@ -690,8 +1104,21 @@ const reportPrintCSS = `:root{color-scheme:light}
 body{font-family:"Google Sans Flex",-apple-system,"Segoe UI",sans-serif;font-size:11pt;line-height:1.55;color:#1a1d23;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .masthead{padding-bottom:14pt;border-bottom:1.5pt solid #1a1d23;margin-bottom:16pt}
 .brand{display:flex;align-items:baseline;gap:5pt;margin-bottom:16pt}
-.brand .mark{color:#ff5a19;font-size:9pt;line-height:1}
 .brand .wordmark{font-weight:700;font-size:10.5pt;letter-spacing:.01em}
+.brand .wordmark-image{display:block;height:11pt;width:64pt;background-repeat:no-repeat;background-size:contain;background-position:left center;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.hairline{height:1.5pt;background:#ff5a19;margin:0 0 18pt}
+.cover{margin:0 0 6pt}
+.prepared{margin-top:6pt;font-size:11pt;color:#3c424e}
+.contents{margin:0 0 18pt;padding:10pt 12pt;border:.5pt solid #d8dce4;border-radius:4pt;background:#f7f8fa;page-break-inside:avoid;break-inside:avoid}
+.contents h2{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7.5pt;letter-spacing:.16em;text-transform:uppercase;color:#6a7180;margin:0 0 6pt}
+.contents ol{margin:0;padding-left:16pt;font-size:9.5pt;line-height:1.5}
+.contents li.contents-level-3{margin-left:12pt;font-size:9pt}
+.contents a{color:#1a1d23;text-decoration:none}
+.sources{margin-top:18pt;padding-top:10pt;border-top:.5pt solid #d8dce4}
+.sources ol{font-size:9pt;line-height:1.5;padding-left:16pt}
+.sources a{color:#6a7180;word-break:break-all}
+.sources-note{font-size:8.5pt;line-height:1.45;color:#6a7180;margin:0 0 6pt}
+.sources-unverified{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7pt;letter-spacing:.1em;text-transform:uppercase;color:#8a6032;border:.5pt solid #e2c9a8;border-radius:3pt;padding:.5pt 3pt;margin-left:3pt}
 .brand .kicker{margin-left:auto;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:7.5pt;letter-spacing:.18em;color:#6a7180}
 .title{font-size:22pt;line-height:1.15;font-weight:700;letter-spacing:-.015em;max-width:36ch}
 .meta{margin-top:8pt;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:8pt;letter-spacing:.04em;color:#6a7180;font-variant-numeric:tabular-nums}
@@ -711,6 +1138,8 @@ body{font-family:"Google Sans Flex",-apple-system,"Segoe UI",sans-serif;font-siz
 .report li>ul,.report li>ol{margin:3pt 0 2pt;padding-left:15pt}
 .report blockquote{margin:0 0 8pt;padding:3pt 10pt;border-left:1.5pt solid #d8dce4;color:#4c5261}
 .report code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:9.5pt;background:#f1f3f7;border-radius:2pt;padding:.5pt 3pt}
+.report pre{margin:0 0 9pt;padding:6pt 8pt;background:#f1f3f7;border-radius:3pt;white-space:pre-wrap;word-break:break-word;page-break-inside:avoid;break-inside:avoid}
+.report pre code{display:block;font-size:8.5pt;line-height:1.45;background:none;border-radius:0;padding:0}
 .report a{color:#1a1d23;text-decoration:underline;text-decoration-thickness:.5pt;text-underline-offset:2pt}
 .report-image{display:block;width:100%;margin:8pt 0 11pt;page-break-inside:avoid;break-inside:avoid}
 .report-image--width-25{width:25%}.report-image--width-50{width:50%}.report-image--width-75{width:75%}.report-image--width-100{width:100%}

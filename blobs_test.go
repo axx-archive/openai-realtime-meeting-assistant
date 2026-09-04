@@ -721,6 +721,18 @@ func TestBlobSweepAdminActionDryRunThenDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// a walker-gap blob: mentioned only under a metadata key the reference
+	// walk does not collect — "sweep now" must not delete it either
+	gapBody := []byte("scene bytes stored under a key the walker does not know")
+	gapRef, err := putBlob(gapBody, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, appended, err := app.memory.appendOSArtifact("artifact-admin-gap", "# Deck\n\nBody.", map[string]string{
+		"title": "Deck", "mode": "design", "futureSceneRef": gapRef,
+	}); err != nil || !appended {
+		t.Fatalf("append gap artifact: appended=%v err=%v", appended, err)
+	}
 
 	sweep := func(body string, cookies []*http.Cookie) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/assistant/admin/blobs/sweep", strings.NewReader(body))
@@ -744,8 +756,8 @@ func TestBlobSweepAdminActionDryRunThenDelete(t *testing.T) {
 		t.Fatalf("dry run status=%d body=%s", dry.Code, dry.Body.String())
 	}
 	dryPayload := decodeJSON(t, dry)
-	if dryPayload["dryRun"] != true || dryPayload["scanned"] != float64(2) || dryPayload["unreferenced"] != float64(1) || dryPayload["deleted"] != float64(0) || dryPayload["deletedBytes"] != float64(0) {
-		t.Fatalf("dry run payload=%v, want scanned=2 unreferenced=1 deleted=0 deletedBytes=0", dryPayload)
+	if dryPayload["dryRun"] != true || dryPayload["scanned"] != float64(3) || dryPayload["unreferenced"] != float64(2) || dryPayload["deleted"] != float64(0) || dryPayload["deletedBytes"] != float64(0) || dryPayload["protected"] != float64(1) {
+		t.Fatalf("dry run payload=%v, want scanned=3 unreferenced=2 deleted=0 protected=1", dryPayload)
 	}
 	if _, _, err := getBlob(orphanRef); err != nil {
 		t.Fatalf("dry run deleted the orphan: %v", err)
@@ -756,14 +768,36 @@ func TestBlobSweepAdminActionDryRunThenDelete(t *testing.T) {
 		t.Fatalf("sweep status=%d body=%s", real.Code, real.Body.String())
 	}
 	realPayload := decodeJSON(t, real)
-	if realPayload["dryRun"] != false || realPayload["unreferenced"] != float64(1) || realPayload["deleted"] != float64(1) || realPayload["deletedBytes"] != float64(len(orphanBody)) {
-		t.Fatalf("sweep payload=%v, want unreferenced=1 deleted=1 deletedBytes=%d", realPayload, len(orphanBody))
+	if realPayload["dryRun"] != false || realPayload["unreferenced"] != float64(2) || realPayload["deleted"] != float64(1) || realPayload["deletedBytes"] != float64(len(orphanBody)) || realPayload["protected"] != float64(1) || realPayload["forced"] != false {
+		t.Fatalf("sweep payload=%v, want unreferenced=2 deleted=1 (orphan only) protected=1", realPayload)
 	}
 	if _, _, err := getBlob(orphanRef); err == nil {
 		t.Fatal("orphan survived the immediate admin sweep")
 	}
 	if _, _, err := getBlob(keptRef); err != nil {
 		t.Fatalf("referenced Drive blob deleted by the admin sweep: %v", err)
+	}
+	if _, _, err := getBlob(gapRef); err != nil {
+		t.Fatalf("mentioned-but-uncollected blob deleted by the admin sweep: %v", err)
+	}
+
+	// force needs a reason; with one it is the only override
+	if recorder := sweep(`{"dryRun":false,"force":true}`, admin); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("force without a reason status=%d, want 400", recorder.Code)
+	}
+	if _, _, err := getBlob(gapRef); err != nil {
+		t.Fatalf("reasonless force deleted the protected blob: %v", err)
+	}
+	forced := sweep(`{"dryRun":false,"force":true,"reason":"walker extended in the next release; scene re-rendered"}`, admin)
+	if forced.Code != http.StatusOK {
+		t.Fatalf("forced sweep status=%d body=%s", forced.Code, forced.Body.String())
+	}
+	forcedPayload := decodeJSON(t, forced)
+	if forcedPayload["deleted"] != float64(1) || forcedPayload["deletedBytes"] != float64(len(gapBody)) || forcedPayload["forced"] != true || forcedPayload["protected"] != float64(0) {
+		t.Fatalf("forced payload=%v, want the protected blob deleted", forcedPayload)
+	}
+	if _, _, err := getBlob(gapRef); err == nil {
+		t.Fatal("forced sweep left the protected blob")
 	}
 }
 
@@ -895,5 +929,149 @@ func TestBlobReferenceWalkersAndPutBlobWithCap(t *testing.T) {
 	}
 	if !blobInlineSafeMimes["video/webm"] || !blobInlineSafeMimes["audio/webm"] {
 		t.Fatal("webm media must be inline-safe for Meeting Record playback")
+	}
+}
+
+// 2026-09-02: a blob referenced ONLY through a metadata key the reference
+// walk does not know (the deck-scene class of bug) is flagged by the mention
+// audit, reported by the founder route with a producer guess, and never
+// deleted by the weekly job even on its second sighting.
+func TestBlobSweepReportFlagsRefMentionedOnlyByUnknownMetadataKey(t *testing.T) {
+	setupAuthTestEnv(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	// a legitimately referenced Drive row keeps the walk's fail-safe (rows but
+	// no refs) out of the picture
+	keptRef, err := putBlob([]byte("referenced drive upload beside the mystery"), "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := app.memory.appendEntry(meetingMemoryKindFile, "file-report-kept", "File kept.txt uploaded.", map[string]string{
+		"name": "kept.txt", "blobRef": keptRef, "mime": "text/plain", "uploaderEmail": "tim@shareability.com",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mysteryRef, err := putBlob([]byte("bytes a new producer stored under a key the walker does not know"), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, appended, err := app.memory.appendOSArtifact("artifact-mystery-producer", "# Deck\n\nBody.", map[string]string{
+		"title": "Deck", "mode": "design", "futureSceneRef": mysteryRef,
+	}); err != nil || !appended {
+		t.Fatalf("append artifact: appended=%v err=%v", appended, err)
+	}
+	orphanRef, err := putBlob([]byte("a genuine orphan nobody mentions"), "image/jpeg")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mentions, _ := blobRefMentions(app, blobRefSet([]string{mysteryRef, orphanRef}))
+	if hits := mentions[mysteryRef]; len(hits) != 1 || hits[0].Kind != meetingMemoryKindOSArtifact || hits[0].ID != "artifact-mystery-producer" || hits[0].Key != "futureSceneRef" {
+		t.Fatalf("mystery mentions=%+v, want the unknown metadata key flagged", hits)
+	}
+	if _, mentioned := mentions[orphanRef]; mentioned {
+		t.Fatalf("orphan reported a mention: %+v", mentions[orphanRef])
+	}
+	if guess := blobProducerGuess(mentions[mysteryRef]); guess != "artifact metadata futureSceneRef" {
+		t.Fatalf("producer guess=%q", guess)
+	}
+
+	// weekly job: first sighting (dry run) then second a week later — the
+	// mentioned ref is protected, the true orphan is deleted.
+	start := time.Date(2026, 9, 2, 3, 0, 0, 0, time.UTC)
+	if _, ran, err := app.runScheduledBlobSweep(start); err != nil || !ran {
+		t.Fatalf("first run ran=%v err=%v", ran, err)
+	}
+	state, err := loadBlobSweepState()
+	if err != nil || len(state.PendingRefs) != 2 {
+		t.Fatalf("state=%+v err=%v, want both refs pending after the first sighting", state, err)
+	}
+	report, ran, err := app.runScheduledBlobSweep(start.Add(blobSweepInterval))
+	if err != nil || !ran {
+		t.Fatalf("second run ran=%v err=%v", ran, err)
+	}
+	if report.Deleted != 1 || len(report.DeletedRefs) != 1 || report.DeletedRefs[0] != orphanRef {
+		t.Fatalf("second run report=%+v, want only the unmentioned orphan deleted", report)
+	}
+	if _, _, err := getBlob(mysteryRef); err != nil {
+		t.Fatalf("mentioned-but-uncollected blob was deleted: %v", err)
+	}
+	if _, _, err := getBlob(keptRef); err != nil {
+		t.Fatalf("referenced blob was deleted: %v", err)
+	}
+
+	// founder route: pending refs with producer guesses; members and the
+	// signed-out get nothing.
+	get := func(query string, cookies []*http.Cookie) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/assistant/admin/blobs/sweep?"+query, nil)
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		recorder := httptest.NewRecorder()
+		adminBlobSweepHandler(recorder, req)
+		return recorder
+	}
+	if recorder := get("pending=1", nil); recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("signed-out report status=%d, want 401", recorder.Code)
+	}
+	if recorder := get("pending=1", loginAs(t, "tim@shareability.com", "B0NFIRE!")); recorder.Code != http.StatusForbidden {
+		t.Fatalf("member report status=%d, want 403", recorder.Code)
+	}
+	founder := loginAs(t, "aj@shareability.com", "B0NFIRE!")
+	if recorder := get("", founder); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("report without a mode status=%d, want 400", recorder.Code)
+	}
+	recorder := get("pending=1", founder)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("founder report status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		OK                      bool             `json:"ok"`
+		PendingCount            int              `json:"pendingCount"`
+		MentionedButUncollected int              `json:"mentionedButUncollected"`
+		Refs                    []blobPendingRef `json:"refs"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode report: %v", err)
+	}
+	if !payload.OK || payload.PendingCount != 1 || payload.MentionedButUncollected != 1 || len(payload.Refs) != 1 {
+		t.Fatalf("report=%+v, want the protected ref still pending and flagged", payload)
+	}
+	row := payload.Refs[0]
+	if row.Ref != mysteryRef || !row.Mentioned || row.Producer != "artifact metadata futureSceneRef" || row.Size == 0 || row.Mime != "image/png" || row.CreatedAt == "" {
+		t.Fatalf("report row=%+v", row)
+	}
+
+	// read-only report mode: a fresh orphan is sighted, nothing deleted, the
+	// two-sighting state untouched
+	t.Setenv(blobSweepReportOnlyEnv, "1")
+	secondOrphan, _ := putBlob([]byte("second orphan under report-only"), "image/jpeg")
+	stateBefore, _ := os.ReadFile(blobSweepStatePath())
+	report, ran, err = app.runScheduledBlobSweep(start.Add(3 * blobSweepInterval))
+	if err != nil || !ran || report.Deleted != 0 || report.Unreferenced != 2 {
+		t.Fatalf("report-only run ran=%v err=%v report=%+v, want a dry run over both refs", ran, err, report)
+	}
+	stateAfter, _ := os.ReadFile(blobSweepStatePath())
+	if string(stateBefore) != string(stateAfter) {
+		t.Fatal("report-only mode wrote the sweep state")
+	}
+	if _, _, err := getBlob(secondOrphan); err != nil {
+		t.Fatalf("report-only mode deleted a blob: %v", err)
+	}
+	scan := get("scan=1", founder)
+	if scan.Code != http.StatusOK || !strings.Contains(scan.Body.String(), secondOrphan) || !strings.Contains(scan.Body.String(), `"reportOnlyMode":true`) {
+		t.Fatalf("scan report status=%d body=%s", scan.Code, scan.Body.String())
+	}
+}
+
+func TestScanBlobRefTokens(t *testing.T) {
+	ref := strings.Repeat("ab", 32)
+	var found []string
+	scanBlobRefTokens("see /artifacts/blob/"+ref+" and "+ref+ref+" and "+strings.ToUpper(ref)+" then "+ref, func(hit string) { found = append(found, hit) })
+	if len(found) != 2 || found[0] != ref || found[1] != ref {
+		t.Fatalf("found=%v, want exactly the two 64-hex runs (not the 128-run, not uppercase)", found)
 	}
 }

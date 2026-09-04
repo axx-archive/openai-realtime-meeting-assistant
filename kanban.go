@@ -123,6 +123,14 @@ type roomRecordingState struct {
 	StatusRevision uint64 `json:"statusRevision"`
 	UpdatedAt      string `json:"updatedAt,omitempty"`
 	UpdatedBy      string `json:"updatedBy,omitempty"`
+	// Capturing is the field the green pill was missing. Enabled + Connected
+	// both stayed true through the 2026-09-02 blackout because they describe
+	// intent and a websocket, not capture. Capturing is false only while the
+	// stall watchdog holds this room stalled.
+	Capturing     bool   `json:"capturing"`
+	StalledSince  string `json:"stalledSince,omitempty"`
+	LastSegmentAt string `json:"lastSegmentAt,omitempty"`
+	StallReason   string `json:"stallReason,omitempty"`
 }
 
 type meetingArchive struct {
@@ -949,6 +957,9 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 	// Wave 8 D5: chat-native extractor — channel/riff rows digest per thread
 	// (channel_digest.go) instead of riding the meeting brain prompt.
 	app.startChannelDigestWorker(apiKey)
+	// Wave 11 D12: the Scout follow-up watcher reads replies to Scout's own
+	// messages and decides reply / act / stay silent (scout_followup_watcher.go).
+	app.startScoutFollowupWatcher(apiKey)
 	// Track-2 Wave 3 (amendment A1): the entity ledger consolidates each landed
 	// meeting_digest's facts — plus new decision-ledger rows — into the
 	// canonical cross-meeting registry of decisions / action items / topics /
@@ -972,12 +983,35 @@ func (app *kanbanBoardApp) JoinConferenceRoom() error {
 // by an explicit, sitting-scoped invitation through the room-agent control
 // plane; ordinary admission must never silently add an AI participant.
 func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
+	// Publish the memory sitting snapshot and its media identity under one
+	// lifecycle read lease. Manual archive and idle close take the write lease
+	// while they rotate the meeting id and media generation; without this
+	// pairing, an admission could read the predecessor id, lose the race to a
+	// rollover that leaves mediaActor nil, then re-mint the predecessor after
+	// the successor was already durable. The forward-only divergence repair
+	// below cannot protect that nil-actor seam because there is no live identity
+	// for it to compare.
+	app.meetingLifecycleMu.RLock()
 	sittingID := ""
 	if app.memory != nil {
 		sittingID = app.memory.currentMeetingID(officeRoomID)
 	}
+	if officeMediaAfterSittingSnapshotProbe != nil {
+		officeMediaAfterSittingSnapshotProbe()
+	}
 	app.mu.Lock()
 	state := app.roomLiveLocked(officeRoomID)
+	// A live media identity that no longer names the room's current sitting is
+	// always the fingerprint of a teardown that was skipped, and it is never
+	// harmless: every downstream fence compares its own scope against
+	// state.mediaSittingID, so an inherited id silently DROPS the whole
+	// sitting's transcript (rememberTranscriptWithScopeAndSegmentAndSource
+	// returns on the sitting gate) and fences off Scout invitation, the
+	// meeting specialists and STRIDE temporal projection. Retire it here so
+	// the mint below rebuilds the plane against the sitting that is actually
+	// live; reassigning the id alone would leave the transcription lane's
+	// captured scope stale and keep dropping source.
+	rollover := app.retireDivergedOfficeMediaLocked(state, sittingID)
 	if state.mediaActor == nil {
 		state.mediaGen++
 		// Generation zero is reserved exclusively for the legacy
@@ -988,6 +1022,9 @@ func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
 		}
 		state.mediaActor = actorForRoomGeneration(officeRoomID, state.mediaGen)
 		state.mediaSittingID = sittingID
+		// A new office sitting starts the transcript capture census at zero so
+		// a /readyz drop reading names THIS meeting and not the last one.
+		resetTranscriptCaptureLocked(state)
 	}
 	generation := state.mediaGen
 	mediaSittingID := state.mediaSittingID
@@ -999,6 +1036,13 @@ func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
 	}
 	laneToken := app.transcriptionStartToken
 	app.mu.Unlock()
+	app.meetingLifecycleMu.RUnlock()
+	// Potentially blocking peer/lane/socket teardown for the retired identity
+	// runs outside app.mu, exactly as the manual-archive path does, and is a
+	// no-op on the ordinary idempotent call. Any callback still in flight for
+	// the retired sitting fails the exact sitting+generation checks and can
+	// neither be accepted nor re-labelled onto the successor.
+	app.finishOfficeMediaAfterManualArchive(rollover)
 	if roomMixer != nil {
 		roomMixer.setActivityListener(&roomAudioActivityListener{app: app, roomID: officeRoomID, sittingID: mediaSittingID, generation: generation})
 	}
@@ -1014,6 +1058,78 @@ func (app *kanbanBoardApp) ensureOfficeMedia() uint64 {
 		app.mu.Unlock()
 	}
 	return generation
+}
+
+// Deterministic test seam for the snapshot-to-publication lifecycle fence.
+// Nil in production.
+var officeMediaAfterSittingSnapshotProbe func()
+
+// retireDivergedOfficeMediaLocked retires an office media identity that is
+// still live but no longer names the sitting the memory store says is current,
+// so ensureOfficeMedia's mint can republish the plane against the live
+// sitting. The caller holds app.mu; the returned rollover carries the blocking
+// transport teardown, which the caller runs after releasing it.
+//
+// A divergence is never normal: the idle-end close chain retires the media
+// identity with the sitting (teardownOfficeMediaAfterIdle) and manual archive
+// republishes it (rolloverOfficeMediaAfterManualArchiveLocked), so reaching
+// admission with a stale identity means one of those releases was skipped
+// upstream. It is logged rather than healed quietly for exactly that reason.
+//
+// Only a strictly newer sitting retires a live identity. Sitting ids are the
+// fixed-width, lexically sortable meeting-<UTC date>-<UTC time>-<nanos> minted
+// by the memory store, so "sorts after" is "minted later", and the ordering
+// makes the decision safe against the snapshot race: ensureOfficeMedia reads
+// the current sitting id before it takes app.mu (the memory store's lock must
+// never be taken under app.mu — its transcript hooks reach back the other
+// way), so a caller holding an older snapshot must not be allowed to retire a
+// successor another admission already published. An empty current id likewise
+// never retires anything: releasing a live plane is teardown's decision, not
+// admission's.
+func (app *kanbanBoardApp) retireDivergedOfficeMediaLocked(state *roomLiveState, sittingID string) officeManualArchiveMediaRollover {
+	if app == nil || state == nil || state.mediaActor == nil {
+		return officeManualArchiveMediaRollover{}
+	}
+	previousSittingID := strings.TrimSpace(state.mediaSittingID)
+	sittingID = strings.TrimSpace(sittingID)
+	if previousSittingID == sittingID {
+		return officeManualArchiveMediaRollover{}
+	}
+	if sittingID == "" || sittingID <= previousSittingID {
+		log.Warnf("office_media_sitting_divergence room=%s media_sitting=%q current_sitting=%q gen=%d action=declined — the current sitting id does not sort after the live media identity; leaving the media plane alone", officeRoomID, previousSittingID, sittingID, state.mediaGen)
+		return officeManualArchiveMediaRollover{}
+	}
+	log.Warnf("office_media_sitting_divergence room=%s media_sitting=%q current_sitting=%q gen=%d action=retired — the office media plane outlived its sitting, so an earlier media release was skipped; capture for the live sitting was being dropped until now", officeRoomID, previousSittingID, sittingID, state.mediaGen)
+	if previousSittingID != "" {
+		// The proven path: it retires the identity, drops the lane so its
+		// successor captures the live sitting, moves the generation and clears
+		// the dead sitting's attribution and Scout requester bindings.
+		if rollover := app.rolloverOfficeMediaAfterManualArchiveLocked(previousSittingID, sittingID); rollover.changed {
+			return rollover
+		}
+	}
+	// An unanchored identity (minted before the room had a sitting id at all)
+	// has no previous sitting for that rollover to retire, so retire it here
+	// behind the same fences. Nothing can have been captured under it: every
+	// persistence gate compares against a non-empty sitting id.
+	oldGeneration := state.mediaGen
+	lane := app.transcriptLane
+	app.transcriptLane = nil
+	app.transcriptionStartToken++
+	app.transcriptionStarting = false
+	mediaActor := state.mediaActor
+	state.mediaActor = nil
+	state.mediaSittingID = ""
+	state.pendingAttributionWindows = nil
+	state.currentSpeechStartedAt = time.Time{}
+	state.currentSpeechStoppedAt = time.Time{}
+	state.activeSpeakerName = ""
+	state.activeSpeakerCandidate = ""
+	state.activeSpeakerCandidateAt = time.Time{}
+	state.activeSpeakerPayload = nil
+	closeRoomMediaActorOwned(officeRoomID, mediaActor)
+	app.clearOfficeScoutRequesterBindingsLocked()
+	return officeManualArchiveMediaRollover{oldGeneration: oldGeneration, lane: lane, changed: true}
 }
 
 // ensureOfficeRealtimePeer starts the office Scout peer when none is live.
@@ -6168,7 +6284,7 @@ func visibleMeetingMemoryEntries(entries []meetingMemoryEntry, limit int) []meet
 		// reflections, and cursor stubs stay recall/bookkeeping material: the
 		// briefing surfaces read digests through the range helpers, not this
 		// feed. None of them are timeline entries.
-		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == memoryContextKindCompanyConversation || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindChannelDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog || isMeetingDigestKind(entry.Kind) {
+		if entry.Kind == meetingMemoryKindScoutChat || entry.Kind == memoryContextKindCompanyConversation || entry.Kind == meetingMemoryKindCodexProposal || entry.Kind == meetingMemoryKindMissionInsight || entry.Kind == meetingMemoryKindDecision || entry.Kind == meetingMemoryKindDecisionPass || entry.Kind == meetingMemoryKindPackage || entry.Kind == meetingMemoryKindDealRoom || entry.Kind == meetingMemoryKindFile || entry.Kind == meetingMemoryKindReflection || entry.Kind == meetingMemoryKindDayDigestPass || entry.Kind == meetingMemoryKindChannelDigestPass || entry.Kind == meetingMemoryKindLedgerEvent || entry.Kind == meetingMemoryKindLedgerPass || entry.Kind == meetingMemoryKindNarrative || entry.Kind == meetingMemoryKindRunLog || entry.Kind == meetingMemoryKindPackagingIntake || entry.Kind == meetingMemoryKindScoutFollowupPass || entry.Kind == meetingMemoryKindScoutFollowupState || isMeetingDigestKind(entry.Kind) {
 			continue
 		}
 		visible = append(visible, entry)
@@ -8075,6 +8191,11 @@ func (app *kanbanBoardApp) startParticipantLivenessSweeper() {
 			sweepAbandonedMeetingRecordingUploads()
 		}
 	}()
+	// The capture-stall watchdog needs a finer tick than participant liveness
+	// (the recovery ladder's steps are 5s apart), so it runs on its own timer —
+	// started here, from the one place that is boot-only and never reached by
+	// the test constructor.
+	app.startTranscriptCaptureWatchdog()
 }
 
 // activeParticipantCount reports the room's live seat count (multi-room W3:
@@ -8414,6 +8535,8 @@ func (app *kanbanBoardApp) setTranscriptRecordingInRoom(roomID string, enabled b
 		app.scoutLastToolResultAt = time.Time{}
 		app.scoutLastToolResultName = ""
 	}
+	sittingID := state.mediaSittingID
+	updatedAt := state.recordingUpdatedAt
 	snapshot := app.roomSnapshotLockedForRoom(state, configuredMeetingRoomCapacity())
 	app.mu.Unlock()
 	if changed && lane != nil {
@@ -8421,7 +8544,55 @@ func (app *kanbanBoardApp) setTranscriptRecordingInRoom(roomID string, enabled b
 		// commits, and provider callbacks from the prior epoch cannot cross it.
 		lane.resetSourcesForRecordingEpoch(epoch)
 	}
+	if changed {
+		app.recordRecordingToggleAudit(roomID, sittingID, updatedBy, enabled, epoch, updatedAt)
+	}
 	return snapshot
+}
+
+// recordRecordingToggleAudit writes the durable, recall-hidden audit row for a
+// recording transition (Fix 5).
+//
+// Before this, setTranscriptRecordingInRoom mutated in-memory state only:
+// recordingUpdatedAt and recordingUpdatedBy were never persisted, and the sole
+// durable trace of a toggle was recordingEpoch stamped on transcript rows.
+// That was enough to prove two toggles happened inside the 2026-09-02 blackout
+// and not enough to say when, or by whom — which is exactly why the "someone
+// turned recording off" hypothesis could not be closed. Best-effort: an audit
+// write must never block or fail the toggle itself.
+func (app *kanbanBoardApp) recordRecordingToggleAudit(roomID, sittingID, actor string, enabled bool, epoch uint64, at time.Time) {
+	if app == nil || app.memory == nil {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = scoutParticipantName
+	}
+	action := "off"
+	if enabled {
+		action = "on"
+	}
+	metadata := map[string]string{
+		relevanceMetadataKey: relevanceExpired,
+		"roomId":             roomID,
+		"actor":              actor,
+		"enabled":            strconv.FormatBool(enabled),
+		"recordingEpoch":     strconv.FormatUint(epoch, 10),
+		"toggledAt":          at.UTC().Format(time.RFC3339Nano),
+		"source":             "recording_toggle",
+	}
+	if strings.TrimSpace(sittingID) != "" {
+		metadata["meetingId"] = strings.TrimSpace(sittingID)
+	}
+	text := fmt.Sprintf("Meeting recording turned %s in %s by %s (epoch %d).", action, roomID, actor, epoch)
+	id := fmt.Sprintf("recording-audit-%s-%d-%d", roomID, epoch, at.UTC().UnixNano())
+	if _, _, err := app.memory.appendAmbientEntry(meetingMemoryKindRecordingAudit, id, text, metadata); err != nil {
+		log.Errorf("Failed to record recording-toggle audit room=%s epoch=%d: %v", roomID, epoch, err)
+	}
 }
 
 func roomRecordingAnnouncementText(recording roomRecordingState) string {
@@ -8461,6 +8632,14 @@ func (app *kanbanBoardApp) roomRecordingStateLocked(room *roomLiveState) roomRec
 		Revision:       room.recordingEpoch,
 		StatusRevision: room.recordingStatusRevision,
 		UpdatedBy:      room.recordingUpdatedBy,
+		Capturing:      room.captureStalledSince.IsZero(),
+		StallReason:    room.captureStallReason,
+	}
+	if !room.captureStalledSince.IsZero() {
+		state.StalledSince = room.captureStalledSince.UTC().Format(time.RFC3339Nano)
+	}
+	if !room.captureStallLastSegment.IsZero() {
+		state.LastSegmentAt = room.captureStallLastSegment.UTC().Format(time.RFC3339Nano)
 	}
 	if !room.recordingUpdatedAt.IsZero() {
 		state.UpdatedAt = room.recordingUpdatedAt.UTC().Format(time.RFC3339Nano)

@@ -1142,7 +1142,9 @@ func (app *kanbanBoardApp) adjudicateLedgerAmbiguities(ctx context.Context, apiK
 		Input:           buildLedgerAdjudicationInput(pairs, working, now),
 		ReasoningEffort: meetingBrainReasoningEffort(),
 		Verbosity:       "low",
-		MaxOutputTokens: entityLedgerMaxOutputTokens,
+		// The truncation retry (runLedgerConsolidationPass) threads a raised
+		// budget down through the context for a single-digest window.
+		MaxOutputTokens: ambientOutputBudget(ctx, entityLedgerMaxOutputTokens),
 	})
 	if err != nil {
 		return nil, err
@@ -1189,7 +1191,24 @@ func (app *kanbanBoardApp) runLedgerConsolidationPass(ctx context.Context, apiKe
 		// direct callers (a future boundary flush) get a safe no-op.
 		return meetingMemoryEntry{}, nil
 	}
+	// Wave 8 D11 follow-up: the pass's single adjudication call rides the shared
+	// truncation recovery (ambient_truncation.go). Consolidation is all-or-nothing
+	// and lands nothing before adjudication returns, so re-running the whole
+	// window body with half the digests (or a raised budget for a single digest)
+	// is side-effect free; a head that still truncates is skipped and surfaced
+	// as stuckInputs instead of holding the cursor for a four-strike circuit.
+	outcome, err := ambientWindowWithTruncationRecovery(app, entityLedgerAgent(), inputs, entityLedgerMaxOutputTokens, func(window []meetingMemoryEntry, maxOutputTokens int) (meetingMemoryEntry, error) {
+		return app.runLedgerConsolidationWindow(withAmbientOutputBudget(ctx, maxOutputTokens), apiKey, window, responder, now)
+	})
+	if err != nil {
+		return meetingMemoryEntry{}, err
+	}
+	return outcome.Value, nil
+}
 
+// runLedgerConsolidationWindow is the pass body over one exact window; see
+// runLedgerConsolidationPass for the truncation envelope around it.
+func (app *kanbanBoardApp) runLedgerConsolidationWindow(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder, now time.Time) (meetingMemoryEntry, error) {
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	current := contextApp.memory.latestDigestPerMeeting()
 	seenKeys := map[string]bool{}
@@ -1408,6 +1427,13 @@ func (app *kanbanBoardApp) consolidateLedgerFacts(ctx context.Context, apiKey st
 	if len(ambiguities) > 0 {
 		verdicts, err := app.adjudicateLedgerAmbiguities(ctx, apiKey, responder, ambiguities, working, now)
 		if err != nil {
+			if isAmbientTruncation(err) {
+				// A truncated verdict list over a wide window must not mint every
+				// pair as ADD: nothing has landed yet, so hand the truncation to
+				// the pass envelope (runLedgerConsolidationPass), which re-runs
+				// the body over half the digests.
+				return 0, err
+			}
 			log.Errorf("%s adjudication failed (%d pair(s) fall back to add): %v", entityLedgerAgentName, len(ambiguities), err)
 			verdicts = nil
 		}

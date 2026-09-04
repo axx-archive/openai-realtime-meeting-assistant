@@ -188,6 +188,10 @@ func (app *kanbanBoardApp) buildMissionIntelInput(inputs []meetingMemoryEntry, g
 	return builder.String()
 }
 
+// missionIntelMaxOutputTokens is the insight's output envelope; the truncation
+// retry may raise it once for a single-brain window (ambient_truncation.go).
+const missionIntelMaxOutputTokens = 900
+
 func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	if strideE10TenantCutoverEnabled() {
 		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
@@ -195,18 +199,28 @@ func (app *kanbanBoardApp) produceMissionInsight(ctx context.Context, apiKey str
 	roomID := ambientWindowRoomID(inputs)
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	model := meetingBrainModel()
-	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:           model,
-		Seat:            seatMissionIntel,
-		Instructions:    missionIntelInstructions(),
-		Input:           contextApp.buildMissionIntelInput(inputs, time.Now().UTC()),
-		ReasoningEffort: meetingBrainReasoningEffort(),
-		Verbosity:       "low",
-		MaxOutputTokens: 900,
+	// Wave 8 D11 follow-up (ambient_truncation.go): max_output_truncation
+	// halves the brain window once (or raises the budget for a single brain)
+	// before the stuck head is skipped — production wedged this worker for
+	// hours on one brain input behind a four-strike provider circuit.
+	outcome, err := ambientWindowWithTruncationRecovery(app, missionIntelligenceAgent(), inputs, missionIntelMaxOutputTokens, func(window []meetingMemoryEntry, maxOutputTokens int) (string, error) {
+		return responder(ctx, apiKey, openAITextRequest{
+			Model:           model,
+			Seat:            seatMissionIntel,
+			Instructions:    missionIntelInstructions(),
+			Input:           contextApp.buildMissionIntelInput(window, time.Now().UTC()),
+			ReasoningEffort: meetingBrainReasoningEffort(),
+			Verbosity:       "low",
+			MaxOutputTokens: maxOutputTokens,
+		})
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
+	if outcome.Skipped {
+		return meetingMemoryEntry{}, nil
+	}
+	inputs, text := outcome.Inputs, outcome.Value
 	insight, cleanText, ok := parseMissionInsight(text)
 	if !ok {
 		// Never persist unparseable output: the cursor stays put, so the

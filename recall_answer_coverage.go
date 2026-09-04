@@ -22,6 +22,21 @@ import (
 	"time"
 )
 
+// answerDigestOnlyCoverageComplete re-checks every derive() condition except
+// the raw lane for a digest-only answer: authorized sources, the requested
+// range fully resolved, every source fresh.
+func answerDigestOnlyCoverageComplete(coverage RecallCoverage) bool {
+	if coverage.AuthorizedSources == 0 || !coverage.ResolvedStartUTC.Equal(coverage.RequestedStartUTC) || !coverage.ResolvedEndUTC.Equal(coverage.RequestedEndUTC) {
+		return false
+	}
+	for _, source := range coverage.Sources {
+		if source.Status != RecallSourceFresh {
+			return false
+		}
+	}
+	return true
+}
+
 // answerRecallCoverage grades one answer's evidence.
 func (app *kanbanBoardApp) answerRecallCoverage(query string, matches []meetingMemoryMatch, contextEntries []meetingMemoryEntry, now time.Time) RecallCoverage {
 	if now.IsZero() {
@@ -147,6 +162,17 @@ func (app *kanbanBoardApp) answerRecallCoverage(query string, matches []meetingM
 		}
 	}
 	coverage.Status = deriveRecallCoverageStatus(coverage)
+	if coverage.Status == RecallCoveragePartial && digestLane && !rawLane && answerDigestOnlyCoverageComplete(coverage) {
+		// A current digest is the T2 rollup of the raw evidence it folded: an
+		// answer composed entirely from fresh digests that resolve the
+		// requested range is complete coverage. deriveRecallCoverageStatus
+		// requires the raw lane because raw is the retrieval PLANNER's primary;
+		// for an answer the pinned digest lane is primary and raw is simply not
+		// required — production graded exactly this shape (digest lane pinned,
+		// lexical band empty) as partial with an empty reason.
+		coverage.Lanes.Raw = RecallLaneNotRequired
+		coverage.Status = RecallCoverageComplete
+	}
 	if coverage.Status != RecallCoverageComplete {
 		coverage.Reason = brainCoverageReason(coverage)
 		if strings.TrimSpace(coverage.Reason) == "" {

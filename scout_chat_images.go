@@ -42,6 +42,9 @@ type scoutChatImageRef struct {
 	GenerationID      string `json:"generationId,omitempty"`
 	ReplacesMessageID string `json:"replacesMessageId,omitempty"`
 	SavedToFiles      bool   `json:"savedToFiles,omitempty"`
+	// Retention (Wave 11 D18): same contract as scoutChatFileAttachment.
+	ExpiresAt string `json:"expiresAt,omitempty"`
+	Expired   bool   `json:"expired,omitempty"`
 }
 
 type scoutChatImageGenerationState struct {

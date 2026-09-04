@@ -1519,6 +1519,7 @@ modelRoute:
 	// so the routing verdict carries honest provenance.
 	routerProvenance := &providerCallProvenanceCapture{}
 	ctx = withProviderCallProvenanceCapture(ctx, routerProvenance)
+	routerStarted := time.Now()
 	response, err := createOpenAITextResponse(ctx, apiKey, openAITextRequest{
 		Model:           model,
 		Seat:            seatRouter,
@@ -1530,6 +1531,9 @@ modelRoute:
 		MaxOutputTokens: scoutRouterMaxTokens,
 		JSONSchema:      scoutRouterJSONSchema(),
 	})
+	// Pairs with memory_query.go "Scout answer timing" (2026-09-02): the
+	// router runs in the chat turn before the answer path, so it is timed here.
+	log.Infof("Scout router timing: routerMs=%d model=%s effort=%s failed=%t", time.Since(routerStarted).Milliseconds(), model, effort, err != nil)
 	if err != nil {
 		log.Errorf("Scout router turn failed: %v", err)
 		recordCapabilityFailure(capabilityTypedScoutRouter, time.Now().UTC(), err)

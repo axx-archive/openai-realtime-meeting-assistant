@@ -864,7 +864,9 @@ func documentDOCXExportHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	title := strings.TrimSpace(artifact.Metadata["title"])
-	docx, err := compileDocumentDOCX(documentStudioDocumentFromEntry(artifact).Markdown, title, allowedRefs, func(ref string) ([]byte, string, error) {
+	// Research reports export through the same branded render pass the PDF
+	// uses (report_print.go): cover, contents, sources appendix, colophon.
+	docx, err := compileDocumentDOCX(documentExportMarkdown(artifact), title, allowedRefs, func(ref string) ([]byte, string, error) {
 		if _, allowed := allowedRefs[ref]; !allowed {
 			return nil, "", fmt.Errorf("image is not attached")
 		}

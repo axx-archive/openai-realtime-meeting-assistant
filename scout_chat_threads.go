@@ -53,6 +53,10 @@ type scoutConversationMessageRequest struct {
 	ToolTemplate        string                    `json:"toolTemplate"`
 	OperationID         string                    `json:"operationId"`
 	ProjectContextToken string                    `json:"projectContextToken"`
+	// Clarifying carries structured answers to a Packaging Studio intake's
+	// clarifying questions (Wave 11 D13 pills): {commissionId, answers:
+	// [{id, value}]}. Optional; free reply text is parsed as well.
+	Clarifying *scoutChatClarifyingAnswers `json:"clarifying"`
 	// ContextRefs are client-declared Drive attachments for the work this turn
 	// may start (Wave 5 D8): {ref: "file|<id>", sourceId?, sourceRevision?}.
 	// Decoded through decodeWorkRequestContextRefs; the launcher re-authorizes
@@ -73,7 +77,7 @@ func decodeScoutConversationMessageRequest(w http.ResponseWriter, r *http.Reques
 	allowed := map[string]bool{
 		"text": true, "files": true, "replyToMessageId": true,
 		"followUpArtifactId": true, "toolTemplate": true, "operationId": true,
-		"projectContextToken": true, "contextRefs": true,
+		"projectContextToken": true, "contextRefs": true, "clarifying": true,
 	}
 	for key := range object {
 		if !allowed[key] {
@@ -265,6 +269,14 @@ type scoutChatFileAttachment struct {
 	Width    int     `json:"width,omitempty"`
 	Height   int     `json:"height,omitempty"`
 	Duration float64 `json:"duration,omitempty"`
+	// Retention (Wave 11 D18, chat_media_retention.go): ExpiresAt is stamped
+	// on the first sighting past the retention window (visible so clients can
+	// warn), Expired flips when the body is deleted — the message and this
+	// record's Text stay — and Keep is the explicit "never expire" flag.
+	// A body saved to Drive is permanent through the Drive row, not a flag.
+	ExpiresAt string `json:"expiresAt,omitempty"`
+	Expired   bool   `json:"expired,omitempty"`
+	Keep      bool   `json:"keep,omitempty"`
 }
 
 type scoutChatThreadRef struct {
@@ -867,6 +879,12 @@ type scoutChatMessageRecord struct {
 	// posts (goal_manifest.go). Same law again: persisted DATA the client
 	// renders, so reloads show the same card.
 	Manifest *scoutChatManifest `json:"manifest,omitempty"`
+	// Clarifying carries the Packaging Studio intake's clarifying questions
+	// (Wave 11 D11, packaging_intake.go) on a threaded Scout reply: the
+	// commission id, the numbered questions, and pill options where a
+	// question is closed-ended. DATA the client renders; answers arrive as an
+	// ordinary reply (text and/or the request's `clarifying.answers`).
+	Clarifying *scoutChatClarifying `json:"clarifying,omitempty"`
 	// Image carries a generated concept render (Kind "image", card 096): the
 	// content-addressed blob ref plus its filed artifact id, so the picture
 	// renders inline via the session-gated /artifacts/blob route on every
@@ -1944,6 +1962,7 @@ func assistantChatThreadHandler(w http.ResponseWriter, r *http.Request) {
 		})
 		// Wave 5 D8: Drive refs ride the request context into the one launch seam.
 		messageContext = withWorkRequestContextRefs(messageContext, payload.ContextRefs)
+		messageContext = withPackagingIntakeAnswers(messageContext, payload.Clarifying)
 		if encodedToken := strings.TrimSpace(payload.ProjectContextToken); encodedToken != "" {
 			tokenDigest := homeProjectTokenDigest(encodedToken)
 			acceptedRetry := kanbanApp.acceptedScoutProjectTurnRetry(user, threadID, operationID, bodyDigest, tokenDigest)
@@ -3763,6 +3782,30 @@ func (app *kanbanBoardApp) appendScoutChatThreadMessageWithReplyAndTool(ctx cont
 		}
 		response["thread"] = saved
 		return response, nil
+	}
+
+	// Wave 11 D11: an UNDER-SPECIFIED packaging work ask (research /
+	// presentation / document / story) becomes a Packaging Studio commission.
+	// Missing brief facts that change the output are asked ONCE as a threaded
+	// reply on this message; answers in that thread complete the brief and
+	// launch (private) or mint the existing public proposal card.
+	//
+	// The gate keeps this a fallback rather than a pre-empt: a hired agent's own
+	// direct thread, a realtime voice turn, and any turn whose sources are
+	// already bound stay on the route they had before this seam existed.
+	if intakeResponse, handled := app.packagingIntakeTurn(ctx, user, thread, userMessage, files, sourceNeed.ContextRefs, packagingIntakeGate{
+		TargetedAgentWork: targetedAgentWork,
+		AgentDirectThread: coworkerProfileAvailable,
+		SourceBound:       sourceNeed.Required || sourceNeed.Work || len(sourceNeed.ContextRefs) > 0,
+	}, commitUserMessage); handled {
+		return intakeResponse, nil
+	}
+	// Wave 11 Story Studio: a message in the requester's own private thread
+	// bound to a story outline is a workshop turn (revise → version → Scout's
+	// diff-summary reply). The intake above owns a NEW packaging ask first;
+	// this never runs for a turn the intake handled, and never both.
+	if storyResponse, handled := app.packagingStoryThreadTurn(ctx, user, thread, userMessage, commitUserMessage); handled {
+		return storyResponse, nil
 	}
 
 	// An ordinary private conversation that explicitly asks for a time-ranged

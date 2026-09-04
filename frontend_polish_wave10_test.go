@@ -68,19 +68,21 @@ func TestPolishWave10LightRampAndButtonHierarchy(t *testing.T) {
 		}
 	}
 	// ember for text goes through --ember-text; the two light-mode failures
-	// the contrast probe found were raw Stride Orange on putty. The second one
-	// used to be the thread row's mono STRIDE badge; AJ cut that badge on
-	// 2026-09-02 (pinned channels wear the ember title alone), so the mono
-	// half of the contract is pinned on the chat unread seam instead — same
-	// rule, still ember-on-mono, still through the token.
+	// the contrast probe found were raw Stride Orange on putty
+	// AJ 2026-09-02 cut the mono STRIDE badge from the pinned channels ("both pinned channels wear ember — no dot, no STRIDE badge"), so the mono half of the contract re-pins on the chat unread seam, the surface that still carries ember text in the mono label type.
 	for _, want := range []string{
 		".chat-thread-item__title--bonfire-chat {\n        color: var(--ember-text);",
-		"#chatTool .desktop-chat-unread {",
-		"color: var(--ember-text);\n        font: var(--type-label);",
+		// the mono half is real only while the label type stays mono
 		"--type-label: 500 11px/1.2 var(--font-mono);",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("ember-text contract missing %q", want)
+		}
+	}
+	unread := polishWave10Section(t, html, "#chatTool .desktop-chat-unread {", "}")
+	for _, want := range []string{"color: var(--ember-text);", "font: var(--type-label);"} {
+		if !strings.Contains(unread, want) {
+			t.Errorf("the chat unread seam is ember TEXT in mono, through the token: missing %q in %s", want, unread)
 		}
 	}
 	eyebrow := polishWave10Section(t, html, ".studio-project-detail__eyebrow {", ".studio-project-detail__title-row")

@@ -73,7 +73,8 @@ func TestIndexWorkHubLiveListAndRailCount(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<span id="workRailBadge" class="pd1-primary-nav__count" hidden aria-label="">0</span>`,
-		`data-pd1-destination="Work" aria-label="Work"`,
+		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
+		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
 		"function syncWorkRailBadge()",
 		"workRailBadge.hidden = count === 0",
 		"['queued', 'running'].includes(String(project?.status || ''))",
@@ -122,8 +123,8 @@ func TestIndexWorkHubSaveToFilesOrder(t *testing.T) {
 	for _, want := range []string{
 		"artifactSaveToFilesControl(project.result, {",
 		"qualified: true",
-		"readyLabel: 'Save to Files'",
-		"savedLabel: 'Saved to Files'",
+		"readyLabel: 'Save to Drive'", // Wave 11 D7: Drive is the destination's name
+		"savedLabel: 'Saved to Drive'",
 	} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("Work detail Save to Files missing %q", want)

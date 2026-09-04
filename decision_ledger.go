@@ -764,27 +764,40 @@ func (app *kanbanBoardApp) detectDecisionReversals(ctx context.Context, apiKey s
 	return targets
 }
 
+// decisionLedgerMaxOutputTokens is the extraction's output envelope; the
+// truncation retry may raise it once for a single-brain window.
+const decisionLedgerMaxOutputTokens = 700
+
 func (app *kanbanBoardApp) produceDecisionLedgerPass(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) (meetingMemoryEntry, error) {
 	if strideE10TenantCutoverEnabled() {
 		return meetingMemoryEntry{}, ErrStrideE10TenantAuthorityStale
 	}
 	contextApp := app.scopedRecallApp(ctx, ambientServicePrincipalForInputs(inputs))
 	model := meetingBrainModel()
-	text, err := responder(ctx, apiKey, openAITextRequest{
-		Model:        model,
-		Seat:         seatDecisionLedger,
-		Instructions: decisionLedgerInstructions(),
-		Input:        contextApp.buildDecisionLedgerInput(inputs, time.Now().UTC()),
-		// Use the shared maximum-by-default brain dial: the ledger judges firm vs
-		// directional commitment and emits exact-shape JSON, where low reasoning
-		// effort punishes discrimination most.
-		ReasoningEffort: meetingBrainReasoningEffort(),
-		Verbosity:       "low",
-		MaxOutputTokens: 700,
+	// Wave 8 D11 follow-up (ambient_truncation.go): truncation halves the brain
+	// window once (or raises the budget for a single brain) before the stuck
+	// head is skipped — never a four-strike provider circuit.
+	outcome, err := ambientWindowWithTruncationRecovery(app, decisionLedgerAgent(), inputs, decisionLedgerMaxOutputTokens, func(window []meetingMemoryEntry, maxOutputTokens int) (string, error) {
+		return responder(ctx, apiKey, openAITextRequest{
+			Model:        model,
+			Seat:         seatDecisionLedger,
+			Instructions: decisionLedgerInstructions(),
+			Input:        contextApp.buildDecisionLedgerInput(window, time.Now().UTC()),
+			// Use the shared maximum-by-default brain dial: the ledger judges firm vs
+			// directional commitment and emits exact-shape JSON, where low reasoning
+			// effort punishes discrimination most.
+			ReasoningEffort: meetingBrainReasoningEffort(),
+			Verbosity:       "low",
+			MaxOutputTokens: maxOutputTokens,
+		})
 	})
 	if err != nil {
 		return meetingMemoryEntry{}, err
 	}
+	if outcome.Skipped {
+		return meetingMemoryEntry{}, nil
+	}
+	inputs, text := outcome.Inputs, outcome.Value
 	extraction, ok := parseDecisionLedgerOutput(text)
 	if !ok {
 		// Never advance the cursor on unparseable output: with no decision_pass

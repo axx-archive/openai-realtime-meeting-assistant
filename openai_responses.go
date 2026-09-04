@@ -478,6 +478,9 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 	started := time.Now()
 	recordWire := func(usage *openAIResponsesUsage, wireSuccess bool, accepted bool, reason string, serviceTier string, callErr error) {
 		captureAmbientReplayUsage(ctx, usage, accepted)
+		if capture := providerUsageCaptureFromContext(ctx); capture != nil {
+			capture.observe(usage)
+		}
 		entry := llmUsageEntry{
 			Provider:             providerOpenAI,
 			Model:                model,

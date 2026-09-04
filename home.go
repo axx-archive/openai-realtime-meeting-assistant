@@ -292,6 +292,10 @@ func homeConversationIsOwnerOnlyPrivate(metadata map[string]string) bool {
 	if strings.TrimSpace(metadata["table"]) == "true" {
 		return false
 	}
+	// - system "meetings" → the permanent #meetings recap channel
+	if strings.TrimSpace(metadata["system"]) != "" {
+		return false
+	}
 	return true
 }
 

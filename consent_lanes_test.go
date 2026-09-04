@@ -961,3 +961,245 @@ func TestWithdrawalNotificationsCannotDropWhenQueuesAreSaturated(t *testing.T) {
 		close(lane.stop)
 	})
 }
+
+/* ---------- Fix 3: bounded last-known-good fence grace ---------- */
+
+// TestConsentRefreshGraceHoldsThenGivesUp pins both halves of Fix 3. A failed
+// refresh no longer throws away a fence that is still inside its own validity
+// window, and the hold is bounded: after three consecutive failures the map is
+// emptied and the room's census records why.
+func TestConsentRefreshGraceHoldsThenGivesUp(t *testing.T) {
+	app := newIsolatedKanbanBoardApp(t)
+	binding := consentLaneTestBinding("user-grace", officeRoomID, "sitting-grace")
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
+	authority.CaptureCutoff = func() (uint64, error) { return 0, nil }
+	installConsentAuthorityForTest(t, authority)
+	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription} {
+		grantConsentScope(t, authority, binding, scope)
+	}
+	decision, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+	if err != nil || !decision.Allowed {
+		t.Fatalf("authorize=%+v err=%v", decision, err)
+	}
+	capture, err := authority.Authorize(context.Background(), binding, ConsentLaneAudioCapture)
+	if err != nil || !capture.Allowed {
+		t.Fatalf("capture authorize=%+v err=%v", capture, err)
+	}
+
+	// app == nil is the failure arm: refresh() cannot reach the authority at
+	// all, which is the shape a durable-store outage takes.
+	gate := &consentAudioIngressGate{
+		authority: authority, app: nil, principal: CanonicalPrincipalRef{Kind: "guest", ID: binding.PrincipalID},
+		roomID: officeRoomID, stop: make(chan struct{}), done: make(chan struct{}),
+		fences: map[ConsentLane]ConsentFence{
+			ConsentLaneAudioCapture:  capture.Fence,
+			ConsentLaneTranscription: decision.Fence,
+		},
+	}
+
+	for attempt := 1; attempt <= consentIngressFenceGraceAttempts; attempt++ {
+		gate.refresh()
+		gate.mu.RLock()
+		held := len(gate.fences)
+		gate.mu.RUnlock()
+		if held != 2 {
+			t.Fatalf("attempt %d emptied the fence map (held=%d); a still-valid fence was discarded early", attempt, held)
+		}
+	}
+	gate.refresh()
+	gate.mu.RLock()
+	held := len(gate.fences)
+	gate.mu.RUnlock()
+	if held != 0 {
+		t.Fatalf("grace did not give up after %d failures (held=%d); the bound is not a bound", consentIngressFenceGraceAttempts, held)
+	}
+
+	// The give-up is recorded, not silent. This is the line whose absence made
+	// consent starvation indistinguishable from every other cause.
+	app.noteTranscriptFenceCleared(officeRoomID)
+	app.mu.Lock()
+	drops := app.roomLiveLocked(officeRoomID).transcriptFrameDrops[transcriptDropFenceRefresh]
+	app.mu.Unlock()
+	if drops == 0 {
+		t.Fatal("emptying the fence map recorded no fence_refresh_failed drop")
+	}
+}
+
+// TestConsentRefreshGraceIsWallClockBoundedToo proves the grace cannot be
+// stretched by a slow failure cadence: three seconds ends it regardless of how
+// few attempts have been made.
+func TestConsentRefreshGraceIsWallClockBoundedToo(t *testing.T) {
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
+	gate := &consentAudioIngressGate{
+		authority: authority, roomID: officeRoomID, stop: make(chan struct{}), done: make(chan struct{}),
+		fences:          map[ConsentLane]ConsentFence{ConsentLaneTranscription: {lane: ConsentLaneTranscription}},
+		failedRefreshes: 1,
+		graceStartedAt:  time.Now().Add(-consentIngressFenceGraceWindow - time.Second),
+	}
+	gate.refresh()
+	gate.mu.RLock()
+	held := len(gate.fences)
+	gate.mu.RUnlock()
+	if held != 0 {
+		t.Fatalf("fences survived past the %s wall-clock grace (held=%d)", consentIngressFenceGraceWindow, held)
+	}
+}
+
+// TestConsentGraceCannotExtendAuthorization is the consent argument, executed.
+// A held fence is still rejected the instant it passes its own staleness
+// window, so the grace removes a gratuitous mute without widening the window
+// in which a withdrawal could go unnoticed by even one millisecond.
+func TestConsentGraceCannotExtendAuthorization(t *testing.T) {
+	binding := consentLaneTestBinding("user-stale", officeRoomID, "sitting-stale")
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
+	authority.CaptureCutoff = func() (uint64, error) { return 0, nil }
+	installConsentAuthorityForTest(t, authority)
+	for _, scope := range []ConsentScope{ConsentAudioCapture, ConsentTranscription} {
+		grantConsentScope(t, authority, binding, scope)
+	}
+	capture, err := authority.Authorize(context.Background(), binding, ConsentLaneAudioCapture)
+	if err != nil || !capture.Allowed {
+		t.Fatalf("capture authorize=%+v err=%v", capture, err)
+	}
+	transcription, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+	if err != nil || !transcription.Allowed {
+		t.Fatalf("transcription authorize=%+v err=%v", transcription, err)
+	}
+
+	gate := &consentAudioIngressGate{
+		authority: authority, roomID: officeRoomID, stop: make(chan struct{}), done: make(chan struct{}),
+		fences: map[ConsentLane]ConsentFence{
+			ConsentLaneAudioCapture:  capture.Fence,
+			ConsentLaneTranscription: transcription.Fence,
+		},
+	}
+	if _, ok := gate.admittedFences(); !ok {
+		t.Fatal("a fresh fence was not admitted")
+	}
+
+	// Age the held fences past the staleness window without refreshing them —
+	// exactly what the grace does during an authority outage.
+	gate.mu.Lock()
+	for lane, fence := range gate.fences {
+		fence.issuedAt = fence.issuedAt.Add(-2*consentIngressRefreshInterval - time.Second)
+		gate.fences[lane] = fence
+	}
+	gate.mu.Unlock()
+	gate.refresh() // failure arm: the map is HELD, still stale
+	if _, ok := gate.admittedFences(); ok {
+		t.Fatal("a held-but-stale fence was admitted; the grace widened the consent window")
+	}
+	gate.mu.RLock()
+	stale := gate.fences[ConsentLaneTranscription]
+	gate.mu.RUnlock()
+	if err := authority.ValidateIngressFence(stale); !errors.Is(err, ErrConsentFenceStale) {
+		t.Fatalf("held fence validation err=%v, want ErrConsentFenceStale", err)
+	}
+
+	// And a withdrawal still invalidates instantly through the generation
+	// check, independent of staleness or grace.
+	fresh, err := authority.Authorize(context.Background(), binding, ConsentLaneTranscription)
+	if err != nil || !fresh.Allowed {
+		t.Fatalf("re-authorize=%+v err=%v", fresh, err)
+	}
+	if err := authority.ValidateIngressFence(fresh.Fence); err != nil {
+		t.Fatalf("fresh fence rejected: %v", err)
+	}
+	if _, err := authority.RecordDecision(context.Background(), binding, ConsentTranscription, ConsentWithdrawn); err != nil {
+		t.Fatal(err)
+	}
+	if err := authority.ValidateIngressFence(fresh.Fence); err == nil {
+		t.Fatal("a withdrawn fence still validated; revocation is no longer immediate")
+	}
+}
+
+// TestConsentRefreshTimeoutCannotOutliveItsStalenessWindow pins the numeric
+// relationship that made a single slow authority call mute a whole meeting for
+// five seconds.
+func TestConsentRefreshTimeoutCannotOutliveItsStalenessWindow(t *testing.T) {
+	if consentIngressRefreshTimeout >= consentAuthorityLockTimeout {
+		t.Fatalf("refresh timeout %s is not tighter than the shared authority budget %s", consentIngressRefreshTimeout, consentAuthorityLockTimeout)
+	}
+	// The staleness window is 2 refresh intervals. A refresh may not block for
+	// meaningfully longer than that, or a single slow call reintroduces the
+	// mute-the-whole-room cliff.
+	if consentIngressRefreshTimeout > 3*consentIngressRefreshInterval {
+		t.Fatalf("refresh timeout %s exceeds 3 refresh intervals (%s); a slow call outlives the fence it feeds", consentIngressRefreshTimeout, 3*consentIngressRefreshInterval)
+	}
+}
+
+// TestConsentGraceWarnIsLatchedNotPerAttempt bounds the log rate of a failing
+// or flapping consent authority. refresh() runs every 250ms, so a line per
+// failed attempt is a sustained storm — and the storm buries the one line
+// (consent_ingress_fences_cleared) that actually names a starved room.
+func TestConsentGraceWarnIsLatchedNotPerAttempt(t *testing.T) {
+	authority := NewConsentLaneAuthority(NewMemoryConsentStore(), "policy-v1")
+	held := map[ConsentLane]ConsentFence{ConsentLaneTranscription: {lane: ConsentLaneTranscription}}
+	// app == nil is the failure arm: refresh() cannot reach the authority at
+	// all, which is the shape a durable-store outage takes.
+	gate := &consentAudioIngressGate{
+		authority: authority, app: nil, roomID: officeRoomID,
+		stop: make(chan struct{}), done: make(chan struct{}),
+		fences: map[ConsentLane]ConsentFence{ConsentLaneTranscription: {lane: ConsentLaneTranscription}},
+	}
+
+	for attempt := 1; attempt <= consentIngressFenceGraceAttempts; attempt++ {
+		gate.refresh()
+	}
+	gate.mu.RLock()
+	notices, attempts := gate.graceWarnNotices, gate.failedRefreshes
+	gate.mu.RUnlock()
+	if attempts != consentIngressFenceGraceAttempts {
+		t.Fatalf("failedRefreshes=%d, want %d; the grace bound stopped counting", attempts, consentIngressFenceGraceAttempts)
+	}
+	if notices != 1 {
+		t.Fatalf("grace warned %d times in %d failed refreshes, want 1 on entry", notices, attempts)
+	}
+
+	// A flap must not re-announce. This is the exact success transition
+	// production runs, and the latch has to survive it: alternating
+	// success/failure at the refresh cadence would otherwise put the line back
+	// at up to 4/second.
+	now := time.Now()
+	gate.mu.Lock()
+	gate.applyRefreshSuccessLocked(now, held)
+	gate.mu.Unlock()
+	gate.refresh()
+	gate.mu.RLock()
+	notices = gate.graceWarnNotices
+	gate.mu.RUnlock()
+	if notices != 1 {
+		t.Fatalf("a flapping authority re-announced the grace warn (%d notices); the latch has no hysteresis", notices)
+	}
+
+	// A gate that has been healthy for longer than the quiet window is a new
+	// episode, and a new episode IS worth a line.
+	gate.mu.Lock()
+	gate.graceLastFailureAt = now.Add(-consentIngressGraceWarnQuietWindow - time.Second)
+	gate.applyRefreshSuccessLocked(now, held)
+	gate.mu.Unlock()
+	gate.refresh()
+	gate.mu.RLock()
+	notices = gate.graceWarnNotices
+	gate.mu.RUnlock()
+	if notices != 2 {
+		t.Fatalf("grace notices=%d after a genuinely quiet recovery, want 2; a real new outage must not be swallowed", notices)
+	}
+
+	// A change of failure level is announced even while latched: the reason is
+	// the payload of the line.
+	gate.mu.Lock()
+	gate.fences = held
+	gate.mu.Unlock()
+	gate.app = newIsolatedKanbanBoardApp(t)
+	gate.refresh()
+	gate.mu.RLock()
+	notices, failure := gate.graceWarnNotices, gate.graceWarnedFailure
+	gate.mu.RUnlock()
+	if failure != "no_active_sitting" {
+		t.Fatalf("failure level=%q, want no_active_sitting", failure)
+	}
+	if notices != 3 {
+		t.Fatalf("grace notices=%d after the failure changed level, want 3", notices)
+	}
+}

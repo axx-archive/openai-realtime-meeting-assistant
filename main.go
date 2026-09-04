@@ -1243,6 +1243,7 @@ func main() {
 	// admin blob GC action (blobs.go).
 	http.HandleFunc("/assistant/admin/accounts", adminAccountsHandler)
 	http.HandleFunc("/assistant/admin/blobs/sweep", adminBlobSweepHandler)
+	http.HandleFunc("/assistant/admin/storage", adminStorageHandler)
 	http.HandleFunc("/api/artifact-dispositions/v1", artifactDispositionHandler)
 	http.HandleFunc("/api/artifact-drive-saves/v1", artifactDriveSaveHandler)
 	registerSTRIDERuntimeRoutes(http.DefaultServeMux)
@@ -1282,6 +1283,16 @@ func main() {
 	http.HandleFunc("/artifacts/export-pdf", artifactExportPDFHandler)
 	http.HandleFunc("/artifacts/export-pptx", deckPPTXExportHandler)
 	http.HandleFunc("/artifacts/export-docx", documentDOCXExportHandler)
+	// Wave 11 (Packaging Studio): commissions, story outlines, project tags,
+	// and the one duplicate door — three-registry rule (authorization_surfaces.go
+	// row + guest_allowlist_test.go probe) for every route.
+	http.HandleFunc("/assistant/packaging/commissions", packagingCommissionsHandler)
+	http.HandleFunc("/assistant/packaging/commissions/", packagingCommissionHandler)
+	http.HandleFunc("/assistant/packaging/stories", packagingStoriesHandler)
+	http.HandleFunc("/assistant/packaging/stories/", packagingStoryHandler)
+	http.HandleFunc("/assistant/projects", assistantProjectsHandler)
+	http.HandleFunc("/artifacts/project", artifactProjectHandler)
+	http.HandleFunc("/artifacts/duplicate", artifactDuplicateHandler)
 	http.HandleFunc("/calendar/event.ics", calendarICSHandler)
 	http.HandleFunc("/calendar/meetings.ics", calendarMeetingsICSHandler)
 	http.HandleFunc("/internal/render/jobs/result", internalRenderRunnerResultHandler)
@@ -2930,7 +2941,17 @@ func assistantRealtimeOfferHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusServiceUnavailable, "Scout voice could not persist its private session")
 		return
 	}
-	recordCapabilityMilestone(capabilityPrivateVoice, "offer_accepted", time.Now().UTC())
+	// Server-owned success evidence. This process made the provider call
+	// itself and is holding the answer SDP, so accepting the offer is the exact
+	// counterpart of the recordCapabilityFailure above — recording only a
+	// milestone here left the private voice lane structurally unable to ever
+	// report healthy. Client beacons stay milestone-only on purpose (see
+	// usage_rollup.go): a signed-in browser must not be able to manufacture a
+	// success timestamp, and this line does not let it — only the server's own
+	// completed negotiation writes it.
+	accepted := time.Now().UTC()
+	recordCapabilitySuccess(capabilityPrivateVoice, accepted)
+	recordCapabilityMilestone(capabilityPrivateVoice, "offer_accepted", accepted)
 
 	writeAuthJSON(w, http.StatusOK, map[string]any{
 		"ok":                true,
@@ -6575,6 +6596,24 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 			announcedAudioPacket := false
 			announcedDecodedAudio := false
 			announcedRTPDetails := false
+			// Audio that arrives for this room and never reaches the mixer.
+			// The census wants exact frame counts and the watchdog wants a
+			// liveness stamp, but neither is worth an app.mu acquisition per
+			// RTP packet, so blocked frames accumulate here (goroutine-local,
+			// no lock) and flush on the first blocked packet and once a second
+			// after that. Nothing is flushed at teardown on purpose: stamping
+			// "audio is arriving" for a track that just ended would hand the
+			// watchdog a liveness signal that is no longer true, and losing at
+			// most one second of counts is the cheaper error.
+			blockedAudioFrames := map[string]uint64{}
+			blockedAudioFlushedAt := time.Time{}
+			flushBlockedAudioFrames := func(at time.Time) {
+				for reason, frames := range blockedAudioFrames {
+					kanbanApp.noteRoomAudioIngressBlocked(connRoomID, reason, frames)
+					delete(blockedAudioFrames, reason)
+				}
+				blockedAudioFlushedAt = at
+			}
 			onTrackStartedAt := time.Now()
 			packetsForwarded := 0
 			payloadBytesForwarded := 0
@@ -6634,6 +6673,29 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) { // nolint
 					}
 					fences, allowed := consentGate.admittedFences()
 					if !allowed || !roomAudioMixer.admitsAnalysis(audioTrackKey) {
+						// The watchdog's liveness signal used to live strictly
+						// DOWNSTREAM of this gate: it was stamped by the mixer
+						// path, which this `continue` skips. So the consent
+						// starvation the watchdog exists to catch produced
+						// zero offered frames, read as a quiet room, and left
+						// the pill green over the hole. Audio arriving for
+						// this room is now recorded here — upstream of consent
+						// — with its reason named in the drop census.
+						//
+						// transcriptFramesOffered is deliberately untouched:
+						// it counts speech-gated MIXER frames and feeds an
+						// accepted/offered ratio that a per-RTP-packet
+						// increment would corrupt. Only the drop census and
+						// the arrival stamp move here.
+						reason := transcriptDropConsentDenied
+						if allowed {
+							reason = transcriptDropMixerSaturated
+						}
+						blockedAudioFrames[reason]++
+						if blockedAt := time.Now(); blockedAudioFlushedAt.IsZero() ||
+							blockedAt.Sub(blockedAudioFlushedAt) >= roomAudioIngressBlockedFlushInterval {
+							flushBlockedAudioFrames(blockedAt)
+						}
 						continue
 					}
 					pcm, decodeErr := decodeOpusToRoomPCM(audioDecoder, audioDecodeBuffer, audioChannels, packet.Payload)

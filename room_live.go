@@ -16,6 +16,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -110,6 +111,36 @@ const (
 	// flipping recording back on.
 	defaultGuestTranscriptionCapMinutes = 120
 	guestTranscriptionCapActor          = "system:guest-cap"
+
+	// ---- transcript capture observability + stall watchdog (2026-09-02 blackout) ----
+	//
+	// transcriptCaptureOfferWindow is how recently the room mixer must have
+	// handed the transcription sink a frame for the watchdog to believe audio
+	// is still being OFFERED. This clause is the entire reason a quiet room
+	// cannot false-trip: mixAudioFrameSetWithActivity only emits activities for
+	// speech-gated sources, so a room where nobody is talking offers zero
+	// frames, lastTranscriptFrameAt goes stale, and the watchdog stays silent.
+	transcriptCaptureOfferWindow = 5 * time.Second
+	// transcriptCaptureStallAfter is how long audio may be offered with nothing
+	// landing before the room stops claiming a green "Live transcription" pill.
+	transcriptCaptureStallAfter = 45 * time.Second
+	// Recovery ladder, measured on the SAME clock as the trip (age of the last
+	// provider completion) so the published numbers mean what they say:
+	// 90s force a synchronous consent refresh (3 tries, 5s apart, through 100s),
+	// 105s rebuild the source child lanes and force a provider reconnect,
+	// 180s give up loudly and HOLD the stalled state. Never silently green.
+	transcriptCaptureLadderRefreshAt = 90 * time.Second
+	transcriptCaptureLadderRetryEach = 5 * time.Second
+	transcriptCaptureLadderRefreshes = 3
+	transcriptCaptureLadderRebuildAt = 105 * time.Second
+	transcriptCaptureLadderGiveUpAt  = 180 * time.Second
+	transcriptCaptureWatchdogTick    = 5 * time.Second
+	// roomAudioIngressBlockedFlushInterval bounds how often the RTP hot path
+	// takes app.mu to report audio it could not hand to the mixer. The exact
+	// frame count is accumulated locally and flushed on this cadence (and on
+	// the first blocked packet), so the census stays exact in frames while the
+	// media path pays one lock per second per track instead of fifty.
+	roomAudioIngressBlockedFlushInterval = time.Second
 )
 
 // roomLiveState owns everything that is per-room at runtime. Guarded by
@@ -158,6 +189,68 @@ type roomLiveState struct {
 	// edge, including provider connect/disconnect refinements that do not change
 	// the hard capture epoch. It is guarded by app.mu and never reused.
 	recordingStatusRevision uint64
+
+	// ---- transcript capture accounting (Fix 1) ----
+	//
+	// Every silent exit on the audio -> transcription-lane hop increments a
+	// per-reason counter here instead of vanishing. Guarded by app.mu like the
+	// rest of this struct; the mixer goroutine already takes app.mu once per
+	// source frame on this path, so no new lock order is introduced.
+	//
+	// transcriptFramesOffered counts frames the mixer HAD for this room
+	// (speech-gated, so silence is not counted); transcriptFramesAccepted
+	// counts the ones the lane actually took.
+	transcriptFramesOffered  uint64
+	transcriptFramesAccepted uint64
+	transcriptFrameDrops     map[string]uint64
+	// lastTranscriptFrameAt is the last frame OFFERED to the sink — stamped
+	// before the fence check, so it means "the mixer still has audio for this
+	// room", never "consent said yes".
+	lastTranscriptFrameAt time.Time
+	// lastAudioIngressAt is the OTHER half of "is audio arriving for this
+	// room", stamped at the RTP seam UPSTREAM of the consent gate. Without it
+	// the watchdog was blind to the exact failure it was built for: consent
+	// starvation drops every packet before the mixer ever sees it, so
+	// lastTranscriptFrameAt never moves, `offering` stays false, and the pill
+	// stays green over the hole. It is deliberately NOT a frame counter — see
+	// noteRoomAudioIngressBlocked for the counter semantics.
+	lastAudioIngressAt       time.Time
+	lastTranscriptDropAt     time.Time
+	lastTranscriptDropReason string
+	// lastTranscriptCommitAt is the last time a provider transcription
+	// COMPLETED for this room. Seeded from the first offered frame so a lane
+	// that never lands anything still has a clock to be judged against.
+	lastTranscriptCommitAt time.Time
+	// transcriptStarving latches the accepting->dropping edge so the drop log
+	// fires once per transition instead of 50 times a second.
+	transcriptStarving      bool
+	transcriptStarvingSince time.Time
+	// transcriptStarveTransitions / transcriptFlowNotices count the edges that
+	// produce a log line, incremented in exactly the branches that log. They
+	// make "transition-only, never per frame" assertable without swapping the
+	// process-wide logger out from under live goroutines.
+	transcriptStarveTransitions uint64
+	transcriptFlowNotices       uint64
+	// transcriptStarvingAccepted snapshots transcriptFramesAccepted at the
+	// moment the latch armed, so "recovered" means frames were accepted AFTER
+	// the drop began — not merely that drops stopped because the room fell
+	// silent.
+	transcriptStarvingAccepted uint64
+
+	// ---- capture-stall watchdog (Fix 2) ----
+	// captureStallTrips counts accepting -> stalled edges, incremented in the
+	// branch that logs the trip.
+	captureStallTrips   uint64
+	captureStalledSince time.Time
+	captureStallReason  string
+	// captureStallRefreshes / captureStallNextAttempt drive ladder step 1;
+	// captureStallRebuilt and captureStallEscalated latch steps 2 and 3 so each
+	// runs once per stall and every step logs exactly once.
+	captureStallRefreshes   int
+	captureStallNextAttempt time.Time
+	captureStallRebuilt     bool
+	captureStallEscalated   bool
+	captureStallLastSegment time.Time
 
 	// speaker attribution + active speaker, fed by THIS room's mixer activity
 	// listener (roomAudioActivityListener).
@@ -852,21 +945,48 @@ func (s *roomLaneAudioSink) WriteMixedPCM(roomPCM []int16) error {
 }
 
 func (s *roomLaneAudioSink) WriteMixedPCMWithConsent(roomPCM []int16, fences []ConsentFence) error {
-	if len(roomPCM) == 0 || pcmIsZero(roomPCM) {
+	// Fix 1: the mixed lane's silent exits are named too. Production routes
+	// transcription through the identity-preserving source sink, but this path
+	// stays reachable and an unnamed drop here would be just as invisible.
+	drop := func(reason string) {
+		if s != nil && s.app != nil && s.lane == ConsentLaneTranscription {
+			s.app.noteTranscriptFrameDropped(s.roomID, reason)
+		}
+	}
+	if len(roomPCM) == 0 {
+		return nil
+	}
+	// Fix 6: this path counted accepted and dropped frames but never OFFERED
+	// ones, so transcriptFramesAccepted could exceed transcriptFramesOffered
+	// and the watchdog's offer window never opened here at all. Stamped before
+	// the zero-PCM and consent checks, mirroring the mixer's source path: it
+	// answers "the sink was handed audio", never "the audio was authorized".
+	if s != nil && s.app != nil && s.lane == ConsentLaneTranscription {
+		s.app.noteTranscriptFrameOffered(s.roomID)
+	}
+	if pcmIsZero(roomPCM) {
+		drop(transcriptDropZeroPCM)
 		return nil
 	}
 	authority := currentConsentLaneAuthority()
 	if len(fences) == 0 {
+		drop(transcriptDropNoFence)
 		return nil
 	}
 	for _, fence := range fences {
-		if fence.lane != s.lane || authority.ValidateIngressFence(fence) != nil {
+		if fence.lane != s.lane {
+			drop(transcriptDropLaneMismatch)
+			return nil
+		}
+		if authority.ValidateIngressFence(fence) != nil {
+			drop(transcriptDropFenceStale)
 			return nil
 		}
 	}
 	switch s.lane {
 	case ConsentLaneTranscription:
 		if !s.app.transcriptRecordingActiveInRoom(s.roomID) {
+			drop(transcriptDropRecordingOff)
 			return nil
 		}
 		s.app.mu.Lock()
@@ -877,8 +997,14 @@ func (s *roomLaneAudioSink) WriteMixedPCMWithConsent(roomPCM []int16, fences []C
 			transcriptLane = s.app.roomLiveLocked(s.roomID).lane
 		}
 		s.app.mu.Unlock()
-		if transcriptLane != nil {
-			transcriptLane.enqueueWithConsent(roomPCM, fences)
+		if transcriptLane == nil {
+			drop(transcriptDropLaneMissing)
+			break
+		}
+		if transcriptLane.enqueueWithConsent(roomPCM, fences) {
+			s.app.noteTranscriptFrameAccepted(s.roomID)
+		} else {
+			drop(transcriptDropQueueFull)
 		}
 	case ConsentLaneModelAnalysis:
 		if normalizeRoomID(s.roomID) == officeRoomID {
@@ -895,16 +1021,28 @@ func (s *roomLaneAudioSink) WriteMixedPCMWithConsent(roomPCM []int16, fences []C
 }
 
 func (s *roomLaneAudioSink) WriteSourcePCMWithConsent(trackKey string, participantName string, roomPCM []int16, fence ConsentFence) error {
-	if s == nil || s.app == nil || s.lane != ConsentLaneTranscription || len(roomPCM) == 0 || pcmIsZero(roomPCM) {
+	if s == nil || s.app == nil || s.lane != ConsentLaneTranscription || len(roomPCM) == 0 {
 		return nil
 	}
-	if fence.lane != ConsentLaneTranscription || currentConsentLaneAuthority().ValidateIngressFence(fence) != nil {
+	// Fix 1: every exit below used to be a bare `return nil`. Each one now
+	// names itself so a 34-minute hole cannot be invisible again.
+	if pcmIsZero(roomPCM) {
+		s.app.noteTranscriptFrameDropped(s.roomID, transcriptDropZeroPCM)
+		return nil
+	}
+	if fence.lane != ConsentLaneTranscription {
+		s.app.noteTranscriptFrameDropped(s.roomID, transcriptDropLaneMismatch)
+		return nil
+	}
+	if currentConsentLaneAuthority().ValidateIngressFence(fence) != nil {
+		s.app.noteTranscriptFrameDropped(s.roomID, transcriptDropFenceStale)
 		return nil
 	}
 	s.app.mu.Lock()
 	state := s.app.roomLiveLocked(s.roomID)
 	if !state.recordingEnabled {
 		s.app.mu.Unlock()
+		s.app.noteTranscriptFrameDropped(s.roomID, transcriptDropRecordingOff)
 		return nil
 	}
 	epoch := state.recordingEpoch
@@ -915,10 +1053,589 @@ func (s *roomLaneAudioSink) WriteSourcePCMWithConsent(trackKey string, participa
 		transcriptLane = state.lane
 	}
 	s.app.mu.Unlock()
-	if transcriptLane != nil {
-		transcriptLane.enqueueSourceWithConsent(trackKey, participantName, roomPCM, fence, epoch)
+	if transcriptLane == nil {
+		s.app.noteTranscriptFrameDropped(s.roomID, transcriptDropLaneMissing)
+		return nil
+	}
+	if transcriptLane.enqueueSourceWithConsent(trackKey, participantName, roomPCM, fence, epoch) {
+		s.app.noteTranscriptFrameAccepted(s.roomID)
+	} else {
+		s.app.noteTranscriptFrameDropped(s.roomID, transcriptDropQueueFull)
 	}
 	return nil
+}
+
+// NoteSourceFrameOffered / NoteSourceFrameDropped let the room mixer report the
+// frames it discards before this sink is ever called. The mixer owns no room
+// identity, so the sink is the seam that maps a dropped frame to a room.
+func (s *roomLaneAudioSink) NoteSourceFrameOffered() {
+	if s == nil || s.app == nil || s.lane != ConsentLaneTranscription {
+		return
+	}
+	s.app.noteTranscriptFrameOffered(s.roomID)
+}
+
+func (s *roomLaneAudioSink) NoteSourceFrameDropped(reason string) {
+	if s == nil || s.app == nil || s.lane != ConsentLaneTranscription {
+		return
+	}
+	s.app.noteTranscriptFrameDropped(s.roomID, reason)
+}
+
+/* ---------- transcript capture accounting + stall watchdog ---------- */
+
+// Drop reasons for the audio -> transcription-lane hop. Before the 2026-09-02
+// blackout every one of these exits was a bare `continue` / `return nil`: no
+// error, no log, no counter. Naming them is the whole point — the next
+// occurrence has to identify itself instead of costing a forensic sweep.
+const (
+	transcriptDropShortFrame   = "short_frame"
+	transcriptDropNoFence      = "no_fence"
+	transcriptDropNoAuthority  = "no_authority"
+	transcriptDropFenceInvalid = "fence_invalid"
+	transcriptDropFenceStale   = "fence_stale"
+	transcriptDropLaneMismatch = "lane_mismatch"
+	transcriptDropRecordingOff = "recording_off"
+	transcriptDropZeroPCM      = "zero_pcm"
+	transcriptDropLaneMissing  = "lane_missing"
+	transcriptDropQueueFull    = "queue_full"
+	transcriptDropFenceRefresh = "fence_refresh_failed"
+	// The two RTP-seam reasons. Audio that never reaches the mixer used to be
+	// a bare `continue` in main.go's read loop: no counter, no timestamp, and
+	// — worst of all — no liveness evidence, which is why a consent-starved
+	// room could not trip the very watchdog written for it.
+	transcriptDropConsentDenied  = "consent_denied"
+	transcriptDropMixerSaturated = "mixer_saturated"
+)
+
+// resetTranscriptCaptureLocked clears the per-sitting capture accounting. A new
+// media sitting starts from zero so a readyz drop census names THIS meeting.
+// Callers hold app.mu.
+func resetTranscriptCaptureLocked(state *roomLiveState) {
+	if state == nil {
+		return
+	}
+	state.transcriptFramesOffered = 0
+	state.transcriptFramesAccepted = 0
+	state.transcriptFrameDrops = nil
+	state.lastTranscriptFrameAt = time.Time{}
+	state.lastAudioIngressAt = time.Time{}
+	state.lastTranscriptDropAt = time.Time{}
+	state.lastTranscriptDropReason = ""
+	state.lastTranscriptCommitAt = time.Time{}
+	// captureStallLastSegment is published as recording.lastSegmentAt. Leaving
+	// it set across a sitting boundary made a fresh meeting advertise the
+	// PREVIOUS meeting's last transcript time — a green-looking timestamp for
+	// audio this sitting never captured.
+	state.captureStallLastSegment = time.Time{}
+	state.transcriptStarving = false
+	state.transcriptStarvingSince = time.Time{}
+	state.transcriptStarvingAccepted = 0
+	state.transcriptStarveTransitions = 0
+	state.transcriptFlowNotices = 0
+	state.captureStallTrips = 0
+	clearCaptureStallLocked(state)
+}
+
+// roomLiveIfPresentLocked is the read-only sibling of roomLiveLocked: capture
+// accounting must never CONSTRUCT a room. A stray roomID from a late provider
+// callback would otherwise mint a phantom entry in app.roomLive and publish it
+// as a room in /readyz. Callers hold app.mu.
+func (app *kanbanBoardApp) roomLiveIfPresentLocked(roomID string) *roomLiveState {
+	if app == nil || app.roomLive == nil {
+		return nil
+	}
+	return app.roomLive[normalizeRoomID(roomID)]
+}
+
+func clearCaptureStallLocked(state *roomLiveState) {
+	if state == nil {
+		return
+	}
+	state.captureStalledSince = time.Time{}
+	state.captureStallReason = ""
+	state.captureStallRefreshes = 0
+	state.captureStallNextAttempt = time.Time{}
+	state.captureStallRebuilt = false
+	state.captureStallEscalated = false
+}
+
+// noteTranscriptFrameOffered records that the mixer HAD a speech-gated frame
+// for this room and handed it to the transcription sink. It is stamped before
+// any consent check on purpose: it answers "is there audio?", never "is the
+// audio authorized?". A silent room reaches this function zero times, which is
+// what keeps the watchdog from crying wolf.
+func (app *kanbanBoardApp) noteTranscriptFrameOffered(roomID string) {
+	if app == nil {
+		return
+	}
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state := app.roomLiveIfPresentLocked(roomID)
+	if state == nil {
+		app.mu.Unlock()
+		return
+	}
+	state.transcriptFramesOffered++
+	state.lastTranscriptFrameAt = now
+	if state.lastTranscriptCommitAt.IsZero() {
+		// Seed the commit clock from the first offered frame so a lane that has
+		// never landed anything is still judged against a real baseline.
+		state.lastTranscriptCommitAt = now
+	}
+	app.mu.Unlock()
+}
+
+// noteTranscriptFrameAccepted records that the lane took the frame. It does NOT
+// clear a capture stall: frames reaching the lane is not evidence that anything
+// is being transcribed, and only a provider completion may return the room to
+// green.
+func (app *kanbanBoardApp) noteTranscriptFrameAccepted(roomID string) {
+	if app == nil {
+		return
+	}
+	app.mu.Lock()
+	if state := app.roomLiveIfPresentLocked(roomID); state != nil {
+		state.transcriptFramesAccepted++
+	}
+	app.mu.Unlock()
+}
+
+// transcriptAudioLive answers the ONE liveness question the watchdog and
+// /readyz both ask: is audio arriving for this room right now? It is true when
+// either seam saw audio inside the offer window — the mixer handing the
+// transcription sink a speech-gated frame (consent said yes), or the RTP loop
+// reporting audio it could not hand over at all (consent said no). Asking it
+// at only the first seam is what let consent starvation hide: the hole
+// produced zero offered frames, so the watchdog saw a "quiet" room.
+//
+// Both stamps stay silent for a genuinely quiet room — the mixer's speech gate
+// suppresses silence, and blocked-audio reporting only happens when packets
+// really arrive — so this remains the clause that keeps the watchdog from
+// crying wolf.
+func transcriptAudioLive(lastFrameAt, lastIngressAt, now time.Time) bool {
+	if !lastFrameAt.IsZero() && now.Sub(lastFrameAt) < transcriptCaptureOfferWindow {
+		return true
+	}
+	return !lastIngressAt.IsZero() && now.Sub(lastIngressAt) < transcriptCaptureOfferWindow
+}
+
+// noteRoomAudioIngressBlocked records audio that arrived for this room over
+// RTP and was refused before the mixer could see it — consent denied, or the
+// analysis queue saturated. It is the watchdog's upstream liveness stamp and a
+// named entry in the drop census.
+//
+// Counter semantics, deliberately: transcriptFramesOffered counts speech-gated
+// MIXER frames and feeds an accepted/offered ratio, so this path must never
+// touch it — a per-RTP-packet increment would corrupt that ratio and make an
+// unauthorized packet look like audio the lane was handed. What arrives here
+// is counted only as drops, under its own reason, with the exact frame count
+// the caller accumulated.
+func (app *kanbanBoardApp) noteRoomAudioIngressBlocked(roomID string, reason string, frames uint64) {
+	if app == nil || frames == 0 || strings.TrimSpace(reason) == "" {
+		return
+	}
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state := app.roomLiveIfPresentLocked(roomID)
+	if state == nil {
+		app.mu.Unlock()
+		return
+	}
+	state.lastAudioIngressAt = now
+	if state.transcriptFrameDrops == nil {
+		state.transcriptFrameDrops = map[string]uint64{}
+	}
+	state.transcriptFrameDrops[reason] += frames
+	state.lastTranscriptDropAt = now
+	state.lastTranscriptDropReason = reason
+	if state.lastTranscriptCommitAt.IsZero() {
+		// Same baseline the mixer path seeds. Without a clock, a room whose
+		// audio never once got past the gate can never age past the stall
+		// threshold, and the hole stays invisible for the whole sitting.
+		state.lastTranscriptCommitAt = now
+	}
+	transition := !state.transcriptStarving
+	if transition {
+		state.transcriptStarving = true
+		state.transcriptStarvingSince = now
+		state.transcriptStarvingAccepted = state.transcriptFramesAccepted
+		state.transcriptStarveTransitions++
+	}
+	participants := len(state.participants)
+	sittingID := state.mediaSittingID
+	app.mu.Unlock()
+	if transition {
+		log.Warnf("room_audio_ingress_blocked room=%s sitting=%s reason=%s frames=%d participants=%d; RTP audio is arriving for this room but is being refused before the mixer", normalizeRoomID(roomID), sittingID, reason, frames, participants)
+	}
+}
+
+// noteTranscriptFrameDropped counts one silently-discarded frame under its
+// reason and logs ONCE on the accepting -> dropping edge. The edge is cleared
+// by the watchdog sweep, not by the next accepted frame, so interleaved
+// sources cannot turn this into a per-frame log.
+func (app *kanbanBoardApp) noteTranscriptFrameDropped(roomID string, reason string) {
+	if app == nil || strings.TrimSpace(reason) == "" {
+		return
+	}
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state := app.roomLiveIfPresentLocked(roomID)
+	if state == nil {
+		app.mu.Unlock()
+		return
+	}
+	if state.transcriptFrameDrops == nil {
+		state.transcriptFrameDrops = map[string]uint64{}
+	}
+	state.transcriptFrameDrops[reason]++
+	state.lastTranscriptDropAt = now
+	state.lastTranscriptDropReason = reason
+	transition := !state.transcriptStarving
+	if transition {
+		state.transcriptStarving = true
+		state.transcriptStarvingSince = now
+		state.transcriptStarvingAccepted = state.transcriptFramesAccepted
+		state.transcriptStarveTransitions++
+	}
+	participants := len(state.participants)
+	sittingID := state.mediaSittingID
+	app.mu.Unlock()
+	if transition {
+		log.Warnf("transcript_frames_dropping room=%s sitting=%s reason=%s participants=%d; the mixer has audio for this room but the transcription lane is not taking it", normalizeRoomID(roomID), sittingID, reason, participants)
+	}
+}
+
+// noteTranscriptFenceCleared records that a principal's consent fences were
+// emptied. It is an upstream CAUSE marker, not a dropped frame: it counts and
+// names itself in the /readyz census without arming the accepting -> dropping
+// latch, because no audio frame passed through here. When audio really is
+// flowing the mixer's own no_fence drops arm the latch a beat later, and the
+// census then carries both halves of the story.
+func (app *kanbanBoardApp) noteTranscriptFenceCleared(roomID string) {
+	if app == nil {
+		return
+	}
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state := app.roomLiveIfPresentLocked(roomID)
+	if state == nil {
+		app.mu.Unlock()
+		return
+	}
+	if state.transcriptFrameDrops == nil {
+		state.transcriptFrameDrops = map[string]uint64{}
+	}
+	state.transcriptFrameDrops[transcriptDropFenceRefresh]++
+	state.lastTranscriptDropAt = now
+	state.lastTranscriptDropReason = transcriptDropFenceRefresh
+	app.mu.Unlock()
+}
+
+// dominantTranscriptDropReasonLocked returns the reason with the most drops,
+// ties broken by name so the value is stable. Callers hold app.mu.
+func dominantTranscriptDropReasonLocked(state *roomLiveState) string {
+	if state == nil || len(state.transcriptFrameDrops) == 0 {
+		return ""
+	}
+	best, bestCount := "", uint64(0)
+	for reason, count := range state.transcriptFrameDrops {
+		if count > bestCount || (count == bestCount && reason < best) {
+			best, bestCount = reason, count
+		}
+	}
+	return best
+}
+
+// noteTranscriptCommit records a provider transcription completion only after
+// transcriptionEventPersisted has proved that exact event is durable. This is
+// the only signal that returns a stalled room to green, and it is the clock the
+// watchdog measures against.
+func (app *kanbanBoardApp) noteTranscriptCommit(roomID string) {
+	if app == nil {
+		return
+	}
+	now := time.Now().UTC()
+	app.mu.Lock()
+	state := app.roomLiveIfPresentLocked(roomID)
+	if state == nil {
+		app.mu.Unlock()
+		return
+	}
+	state.lastTranscriptCommitAt = now
+	state.captureStallLastSegment = now
+	stalledSince := state.captureStalledSince
+	reason := state.captureStallReason
+	sittingID := state.mediaSittingID
+	clearCaptureStallLocked(state)
+	app.mu.Unlock()
+	if stalledSince.IsZero() {
+		return
+	}
+	gap := now.Sub(stalledSince)
+	log.Infof("transcript_capture_recovered room=%s sitting=%s starved=%s reason=%s; capture resumed", normalizeRoomID(roomID), sittingID, gap.Round(time.Second), reason)
+	// The pill goes back to green through the same versioned snapshot edge the
+	// trip used, so a reordered frame cannot resurrect the stalled state.
+	broadcastRoomKanbanEvent(roomID, "participants", app.roomSnapshotForTranscriptionConnectionEdge(roomID))
+	app.recordTranscriptCoverageGap(roomID, sittingID, stalledSince, now, true)
+}
+
+// transcriptCaptureStallAction is one room's worth of work computed under
+// app.mu and executed after the lock is released. Logging, broadcasting, the
+// consent refresh and the lane rebuild all take other locks or do I/O.
+type transcriptCaptureStallAction struct {
+	roomID       string
+	sittingID    string
+	participants int
+	reason       string
+	commitAge    time.Duration
+	starved      time.Duration
+	// stallFrom / stallTo carry the uncaptured window out of the critical
+	// section so the ABANDON path can write its coverage row too. A stall that
+	// never recovers used to write nothing at all — and a hole running to the
+	// end of the meeting is the exact shape the 2026-09-02 blackout had.
+	stallFrom     time.Time
+	stallTo       time.Time
+	lane          *meetingTranscriptionLane
+	trip          bool
+	refresh       bool
+	refreshTry    int
+	rebuild       bool
+	escalate      bool
+	abandoned     bool
+	starveCleared bool
+}
+
+// sweepTranscriptCaptureStalls is the watchdog. It is driven on a ticker from
+// startParticipantLivenessSweeper in production and called directly by tests.
+//
+// The trip condition is deliberately two-sided:
+//
+//	live      — the room has seats and recording is on
+//	offering  — the mixer handed this room a speech-gated frame in the last 5s
+//	commitAge — nothing has completed at the provider for over 45s
+//
+// `offering` is the clause that makes a quiet room safe. The mixer emits
+// activities only for sources whose speech gate is open, so five minutes of
+// silence produces zero offered frames, lastTranscriptFrameAt goes stale, and
+// this function does nothing at all.
+func (app *kanbanBoardApp) sweepTranscriptCaptureStalls(now time.Time) {
+	if app == nil {
+		return
+	}
+	now = now.UTC()
+	actions := make([]transcriptCaptureStallAction, 0, 4)
+	app.mu.Lock()
+	for roomID, state := range app.roomLive {
+		if state == nil {
+			continue
+		}
+		roomID = normalizeRoomID(roomID)
+		action := transcriptCaptureStallAction{roomID: roomID, sittingID: state.mediaSittingID, participants: len(state.participants)}
+		offering := transcriptAudioLive(state.lastTranscriptFrameAt, state.lastAudioIngressAt, now)
+		dropQuiet := state.lastTranscriptDropAt.IsZero() || now.Sub(state.lastTranscriptDropAt) >= transcriptCaptureOfferWindow
+
+		// Retire the accepting/dropping edge here rather than on the accept
+		// path so interleaved sources cannot flap the transition log.
+		if state.transcriptStarving && dropQuiet {
+			if state.transcriptFramesAccepted > state.transcriptStarvingAccepted {
+				action.starveCleared = true
+				action.starved = now.Sub(state.transcriptStarvingSince)
+				state.transcriptStarving = false
+				state.transcriptStarvingSince = time.Time{}
+				state.transcriptFlowNotices++
+			} else if !offering {
+				// The room simply went quiet. We cannot claim recovery we did
+				// not observe, so drop the latch without announcing anything.
+				state.transcriptStarving = false
+				state.transcriptStarvingSince = time.Time{}
+			}
+		}
+
+		live := state.recordingEnabled && len(state.participants) > 0
+		if !live || !offering {
+			// A stall cannot outlive its room. Ending it is still an event:
+			// nothing here returns to green quietly.
+			if !state.captureStalledSince.IsZero() && !live {
+				action.abandoned = true
+				action.starved = now.Sub(state.captureStalledSince)
+				action.reason = state.captureStallReason
+				action.stallFrom = state.captureStalledSince
+				action.stallTo = now
+				clearCaptureStallLocked(state)
+				actions = append(actions, action)
+			} else if action.starveCleared {
+				actions = append(actions, action)
+			}
+			continue
+		}
+
+		commitAge := time.Duration(0)
+		if !state.lastTranscriptCommitAt.IsZero() {
+			commitAge = now.Sub(state.lastTranscriptCommitAt)
+		}
+		action.commitAge = commitAge
+		if commitAge <= transcriptCaptureStallAfter {
+			if action.starveCleared {
+				actions = append(actions, action)
+			}
+			continue
+		}
+
+		if state.captureStalledSince.IsZero() {
+			// Anchor the stall to the last thing that actually landed, not to
+			// the moment the sweep noticed. That makes StalledSince mean "no
+			// new transcript since X" — which is the timestamp the pill and
+			// the recap header need — and keeps the coverage row honest even
+			// when the sweep first sees a room long after capture died.
+			state.captureStalledSince = state.lastTranscriptCommitAt
+			if state.captureStalledSince.IsZero() {
+				state.captureStalledSince = now.Add(-transcriptCaptureStallAfter)
+			}
+			state.captureStallReason = dominantTranscriptDropReasonLocked(state)
+			state.captureStallNextAttempt = time.Time{}
+			state.captureStallTrips++
+			action.trip = true
+			// The status revision bump that publishes the amber pill is minted
+			// by roomSnapshotForTranscriptionConnectionEdge after the unlock.
+		}
+		if state.captureStallReason == "" {
+			state.captureStallReason = dominantTranscriptDropReasonLocked(state)
+		}
+		action.reason = state.captureStallReason
+		action.starved = now.Sub(state.captureStalledSince)
+
+		if commitAge >= transcriptCaptureLadderRefreshAt && state.captureStallRefreshes < transcriptCaptureLadderRefreshes &&
+			(state.captureStallNextAttempt.IsZero() || !now.Before(state.captureStallNextAttempt)) {
+			state.captureStallRefreshes++
+			state.captureStallNextAttempt = now.Add(transcriptCaptureLadderRetryEach)
+			action.refresh = true
+			action.refreshTry = state.captureStallRefreshes
+		}
+		if commitAge >= transcriptCaptureLadderRebuildAt && !state.captureStallRebuilt {
+			state.captureStallRebuilt = true
+			action.rebuild = true
+			if normalizeRoomID(roomID) == officeRoomID && app.transcriptLane != nil {
+				action.lane = app.transcriptLane
+			} else {
+				action.lane = state.lane
+			}
+		}
+		if commitAge >= transcriptCaptureLadderGiveUpAt && !state.captureStallEscalated {
+			state.captureStallEscalated = true
+			action.escalate = true
+		}
+		if action.trip || action.refresh || action.rebuild || action.escalate || action.starveCleared {
+			actions = append(actions, action)
+		}
+	}
+	app.mu.Unlock()
+
+	for _, action := range actions {
+		if action.starveCleared {
+			log.Infof("transcript_frames_flowing room=%s sitting=%s starved=%s; the transcription lane is taking frames again", action.roomID, action.sittingID, action.starved.Round(time.Second))
+		}
+		if action.abandoned {
+			log.Infof("transcript_capture_stall_ended room=%s sitting=%s stalled=%s reason=%s; the room stopped capturing before the stall cleared", action.roomID, action.sittingID, action.starved.Round(time.Second), action.reason)
+			broadcastRoomKanbanEvent(action.roomID, "participants", app.roomSnapshotForTranscriptionConnectionEdge(action.roomID))
+			// The hole is durable evidence whether or not capture ever came
+			// back. Recording it ONLY on recovery meant the worst case — a
+			// stall that runs to the end of the meeting — left the recap free
+			// to summarize a truncated transcript as if it were complete.
+			app.recordTranscriptCoverageGap(action.roomID, action.sittingID, action.stallFrom, action.stallTo, false)
+		}
+		if action.trip {
+			log.Warnf("transcript_capture_stalled room=%s sitting=%s elapsed=%s participants=%d reason=%s; audio is being offered but nothing has landed", action.roomID, action.sittingID, action.commitAge.Round(time.Second), action.participants, firstNonEmptyString(action.reason, "unknown"))
+			// Publishes Capturing=false to every seated client on the same
+			// monotonic revision the recording toggle uses.
+			broadcastRoomKanbanEvent(action.roomID, "participants", app.roomSnapshotForTranscriptionConnectionEdge(action.roomID))
+		}
+		if action.refresh {
+			refreshed, granted := refreshConsentIngressGatesForRoom(action.roomID)
+			log.Warnf("transcript_capture_recovery step=consent_refresh room=%s sitting=%s attempt=%d/%d gates=%d fenced=%d elapsed=%s", action.roomID, action.sittingID, action.refreshTry, transcriptCaptureLadderRefreshes, refreshed, granted, action.commitAge.Round(time.Second))
+		}
+		if action.rebuild {
+			log.Warnf("transcript_capture_recovery step=lane_rebuild room=%s sitting=%s elapsed=%s; rebuilding source lanes and forcing a provider reconnect (recording epoch untouched)", action.roomID, action.sittingID, action.commitAge.Round(time.Second))
+			action.lane.repairProviderConnection()
+		}
+		if action.escalate {
+			log.Errorf("transcript_capture_unrecovered room=%s sitting=%s elapsed=%s reason=%s; the recovery ladder did not restore capture and the room stays visibly stalled", action.roomID, action.sittingID, action.commitAge.Round(time.Second), firstNonEmptyString(action.reason, "unknown"))
+		}
+	}
+}
+
+// startTranscriptCaptureWatchdog runs the sweep for the process lifetime.
+// Started once from server boot alongside the participant liveness sweeper and
+// never from the test constructor, so tests drive sweepTranscriptCaptureStalls
+// directly with an explicit clock.
+func (app *kanbanBoardApp) startTranscriptCaptureWatchdog() {
+	if app == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(transcriptCaptureWatchdogTick)
+		defer ticker.Stop()
+		for range ticker.C {
+			app.sweepTranscriptCaptureStalls(time.Now().UTC())
+		}
+	}()
+}
+
+// recordTranscriptCoverageGap writes the durable, recall-hidden row that keeps
+// the recap honest: a meeting whose transcript has a hole must not be
+// summarized as if it were complete.
+// recovered distinguishes the two ways a hole ends. It changes the wording
+// only — an unrecovered hole must not be announced as "recovered", because the
+// difference is exactly what tells a reader whether the tail of the meeting is
+// missing or merely the middle.
+func (app *kanbanBoardApp) recordTranscriptCoverageGap(roomID, sittingID string, from, to time.Time, recovered bool) {
+	if app == nil || app.memory == nil || !to.After(from) {
+		return
+	}
+	roomID = normalizeRoomID(roomID)
+	gap := to.Sub(from)
+	if gap < transcriptCaptureStallAfter {
+		return
+	}
+	text := fmt.Sprintf("Transcription recovered — %s were not captured (%s–%s UTC).",
+		humanizeTranscriptGap(gap), from.UTC().Format("15:04"), to.UTC().Format("15:04"))
+	if !recovered {
+		text = fmt.Sprintf("Transcription never recovered — %s were not captured before this room stopped capturing (%s–%s UTC).",
+			humanizeTranscriptGap(gap), from.UTC().Format("15:04"), to.UTC().Format("15:04"))
+	}
+	metadata := map[string]string{
+		relevanceMetadataKey: relevanceExpired,
+		"roomId":             roomID,
+		"gapSeconds":         strconv.FormatInt(int64(gap.Seconds()), 10),
+		"gapStartedAt":       from.UTC().Format(time.RFC3339Nano),
+		"gapEndedAt":         to.UTC().Format(time.RFC3339Nano),
+		"recovered":          strconv.FormatBool(recovered),
+		"source":             "transcript_capture_watchdog",
+	}
+	if strings.TrimSpace(sittingID) != "" {
+		metadata["meetingId"] = strings.TrimSpace(sittingID)
+	}
+	id := fmt.Sprintf("transcript-coverage-%s-%d", roomID, to.UnixNano())
+	if _, _, err := app.memory.appendAmbientEntry(meetingMemoryKindTranscriptCoverage, id, text, metadata); err != nil {
+		log.Errorf("Failed to record transcript coverage gap room=%s: %v", roomID, err)
+		return
+	}
+	broadcastRoomKanbanEvent(roomID, "transcription_coverage", map[string]any{
+		"roomId": roomID, "meetingId": strings.TrimSpace(sittingID), "text": text,
+		"gapSeconds": int64(gap.Seconds()), "recovered": recovered,
+		"from": from.UTC().Format(time.RFC3339Nano), "to": to.UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func humanizeTranscriptGap(gap time.Duration) string {
+	if gap < time.Minute {
+		return fmt.Sprintf("%d seconds", int(gap.Round(time.Second).Seconds()))
+	}
+	minutes := int(gap.Round(time.Minute).Minutes())
+	if minutes == 1 {
+		return "1 minute"
+	}
+	return fmt.Sprintf("%d minutes", minutes)
 }
 
 func (s *roomLaneAudioSink) RemoveSource(trackKey string) {
@@ -1007,6 +1724,9 @@ func (app *kanbanBoardApp) ensureRoomMedia(roomID string) uint64 {
 	}
 	state.mediaActor = actorForRoomGeneration(roomID, gen)
 	state.mediaSittingID = sittingID
+	// A new sitting starts the capture census at zero so a /readyz drop
+	// reading names THIS meeting and not the last one.
+	resetTranscriptCaptureLocked(state)
 	app.mu.Unlock()
 	log.Infof("room_media_started room=%s gen=%d lane=%t", roomID, gen, lane != nil)
 	return gen

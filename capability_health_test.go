@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -186,7 +187,7 @@ func TestCapabilitySnapshotExposesEveryAmbientLaneAndCircuitTruth(t *testing.T) 
 	for _, name := range []string{
 		"brain", "missionIntel", "decisionLedger", "narrative",
 		"meetingDigest", "dayDigest", "entityLedger", "companyDigest",
-		"researchSuggestion", "slopClassifier", "tasteAnalyst", "houseStyle",
+		"researchSuggestion", "slopClassifier", "tasteAnalyst", "houseStyle", "scoutFollowup",
 	} {
 		worker, ok := workers[name].(map[string]any)
 		if !ok {
@@ -732,5 +733,287 @@ func TestLiveHandlerIsLivenessOnly(t *testing.T) {
 	liveHandler(recorder, httptest.NewRequest(http.MethodGet, "/livez", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("live status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// Gen 249 was invisible from outside: a scope blocked-and-stuck and a scope
+// blocked-but-anchorable published identical health, and the anchor's own
+// telemetry key was absent rather than zero. Both states are now distinct.
+func TestAmbientWorkerHealthDistinguishesAnchorableFromUnrecoverableBlocks(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	app := newIsolatedKanbanBoardApp(t)
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	anchoring := channelDigestAgent()
+	failClosed := meetingBrainAgent()
+	blocked := func(agent ambientAgentConfig) ambientHeldWindow {
+		return ambientHeldWindow{
+			Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind,
+			ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey,
+			BlockedReason: ambientContinuityAmbiguous,
+		}
+	}
+	if err := persistAmbientHeldWindowState(app.ambientHeldWindowPath(), ambientHeldWindowState{Version: 1, Windows: map[string]ambientHeldWindow{
+		ambientAgentScopeKey(anchoring, officeRoomID):  blocked(anchoring),
+		ambientAgentScopeKey(failClosed, officeRoomID): blocked(failClosed),
+	}}); err != nil {
+		t.Fatalf("persist blocked checkpoints: %v", err)
+	}
+
+	anchorable := ambientWorkerCheckpointDiagnostics(app, anchoring)
+	if anchorable["checkpointStatus"] != "blocked_anchorable" || anchorable["blockedScopeCount"] != 1 ||
+		anchorable["blockedAnchorableScopes"] != 1 || anchorable["firstRunAnchorScopes"] != 0 ||
+		anchorable["ambientContinuityHealthy"] != false {
+		t.Fatalf("anchorable diagnostics=%v, want a blocked-but-anchorable scope, still counted unhealthy until it runs", anchorable)
+	}
+	scopes, _ := anchorable["continuityScopes"].([]map[string]any)
+	if len(scopes) != 1 || scopes[0]["anchorable"] != true {
+		t.Fatalf("anchorable continuity scopes=%v, want the scope marked anchorable", scopes)
+	}
+
+	stuck := ambientWorkerCheckpointDiagnostics(app, failClosed)
+	if stuck["checkpointStatus"] != "blocked" || stuck["blockedScopeCount"] != 1 || stuck["blockedAnchorableScopes"] != 0 {
+		t.Fatalf("fail-closed diagnostics=%v, want an unrecoverable block", stuck)
+	}
+	if _, published := stuck["firstRunAnchorScopes"]; published {
+		t.Fatalf("a worker that does not opt in must not publish firstRunAnchorScopes: %v", stuck)
+	}
+	stuckScopes, _ := stuck["continuityScopes"].([]map[string]any)
+	if len(stuckScopes) != 1 || stuckScopes[0]["anchorable"] != false {
+		t.Fatalf("fail-closed continuity scopes=%v, want the scope marked not anchorable", stuckScopes)
+	}
+}
+
+// Both Scout voice lanes sit behind server-owned release gates: private voice
+// behind PRIVATE_REALTIME_VOICE_QUALIFIED (every offer 503s while it is closed)
+// and room voice behind the room-scout qualification receipt (JoinConferenceRoom
+// installs no transport factory while it is closed, so no realtime session can
+// exist). Production runs both closed. Reporting either as "idle" claimed
+// nothing had asked for the lane recently when in fact nothing was allowed to;
+// a configured-off capability must name that.
+func TestCapabilityVoiceLanesNameTheirReleaseGates(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+
+	openRoomVoiceGate := func(t *testing.T) {
+		t.Helper()
+		receipt := strings.Repeat("a", 64)
+		t.Setenv(roomScoutVoiceModeEnv, "qualified")
+		t.Setenv(roomScoutVoiceQualificationEnv, receipt)
+		t.Cleanup(installRoomScoutVoiceQualificationVerifier(func(candidate string) bool { return candidate == receipt }))
+	}
+
+	now := time.Now().UTC()
+	for _, lane := range []struct {
+		key        string
+		capability string
+		open       func(t *testing.T)
+	}{
+		{key: "privateVoice", capability: capabilityPrivateVoice, open: func(t *testing.T) {
+			t.Helper()
+			t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
+		}},
+		{key: "roomVoice", capability: capabilityRoomVoice, open: openRoomVoiceGate},
+	} {
+		t.Run(lane.key, func(t *testing.T) {
+			resetCapabilityRuntimeForTest(t)
+			// Gate closed (the production posture): the lane names the gate.
+			t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "false")
+			t.Setenv(roomScoutVoiceModeEnv, "")
+			t.Setenv(roomScoutVoiceQualificationEnv, "")
+			t.Cleanup(installRoomScoutVoiceQualificationVerifier(nil))
+			snapshot, degraded := capabilitySnapshot(now)
+			row := snapshot[lane.key].(map[string]any)
+			if row["enabled"] != false || row["status"] != capabilityStatusDisabled {
+				t.Fatalf("gate closed: %s=%v, want enabled=false status=disabled", lane.key, row)
+			}
+			// "disabled" is a configuration fact, not a fault: it must not drag
+			// the readiness rollup or the Scout aggregate into degraded.
+			if slices.Contains(degraded, lane.key) || slices.Contains(degraded, capabilityScout) {
+				t.Fatalf("a deliberately disabled lane counted as degraded: %v", degraded)
+			}
+			if scout := snapshot["scout"].(map[string]any); scout["status"] == capabilityStatusDegraded {
+				t.Fatalf("scout aggregate=%v, want a disabled child not to degrade the parent", scout["status"])
+			}
+
+			// Gate open with no traffic is honest idleness — never a
+			// manufactured healthy state from a present configuration.
+			lane.open(t)
+			snapshot, _ = capabilitySnapshot(now)
+			row = snapshot[lane.key].(map[string]any)
+			if row["enabled"] != true || row["status"] != capabilityStatusIdle {
+				t.Fatalf("gate open, no traffic: %s=%v, want enabled=true status=idle", lane.key, row)
+			}
+			if _, present := row["lastSuccessAt"]; present {
+				t.Fatalf("a lane that never ran must carry no success timestamp: %v", row)
+			}
+			recordCapabilitySuccess(lane.capability, now)
+			snapshot, _ = capabilitySnapshot(now)
+			row = snapshot[lane.key].(map[string]any)
+			if row["lastSuccessAt"] == nil {
+				t.Fatalf("recorded success did not reach the panel: %s=%v", lane.key, row)
+			}
+			// Private voice has no liveness key, so evidence alone decides and
+			// it reaches healthy — the state that was structurally unreachable
+			// before this lane had a success writer at all. Room voice reports
+			// `connected`, and a lane with no connected session stays idle no
+			// matter how old its evidence is (capabilityStatus), which is why
+			// only the private lane is asserted healthy here.
+			if lane.key == "privateVoice" && row["status"] != capabilityStatusHealthy {
+				t.Fatalf("recorded success: %s=%v, want healthy", lane.key, row)
+			}
+		})
+	}
+}
+
+// The "disabled" word must never mask a live session. A room session that is
+// still running behind a gate that has since closed (a rollback, a mid-flight
+// revocation, an operator flipping the env under a running room) has to keep
+// reporting what it is actually doing — otherwise a failing lane would read as
+// a deliberate switch-off, which is the same dishonesty in the other direction.
+func TestCapabilityRoomVoiceDisabledNeverMasksALiveSession(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+	// gate closed
+	t.Setenv(roomScoutVoiceModeEnv, "")
+	t.Setenv(roomScoutVoiceQualificationEnv, "")
+	t.Cleanup(installRoomScoutVoiceQualificationVerifier(nil))
+
+	previousApp := kanbanApp
+	app := newIsolatedKanbanBoardApp(t)
+	kanbanApp = app
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	now := time.Now().UTC()
+	snapshot, degraded := capabilitySnapshot(now)
+	row := snapshot["roomVoice"].(map[string]any)
+	if row["status"] != capabilityStatusDisabled || row["reason"] != "quality_gate_pending" {
+		t.Fatalf("gate closed with nothing running: roomVoice=%v, want disabled naming the gate", row)
+	}
+	if slices.Contains(degraded, "roomVoice") {
+		t.Fatalf("a switched-off lane counted as degraded: %v", degraded)
+	}
+
+	// Now a session is live behind the closed gate and disconnected.
+	app.mu.Lock()
+	app.voiceControlActive = true
+	app.connected = false
+	app.mu.Unlock()
+	snapshot, degraded = capabilitySnapshot(now)
+	row = snapshot["roomVoice"].(map[string]any)
+	if row["status"] != capabilityStatusDegraded {
+		t.Fatalf("live session behind a closed gate: roomVoice=%v, want degraded not disabled", row)
+	}
+	if _, masked := row["reason"]; masked {
+		t.Fatalf("a live lane must not carry the switch-off reason: %v", row)
+	}
+	if !slices.Contains(degraded, "roomVoice") {
+		t.Fatalf("degraded=%v, want roomVoice", degraded)
+	}
+}
+
+// End to end: a private voice offer the server itself negotiates must move the
+// lane off "last success — none since restart". The failure branch of this
+// handler always recorded a capability failure; the accepted branch recorded
+// only a milestone, so the panel row could never read healthy no matter how
+// many sessions succeeded.
+func TestCapabilityPrivateVoiceOfferRecordsServerObservedSuccess(t *testing.T) {
+	setupAuthTestEnv(t)
+	resetCapabilityRuntimeForTest(t)
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
+	t.Setenv("OPENAI_API_KEY", "test-realtime-key")
+	previousApp := kanbanApp
+	kanbanApp = newIsolatedKanbanBoardApp(t)
+	t.Cleanup(func() { kanbanApp = previousApp })
+
+	previousURL := realtimeCallsURL
+	previousClient := realtimeHTTPClient
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/sdp")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("v=0\n"))
+	}))
+	t.Cleanup(func() {
+		provider.Close()
+		realtimeCallsURL = previousURL
+		realtimeHTTPClient = previousClient
+	})
+	realtimeCallsURL = provider.URL
+	realtimeHTTPClient = provider.Client()
+
+	before := capabilityState(capabilityPrivateVoice)
+	if !before.LastSuccess.IsZero() {
+		t.Fatalf("precondition: lane already carries a success: %+v", before)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/assistant/realtime-offer", strings.NewReader(`{"sdp":"v=0\r\n","voiceSessionId":"voice-capability-success"}`))
+	req.Header.Set("Content-Type", "application/json")
+	for _, cookie := range loginAs(t, "aj@shareability.com", "B0NFIRE!") {
+		req.AddCookie(cookie)
+	}
+	recorder := httptest.NewRecorder()
+	assistantRealtimeOfferHandler(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("offer status=%d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+
+	state := capabilityState(capabilityPrivateVoice)
+	if state.LastSuccess.IsZero() {
+		t.Fatalf("accepted offer recorded no success: %+v", state)
+	}
+	if state.LastMilestone != "offer_accepted" || state.MilestoneSource != "server" {
+		t.Fatalf("server milestone lost: %+v", state)
+	}
+	// the panel reads capabilitySnapshot, so prove the success arrives there
+	snapshot, degraded := capabilitySnapshot(time.Now().UTC())
+	lane := snapshot["scout"].(map[string]any)["lanes"].(map[string]any)["privateVoice"].(map[string]any)
+	if lane["status"] != capabilityStatusHealthy || lane["lastSuccessAt"] == nil {
+		t.Fatalf("scout.lanes.privateVoice=%v, want healthy with a success timestamp", lane)
+	}
+	if slices.Contains(degraded, "privateVoice") {
+		t.Fatalf("a healthy lane counted as degraded: %v", degraded)
+	}
+}
+
+// The typed lanes DO record success on the interactive path; that recording is
+// the only thing standing between the panel's honest "idle" and a lane that can
+// never read healthy (the private-voice bug above). Pin both the call sites and
+// the read-back so a refactor cannot silently drop them.
+func TestCapabilityTypedScoutLanesRecordSuccessWherePanelReadsIt(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	t.Setenv("OPENAI_API_KEY", "test-openai-key")
+
+	for _, pin := range []struct{ file, want string }{
+		{"scout_chat.go", "recordCapabilitySuccess(capabilityTypedScoutRouter,"},
+		{"memory_query.go", "recordCapabilitySuccess(capabilityTypedScoutAnswer,"},
+	} {
+		raw, err := os.ReadFile(pin.file)
+		if err != nil {
+			t.Fatalf("read %s: %v", pin.file, err)
+		}
+		if !strings.Contains(string(raw), pin.want) {
+			t.Errorf("%s must keep %q — without it the lane can never leave idle", pin.file, pin.want)
+		}
+	}
+
+	now := time.Now().UTC()
+	for lane, capability := range map[string]string{
+		"typedRouter": capabilityTypedScoutRouter,
+		"typedAnswer": capabilityTypedScoutAnswer,
+	} {
+		snapshot, _ := capabilitySnapshot(now)
+		row := snapshot["scout"].(map[string]any)["lanes"].(map[string]any)[lane].(map[string]any)
+		if _, present := row["lastSuccessAt"]; present || row["status"] != capabilityStatusIdle {
+			t.Fatalf("%s before traffic=%v, want idle with no success timestamp", lane, row)
+		}
+		recordCapabilityPoll(capability, now)
+		recordCapabilitySuccess(capability, now)
+		snapshot, _ = capabilitySnapshot(now)
+		row = snapshot["scout"].(map[string]any)["lanes"].(map[string]any)[lane].(map[string]any)
+		if row["status"] != capabilityStatusHealthy || row["lastSuccessAt"] == nil {
+			t.Fatalf("%s after one typed turn=%v, want healthy with a success timestamp", lane, row)
+		}
 	}
 }

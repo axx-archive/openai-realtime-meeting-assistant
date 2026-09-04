@@ -369,11 +369,11 @@ func packagingStudioDefinition() ProcessDefinition {
 				InputFrom: []string{"context_snapshot", "write", "evidence", "identity_candidates", "identity_judges", "identity_critic"},
 				PromptBody: strings.Join([]string{
 					"You are the decision editor. Read the one art-director candidate record and the active review record. Select exactly one existing candidate_id; never merge, rename, or rewrite its strategy, visual_system, or identity tokens. Explain the selection briefly, then direct imagery only where it performs an emotional or explanatory job type and evidence cannot.",
-					"Zero images is a valid deliberately typographic deck; default to one to three purposeful images, use no more than four, and reserve at most one full-bleed crescendo. Ledger and number slides carry none.",
+					"Zero images is a valid deliberately typographic deck; default to one to three purposeful images, use no more than four, and reserve at most one full-bleed crescendo. IMAGERY MODE from the brief (context_snapshot direct_ask) overrides that reserve: full-bleed means every directed shot may use slot bleed; on-slide means every shot uses slot plate and none may bleed; hybrid keeps the single crescendo. Ledger and number slides carry none.",
 					"Every named depiction of a real person, place, product, venue, or brand must be authority-bound. A claim-bound shot sets depiction_kind to claim, depiction_entity to one complete exact named entity in an admitted Claim ID from the evidence dossier, and depiction_ref to that Claim ID. A supplied-asset shot sets depiction_kind to asset, copies the complete exact same entity carried by the trusted user-image filename into depiction_entity, and copies that exact brand_assets source_ref into depiction_ref. Never use a shorter alias. For either named kind, subject is exactly 'authorized depiction of <depiction_entity>' and place is either empty or that same exact entity. No shot field may introduce another real person, place, product, venue, or brand. The server rebuilds the provider prompt from only the admitted entity and controlled art-direction fields; generic source prose, a different entity's file, a stale file, or extra named prose never grants or reaches image authority. When exact same-entity authority is unavailable, force a generic non-identifying image: depiction_kind generic and empty depiction_entity, depiction_ref, and place.",
 					"Return exactly one fenced JSON object and no prose. The object has exactly selected_candidate_id, selection_rationale, strategy, visual_system, identity, and shots. Copy strategy, visual_system, and every identity token exactly from the selected candidate. identity has exactly palette, type, spacing, grid, graphic_motif, image_treatment, data_viz_treatment, and refusals.",
 					"shots is an array of zero to four objects. Every shot has exactly fig, slide_id, slot, subject, composition, temperature, treatment, aspect, caption, place, why, depiction_kind, depiction_entity, and depiction_ref. fig is a unique positive integer. slide_id exactly matches deck_copy_v3. slot is bleed or plate; aspect is landscape, portrait, or square. composition is exactly wide_negative_space_left, wide_negative_space_right, centered_subject, close_detail, top_down, low_angle, or panoramic. temperature is joy, focus, drama, warmth, calm, energy, wonder, resolve, intimacy, confidence, or tension. treatment is exactly natural_editorial, cinematic_low_key, bright_documentary, restrained_monochrome, or tactile_film. why is exactly opening_tension, human_scale, evidence_texture, emotional_crescendo, transition, closing_resolve, or explanatory_context. caption is an empty string; the server authors it.",
-					"For generic shots, subject is exactly one of non-identifying people in motion, non-identifying hands at work, unbranded objects in use, unbranded tools and materials, anonymous crowd without recognizable faces, rural landscape without identifying landmarks, urban landscape without identifying landmarks, empty interior without identifiers, abstract natural texture, food and drink without branding, animals without identifying marks, or documentary detail without identifying text; place, depiction_entity, and depiction_ref are empty. Named claim/asset shots still require the exact authority-bound entity fields. Use at most one bleed and reserve copy-safe negative space.",
+					"For generic shots, subject is exactly one of non-identifying people in motion, non-identifying hands at work, unbranded objects in use, unbranded tools and materials, anonymous crowd without recognizable faces, rural landscape without identifying landmarks, urban landscape without identifying landmarks, empty interior without identifiers, abstract natural texture, food and drink without branding, animals without identifying marks, or documentary detail without identifying text; place, depiction_entity, and depiction_ref are empty. Named claim/asset shots still require the exact authority-bound entity fields. Use at most one bleed unless the brief's IMAGERY MODE is full-bleed (then any shot may bleed) or on-slide (then no shot may bleed), and reserve copy-safe negative space.",
 				}, "\n"), OutputContract: packagingStudioIdentityDirectionContract,
 			},
 			{
@@ -1425,6 +1425,56 @@ func parseImageryDirection(body string, slideIDs map[string]struct{}) (imageryDi
 }
 
 func parseImageryDirectionWithServerFields(body string, slideIDs map[string]struct{}, serverFields bool) (imageryDirectionDoc, error) {
+	return parseImageryDirectionWithBleedCap(body, slideIDs, serverFields, packagingStudioDefaultBleedCap)
+}
+
+// packagingStudioDefaultBleedCap is the engine's law absent a brief: at most
+// one full-bleed crescendo per deck. A Wave 11 presentation commission maps
+// its imagery mode onto the cap (packagingStudioBleedCapForPlan): full-bleed
+// lifts it to every directed shot, on-slide drops it to zero, hybrid keeps it.
+const packagingStudioDefaultBleedCap = 1
+
+func packagingStudioBleedCapForImageryMode(mode string) int {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case packagingImageryFullBleed:
+		return packagingStudioImageryMaxShots
+	case packagingImageryOnSlide:
+		return 0
+	default:
+		return packagingStudioDefaultBleedCap
+	}
+}
+
+// packagingStudioGoalRoot resolves the canonical Studio root artifact of a
+// plan by its goal id (the root's threadId), the same identity
+// launchConversationStudioProcessOnce adopts on replay.
+func packagingStudioGoalRoot(app *kanbanBoardApp, plan *goalPlan) (meetingMemoryEntry, bool) {
+	if app == nil || app.memory == nil || plan == nil || strings.TrimSpace(plan.GoalID) == "" {
+		return meetingMemoryEntry{}, false
+	}
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindOSArtifact, 0) {
+		if strings.TrimSpace(entry.Metadata["mode"]) != "goal" || strings.TrimSpace(entry.Metadata["threadId"]) != strings.TrimSpace(plan.GoalID) {
+			continue
+		}
+		if _, _, canonical := studioProjectCandidate(entry); canonical {
+			return entry, true
+		}
+	}
+	return meetingMemoryEntry{}, false
+}
+
+// packagingStudioBleedCapForPlan reads the commission's imagery mode off the
+// goal root (stamped by packaging_commissions.go). Plans without a brief keep
+// the default law.
+func packagingStudioBleedCapForPlan(app *kanbanBoardApp, plan *goalPlan) int {
+	root, ok := packagingStudioGoalRoot(app, plan)
+	if !ok {
+		return packagingStudioDefaultBleedCap
+	}
+	return packagingStudioBleedCapForImageryMode(root.Metadata[packagingImageryModeMetadataKey])
+}
+
+func parseImageryDirectionWithBleedCap(body string, slideIDs map[string]struct{}, serverFields bool, bleedCap int) (imageryDirectionDoc, error) {
 	root, err := strictFencedJSONObject(body, packagingStudioIdentityDirectionContract)
 	if err != nil {
 		return imageryDirectionDoc{}, err
@@ -1509,8 +1559,14 @@ func parseImageryDirectionWithServerFields(body string, slideIDs map[string]stru
 		}
 		if shot.Slot == "bleed" {
 			bleedCount++
-			if bleedCount > 1 {
-				return imageryDirectionDoc{}, fmt.Errorf("%s may direct at most one bleed shot", packagingStudioIdentityDirectionContract)
+			if bleedCount > bleedCap {
+				switch bleedCap {
+				case 0:
+					return imageryDirectionDoc{}, fmt.Errorf("%s may not direct a bleed shot when the brief's imagery mode is on-slide", packagingStudioIdentityDirectionContract)
+				case 1:
+					return imageryDirectionDoc{}, fmt.Errorf("%s may direct at most one bleed shot", packagingStudioIdentityDirectionContract)
+				}
+				return imageryDirectionDoc{}, fmt.Errorf("%s may direct at most %d bleed shots", packagingStudioIdentityDirectionContract, bleedCap)
 			}
 		}
 		if !oneOf(shot.Aspect, "landscape", "portrait", "square") {
@@ -2320,7 +2376,7 @@ func validatePackagingStudioIdentityDirection(app *kanbanBoardApp, plan *goalPla
 	if err != nil {
 		return imageryDirectionDoc{}, err
 	}
-	doc, err := parseImageryDirection(body, slideIDs)
+	doc, err := parseImageryDirectionWithBleedCap(body, slideIDs, false, packagingStudioBleedCapForPlan(app, plan))
 	if err != nil {
 		return imageryDirectionDoc{}, err
 	}
@@ -2442,7 +2498,7 @@ func validateCanonicalPackagingStudioIdentityDirection(app *kanbanBoardApp, plan
 	if err != nil {
 		return imageryDirectionDoc{}, err
 	}
-	doc, err := parseImageryDirectionWithServerFields(body, slideIDs, true)
+	doc, err := parseImageryDirectionWithBleedCap(body, slideIDs, true, packagingStudioBleedCapForPlan(app, plan))
 	if err != nil {
 		return imageryDirectionDoc{}, err
 	}
@@ -2788,7 +2844,7 @@ func compilePackagingStudioImagery(app *kanbanBoardApp, plan *goalPlan, parentID
 		} else if packagingStudioFrozenV5Contract(plan) {
 			visualSystem, err = validatePackagingStudioV5TypographicIdentity(identitySynthesis)
 		} else {
-			identityDirection, err = parseImageryDirection(identitySynthesis, slideIDs)
+			identityDirection, err = parseImageryDirectionWithBleedCap(identitySynthesis, slideIDs, false, packagingStudioBleedCapForPlan(app, plan))
 		}
 		if err != nil {
 			return "", nil, err

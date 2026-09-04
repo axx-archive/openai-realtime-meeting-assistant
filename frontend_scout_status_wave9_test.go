@@ -108,6 +108,10 @@ func TestIndexScoutStatusPillStatesCopy(t *testing.T) {
 		"case 'healthy': return { word: 'healthy', tone: 'mono' }",
 		"case 'fallback_active': return { word: 'backup model', tone: 'warn' }",
 		"case 'paused_by_breaker': return { word: 'paused', tone: 'warn' }",
+		// a lane switched off by configuration (private voice behind
+		// PRIVATE_REALTIME_VOICE_QUALIFIED) names itself without raising a
+		// fault tone — warn/danger belong to lanes that are trying and failing
+		"case 'disabled': return { word: 'disabled', tone: 'idle' }",
 	} {
 		if !strings.Contains(lane, want) {
 			t.Errorf("scoutLaneWord missing %q", want)
@@ -200,7 +204,12 @@ func TestIndexScoutStatusPopoverLaneRows(t *testing.T) {
 	for _, want := range []string{
 		"scoutLaneWord(status)",
 		"scoutStatusRelative(lane?.lastSuccessAt)",
-		"'scout-status-pop__mono', success || 'none yet'",
+		// the evidence store is process memory, so an absent timestamp means
+		// "nothing since the restart", never "this lane has never worked"
+		"'scout-status-pop__mono', success || 'none since restart'",
+		// a configured-off lane names its gate instead of leaving the reader to
+		// guess why the row is not healthy
+		"status === 'disabled' && lane?.reason",
 		"lane?.lastFailureClass",
 		"const breaker = lane?.breaker",
 		"scoutStatusRelative(breaker.retryAt)",

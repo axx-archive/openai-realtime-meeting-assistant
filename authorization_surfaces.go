@@ -184,6 +184,17 @@ var authorizationHTTPSurfaces = []AuthorizationSurface{
 	authSurface("http.internal_codex_result", AuthorizationHTTP, "/internal/codex/jobs/result", []string{"job", "artifact", "workflow"}, []ACLAction{ACLExecute, ACLWrite}, []string{"service"}, true, true, AuthorizationLegacyGuarded),
 	authSurface("http.internal_media_soak", AuthorizationHTTP, "/internal/media-soak/", []string{"room", "meeting", "media_runtime", "release_evidence"}, []ACLAction{ACLExecute, ACLReadMetadata}, []string{"service"}, true, true, AuthorizationCanonicalEnforced),
 	authSurface("http.internal_render_result", AuthorizationHTTP, "/internal/render/jobs/result", []string{"job", "artifact", "blob"}, []ACLAction{ACLExecute, ACLWrite}, []string{"service"}, true, true, AuthorizationLegacyGuarded),
+	// Wave 11 (Packaging Studio): a commission validates a structured brief,
+	// re-authorizes every named source, commits it as the requester's message
+	// in a private thread, and launches through startConversationPrivateWork.
+	authSurface("http.assistant.packaging_commissions", AuthorizationHTTP, "/assistant/packaging/commissions", []string{"chat_thread", "workflow", "artifact", "file"}, []ACLAction{ACLReadContent, ACLCreateChild, ACLExecute}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.packaging_commission", AuthorizationHTTP, "/assistant/packaging/commissions/", []string{"workflow", "artifact"}, []ACLAction{ACLReadContent}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.packaging_stories", AuthorizationHTTP, "/assistant/packaging/stories", []string{"chat_thread", "artifact"}, []ACLAction{ACLReadContent, ACLCreateChild}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.packaging_story", AuthorizationHTTP, "/assistant/packaging/stories/", []string{"artifact", "revision", "chat_thread", "workflow"}, []ACLAction{ACLReadContent, ACLWrite, ACLExecute}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.assistant.projects", AuthorizationHTTP, "/assistant/projects", []string{"artifact", "file"}, []ACLAction{ACLReadMetadata}, []string{"user"}, false, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.project", AuthorizationHTTP, "/artifacts/project", []string{"artifact", "file"}, []ACLAction{ACLReadContent, ACLWrite}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.artifacts.duplicate", AuthorizationHTTP, "/artifacts/duplicate", []string{"artifact", "revision", "blob", "file"}, []ACLAction{ACLReadContent, ACLWrite, ACLCreateChild}, []string{"user"}, true, true, AuthorizationCanonicalEnforced),
+	authSurface("http.admin.storage", AuthorizationHTTP, "/assistant/admin/storage", []string{"blob", "file", "artifact", "chat_thread"}, []ACLAction{ACLReadMetadata}, []string{"user"}, true, true, AuthorizationLegacyGuarded),
 }
 
 var authorizationCapabilitySurfaces = []AuthorizationSurface{

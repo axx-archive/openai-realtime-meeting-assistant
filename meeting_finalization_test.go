@@ -1837,26 +1837,57 @@ func TestManualArchiveEmailCompletionCannotRestoreConcurrentlyDeletedTranscript(
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	readDeletionSafeArchive := func(stage string) meetingArchive {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read archive after %s: %v", stage, err)
+		}
+		var archive meetingArchive
+		if err := json.Unmarshal(raw, &archive); err != nil {
+			t.Fatalf("decode archive after %s: %v", stage, err)
+		}
+		for _, entry := range archive.Memory {
+			if entry.ID == "manual-email-delete-race" {
+				t.Fatalf("%s restored a transcript already deleted by its author", stage)
+			}
+		}
+		if archive.Meeting == nil || archive.Meeting.Finalization == nil {
+			t.Fatalf("archive after %s lost its finalization receipt: %+v", stage, archive.Meeting)
+		}
+		return archive
 	}
-	var archive meetingArchive
-	if err := json.Unmarshal(raw, &archive); err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range archive.Memory {
-		if entry.ID == "manual-email-delete-race" {
-			t.Fatal("slow email completion restored a transcript already deleted by its author")
+	// The deletion fence is write-ahead, so the row is already gone from the
+	// durable archive the instant the manual close returns. The embedded
+	// receipt may still honestly read `closing` here: endMeetingArchivePublication
+	// only releases the background core runner as archiveMeeting returns, and
+	// that runner owns the reseal of the reduced source plus the archive
+	// refresh. What the archive may never do — at this or any other instant —
+	// is advertise a settled receipt over source the author already deleted.
+	archive := readDeletionSafeArchive("slow email completion")
+	if settled := archive.Meeting.Finalization; settled.State == meetingFinalizationFinalized || settled.State == meetingFinalizationDegraded {
+		if settled.Source.TranscriptCount != 0 || settled.Source.TranscriptID != "" {
+			t.Fatalf("archive settled a finalization receipt over deleted source: %+v", settled)
 		}
 	}
-	latest, found := app.meetings.recordByID(archive.MeetingID)
-	if !found || archive.Meeting == nil || archive.Meeting.Finalization == nil || latest.Finalization == nil ||
+	// ArchiveSyncedAt is the durable proof that the archive file already holds
+	// this exact receipt: refreshMeetingArchiveFinalization writes the embed
+	// first and stamps the record only after that write succeeds. Waiting on
+	// that stamp waits on the real cross-file guarantee instead of on whether
+	// the core runner happened to beat archiveMeeting's own return.
+	latest := waitForMeetingArchiveFinalizationSync(t, app, archive.MeetingID)
+	archive = readDeletionSafeArchive("finalization refresh")
+	// Keep this comparison narrow: markFinalizationArchiveSynced stamps
+	// ArchiveSyncedAt and UpdatedAt on the record AFTER the embed bytes are
+	// written (meeting_finalization.go:318-319), so the embed can never carry
+	// them. Widening this to sameMeetingFinalizationVersion or to full-receipt
+	// equality re-flakes this test permanently, not intermittently.
+	if latest.Finalization == nil ||
 		archive.Meeting.Finalization.State != latest.Finalization.State ||
 		!archive.Meeting.Finalization.Source.equal(latest.Finalization.Source) ||
 		archive.Meeting.Finalization.ObservedRevision != latest.Finalization.ObservedRevision ||
 		archive.Meeting.Finalization.Source.TranscriptCount != 0 || archive.Meeting.Finalization.Source.TranscriptID != "" {
-		t.Fatalf("archive did not preserve the latest deletion-safe finalization truth: archive=%+v latest=%+v", archive.Meeting, latest)
+		t.Fatalf("archive did not preserve the latest deletion-safe finalization truth: archive=%+v latest=%+v", archive.Meeting.Finalization, latest.Finalization)
 	}
 }
 

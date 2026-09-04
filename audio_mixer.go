@@ -57,6 +57,19 @@ type consentSourceAudioSink interface {
 	RemoveSource(trackKey string)
 }
 
+// sourceAudioDropObserver is the diagnostic seam for the three silent exits
+// the mixer owns. The mixer has no room identity of its own, so it reports the
+// frame to whichever sink it was about to hand it to and that sink maps it to a
+// room. Optional: a sink that does not implement it simply is not counted.
+type sourceAudioDropObserver interface {
+	// NoteSourceFrameOffered is called for every speech-gated frame the mixer
+	// HAS for the sink, before any consent check. It is the "is there audio?"
+	// signal the capture-stall watchdog reads, and it is deliberately not
+	// reached at all when every source is below its speech gate.
+	NoteSourceFrameOffered()
+	NoteSourceFrameDropped(reason string)
+}
+
 type audioMixerSink struct {
 	sink      mixedAudioSink
 	lane      ConsentLane
@@ -423,10 +436,33 @@ func (mixer *audioMixer) run() {
 			}
 			for key, sinkConfig := range mixer.snapshotSinks() {
 				if sourceSink, ok := sinkConfig.sink.(consentSourceAudioSink); ok && sinkConfig.lane == ConsentLaneTranscription {
+					observer, _ := sinkConfig.sink.(sourceAudioDropObserver)
 					for _, activity := range activities {
 						frame := activity.laneFrames[sinkConfig.lane]
 						fence, fenced := activity.laneFences[sinkConfig.lane]
-						if len(frame) < roomAudioMixFrameSize || !fenced || sinkConfig.authority == nil || sinkConfig.authority.ValidateFenceLocal(fence) != nil {
+						// `activities` carries only sources whose speech gate is
+						// open, so reaching here at all means the mixer really
+						// has audio for this room. Stamp that BEFORE the consent
+						// checks: it answers "is anyone talking?", never "is the
+						// audio authorized?".
+						if observer != nil {
+							observer.NoteSourceFrameOffered()
+						}
+						// Fix 1: three silent `continue`s, now named.
+						if len(frame) < roomAudioMixFrameSize {
+							noteSourceAudioDrop(observer, transcriptDropShortFrame)
+							continue
+						}
+						if !fenced {
+							noteSourceAudioDrop(observer, transcriptDropNoFence)
+							continue
+						}
+						if sinkConfig.authority == nil {
+							noteSourceAudioDrop(observer, transcriptDropNoAuthority)
+							continue
+						}
+						if sinkConfig.authority.ValidateFenceLocal(fence) != nil {
+							noteSourceAudioDrop(observer, transcriptDropFenceInvalid)
 							continue
 						}
 						if err := sourceSink.WriteSourcePCMWithConsent(activity.trackKey, activity.participantName, frame, fence); err != nil {
@@ -454,6 +490,13 @@ func (mixer *audioMixer) run() {
 			}
 		}
 	}
+}
+
+func noteSourceAudioDrop(observer sourceAudioDropObserver, reason string) {
+	if observer == nil {
+		return
+	}
+	observer.NoteSourceFrameDropped(reason)
 }
 
 func (mixer *audioMixer) removeSourceFromSinks(trackKey string) {

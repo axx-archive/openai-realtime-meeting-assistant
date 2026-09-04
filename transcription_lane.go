@@ -26,11 +26,19 @@ const (
 	// must accept the domain-vocabulary prompt. GPT Transcribe is the accurate
 	// final-transcript model for committed Realtime turns and supports the
 	// modern prompt, keyword, and plural-language hints.
-	defaultTranscriptionLaneModel      = "gpt-transcribe"
-	transcriptionLaneInputSampleRate   = 24000
-	transcriptionLaneQueueSize         = 256
-	transcriptionLaneWriteTimeout      = 5 * time.Second
-	transcriptionLaneCommitSilence     = 800 * time.Millisecond
+	defaultTranscriptionLaneModel    = "gpt-transcribe"
+	transcriptionLaneInputSampleRate = 24000
+	transcriptionLaneQueueSize       = 256
+	transcriptionLaneWriteTimeout    = 5 * time.Second
+	transcriptionLaneCommitSilence   = 800 * time.Millisecond
+	// transcriptionLaneMaxSegment caps a single provider segment. A
+	// source-bound lane's only other commit trigger is the 800ms silence timer,
+	// re-armed by every accepted frame, so an unbroken monologue used to arrive
+	// as one block — 212.6 audio-seconds in production on 2026-09-02, 308.1s on
+	// 2026-09-01. A mid-sentence cut costs far less than a five-minute dark
+	// stretch, and it also keeps the capture-stall watchdog honest: without a
+	// ceiling, a long monologue looks exactly like a stall.
+	transcriptionLaneMaxSegment        = 15 * time.Second
 	transcriptionLanePCMBytesPerSample = 2
 	transcriptionLaneMinCommitSamples  = transcriptionLaneInputSampleRate / 10
 	transcriptionLaneReconnectInitial  = 1 * time.Second
@@ -41,7 +49,26 @@ const (
 var (
 	errTranscriptionLaneSessionExpired = errors.New("transcription session expired")
 	errTranscriptionLaneSessionRefresh = errors.New("transcription session refresh")
+	errTranscriptionLaneRepair         = errors.New("transcription lane repair")
+
+	// transcriptionLaneMaxSegmentDuration is the live value of the segment cap.
+	// Production never changes it; tests scale it down so a "monologue" is
+	// seconds of wall clock instead of a minute. The behaviour under test is
+	// the cap firing on continuous audio, which is timescale-independent.
+	transcriptionLaneMaxSegmentDuration = transcriptionLaneMaxSegment
 )
+
+// meetingMemoryKindTranscriptCoverage is the durable, recall-hidden row that
+// records a hole in a meeting's transcript. It is written with
+// relevance=expired so it never grounds an answer, but the Meeting Record can
+// still read it and refuse to present a partial transcript as complete.
+const meetingMemoryKindTranscriptCoverage = "transcript_coverage"
+
+// meetingMemoryKindRecordingAudit is the durable audit row for a recording
+// toggle (Fix 5). Before it, recordingEpoch stamped on transcript rows was the
+// only durable trace of a toggle: enough to prove two toggles happened during
+// the 2026-09-02 blackout, not enough to say when or by whom.
+const meetingMemoryKindRecordingAudit = "recording_audit"
 
 type meetingTranscriptionLane struct {
 	app                *kanbanBoardApp
@@ -74,7 +101,12 @@ type meetingTranscriptionLane struct {
 	withdrawals  chan ConsentWithdrawalNotice
 	stop         chan struct{}
 	done         chan struct{}
-	closeOnce    sync.Once
+	// repair is the capture-stall recovery ladder's provider-reconnect lever.
+	// It is deliberately NOT the recording epoch: the epoch is attribution
+	// ordering, not a repair tool, and bumping it to fix a stall would fence
+	// off audio that is still legitimately in flight.
+	repair    chan struct{}
+	closeOnce sync.Once
 
 	mu                    sync.Mutex
 	connected             bool
@@ -211,6 +243,7 @@ func newMeetingTranscriptionLaneForRoomGeneration(app *kanbanBoardApp, apiKey st
 		withdrawals:        make(chan ConsentWithdrawalNotice, 8),
 		stop:               make(chan struct{}),
 		done:               make(chan struct{}),
+		repair:             make(chan struct{}, 1),
 	}
 }
 
@@ -272,6 +305,28 @@ func (lane *meetingTranscriptionLane) closeSourceLanes(commitPending bool) {
 	lane.sourceMu.Unlock()
 	for _, child := range children {
 		child.close()
+	}
+}
+
+// repairProviderConnection is recovery-ladder step 2. For a source manager it
+// discards and rebuilds the per-publication child lanes (each child owns its
+// own provider websocket, so the rebuild IS the reconnect); the next accepted
+// frame recreates them. For a plain lane it asks the run loop to drop and
+// redial. The recording epoch is untouched on both paths.
+func (lane *meetingTranscriptionLane) repairProviderConnection() {
+	if lane == nil {
+		return
+	}
+	if lane.sourceManager {
+		// discardOnClose: a stalled child's pending buffer never reached the
+		// provider, and committing it now would attribute stale audio to the
+		// wrong moment.
+		lane.closeSourceLanes(false)
+		return
+	}
+	select {
+	case lane.repair <- struct{}{}:
+	default:
 	}
 }
 
@@ -579,6 +634,10 @@ func (lane *meetingTranscriptionLane) run() {
 				log.Warnf("Transcript lane session expired; reconnecting")
 				broadcastAssistantEvent("status", "Transcript lane reconnecting", map[string]any{"reason": "session expired"})
 				backoff = transcriptionLaneReconnectInitial
+			} else if errors.Is(err, errTranscriptionLaneRepair) {
+				log.Warnf("Transcript lane reconnecting for capture-stall repair room=%s", lane.roomID)
+				broadcastAssistantEvent("status", "Transcript lane reconnecting", map[string]any{"reason": "capture stall repair"})
+				backoff = transcriptionLaneReconnectInitial
 			} else {
 				log.Errorf("Transcript lane failed: %v", err)
 				broadcastAssistantEvent("status", "Transcript lane reconnecting", map[string]any{"error": err.Error()})
@@ -593,7 +652,7 @@ func (lane *meetingTranscriptionLane) run() {
 			return
 		case <-time.After(backoff):
 		}
-		if err != nil && !errors.Is(err, errTranscriptionLaneSessionRefresh) && !errors.Is(err, errTranscriptionLaneSessionExpired) && backoff < transcriptionLaneReconnectMax {
+		if err != nil && !errors.Is(err, errTranscriptionLaneSessionRefresh) && !errors.Is(err, errTranscriptionLaneSessionExpired) && !errors.Is(err, errTranscriptionLaneRepair) && backoff < transcriptionLaneReconnectMax {
 			backoff *= 2
 			if backoff > transcriptionLaneReconnectMax {
 				backoff = transcriptionLaneReconnectMax
@@ -646,6 +705,12 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 	commitTimer := time.NewTimer(time.Hour)
 	stopTranscriptionTimer(commitTimer)
 	defer commitTimer.Stop()
+	// Fix 6: the ceiling on one segment. Armed on the transition INTO
+	// pendingAudio and re-armed after every commit, never re-armed per frame —
+	// that is the difference between a cap and the silence timer.
+	segmentTimer := time.NewTimer(time.Hour)
+	stopTranscriptionTimer(segmentTimer)
+	defer segmentTimer.Stop()
 	refreshTimer := time.NewTimer(transcriptionLaneSessionRefresh)
 	defer refreshTimer.Stop()
 	pendingAudio := false
@@ -667,6 +732,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 		segmentCapture = nil
 		segmentSpeaker = ""
 		stopTranscriptionTimer(commitTimer)
+		stopTranscriptionTimer(segmentTimer)
 		lane.app.discardRealtimeSpeechForScope(lane.scope())
 	}
 	commitPending := func() error {
@@ -698,6 +764,7 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 		pendingAudioSamples = 0
 		pendingFences = map[string]ConsentFence{}
 		segmentCapture = nil
+		stopTranscriptionTimer(segmentTimer)
 		scope := RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration}
 		lane.app.noteRealtimeSpeechStoppedForScope(scope)
 		if lane.fixedSource != nil && lane.sourceBindings != nil {
@@ -756,6 +823,11 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			pendingAudio = true
 			segmentCapture = capture
 			segmentSpeaker = lane.app.activeSpeakerNameForSegmentationForRoom(lane.roomID)
+			// Arm the ceiling exactly once per segment. Re-arming it per frame
+			// (the way the silence timer is re-armed) would recreate the
+			// unbounded-monologue bug it exists to close.
+			stopTranscriptionTimer(segmentTimer)
+			segmentTimer.Reset(transcriptionLaneMaxSegmentDuration)
 			lane.app.noteRealtimeSpeechStartedForScope(RoomScoutScope{RoomID: lane.roomID, SittingID: lane.sittingID, MediaGeneration: lane.mediaGeneration})
 		}
 		for _, fence := range frame.fences {
@@ -814,6 +886,23 @@ func (lane *meetingTranscriptionLane) runOnce() error {
 			// samples from surviving behind other participants' audio.
 			for len(lane.consentInput) > 0 {
 				<-lane.consentInput
+			}
+		case <-lane.repair:
+			// Capture-stall recovery ladder step 2. Drop the uncommitted
+			// segment (it never reached the provider) and redial.
+			if pendingAudio {
+				clearPending(true)
+			}
+			return errTranscriptionLaneRepair
+		case <-segmentTimer.C:
+			if !pendingAudio {
+				continue
+			}
+			// A monologue commits on the ceiling. commitPendingTranscriptionAudio
+			// pads short buffers and the provider handles a mid-sentence cut, so
+			// no audio is lost — only the sentence boundary moves.
+			if err := commitPending(); err != nil {
+				return err
 			}
 		case <-commitTimer.C:
 			if !pendingAudio {
@@ -1246,6 +1335,7 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithSourceBinding
 			})
 		}
 	case "conversation.item.input_audio_transcription.completed":
+		persistedBefore := app.transcriptionEventPersisted(roomID, scope.SittingID, event.EventID, event.ItemID)
 		segmentID := ""
 		audioSeconds := float64(0)
 		if bindings != nil {
@@ -1264,8 +1354,12 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithSourceBinding
 		} else {
 			audioSeconds = app.popTranscriptionSegmentSecondsForLaneScope(scope)
 		}
+		// This is provider success, but it is not yet meeting-transcript success.
+		// Source identity, sitting, consent, and the durable append all sit below;
+		// the 2026-09-03 incident had a fresh provider-success stamp alongside no
+		// transcript artifact. Clearing the watchdog here would recreate that
+		// false green whenever any of those downstream gates refuses the row.
 		recordCapabilitySuccess(capabilitySTT, time.Now().UTC())
-		recordCapabilitySuccess(capabilityMeetingSTT, time.Now().UTC())
 		recordEvalEvent(seatTranscriptionLane, evalKindTranscriptSegment, map[string]any{
 			"status":        "completed",
 			"room_id":       roomID,
@@ -1287,6 +1381,16 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithSourceBinding
 			app.rememberTranscriptForMediaScopeSegment(scope, segmentID, event, "transcript_lane", model)
 		} else {
 			app.rememberTranscriptForSegment(roomID, segmentID, event, "transcript_lane", model)
+		}
+		if !persistedBefore && app.transcriptionEventPersisted(roomID, scope.SittingID, event.EventID, event.ItemID) {
+			recordCapabilitySuccess(capabilityMeetingSTT, time.Now().UTC())
+			// The capture-stall watchdog's recovery clock advances only after the
+			// exact provider completion is durable. A connected websocket, a moving
+			// audio queue, and even a provider completion can all coexist with a
+			// transcript row rejected by a stale sitting or consent fence.
+			app.noteTranscriptCommit(roomID)
+		} else if !persistedBefore {
+			recordCapabilityFailure(capabilityMeetingSTT, time.Now().UTC(), fmt.Errorf("completed transcription was not persisted"))
 		}
 	case "conversation.item.input_audio_transcription.failed":
 		segmentID := ""
@@ -1348,6 +1452,41 @@ func (app *kanbanBoardApp) handleTranscriptionLaneEventForScopeWithSourceBinding
 		broadcastAssistantEvent("audio", "transcript lane detected silence", map[string]any{"eventType": event.Type})
 	}
 
+	return false
+}
+
+// transcriptionEventPersisted is the recovery proof for one provider
+// completion. The provider event id (or item id when the event id is absent)
+// is the same durable identity appendAttributedTranscriptEntryWithCapture
+// stores. The caller snapshots this before and after persistence so an old
+// duplicate cannot be borrowed as proof that a new completion advanced the
+// transcript, while a newly durable row still clears the stall.
+func (app *kanbanBoardApp) transcriptionEventPersisted(roomID, sittingID, eventID, itemID string) bool {
+	if app == nil || app.memory == nil {
+		return false
+	}
+	id := strings.TrimSpace(eventID)
+	if id == "" {
+		id = strings.TrimSpace(itemID)
+	}
+	if id == "" {
+		// Realtime transcription completions are item-bound. An identity-less
+		// event may still be de-duplicated by the memory store's content hash,
+		// but it cannot prove WHICH provider completion landed, so recovery must
+		// fail closed instead of borrowing an unrelated transcript row.
+		return false
+	}
+	roomID = normalizeRoomID(roomID)
+	sittingID = strings.TrimSpace(sittingID)
+	app.memory.mu.RLock()
+	defer app.memory.mu.RUnlock()
+	for index := len(app.memory.entries) - 1; index >= 0; index-- {
+		entry := app.memory.entries[index]
+		if entry.Kind != meetingMemoryKindTranscript || entry.ID != id || normalizeRoomID(entry.Metadata["roomId"]) != roomID {
+			continue
+		}
+		return sittingID == "" || strings.TrimSpace(entry.Metadata["meetingId"]) == sittingID
+	}
 	return false
 }
 

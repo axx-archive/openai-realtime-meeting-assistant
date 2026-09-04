@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -430,6 +431,15 @@ func TestReadinessScoutLanesReportIdleNotDegradedWithHonestShape(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("BACKUP_DISABLED", "true")
+	// This test is about idleness, so every lane must be switched ON. Both
+	// voice lanes sit behind release gates and report "disabled" when their
+	// gate is closed (pinned separately in
+	// TestCapabilityVoiceLanesNameTheirReleaseGates).
+	t.Setenv("PRIVATE_REALTIME_VOICE_QUALIFIED", "true")
+	t.Setenv(roomScoutVoiceModeEnv, "qualified")
+	roomVoiceReceipt := strings.Repeat("a", 64)
+	t.Setenv(roomScoutVoiceQualificationEnv, roomVoiceReceipt)
+	t.Cleanup(installRoomScoutVoiceQualificationVerifier(func(candidate string) bool { return candidate == roomVoiceReceipt }))
 	previousApp := kanbanApp
 	app := newIsolatedKanbanBoardApp(t)
 	kanbanApp = app

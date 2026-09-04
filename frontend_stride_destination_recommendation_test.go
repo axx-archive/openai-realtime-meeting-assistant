@@ -17,7 +17,8 @@ func TestSTRIDESuggestedWorkUISurfacesRecommendationOrManualChoiceWithoutLaunchi
 	// server-owned projects and never mutates merely because a recommendation
 	// was displayed.
 	for _, required := range []string{
-		`data-pd1-destination="Work" aria-label="Work"`,
+		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
+		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
 		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Conversations', 'Work', 'Drive'])`,
 		"function renderStudioProjects()",
 		"async function loadStudioProjects(",

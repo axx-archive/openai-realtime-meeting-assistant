@@ -109,6 +109,16 @@ func channelDigestAgent() ambientAgentConfig {
 		// pre-boot history up oldest-first in bounded chunks over successive
 		// passes, carrying the digest forward — nothing pre-boot is skipped,
 		// nothing replays through the stream cursor.
+		//
+		// Gen 249 follow-up: this opt-in ALSO licenses superseding a stale
+		// blocked checkpoint. The first ship of the anchor was inert in
+		// production because gen 248 had already written a
+		// durable_cursor_ambiguous window for this exact scope and the chassis
+		// returned that persisted block before it consulted the anchor. The
+		// supersession is gated on this scope having produced no
+		// channel_digest_pass at all (see
+		// ambientFirstRunAnchorSupersedesCheckpoint) and marks the checkpoint,
+		// so it can happen at most once.
 		firstRunAnchor: true,
 	}
 }

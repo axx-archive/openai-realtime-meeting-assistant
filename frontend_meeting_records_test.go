@@ -48,7 +48,7 @@ func TestMeetingRecordWebAndNativeSurfacesKeepExactAuthorityAndCanonicalOrder(t 
 		}
 	}
 	for destination, label := range map[string]string{
-		"Home": "Home", "Video": "Rooms", "Conversations": "Conversations", "Work": "Work", "Drive": "Drive",
+		"Home": "Home", "Video": "Rooms", "Conversations": "Conversations", "Work": "Packaging Studio" /* Wave 11 D1 */, "Drive": "Drive",
 	} {
 		if !strings.Contains(html, `data-pd1-destination="`+destination+`" aria-label="`+label+`"`) {
 			t.Fatalf("responsive primary destination %q lacks durable accessible name %q", destination, label)

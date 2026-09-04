@@ -235,7 +235,9 @@ func TestIndexConversationsWave1ReadMarkers(t *testing.T) {
 	// and the seam is styled below the desktop breakpoint too: a base rule
 	// ahead of the desktop chat cascade, which restates it for ≥861px
 	base := strings.Index(html, "#chatTool .desktop-chat-unread {")
-	desktop := strings.Index(html, "/* Chat already names the active conversation in its own header.")
+	// Wave 11 D15: the desktop chat cascade now opens with the D15 note (the
+	// chat-only topbar suppression it replaced is gone)
+	desktop := strings.Index(html, "/* Wave 11 D15: the topbar reads \"Conversations\" + the destination")
 	if base < 0 || desktop < 0 || base > desktop {
 		t.Error("the unread seam needs a base (phone) style ahead of the desktop chat cascade")
 	}

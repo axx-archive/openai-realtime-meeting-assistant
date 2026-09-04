@@ -817,3 +817,154 @@ func TestChannelDigestWindowPassOverLegacyDigestStaysCaughtUp(t *testing.T) {
 		t.Fatalf("pass after the window digest calls=%d err=%v, want the history still caught up", calls, err)
 	}
 }
+
+// PRODUCTION REPRO (gen 249, verified 2026-09-03). Release 8c7344d1 shipped the
+// first-run anchor and it ran ZERO times: the live hold file still carried the
+// PREVIOUS release's checkpoint for this exact scope — blockedReason
+// durable_cursor_ambiguous, no firstRunAnchor field, no held window — and
+// bootstrapAmbientContinuity returned that persisted block before it ever
+// reached the anchor. The store held ZERO channel_digest_pass artifacts, so the
+// anchor's own already-produced guard was NOT what blocked it. That made the
+// blocked state permanent: no future release could have repaired it. This pins
+// the exact production shape end to end — stale block in; anchored, run and
+// recorded out — and pins the fail-closed guard that must survive it.
+func TestChannelDigestStaleBlockedCheckpointAnchorsForNeverProducedScope(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	t.Setenv("CHANNEL_DIGEST_MIN_MESSAGES", "1")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	seed := newKanbanBoardApp()
+	alpha := seedPublicChannelMessages(t, seed, "channel-stale-block-alpha", "Alpha",
+		"Zebra confirmed the packaging pilot kicks off next Monday.",
+		"AJ: we choose vendor Zebra for the packaging pilot.")
+	beta := seedPublicChannelMessages(t, seed, "channel-stale-block-beta", "Beta",
+		"Kappa wants a call about the retainer.")
+	holdPath := seed.ambientHeldWindowPath()
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The live gen-248 window, field for field as production carries it.
+	agent := channelDigestAgent()
+	scope := ambientAgentScopeKey(agent, officeRoomID)
+	stale := ambientHeldWindow{
+		Agent:             agent.name,
+		RoomID:            officeRoomID,
+		InputKind:         agent.inputKind,
+		ArtifactKind:      agent.artifactKind,
+		CursorMetadataKey: agent.cursorMetadataKey,
+		WindowID:          "",
+		BlockedReason:     ambientContinuityAmbiguous,
+	}
+	if err := persistAmbientHeldWindowState(holdPath, ambientHeldWindowState{
+		Version: 1, Windows: map[string]ambientHeldWindow{scope: stale},
+	}); err != nil {
+		t.Fatalf("persist the stale pre-release checkpoint: %v", err)
+	}
+
+	app := newKanbanBoardApp()
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		_ = app.Close()
+	})
+
+	app.memory.mu.RLock()
+	passes, preBootInput := 0, app.memory.bootLatestIDs[meetingMemoryKindTranscript]
+	for _, entry := range app.memory.entries {
+		if entry.Kind == meetingMemoryKindChannelDigestPass {
+			passes++
+		}
+	}
+	app.memory.mu.RUnlock()
+	if passes != 0 || preBootInput == "" {
+		t.Fatalf("store passes=%d preBootInput=%q, want production's shape: never produced, pre-boot input waiting", passes, preBootInput)
+	}
+
+	// BEFORE: blocked — but visibly blocked-and-anchorable, not blocked-and-stuck.
+	// Production could only be diagnosed because firstRunAnchorScopes was
+	// ABSENT; an opted-in worker now publishes it at zero instead.
+	before := ambientWorkerCheckpointDiagnostics(app, agent)
+	if before["checkpointStatus"] != "blocked_anchorable" || before["blockedScopeCount"] != 1 ||
+		before["blockedAnchorableScopes"] != 1 || before["firstRunAnchorScopes"] != 0 || before["ambientContinuityHealthy"] != false {
+		t.Fatalf("pre-anchor diagnostics=%v, want a blocked-but-anchorable scope publishing the anchor key at zero", before)
+	}
+	scopes, _ := before["continuityScopes"].([]map[string]any)
+	if len(scopes) != 1 || scopes[0]["anchorable"] != true || scopes[0]["blockedReason"] != ambientContinuityAmbiguous {
+		t.Fatalf("pre-anchor continuity scopes=%v, want the stale ambiguous scope marked anchorable", scopes)
+	}
+
+	// THE FIX: the stale block is superseded, not obeyed.
+	baseline, blocked, err := app.bootstrapAmbientContinuity(agent, officeRoomID)
+	if err != nil || blocked != "" || baseline != preBootInput {
+		t.Fatalf("baseline=%q blocked=%q err=%v, want the stale block superseded by the pre-boot anchor %q", baseline, blocked, err, preBootInput)
+	}
+	checkpoint, ok, err := app.ambientScopeCheckpoint(scope)
+	if err != nil || !ok || !checkpoint.FirstRunAnchor || checkpoint.BlockedReason != "" || checkpoint.BaselineID != preBootInput {
+		t.Fatalf("checkpoint=%+v ok=%v err=%v, want the supersession recorded and the block cleared", checkpoint, ok, err)
+	}
+	// Idempotent: the marker it just wrote is the anchor-loop stop.
+	if anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(agent, officeRoomID, checkpoint); ok {
+		t.Fatalf("a marked checkpoint re-anchored to %q; FirstRunAnchor must stop a second supersession", anchor)
+	}
+	app.setAmbientAgentBaselineID(agent.name, checkpoint.BaselineID)
+
+	// ...and the pass then actually runs: alpha posts again, so its pre-boot
+	// history is caught up as a chunk before the window group folds the new
+	// message; beta is caught up from the drained scan.
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", alpha.ID, scoutChatMessageRecord{
+		ID: "channel-stale-block-alpha-msg-new", Kind: "message", Role: "user", Text: "Zebra signed; pilot starts Monday for real.",
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), AuthorName: "AJ", AuthorEmail: "aj@shareability.com",
+	}); err != nil {
+		t.Fatalf("post new alpha message: %v", err)
+	}
+	calls := map[string]int{}
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		for _, threadID := range []string{alpha.ID, beta.ID} {
+			if strings.Contains(request.Input, "thread id: "+threadID) {
+				calls[threadID]++
+			}
+		}
+		return cannedMeetingDigestJSON(), nil
+	}
+	pass, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, agent.minBatch(), officeRoomID)
+	if err != nil {
+		t.Fatalf("first pass after the supersession: %v", err)
+	}
+	if calls[alpha.ID] != 2 || calls[beta.ID] != 1 {
+		t.Fatalf("calls alpha=%d beta=%d, want alpha's history chunk + window and beta's chunk", calls[alpha.ID], calls[beta.ID])
+	}
+	if pass.Kind != meetingMemoryKindChannelDigestPass || pass.Metadata[channelDigestCursorMetadataKey] == "" {
+		t.Fatalf("pass=%+v, want the cursor advanced past the new message", pass)
+	}
+	for _, thread := range []scoutChatThreadRecord{alpha, beta} {
+		digest, ok := app.memory.currentDigest(meetingMemoryKindChannelDigest, thread.ID)
+		if !ok || digest.Metadata[channelDigestSeedPendingMetadataKey] != "0" {
+			t.Fatalf("thread %s digest=%v ok=%v, want it caught up with nothing pending", thread.ID, digest.Metadata, ok)
+		}
+	}
+	app.mu.Lock()
+	failure := app.agentFailures[scope]
+	app.mu.Unlock()
+	if failure != nil {
+		t.Fatalf("the anchored pass recorded a failure: %+v", failure)
+	}
+	health := ambientWorkerCapabilitySnapshot(agent, time.Now().UTC(), providerOpenAI, true)
+	if health["firstRunAnchorScopes"] != 1 || health["checkpointStatus"] != "ready" || health["blockedScopeCount"] != 0 ||
+		health["seedPendingRows"] != 0 || health["continuityError"] == true || health["circuit"] == "continuity_error" {
+		t.Fatalf("post-anchor snapshot=%v, want one recorded anchor, a ready checkpoint and nothing pending", health)
+	}
+
+	// Fail-closed is untouched: the scope has now produced, so the same stale
+	// block shape can never be anchored past again — with or without the marker.
+	if anchor, ok := app.ambientFirstRunAnchorSupersedesCheckpoint(agent, officeRoomID, stale); ok {
+		t.Fatalf("anchor=%q for a scope holding a %s; a produced scope must never anchor past unprocessed input", anchor, agent.artifactKind)
+	}
+}

@@ -54,9 +54,31 @@ func TestFrontendPrivateRiffKeepsPublicContextVisibleAndPublishesWithTwoExplicit
 	}
 	emptyState := functionBody(html, "function ensureScoutChatEmptyState(")
 	if !strings.Contains(emptyState, "const isRiff = Boolean(thread?.riff)") ||
-		!strings.Contains(emptyState, "Ask Scout from this checkpoint") ||
-		!strings.Contains(emptyState, "if (!isChannel && !isRiff) empty.after(buildScoutStarterRow())") {
-		t.Fatalf("an empty Private Riff must explain the source-bound conversation without offering durable-work starters: %s", emptyState)
+		!strings.Contains(emptyState, "Ask Scout from this checkpoint") {
+		t.Fatalf("an empty Private Riff must explain the source-bound conversation: %s", emptyState)
+	}
+	// AJ 2026-09-02 (Wave 11 D14) retired buildScoutStarterRow — "clicking these buttons does not do anything really other than type a few words in" — so the same invariant is pinned on its replacement: the private non-riff branch alone appends buildPrivateThreadActionsRow, and the Riff branch offers no durable-work row at all.
+	if n := strings.Count(emptyState, "buildPrivateThreadActionsRow("); n != 1 {
+		t.Fatalf("the private thread actions row must be built on exactly one branch; found %d call sites: %s", n, emptyState)
+	}
+	riffBranchStart := strings.Index(emptyState, "} else if (isRiff) {")
+	if riffBranchStart < 0 {
+		t.Fatalf("ensureScoutChatEmptyState no longer has a dedicated Riff branch: %s", emptyState)
+	}
+	privateBranchStart := riffBranchStart + strings.Index(emptyState[riffBranchStart:], "} else {")
+	privateBranchEnd := strings.Index(emptyState, "if (inner.children.length)")
+	if privateBranchStart <= riffBranchStart || privateBranchEnd <= privateBranchStart {
+		t.Fatalf("ensureScoutChatEmptyState no longer branches channel / riff / private: %s", emptyState)
+	}
+	riffBranch := emptyState[riffBranchStart:privateBranchStart]
+	privateBranch := emptyState[privateBranchStart:privateBranchEnd]
+	for _, forbidden := range []string{"buildPrivateThreadActionsRow", "ActionsRow", "StarterRow", "starter"} {
+		if strings.Contains(riffBranch, forbidden) {
+			t.Fatalf("an empty Private Riff must offer no durable-work starters or thread actions; found %q: %s", forbidden, riffBranch)
+		}
+	}
+	if !strings.Contains(privateBranch, "inner.appendChild(buildPrivateThreadActionsRow(selectedScoutChatThread()))") {
+		t.Fatalf("the private non-riff empty state must be the one branch that appends the thread actions row: %s", privateBranch)
 	}
 	checkpoint := functionBody(html, "function privateRiffCheckpointNode(")
 	if strings.Contains(checkpoint, "Update context") || strings.Contains(checkpoint, "will be included when you send") ||

@@ -75,10 +75,19 @@ func TestMeetingFinalizationPostsOneRecapCardIntoRoomChannel(t *testing.T) {
 		t.Fatalf("cards=%d card=%+v, want one Scout-authored card", count, card)
 	}
 	// compact card: decisions + the mono overflow footer, no action-item list
-	for _, want := range []string{"Meeting recap", "Decisions\n• Choose vendor Zebra", "1 action item · 1 open", "Meeting Record: https://bonfire.test/?record=" + record.ID} {
+	for _, want := range []string{"Meeting recap", "Decisions\n• Choose vendor Zebra", "1 action item · 1 open"} {
 		if !strings.Contains(card.Text, want) {
 			t.Fatalf("card text missing %q:\n%s", want, card.Text)
 		}
+	}
+	// AJ 2026-09-03: no link out of the conversation. The card is read where it
+	// is posted (the web client expands it in place), and the meeting id travels
+	// on the deterministic message id, not in the prose.
+	if strings.Contains(card.Text, "Meeting Record:") || strings.Contains(card.Text, "?record=") {
+		t.Fatalf("recap card text must carry no Meeting Record link:\n%s", card.Text)
+	}
+	if card.ID != meetingRecapCardMessageID(record.ID) {
+		t.Fatalf("card id=%q, want %q — the id is the only carrier of the meeting id", card.ID, meetingRecapCardMessageID(record.ID))
 	}
 	if strings.Contains(card.Text, "Action items") || strings.Contains(card.Text, "Draft the pricing sheet") {
 		t.Fatalf("compact card must not list action items:\n%s", card.Text)
@@ -153,10 +162,13 @@ func TestMeetingRecapCardChannelMapping(t *testing.T) {
 	}
 	text := buildMeetingRecapCardText(meetingRecord{ID: "m1", Title: "Launch", StartedAt: "2026-09-01T10:00:00Z", EndedAt: "2026-09-01T11:12:00Z", Participants: []string{"AJ", "Tim"}},
 		meetingDigestPayload{Decisions: []meetingDigestDecision{{D: "Ship Friday"}, {D: ""}}, ActionItems: []meetingDigestAction{{A: "Write the checklist", Owner: "Tyler"}}}, "the office", time.Now().UTC())
-	for _, want := range []string{"Meeting recap — Launch", "the office · 1h 12m · 2 people", "Decisions\n• Ship Friday", "\n1 action item\n", "Meeting Record: https://bonfire.test/?record=m1"} {
+	for _, want := range []string{"Meeting recap — Launch", "the office · 1h 12m · 2 people", "Decisions\n• Ship Friday", "\n1 action item"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("card text missing %q:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "Meeting Record:") {
+		t.Fatalf("card text must not link out of the conversation:\n%s", text)
 	}
 	if strings.Contains(text, "Write the checklist") {
 		t.Fatalf("compact card must not list action items:\n%s", text)
@@ -168,7 +180,9 @@ func TestMeetingRecapCardChannelMapping(t *testing.T) {
 // deliberately NOT a re-ranking key (it is optional and model-emitted, so
 // ranking on it would reorder the card away from the order the decisions were
 // made in and leave "+N decisions" ambiguous). Plus a mono footer counting
-// what the card leaves off, one Meeting Record link, no action-item list.
+// what the card leaves off, no action-item list, and — since AJ 2026-09-03 —
+// no Meeting Record link: the text ends at the footer and the client expands
+// the card in place instead of routing the reader to the record surface.
 func TestMeetingRecapCardCompactPayloadShape(t *testing.T) {
 	t.Setenv("BONFIRE_PUBLIC_URL", "https://bonfire.test")
 	record := meetingRecord{ID: "m-compact", Title: "Roadmap", StartedAt: "2026-09-02T09:00:00Z", EndedAt: "2026-09-02T09:45:00Z", Participants: []string{"AJ", "Tim", "Tyler"}}
@@ -200,7 +214,7 @@ func TestMeetingRecapCardCompactPayloadShape(t *testing.T) {
 		t.Fatalf("footer=%q", card.Footer())
 	}
 	text := card.Text()
-	want := "**Meeting recap — Roadmap**\nthe office · 45 min · 3 people\n\nDecisions\n• First: pick the vendor\n• Second: freeze scope\n• Third: ship Friday\n\n+2 decisions · 2 action items · 1 open\n\nMeeting Record: https://bonfire.test/?record=m-compact"
+	want := "**Meeting recap — Roadmap**\nthe office · 45 min · 3 people\n\nDecisions\n• First: pick the vendor\n• Second: freeze scope\n• Third: ship Friday\n\n+2 decisions · 2 action items · 1 open"
 	if text != want {
 		t.Fatalf("text=\n%s\nwant\n%s", text, want)
 	}
@@ -211,11 +225,11 @@ func TestMeetingRecapCardCompactPayloadShape(t *testing.T) {
 	}
 	// nothing left off → no footer; no decisions → the honest empty line
 	bare := buildMeetingRecapCard(record, meetingDigestPayload{Decisions: []meetingDigestDecision{{D: "Only one"}}}, "", time.Now().UTC())
-	if bare.Footer() != "" || strings.Contains(bare.Text(), "\n\n\n") || !strings.Contains(bare.Text(), "Decisions\n• Only one\n\nMeeting Record:") {
+	if bare.Footer() != "" || strings.Contains(bare.Text(), "\n\n\n") || !strings.HasSuffix(bare.Text(), "Decisions\n• Only one") {
 		t.Fatalf("bare card=%+v text=\n%s", bare, bare.Text())
 	}
 	empty := buildMeetingRecapCard(record, meetingDigestPayload{ActionItems: []meetingDigestAction{{A: "Follow up"}}}, "", time.Now().UTC())
-	if !strings.Contains(empty.Text(), "No grounded decisions were captured.\n\n1 action item\n") {
+	if !strings.HasSuffix(empty.Text(), "No grounded decisions were captured.\n\n1 action item") {
 		t.Fatalf("empty-decisions text=\n%s", empty.Text())
 	}
 }
