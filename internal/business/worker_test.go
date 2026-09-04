@@ -23,12 +23,13 @@ type workerTestLedger struct {
 	definitiveAbsent                     bool
 }
 type workerTestAdapter struct {
-	ledger      *workerTestLedger
-	planHook    func(WorkerPlanInput)
-	executeHook func(context.Context, WorkerInvocation) error
-	afterAccept func(context.Context, WorkerInvocation) error
-	unknownCost bool
-	badDigest   bool
+	ledger       *workerTestLedger
+	planHook     func(WorkerPlanInput)
+	executeHook  func(context.Context, WorkerInvocation) error
+	afterAccept  func(context.Context, WorkerInvocation) error
+	recoveryHook func(WorkerRecovery)
+	unknownCost  bool
+	badDigest    bool
 }
 
 func (a *workerTestAdapter) ID() string { return "test-private-document-adapter" }
@@ -75,6 +76,9 @@ func (a *workerTestAdapter) Execute(ctx context.Context, in WorkerInvocation) (W
 	return o, nil
 }
 func (a *workerTestAdapter) Reconcile(ctx context.Context, in WorkerRecovery) (WorkerObservation, error) {
+	if a.recoveryHook != nil {
+		a.recoveryHook(in)
+	}
 	a.ledger.mu.Lock()
 	defer a.ledger.mu.Unlock()
 	a.ledger.reconciles++
@@ -86,6 +90,42 @@ func (a *workerTestAdapter) Reconcile(ctx context.Context, in WorkerRecovery) (W
 		return WorkerObservation{Resolved: true, Outcome: "not_accepted", Cost: CostEvidence{&zero, "authoritative-test-no-charge:" + in.Operation.ID}, OutcomeEvidenceRef: "authoritative-test-nonacceptance:" + in.Operation.ID}, nil
 	}
 	return WorkerObservation{Resolved: false}, ctx.Err()
+}
+
+func TestPostgresWorkerAdapterScopeSurvivesRestart(t *testing.T) {
+	s, admin, pool := testStore(t)
+	ctx := context.Background()
+	a := newWorkerTestAdapter()
+	expected := map[string]Scope{}
+	seen := map[string]int{}
+	check := func(stage string, scope Scope, workID string) {
+		t.Helper()
+		if scope != expected[workID] {
+			t.Fatalf("%s: incorrect adapter scope %+v", stage, scope)
+		}
+		seen[stage]++
+	}
+	a.planHook = func(in WorkerPlanInput) { check("plan", in.Scope, in.Work.ID) }
+	a.executeHook = func(_ context.Context, in WorkerInvocation) error { check("execute", in.Scope, in.Work.ID); return nil }
+	a.afterAccept = func(context.Context, WorkerInvocation) error { return errWorkerCrash }
+	a.recoveryHook = func(in WorkerRecovery) { check("reconcile", in.Scope, in.Work.ID) }
+	for i := 0; i < 2; i++ {
+		f := makeFixture(t, s)
+		work := admit(t, s, f)
+		expected[work.ID] = f.scope
+		_, err := driver(t, s, a).Step(ctx, f.scope, work.ID)
+		mustErr(t, err, errWorkerCrash)
+		expireWorkAttempt(t, s, admin, f, work)
+		out, err := driver(t, reopenWorkerStore(t, pool), a).Step(ctx, f.scope, work.ID)
+		if err != nil || out.State != "completed" {
+			t.Fatal(out.State, err)
+		}
+	}
+	for _, stage := range []string{"plan", "execute", "reconcile"} {
+		if seen[stage] != 2 {
+			t.Fatal(stage, seen[stage])
+		}
+	}
 }
 func newWorkerTestAdapter() *workerTestAdapter {
 	return &workerTestAdapter{ledger: &workerTestLedger{outcomes: map[string]WorkerObservation{}}}

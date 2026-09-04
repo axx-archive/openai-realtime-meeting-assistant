@@ -44,6 +44,7 @@ type WorkerAdapter interface {
 }
 
 type WorkerPlanInput struct {
+	Scope       Scope
 	Work        Work
 	AttemptID   string
 	OperationID string
@@ -53,6 +54,7 @@ type WorkerPlan struct {
 	Request   []byte
 }
 type WorkerInvocation struct {
+	Scope     Scope
 	Work      Work
 	Attempt   Attempt
 	Operation Operation
@@ -62,6 +64,7 @@ type WorkerInvocation struct {
 	CheckAuthority func(context.Context) error
 }
 type WorkerRecovery struct {
+	Scope          Scope
 	Work           Work
 	Attempt        Attempt
 	Operation      Operation
@@ -158,7 +161,7 @@ func (w *Worker) Step(parent context.Context, scope Scope, workID string) (Worke
 		return out, ErrInactive
 	}
 	operationID := "operation_" + uuid.NewSHA1(uuid.NameSpaceOID, []byte(scope.OrganizationID+"\x00"+attempt.ID)).String()
-	plan, e := w.adapter.Plan(ctx, WorkerPlanInput{work, attempt.ID, operationID})
+	plan, e := w.adapter.Plan(ctx, WorkerPlanInput{Scope: scope, Work: work, AttemptID: attempt.ID, OperationID: operationID})
 	if e != nil {
 		return out, e
 	}
@@ -201,7 +204,7 @@ func (w *Worker) Step(parent context.Context, scope Scope, workID string) (Worke
 	if e = gate(ctx); e != nil {
 		return out, e
 	}
-	observation, e := w.adapter.Execute(ctx, WorkerInvocation{work, attempt, plan.Operation, request, gate})
+	observation, e := w.adapter.Execute(ctx, WorkerInvocation{Scope: scope, Work: work, Attempt: attempt, Operation: plan.Operation, Request: request, CheckAuthority: gate})
 	if e != nil {
 		return out, e
 	}
@@ -235,7 +238,7 @@ func (w *Worker) recover(ctx context.Context, scope Scope, out WorkerStep) (Work
 		result = &r
 		out.Result = &r
 	}
-	observation, e := w.adapter.Reconcile(ctx, WorkerRecovery{out.Work, a, *a.Operation, result})
+	observation, e := w.adapter.Reconcile(ctx, WorkerRecovery{Scope: scope, Work: out.Work, Attempt: a, Operation: *a.Operation, ExistingResult: result})
 	if e != nil {
 		return out, e
 	}
