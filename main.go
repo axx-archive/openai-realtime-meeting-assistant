@@ -1260,6 +1260,17 @@ func main() {
 	http.HandleFunc("/internal/media-soak/", mediaSoakObserverHandler)
 	http.HandleFunc("/artifacts", artifactsHandler)
 	http.HandleFunc("/api/studio-projects/v1", studioProjectsHandler)
+	businessContext, cancelBusinessStartup := context.WithTimeout(context.Background(), 10*time.Second)
+	businessHandler, businessPool, businessStartupError := newBusinessHTTP(businessContext, os.Getenv("STRIDE_BUSINESS_DATABASE_URL"))
+	cancelBusinessStartup()
+	if businessStartupError != nil {
+		fmt.Fprintf(os.Stderr, "Business startup failed: %v\n", businessStartupError)
+		os.Exit(2)
+	}
+	if businessPool != nil {
+		defer businessPool.Close()
+	}
+	registerBusinessHTTP(http.DefaultServeMux, businessHandler)
 	http.HandleFunc("/artifacts/deck", deckEditorHandler)
 	http.HandleFunc("/artifacts/deck/new", deckEditorNewHandler)
 	http.HandleFunc("/artifacts/deck/copies", deckEditorCopyHandler)

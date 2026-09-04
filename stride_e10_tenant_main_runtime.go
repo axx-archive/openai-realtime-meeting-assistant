@@ -334,6 +334,11 @@ func strideE10TenantHTTPHandler(next http.Handler) http.Handler {
 
 func strideE10TenantSurfaceForHTTPPath(path string) (StrideE10TenantSurface, bool) {
 	path = strings.TrimSpace(path)
+	// Business has its own authenticated-person bridge and SQL tenant authority.
+	// Do not run the legacy active-organization converter around this namespace.
+	if strings.HasPrefix(path, businessAPIBase) {
+		return "", false
+	}
 	for _, prefix := range []string{"/healthz", "/livez", "/readyz", "/capabilities", "/auth/", "/.well-known/", "/public/", "/sw.js", "/a/", "/g", "/guest/", "/ice-test", "/client-config", "/native/config", "/internal/"} {
 		if path == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(path, prefix) {
 			return "", false

@@ -84977,7 +84977,11 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        menu.hidden = true
 	        // Wave 2 D4: bfMenu (adopted — the class and the rows stay) owns
 	        // open/close, light-dismiss, Escape-to-trigger, keys and the origin
-	        const control = bfMenu(trigger, { menu, origin: 'top-right' })
+	        const control = bfMenu(trigger, {
+	          menu,
+	          origin: 'top-right',
+	          onClose: () => resetDesktopMessageDeleteConfirmation(menu.querySelector('[data-danger="true"]'))
+	        })
 	        const close = ({ restoreFocus = false } = {}) => control.close({ restoreFocus })
 	        const open = () => control.open()
 	        wrap.addEventListener('pointerdown', event => event.stopPropagation())
@@ -85128,14 +85132,21 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        input.setSelectionRange(input.value.length, input.value.length)
 	      }
 
+	      function resetDesktopMessageDeleteConfirmation(control) {
+	        if (!control) return
+	        window.clearTimeout(control.desktopDeleteConfirmationTimer)
+	        delete control.desktopDeleteConfirmationTimer
+	        if (control.dataset.armed !== '1') return
+	        delete control.dataset.armed
+	        control.textContent = 'Delete message…'
+	      }
+
 	      function confirmDesktopFeedMessageDelete(messageId, control, close) {
 	        if (control.dataset.armed !== '1') {
 	          control.dataset.armed = '1'
 	          control.textContent = 'Delete message?'
-	          window.setTimeout(() => {
-	            if (!control.isConnected) return
-	            delete control.dataset.armed
-	            control.textContent = 'Delete message…'
+	          control.desktopDeleteConfirmationTimer = window.setTimeout(() => {
+	            resetDesktopMessageDeleteConfirmation(control)
 	          }, 2600)
 	          return
 	        }
@@ -85217,10 +85228,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (control.dataset.armed !== '1') {
 	          control.dataset.armed = '1'
 	          control.textContent = 'Delete?'
-	          window.setTimeout(() => {
-	            if (!control.isConnected) return
-	            delete control.dataset.armed
-	            control.textContent = 'Delete'
+	          control.desktopDeleteConfirmationTimer = window.setTimeout(() => {
+	            resetDesktopMessageDeleteConfirmation(control)
 	          }, 2600)
 	          return
 	        }

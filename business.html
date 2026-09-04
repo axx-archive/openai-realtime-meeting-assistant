@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#11131a" />
+    <title>Business · STRIDE</title>
+    <link rel="icon" href="/public/favicon.svg" />
+    <link rel="stylesheet" href="/public/business/business.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to business</a>
+    <div id="app" class="app-shell">
+      <aside class="rail">
+        <a class="brand" href="/business" aria-label="STRIDE businesses"
+          ><img src="/public/wordmark-ink.svg" alt="STRIDE" /></a
+        ><span class="rail-caption">BUSINESS</span>
+        <nav id="navigation" aria-label="Business navigation"></nav>
+        <div class="rail-bottom">
+          <a href="/index.html">Workspace <span aria-hidden="true">↗</span></a>
+          <div id="viewer"></div>
+        </div>
+      </aside>
+      <div class="main-shell">
+        <header class="topbar">
+          <div id="business-switcher"></div>
+          <div id="top-actions"></div>
+        </header>
+        <main id="main" tabindex="-1">
+          <div class="page-loading" role="status">
+            <span class="loading-mark"></span>
+            <h1>Opening your businesses</h1>
+            <p>Loading your current workspace.</p>
+          </div>
+        </main>
+      </div>
+    </div>
+    <div
+      id="announcements"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    ></div>
+    <script type="module" src="/public/business/business.js"></script>
+  </body>
+</html>
