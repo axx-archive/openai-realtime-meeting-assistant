@@ -6,6 +6,7 @@ const main = document.querySelector("#main"),
 const state = {
   context: null,
   detail: null,
+  workDetail: null,
   loading: false,
   error: null,
   request: 0,
@@ -75,12 +76,14 @@ function route() {
       ? query.get("view")
       : "overview",
     setup: query.get("setup") === "1",
+    workId: query.get("work") || "",
   };
 }
-function url(id, view = "overview") {
+function url(id, view = "overview", workId = "") {
   const query = new URLSearchParams();
   if (id) query.set("business", id);
   if (view !== "overview") query.set("view", view);
+  if (view === "work" && workId) query.set("work", workId);
   return "/business" + (query.size ? "?" + query : "");
 }
 function navigate(href) {
@@ -106,7 +109,7 @@ function money(value, currency = "USD") {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 6,
   }).format(value / 1e6);
 }
 function date(value) {
@@ -246,7 +249,11 @@ function loading() {
       "div",
       { class: "page-loading", role: "status" },
       e("span", { class: "loading-mark" }),
-      e("h1", {}, "Opening your business"),
+      e(
+        "h1",
+        {},
+        route().workId ? "Opening your work" : "Opening your business",
+      ),
       e("p", {}, "Loading the latest operating state."),
     ),
   );
@@ -267,7 +274,9 @@ function showError(error, retry) {
           ? "Your session has ended."
           : error.status === 403
             ? "Access has changed."
-            : "We couldn’t open this business.",
+            : route().workId
+              ? "We couldn’t open this work."
+              : "We couldn’t open this business.",
       ),
       e("p", {}, error.message),
       signedOut
@@ -282,6 +291,7 @@ function showError(error, retry) {
 }
 async function bootstrap() {
   state.detail = null;
+  state.workDetail = null;
   state.context = null;
   state.setupDraft = null;
   header();
@@ -303,6 +313,7 @@ async function loadRoute() {
   header();
   state.controller?.abort();
   state.detail = null;
+  state.workDetail = null;
   const ticket = ++state.request;
   if (!state.context) {
     return bootstrap();
@@ -318,17 +329,31 @@ async function loadRoute() {
   state.controller = new AbortController();
   loading();
   try {
-    const detail = await businessAPI.detail(
-      current.id,
-      state.controller.signal,
-    );
-    if (ticket !== state.request) return;
-    state.detail = detail;
-    header();
-    renderDetail();
+    if (current.view === "work" && current.workId) {
+      const workDetail = await businessAPI.workDetail(
+        current.id,
+        current.workId,
+        state.controller.signal,
+      );
+      if (ticket !== state.request) return;
+      state.workDetail = workDetail;
+      state.detail = { business: workDetail.business };
+      header();
+      renderWorkDetail();
+    } else {
+      const detail = await businessAPI.detail(
+        current.id,
+        state.controller.signal,
+      );
+      if (ticket !== state.request) return;
+      state.detail = detail;
+      header();
+      renderDetail();
+    }
   } catch (error) {
     if (ticket !== state.request) return;
     state.detail = null;
+    state.workDetail = null;
     if ([401, 403, 404].includes(error.status)) {
       state.setupDraft = null;
       state.context = null;
@@ -443,7 +468,24 @@ function collection(kind, title, emptyTitle, emptyCopy, renderer) {
         : "";
   }
   append(6);
-  return panel(title, null, e("div", {}, rows, counter, more));
+  return panel(
+    title,
+    null,
+    e(
+      "div",
+      {},
+      rows,
+      counter,
+      more,
+      d.coverage?.[`${kind}More`]
+        ? e(
+            "p",
+            { class: "data-note" },
+            `Only ${records.length} records are loaded. More records exist; the remaining records are not available in this view yet.`,
+          )
+        : null,
+    ),
+  );
 }
 function teamRow(person) {
   return e(
@@ -454,14 +496,31 @@ function teamRow(person) {
       "div",
       { class: "row-content" },
       e("h3", {}, validText(person.name, "Unnamed team member")),
-      e("p", {}, validText(person.role, "Role not specified")),
+      e("p", {}, person.role || "Agent on this team"),
+      person.offeringVersion
+        ? e(
+            "span",
+            { class: "row-note" },
+            `Offering version ${person.offeringVersion}`,
+          )
+        : null,
       person.mandate ? e("span", { class: "row-note" }, person.mandate) : null,
     ),
     stateBadge(person.status),
   );
 }
 function workRow(work) {
-  const href = safeHref(work.href);
+  const href =
+    typeof work.id === "string" && work.businessId === state.detail.business.id
+      ? url(work.businessId, "work", work.id)
+      : null;
+  const title = validText(
+    work.objective,
+    validText(work.title, validText(work.name, "Untitled work")),
+  );
+  const owner = state.detail.team?.find(
+    (person) => person.id === work.employmentId,
+  );
   return e(
     "article",
     { class: "work-row" },
@@ -472,16 +531,22 @@ function workRow(work) {
       href
         ? e(
             "a",
-            { class: "row-link", href },
-            validText(work.title, validText(work.name, "Untitled work")),
+            {
+              class: "row-link",
+              href,
+              onclick: (event) => {
+                event.preventDefault();
+                navigate(href);
+              },
+            },
+            title,
           )
-        : e(
-            "h3",
-            {},
-            validText(work.title, validText(work.name, "Untitled work")),
-          ),
+        : e("h3", {}, title),
       work.summary ? e("p", {}, work.summary) : null,
-      work.ownerName ? e("span", { class: "row-note" }, work.ownerName) : null,
+      owner?.name ? e("span", { class: "row-note" }, owner.name) : null,
+      work.resultId
+        ? e("span", { class: "row-note" }, "Private result saved")
+        : null,
     ),
     stateBadge(work.status),
   );
@@ -579,7 +644,7 @@ function budgetPanel() {
         e(
           "div",
           {},
-          e("dt", {}, "Recorded spend"),
+          e("dt", {}, "Recorded cost"),
           e("dd", {}, money(b.spentMicros, b.currency)),
         ),
         e(
@@ -595,26 +660,35 @@ function budgetPanel() {
           e(
             "dd",
             {},
-            complete
-              ? money(
-                  Math.max(
-                    0,
-                    b.allowanceMicros - b.spentMicros - b.reservedMicros,
-                  ),
-                )
-              : "Not available",
+            b.state === "cost_unresolved" || b.unknownCostOperations > 0
+              ? "Held"
+              : complete
+                ? money(
+                    Math.max(
+                      0,
+                      b.allowanceMicros - b.spentMicros - b.reservedMicros,
+                    ),
+                  )
+                : "Not available",
           ),
         ),
       ),
-      b.unpricedCalls
+      b.state === "overdrawn"
         ? e(
             "p",
             { class: "data-note warning-text" },
-            `${b.unpricedCalls} unpriced ${b.unpricedCalls === 1 ? "call is" : "calls are"} excluded from recorded spend.`,
+            "Recorded cost and held allowance exceed the spending limit. Further work is held.",
           )
         : null,
-      b.unpricedCalls === null
-        ? e("p", { class: "data-note" }, "Unpriced usage coverage is unknown.")
+      b.unknownCostOperations
+        ? e(
+            "p",
+            { class: "data-note warning-text" },
+            `${b.unknownCostMore ? "At least " : ""}${b.unknownCostOperations} ${b.unknownCostOperations === 1 ? "operation has" : "operations have"} unknown cost. Recorded cost excludes unresolved amounts; further work is held.`,
+          )
+        : null,
+      b.unknownCostOperations === null
+        ? e("p", { class: "data-note" }, "Operation cost coverage is unknown.")
         : null,
     ),
   );
@@ -775,6 +849,359 @@ function renderDetail() {
   main.replaceChildren(...nodes);
   announce(`${b.name} ${view} loaded.`);
 }
+function workStateSummary(detail) {
+  const { work, attempts, result } = detail,
+    latest = attempts.at(-1);
+  if (work.status === "reconciling" || latest?.costState === "unknown")
+    return {
+      title: result
+        ? "Result saved · cost unresolved"
+        : "Operation outcome is being checked",
+      copy: result
+        ? "The private result is saved. Further work is held while cost is checked."
+        : "This operation may have been issued. Its outcome must be established before it can be repeated.",
+      tone: "attention",
+    };
+  if (work.status === "cancelled")
+    return {
+      title: "Work cancelled",
+      copy: result
+        ? "A historical result remains available to authorized members. It is not permission to continue this work."
+        : "This commitment was cancelled. No result is recorded here.",
+      tone: "quiet",
+    };
+  if (result)
+    return {
+      title: "Private result saved",
+      copy: "",
+      tone: "complete",
+    };
+  if (work.status === "failed")
+    return {
+      title: "Work did not complete",
+      copy: "No private result is recorded. A new attempt is not available from this view.",
+      tone: "attention",
+    };
+  if (latest?.state === "prepared")
+    return {
+      title: "Operation prepared · acceptance unconfirmed",
+      copy: "The operation may have been issued. This record does not establish provider acceptance.",
+      tone: "quiet",
+    };
+  if (latest?.state === "claimed")
+    return {
+      title: "Work claimed",
+      copy: "A worker claimed this commitment. A claim alone does not establish a provider call.",
+      tone: "quiet",
+    };
+  if (work.status !== "admitted")
+    return {
+      title: "Work state unavailable",
+      copy: "The current execution state is not established in this record.",
+      tone: "quiet",
+    };
+  return {
+    title: "Work admitted",
+    copy: "The commitment is recorded. No completed result is available yet.",
+    tone: "quiet",
+  };
+}
+// Deliberately small, text-only Markdown presentation. No HTML, links, remote
+// images or embeds are interpreted. Exact bytes remain visible under Source.
+function privateDocument(content) {
+  const documentNode = e("article", {
+    class: "private-document",
+    "aria-label": "Private result content",
+  });
+  const lines = content.replaceAll("\r\n", "\n").split("\n");
+  if (lines.length > 2000) {
+    documentNode.append(e("pre", { class: "result-source" }, content));
+    return documentNode;
+  }
+  let paragraph = [],
+    list = null,
+    code = null;
+  const flush = () => {
+    if (paragraph.length) {
+      documentNode.append(e("p", {}, paragraph.join("\n")));
+      paragraph = [];
+    }
+    list = null;
+  };
+  for (const line of lines) {
+    if (code !== null) {
+      if (/^\s*```/.test(line)) {
+        documentNode.append(e("pre", {}, e("code", {}, code.join("\n"))));
+        code = null;
+      } else code.push(line);
+      continue;
+    }
+    if (/^\s*```/.test(line)) {
+      flush();
+      code = [];
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/),
+      item = line.match(/^\s*(?:[-*+] |\d+[.)] )(.+)$/);
+    if (heading) {
+      flush();
+      documentNode.append(
+        e(heading[1].length === 1 ? "h2" : "h3", {}, heading[2]),
+      );
+    } else if (item) {
+      if (paragraph.length) flush();
+      if (!list) {
+        list = e(/^\s*\d/.test(line) ? "ol" : "ul");
+        documentNode.append(list);
+      }
+      list.append(e("li", {}, item[1]));
+    } else if (!line.trim()) {
+      flush();
+    } else {
+      list = null;
+      paragraph.push(line);
+    }
+  }
+  flush();
+  if (code !== null)
+    documentNode.append(e("pre", {}, e("code", {}, code.join("\n"))));
+  return documentNode;
+}
+function evidencePair(name, value) {
+  return e(
+    "div",
+    {},
+    e("dt", {}, name),
+    e("dd", {}, validText(value, "Not recorded")),
+  );
+}
+function attemptEvidence(attempt) {
+  const op = attempt.operation;
+  return e(
+    "article",
+    { class: "attempt-record" },
+    e(
+      "div",
+      { class: "attempt-heading" },
+      e("h3", {}, `Attempt ${attempt.ordinal}`),
+      stateBadge(attempt.state),
+    ),
+    e(
+      "dl",
+      { class: "evidence-list" },
+      evidencePair("Mode", statusText(attempt.mode)),
+      evidencePair(
+        "Execution outcome",
+        attempt.outcome ? statusText(attempt.outcome) : "Not established",
+      ),
+      evidencePair("Cost", statusText(attempt.costState)),
+    ),
+    e(
+      "details",
+      { class: "record-disclosure" },
+      e("summary", {}, "Inspect attempt record"),
+      e(
+        "dl",
+        { class: "evidence-list technical-record" },
+        evidencePair("Attempt", attempt.id),
+        evidencePair("Operation", op?.id),
+        evidencePair("Adapter", op?.adapterId),
+        evidencePair("Route revision", op?.routeRevision),
+        evidencePair("Price revision", op?.priceRevision),
+        evidencePair("Request digest", op?.requestDigest),
+        evidencePair(
+          "Maximum model cost",
+          op ? money(op.maximumCostMicros) : "Not recorded",
+        ),
+        evidencePair("Outcome evidence", attempt.outcomeEvidenceRef),
+      ),
+    ),
+  );
+}
+function renderWorkDetail() {
+  const d = state.workDetail;
+  if (!d) return;
+  const { business, work, employment, result, attempts } = d,
+    status = workStateSummary(d),
+    unknown = attempts.some((a) => a.costState === "unknown");
+  document.title = `Private work · ${business.name} · STRIDE`;
+  const resultView = result
+    ? e(
+        "section",
+        { class: "result-stage" },
+        e(
+          "div",
+          { class: "result-heading" },
+          label("PRIVATE RESULT"),
+          e("span", { class: "row-note" }, date(result.createdAt)),
+        ),
+        result.eligible
+          ? null
+          : e(
+              "div",
+              { class: "result-caution", role: "note" },
+              e("strong", {}, "Historical result · current use is restricted"),
+              e(
+                "p",
+                {},
+                "You can read this private record. Current authority no longer permits using it for further work.",
+              ),
+            ),
+        privateDocument(result.content),
+        e(
+          "details",
+          { class: "record-disclosure result-original" },
+          e("summary", {}, "View exact source and result record"),
+          e(
+            "dl",
+            { class: "evidence-list technical-record" },
+            evidencePair("Result", result.id),
+            evidencePair("Digest", result.digest),
+            evidencePair("Attempt", result.attemptId),
+            evidencePair("Operation", result.operationId),
+            evidencePair("Generation", String(result.generation)),
+            evidencePair(
+              "Current use",
+              result.eligible
+                ? "Authority current; not publishing permission"
+                : "Restricted",
+            ),
+            !result.eligible
+              ? evidencePair("Restriction", result.ineligibleReason)
+              : null,
+          ),
+          e("pre", { class: "result-source" }, result.content),
+        ),
+      )
+    : e(
+        "section",
+        { class: "result-stage result-waiting" },
+        label("PRIVATE RESULT"),
+        empty("No result is recorded yet.", status.copy, "▱"),
+      );
+  main.replaceChildren(
+    e(
+      "div",
+      { class: "work-breadcrumb" },
+      e(
+        "a",
+        {
+          href: url(business.id, "work"),
+          onclick: (event) => {
+            event.preventDefault();
+            navigate(url(business.id, "work"));
+          },
+        },
+        "← All work",
+      ),
+      e("span", {}, business.name),
+      e("span", { class: "private-label" }, "Private business record"),
+    ),
+    e(
+      "section",
+      { class: "work-title" },
+      label("THE COMMITMENT"),
+      e(
+        "h1",
+        {},
+        work.objective.length <= 160 ? work.objective : "Private work",
+      ),
+      work.objective.length > 160
+        ? e(
+            "details",
+            { class: "work-objective" },
+            e("summary", {}, work.objective),
+            e("p", {}, work.objective),
+          )
+        : null,
+      e(
+        "div",
+        { class: "work-meta" },
+        e(
+          "span",
+          {},
+          `Assigned to ${validText(employment.name, "an unnamed employment")}`,
+        ),
+        e("span", {}, `Created ${date(work.createdAt)}`),
+        button("Refresh work", loadRoute, "button ghost"),
+      ),
+    ),
+    e(
+      "section",
+      { class: `work-state work-state-${status.tone}` },
+      e("strong", {}, status.title),
+      status.copy ? e("p", {}, status.copy) : null,
+    ),
+    e(
+      "div",
+      { class: "work-reader-grid" },
+      e(
+        "div",
+        { class: "work-result-column" },
+        resultView,
+        e(
+          "section",
+          { class: "business-outcome" },
+          e("p", { class: "impact-note" }, "Impact not recorded yet."),
+        ),
+      ),
+      e(
+        "aside",
+        { class: "work-evidence", "aria-label": "Work evidence" },
+        panel(
+          "Model spending",
+          null,
+          e(
+            "dl",
+            { class: "evidence-list" },
+            evidencePair("Recorded cost", money(work.settledMicros)),
+            evidencePair("Still held", money(work.heldMicros)),
+            evidencePair(
+              "Cost coverage",
+              unknown
+                ? `${attempts.filter((a) => a.costState === "unknown").length} ${attempts.filter((a) => a.costState === "unknown").length === 1 ? "operation has" : "operations have"} unknown cost`
+                : attempts.length
+                  ? attempts.every((a) => a.costState === "known")
+                    ? "All recorded attempts priced"
+                    : "Cost not yet established"
+                  : "No operation recorded",
+            ),
+          ),
+        ),
+        unknown
+          ? e(
+              "p",
+              { class: "result-caution" },
+              "Unresolved amounts are excluded from recorded cost. Held allowance remains reserved.",
+            )
+          : null,
+        panel(
+          "Execution record",
+          `${attempts.length} recorded ${attempts.length === 1 ? "attempt" : "attempts"}`,
+          attempts.length
+            ? attempts.map(attemptEvidence)
+            : e("p", { class: "empty-copy" }, "No worker attempt is recorded."),
+        ),
+        e(
+          "details",
+          { class: "record-disclosure" },
+          e("summary", {}, "Inspect assignment"),
+          e(
+            "dl",
+            { class: "evidence-list technical-record" },
+            evidencePair("Work", work.id),
+            evidencePair("Employment", employment.id),
+            evidencePair("Offering", employment.offeringId),
+            evidencePair("Offering version", employment.offeringVersion),
+            evidencePair("Offering digest", employment.offeringDigest),
+          ),
+        ),
+      ),
+    ),
+  );
+  announce(`Private work for ${business.name} loaded. ${status.title}.`);
+}
+
 function teamPanel() {
   return collection(
     "team",
@@ -1206,6 +1633,7 @@ async function submitSetup(event) {
       state.setupDraft = null;
       state.mutation = null;
       state.detail = null;
+      state.workDetail = null;
       state.context = null;
       header();
       showError(error, bootstrap);
@@ -1222,6 +1650,7 @@ async function refreshContextAfterCreate(viewerId) {
     if (state.context?.viewer.id !== viewerId) return;
     if (context.viewer.id !== viewerId) {
       state.detail = null;
+      state.workDetail = null;
       state.context = null;
       state.setupDraft = null;
       state.mutation = null;
@@ -1247,6 +1676,7 @@ async function refreshContextAfterCreate(viewerId) {
     )
       return;
     state.detail = null;
+    state.workDetail = null;
     state.context = null;
     state.setupDraft = null;
     state.mutation = null;
@@ -1402,6 +1832,7 @@ async function submitPolicy(event) {
     setBusy(form, false);
     if ([401, 403, 404].includes(error.status)) {
       state.detail = null;
+      state.workDetail = null;
       state.context = null;
       state.mutation = null;
       header();
@@ -1442,6 +1873,7 @@ async function changeOperatingState(action) {
     if (route().id !== b.id || ticket !== state.request) return;
     if ([401, 403, 404].includes(error.status)) {
       state.detail = null;
+      state.workDetail = null;
       state.context = null;
       header();
       showError(error, bootstrap);

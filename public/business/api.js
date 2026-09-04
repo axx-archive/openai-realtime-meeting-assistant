@@ -2,7 +2,7 @@
  * context: {viewer:{id,name},organizations:[{id,name,canCreateBusiness}],businesses:[Business],capabilities:{createBusiness,createOrganization}}
  * detail: {business:Business,team:[],work:[],initiatives:[],decisions:[],activity:[],budget,execution,capabilities,availability}
  * Business: {id,organizationId,name,mission,customer,firstOutcome,status,revision,leadership:"human_ceo"|"agent_ceo",authorityPreset}
- * budget: {currency:"USD",allowanceMicros:null|integer,reservedMicros:null|integer,spentMicros:null|integer,unpricedCalls:null|integer,state}
+ * budget: {currency:"USD",allowanceMicros:null|integer,reservedMicros:null|integer,spentMicros:null|integer,unknownCostOperations:null|integer,unknownCostMore:boolean,state}
  * availability: each collection is "available"|"unavailable"; omitted/malformed collections are unavailable, never an implied zero.
  * POST businesses: {idempotencyKey,organization:{id}|{name},name,mission,customer,firstOutcome,leadership,authorityPreset,modelAllowanceMicros:null|integer}
  * PATCH businesses/:id: {idempotencyKey,expectedRevision,action:"update_policy"|"pause"|"resume",leadership?,authorityPreset?}
@@ -111,6 +111,11 @@ export function normalizeDetail(raw, expectedId) {
     business,
     capabilities: permissions(value.capabilities),
     availability: {},
+    coverage: {
+      teamMore: value.coverage?.teamMore === true,
+      workMore: value.coverage?.workMore === true,
+      limit: integer(value.coverage?.limit),
+    },
     execution: {
       status: text(value.execution?.status, "unavailable"),
       reason: text(
@@ -131,10 +136,133 @@ export function normalizeDetail(raw, expectedId) {
     allowanceMicros: integer(budget.allowanceMicros),
     reservedMicros: integer(budget.reservedMicros),
     spentMicros: integer(budget.spentMicros),
-    unpricedCalls: integer(budget.unpricedCalls),
+    unknownCostOperations: integer(budget.unknownCostOperations),
     state: text(budget.state, "unavailable"),
+    unknownCostMore: budget.unknownCostMore === true,
   };
   return detail;
+}
+// Validate the entire private result lineage before placing any content in UI.
+export function normalizeWorkDetail(raw, expectedBusinessId, expectedWorkId) {
+  const value = record(raw),
+    business = businessRecord(value.business),
+    work = record(value.work),
+    employment = record(value.employment);
+  const invalid = () => {
+    throw new BusinessAPIError(
+      "The work record is incomplete or changed. Refresh to continue.",
+      502,
+      "invalid_work_response",
+    );
+  };
+  if (
+    business.id !== expectedBusinessId ||
+    work.id !== expectedWorkId ||
+    work.businessId !== business.id ||
+    !id(work.id) ||
+    !text(work.objective) ||
+    !id(work.employmentId)
+  )
+    invalid();
+  if (
+    employment.id !== work.employmentId ||
+    employment.businessId !== business.id ||
+    !id(employment.id)
+  )
+    invalid();
+  if (
+    value.visibility !== "private" ||
+    value.coverage !== "complete" ||
+    !Array.isArray(value.attempts) ||
+    value.attempts.length > 10
+  )
+    invalid();
+  const seen = new Set();
+  const attempts = value.attempts
+    .map((rawAttempt) => {
+      const a = record(rawAttempt),
+        operation = a.operation == null ? null : record(a.operation);
+      if (
+        !id(a.id) ||
+        seen.has(a.id) ||
+        !Number.isSafeInteger(a.ordinal) ||
+        a.ordinal < 1 ||
+        a.ordinal > 10 ||
+        (operation && !id(operation.id))
+      )
+        invalid();
+      seen.add(a.id);
+      return {
+        id: a.id,
+        ordinal: a.ordinal,
+        state: text(a.state, "unknown"),
+        mode: text(a.mode, "unknown"),
+        outcome: text(a.outcome),
+        costState: text(a.costState, "unknown"),
+        resultId: text(a.resultId),
+        outcomeEvidenceRef: text(a.outcomeEvidenceRef),
+        operation: operation
+          ? {
+              id: operation.id,
+              requestDigest: text(operation.requestDigest),
+              adapterId: text(operation.adapterId),
+              routeRevision: text(operation.routeRevision),
+              priceRevision: text(operation.priceRevision),
+              maximumCostMicros: integer(operation.maximumCostMicros),
+            }
+          : null,
+      };
+    })
+    .sort((a, b) => a.ordinal - b.ordinal);
+  let result = null;
+  if (value.result != null) {
+    const r = record(value.result),
+      attempt = attempts.find((a) => a.id === r.attemptId);
+    if (
+      !id(r.id) ||
+      r.id !== work.resultId ||
+      r.workId !== work.id ||
+      !attempt ||
+      attempt.resultId !== r.id ||
+      attempt.operation?.id !== r.operationId ||
+      !Number.isSafeInteger(r.generation) ||
+      r.generation < 1 ||
+      typeof r.content !== "string" ||
+      r.content.length > 256000 ||
+      r.contentType !== "text/markdown" ||
+      !/^sha256:[0-9a-f]{64}$/.test(r.digest) ||
+      typeof r.eligible !== "boolean"
+    )
+      invalid();
+    result = {
+      id: r.id,
+      workId: r.workId,
+      attemptId: r.attemptId,
+      operationId: r.operationId,
+      generation: r.generation,
+      content: r.content,
+      contentType: r.contentType,
+      digest: r.digest,
+      eligible: r.eligible,
+      ineligibleReason: text(r.ineligibleReason),
+      createdAt: text(r.createdAt),
+    };
+  } else if (work.resultId) invalid();
+  return {
+    business,
+    work: {
+      ...work,
+      heldMicros: integer(work.heldMicros),
+      settledMicros: integer(work.settledMicros),
+      reservationMicros: integer(work.reservationMicros),
+    },
+    employment,
+    attempts,
+    result,
+    visibility: "private",
+    coverage: "complete",
+    capabilities: permissions(value.capabilities),
+  };
 }
 async function request(path, options = {}) {
   const controller = new AbortController(),
@@ -203,6 +331,15 @@ async function request(path, options = {}) {
   }
 }
 export const businessAPI = {
+  workDetail: async (businessId, workId, signal) =>
+    normalizeWorkDetail(
+      await request(
+        `/businesses/${encodeURIComponent(businessId)}/work/${encodeURIComponent(workId)}`,
+        { signal },
+      ),
+      businessId,
+      workId,
+    ),
   context: async (signal) =>
     normalizeContext(await request("/context", { signal })),
   detail: async (businessId, signal) =>
