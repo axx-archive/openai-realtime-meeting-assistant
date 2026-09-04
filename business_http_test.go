@@ -14,6 +14,7 @@ type businessHTTPFake struct {
 	actor      business.Actor
 	setupCalls int
 	role       string
+	readDenied bool
 }
 
 func (f *businessHTTPFake) ListOrganizations(_ context.Context, a business.Actor) ([]business.Organization, error) {
@@ -34,6 +35,20 @@ func (f *businessHTTPFake) GetBusiness(_ context.Context, s business.Scope, id s
 }
 func (f *businessHTTPFake) GetBudget(context.Context, business.Scope, string) (business.Budget, error) {
 	return business.Budget{FundedMicros: 1000, CapMicros: 500, ReservedMicros: 20}, nil
+}
+func (f *businessHTTPFake) Overview(ctx context.Context, s business.Scope, id string) (business.Overview, error) {
+	b, err := f.GetBusiness(ctx, s, id)
+	if err != nil {
+		return business.Overview{}, err
+	}
+	budget, _ := f.GetBudget(ctx, s, id)
+	return business.Overview{Business: b, Membership: business.Membership{Role: f.role}, Budget: budget, Team: []business.Employment{}, Work: []business.Work{}}, nil
+}
+func (f *businessHTTPFake) ReadWorkDetail(_ context.Context, s business.Scope, bid, wid string) (business.WorkDetail, error) {
+	if f.readDenied || s.OrganizationID != "org_own" || bid != "biz_own" || wid != "work_own" {
+		return business.WorkDetail{}, business.ErrNotFound
+	}
+	return business.WorkDetail{Business: business.Business{ID: bid}, Work: business.Work{ID: wid, BusinessID: bid}, Attempts: []business.Attempt{{ID: "attempt_own", ClaimKey: "internal-claim", WorkerID: "internal-worker"}}, Result: &business.Result{ID: "result_own", Content: "private evidence"}}, nil
 }
 func (f *businessHTTPFake) SetupBusiness(_ context.Context, a business.Actor, in business.SetupBusinessArgs) (business.SetupBusinessResult, error) {
 	f.actor = a
@@ -79,11 +94,34 @@ func TestBusinessHTTPDetailHasNoInventedMetricsOrAuthority(t *testing.T) {
 	}
 	b := out["budget"].(map[string]any)
 	c := out["capabilities"].(map[string]any)
-	if b["spentMicros"] != nil || b["unpricedCalls"] != nil || b["allowanceMicros"] != float64(500) || c["updatePolicy"] != false || c["hireAgent"] != false {
+	if b["spentMicros"] != float64(0) || b["unknownCostOperations"] != float64(0) || b["allowanceMicros"] != float64(500) || c["updatePolicy"] != false || c["hireAgent"] != false {
 		t.Fatalf("invented data/authority: %+v", out)
 	}
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("private response cached")
+	}
+}
+
+func TestBusinessHTTPWorkDetailReauthorizesAndHidesCoordination(t *testing.T) {
+	f := &businessHTTPFake{role: "member"}
+	h := businessHTTPTestHandler(f)
+	request := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", businessAPIBase+path, nil))
+		return w
+	}
+	w := request("businesses/biz_own/work/work_own")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "private evidence") || strings.Contains(w.Body.String(), "internal-") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	for _, path := range []string{"businesses/biz_foreign/work/work_own", "businesses/biz_own/work/work_foreign"} {
+		if w = request(path); w.Code != 404 || strings.Contains(w.Body.String(), "private evidence") {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	f.readDenied = true
+	if w = request("businesses/biz_own/work/work_own"); w.Code != 404 || strings.Contains(w.Body.String(), "private evidence") {
+		t.Fatal(w.Code, w.Body.String())
 	}
 }
 func TestBusinessHTTPMutationOriginUsesActualCredentialSource(t *testing.T) {

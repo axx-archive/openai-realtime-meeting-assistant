@@ -25,6 +25,8 @@ type businessHTTPStore interface {
 	GetBudget(context.Context, business.Scope, string) (business.Budget, error)
 	SetupBusiness(context.Context, business.Actor, business.SetupBusinessArgs) (business.SetupBusinessResult, error)
 	UpdateBusinessAction(context.Context, business.Scope, business.BusinessAction) (business.Business, error)
+	Overview(context.Context, business.Scope, string) (business.Overview, error)
+	ReadWorkDetail(context.Context, business.Scope, string, string) (business.WorkDetail, error)
 }
 
 type businessViewer struct {
@@ -198,6 +200,21 @@ func (h *businessHTTP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(path, "businesses/") {
 		id := strings.TrimPrefix(path, "businesses/")
+		parts := strings.Split(id, "/")
+		if len(parts) == 3 && parts[1] == "work" && businessHTTPID(parts[0]) && businessHTTPID(parts[2]) {
+			if r.Method != "GET" {
+				w.Header().Set("Allow", "GET")
+				w.WriteHeader(405)
+				return
+			}
+			scope, _, err := h.resolve(r.Context(), actor, parts[0])
+			if err != nil {
+				businessWriteError(w, err)
+				return
+			}
+			h.workDetail(w, r, scope, parts[0], parts[2])
+			return
+		}
 		if id == "" || len(id) > 200 || strings.ContainsAny(id, "/\\\x00") {
 			http.NotFound(w, r)
 			return
@@ -332,23 +349,48 @@ func (h *businessHTTP) create(w http.ResponseWriter, r *http.Request, actor busi
 	h.detail(w, r, scope, b)
 }
 func (h *businessHTTP) detail(w http.ResponseWriter, r *http.Request, scope business.Scope, b business.Business) {
-	budget, err := h.store.GetBudget(r.Context(), scope, b.ID)
+	view, err := h.store.Overview(r.Context(), scope, b.ID)
 	if err != nil {
 		businessWriteError(w, err)
 		return
 	}
-	membership, err := h.store.GetMembership(r.Context(), scope)
-	if err != nil {
-		businessWriteError(w, err)
-		return
-	}
-	owner := membership.Role == "owner"
+	b, budget := view.Business, view.Budget
+	owner := view.Membership.Role == "owner"
 	allowance := min(budget.FundedMicros, budget.CapMicros)
+	state := "allowance_set"
+	if view.UnknownCostOperations > 0 {
+		state = "cost_unresolved"
+	}
+	if budget.SettledMicros+budget.ReservedMicros > allowance {
+		state = "overdrawn"
+	}
 	businessWriteJSON(w, 200, map[string]any{
 		"business":     b,
-		"budget":       map[string]any{"currency": "USD", "allowanceMicros": allowance, "reservedMicros": budget.ReservedMicros, "spentMicros": nil, "unpricedCalls": nil, "state": "allowance_set"},
-		"availability": map[string]string{"team": "unavailable", "work": "unavailable", "initiatives": "unavailable", "decisions": "unavailable", "activity": "unavailable"},
+		"team":         view.Team,
+		"work":         view.Work,
+		"coverage":     map[string]any{"teamMore": view.TeamMore, "workMore": view.WorkMore, "limit": 100},
+		"budget":       map[string]any{"currency": "USD", "allowanceMicros": allowance, "reservedMicros": budget.ReservedMicros, "spentMicros": budget.SettledMicros, "unknownCostOperations": view.UnknownCostOperations, "unknownCostMore": view.UnknownCostMore, "state": state},
+		"availability": map[string]string{"team": "available", "work": "available", "initiatives": "unavailable", "decisions": "unavailable", "activity": "unavailable"},
 		"execution":    map[string]string{"status": "not_active", "reason": "Business saved. Agent execution is not connected yet."},
 		"capabilities": map[string]bool{"updatePolicy": owner && b.Status != "closed", "pause": owner && b.Status == "active", "resume": owner && b.Status == "paused", "hireAgent": false, "createWork": false},
 	})
+}
+
+func businessHTTPID(id string) bool {
+	return id != "" && len(id) <= 200 && !strings.ContainsAny(id, "/\\\x00")
+}
+
+func (h *businessHTTP) workDetail(w http.ResponseWriter, r *http.Request, scope business.Scope, bid, wid string) {
+	detail, err := h.store.ReadWorkDetail(r.Context(), scope, bid, wid)
+	if err != nil {
+		businessWriteError(w, err)
+		return
+	}
+	// Lease claim keys and worker ownership are internal coordination, not the
+	// Work evidence presented to a member. External references are plain text.
+	attempts := []map[string]any{}
+	for _, a := range detail.Attempts {
+		attempts = append(attempts, map[string]any{"id": a.ID, "ordinal": a.Ordinal, "state": a.State, "mode": a.Mode, "outcome": a.Outcome, "costState": a.CostState, "operation": a.Operation, "outcomeEvidenceRef": a.OutcomeEvidenceRef, "resultId": a.ResultID})
+	}
+	businessWriteJSON(w, 200, map[string]any{"business": detail.Business, "work": detail.Work, "employment": detail.Employment, "attempts": attempts, "result": detail.Result, "visibility": "private", "coverage": "complete", "capabilities": map[string]bool{"retry": false, "publish": false}})
 }
