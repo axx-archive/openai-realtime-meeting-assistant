@@ -1529,6 +1529,49 @@ describe('native room media', () => {
     assert.equal(second.label, 'Connection weak');
   });
 
+  it('reports audio-only packet loss at low RTT and recovers on the next healthy interval', () => {
+    const report = (packetsReceived: number, packetsLost: number) => new Map([
+      ['audio', { type: 'inbound-rtp', kind: 'audio', packetsReceived, packetsLost }],
+      ['pair', { type: 'candidate-pair', selected: true, currentRoundTripTime: 0.02 }],
+    ]);
+    const first = summarizeNativeRoomStats(report(100, 0), null, 1_000);
+    const degraded = summarizeNativeRoomStats(report(190, 10), first, 5_000);
+    assert.equal(degraded.packetLossPercent, 10);
+    assert.equal(degraded.label, 'Connection weak');
+    const recovering = summarizeNativeRoomStats(report(287, 13), degraded, 9_000);
+    assert.equal(recovering.label, 'Catching up');
+    const healthy = summarizeNativeRoomStats(report(387, 13), recovering, 13_000);
+    assert.equal(healthy.packetLossPercent, 0);
+    assert.equal(healthy.label, 'Live');
+  });
+
+  it('does not dilute audio loss with healthy high-volume video', () => {
+    const report = (audioReceived: number, audioLost: number, videoReceived: number) => new Map([
+      ['audio', { type: 'inbound-rtp', kind: 'audio', packetsReceived: audioReceived, packetsLost: audioLost }],
+      ['video', { type: 'inbound-rtp', kind: 'video', packetsReceived: videoReceived, packetsLost: 0 }],
+    ]);
+    const first = summarizeNativeRoomStats(report(100, 0, 1_000), null, 1_000);
+    const second = summarizeNativeRoomStats(report(190, 10, 11_000), first, 5_000);
+    assert.equal(second.packetLossPercent, 10);
+    assert.equal(second.label, 'Connection weak');
+  });
+
+  it('reports audio buffering independently of video and does not mark silent intervals weak', () => {
+    const report = (delay: number, count: number) => new Map([
+      ['audio', { type: 'inbound-rtp', kind: 'audio', packetsReceived: count, packetsLost: 0, jitterBufferDelay: delay, jitterBufferEmittedCount: count }],
+    ]);
+    const first = summarizeNativeRoomStats(report(0, 100), null, 1_000);
+    const buffered = summarizeNativeRoomStats(report(80, 200), first, 5_000);
+    assert.equal(buffered.jitterBufferMs, 800);
+    assert.equal(buffered.label, 'Connection weak');
+    const silent = summarizeNativeRoomStats(report(80, 200), buffered, 9_000);
+    assert.equal(silent.jitterBufferMs, 0);
+    assert.equal(silent.packetLossPercent, 0);
+    assert.equal(silent.label, 'Live');
+    const reset = summarizeNativeRoomStats(report(0, 0), silent, 13_000);
+    assert.equal(reset.label, 'Live');
+  });
+
   it('uses the transport-selected candidate pair instead of a stale succeeded pair', () => {
     const snapshot = summarizeNativeRoomStats(new Map([
       ['stale-pair', {

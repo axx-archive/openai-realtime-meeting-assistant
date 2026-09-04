@@ -2,6 +2,7 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -22,7 +23,10 @@ import { useAuth } from '../auth/AuthContext';
 import type { RootStackParamList } from '../navigation/types';
 import { useOfficeEvents } from '../realtime/OfficeEventsContext';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
+import { useSelectedWorkDetail } from '../work/useSelectedWorkDetail';
 import { WorkProjectDetail, WorkProjectSheet } from '../work/WorkProjectSheet';
+import type { WorkFeedbackAction } from '../work/WorkEvidencePanel';
+import { createConversationOperationId } from '../conversations/newConversation';
 import {
   studioProjectFilters,
   studioProjectKindLabel,
@@ -95,13 +99,25 @@ export function WorkHubScreen({ navigation, route }: Props) {
   const { sessionToken } = useAuth();
   const office = useOfficeEvents();
   const isFocused = useIsFocused();
-  const { width } = useWindowDimensions();
-  const split = width >= WORK_HUB_SPLIT_WIDTH;
+  const { fontScale } = useWindowDimensions();
+  const [contentWidth, setContentWidth] = useState(0);
+  // Measure inside the shell and safe area: the global window still includes
+  // the iPad sidebar. Phones and accessibility text keep one focused pane.
+  const split = (Platform.OS !== 'ios' || Platform.isPad)
+    && fontScale < 1.35
+    && contentWidth >= WORK_HUB_SPLIT_WIDTH;
   const requestVersionRef = useRef(0);
+  const feedbackBusyRef = useRef(false);
+  const feedbackAttemptRef = useRef<{ signature: string; key: string } | null>(null);
+  const feedbackSessionRef = useRef(sessionToken);
+  feedbackSessionRef.current = sessionToken;
   const handledRouteProjectRef = useRef('');
   const attemptedRouteProjectRef = useRef('');
   const currentRouteProjectRef = useRef('');
-  const [projects, setProjects] = useState<StudioProject[]>([]);
+  const [projectState, setProjects] = useState<StudioProject[]>([]);
+  const [projectSession, setProjectSession] = useState(sessionToken);
+  const projects = projectSession === sessionToken ? projectState : [];
+  const [detailRefreshVersion, setDetailRefreshVersion] = useState(0);
   const [filter, setFilter] = useState<StudioProjectFilter>('all');
   const [selectedId, setSelectedId] = useState('');
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -123,10 +139,8 @@ export function WorkHubScreen({ navigation, route }: Props) {
       ? `root:${requestedRootRunId}`
       : '';
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedId) ?? null,
-    [projects, selectedId],
-  );
+  const detail = useSelectedWorkDetail(sessionToken, selectedId, isFocused && (split || sheetVisible), detailRefreshVersion);
+  const selectedProject = detail.project;
   const rows = useMemo(() => studioProjectListRows(projects, filter), [filter, projects]);
 
   const load = useCallback(async (refresh = false, silent = false) => {
@@ -139,12 +153,18 @@ export function WorkHubScreen({ navigation, route }: Props) {
     }
     try {
       const response = await api.studioProjects(sessionToken, { limit: 100 });
-      if (version !== requestVersionRef.current) return;
+      if (version !== requestVersionRef.current || feedbackSessionRef.current !== sessionToken) return;
+      setProjectSession(sessionToken);
       setProjects(response.projects ?? []);
+      setDetailRefreshVersion((value) => value + 1);
       setNextBefore(String(response.nextBefore ?? ''));
       setHasMore(Boolean(response.hasMore && response.nextBefore));
     } catch (caught) {
-      if (version === requestVersionRef.current && !silent) setError(errorMessage(caught));
+      if (version === requestVersionRef.current && feedbackSessionRef.current === sessionToken) {
+        setProjects([]);
+        detail.clear();
+        setError(errorMessage(caught));
+      }
     } finally {
       if (version === requestVersionRef.current) {
         if (!silent) {
@@ -153,7 +173,7 @@ export function WorkHubScreen({ navigation, route }: Props) {
         }
       }
     }
-  }, [sessionToken]);
+  }, [sessionToken, detail.clear]);
 
   const loadMore = useCallback(async () => {
     if (!sessionToken || !nextBefore || !hasMore || loadingMore) return;
@@ -161,7 +181,7 @@ export function WorkHubScreen({ navigation, route }: Props) {
     setLoadingMore(true);
     try {
       const response = await api.studioProjects(sessionToken, { before: nextBefore, limit: 100 });
-      if (version !== requestVersionRef.current) return;
+      if (version !== requestVersionRef.current || feedbackSessionRef.current !== sessionToken) return;
       setProjects((current) => {
         const seen = new Set(current.map((project) => project.id));
         return [...current, ...(response.projects ?? []).filter((project) => !seen.has(project.id))];
@@ -197,7 +217,7 @@ export function WorkHubScreen({ navigation, route }: Props) {
       if (selectedId) setSelectedId('');
       return;
     }
-    if (!projects.some((project) => project.id === selectedId)) setSelectedId(projects[0].id);
+    if (!selectedId) setSelectedId(projects[0].id);
   }, [projects, selectedId, split]);
 
   useEffect(() => {
@@ -230,7 +250,7 @@ export function WorkHubScreen({ navigation, route }: Props) {
     }
     void api.studioProject(sessionToken, requestedProjectId)
       .then((response) => {
-        if (currentRouteProjectRef.current !== requestKey) return;
+        if (currentRouteProjectRef.current !== requestKey || feedbackSessionRef.current !== sessionToken) return;
         handledRouteProjectRef.current = requestKey;
         attemptedRouteProjectRef.current = '';
         setRouteError('');
@@ -243,7 +263,7 @@ export function WorkHubScreen({ navigation, route }: Props) {
         if (route.name === 'WorkHome') navigation.setParams({ projectId: undefined, rootRunId: undefined });
       })
       .catch((caught) => {
-        if (currentRouteProjectRef.current !== requestKey) return;
+        if (currentRouteProjectRef.current !== requestKey || feedbackSessionRef.current !== sessionToken) return;
         if (caught instanceof BonfireApiError && (caught.status === 403 || caught.status === 404)) {
           handledRouteProjectRef.current = requestKey;
           attemptedRouteProjectRef.current = '';
@@ -318,15 +338,68 @@ export function WorkHubScreen({ navigation, route }: Props) {
   }, [navigation, split]);
 
   const replaceProject = useCallback((next: StudioProject) => {
+    detail.replace(next);
     setProjects((current) => current.map((project) => project.id === next.id ? next : project));
     setSelectedId(next.id);
-  }, []);
+  }, [detail.replace]);
 
   const surfaceActionError = useCallback((caught: unknown) => {
     const message = errorMessage(caught);
     setActionError(message);
     setError(message);
   }, []);
+
+  const submitFeedback: WorkFeedbackAction = useCallback(async (project, decision) => {
+    const result = project.result;
+    const feedback = project.feedback;
+    if (!sessionToken || !result || !feedback || (decision.type === 'review' && !feedback.canReview) || busyAction || feedbackBusyRef.current) return false;
+    if (decision.type === 'outcome' && (!feedback.canObserveOutcome || !feedback.currentReview?.id)) return false;
+    const request = {
+      id: project.id,
+      expectedRevision: project.revision,
+      feedback: {
+        ...decision,
+        result: { artifactId: result.artifactId, version: result.version, digest: result.digest },
+        ...(decision.type === 'outcome' ? { acceptedReviewId: feedback.currentReview!.id } : {}),
+      },
+    };
+    const signature = JSON.stringify({ session: sessionToken, request });
+    const attempt = feedbackAttemptRef.current?.signature === signature
+      ? feedbackAttemptRef.current
+      : { signature, key: createConversationOperationId() };
+    feedbackAttemptRef.current = attempt;
+    feedbackBusyRef.current = true;
+    setBusyAction('feedback');
+    setActionError('');
+    let saved = false;
+    try {
+      await api.studioWorkFeedback(sessionToken, {
+        ...request,
+        feedback: { ...request.feedback, idempotencyKey: attempt.key },
+      });
+      saved = true;
+      const refreshed = await api.studioProject(sessionToken, project.id);
+      if (feedbackSessionRef.current !== sessionToken) return false;
+      detail.replace(refreshed.project);
+      setProjects((current) => current.map((item) => item.id === project.id ? refreshed.project : item));
+      feedbackAttemptRef.current = null;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return true;
+    } catch (caught) {
+      if (feedbackSessionRef.current !== sessionToken) return false;
+      // Never leave a stale exact-result action available after a conflict or
+      // failed authorization refresh. An unchanged network retry keeps its operation key.
+      if (saved || (caught instanceof BonfireApiError && [401, 403, 404, 409].includes(caught.status))) {
+        detail.clear();
+        setProjects((current) => current.filter((item) => item.id !== project.id));
+      }
+      surfaceActionError(saved ? new Error('Your feedback was saved, but Work could not refresh. Reload to see the current version.') : caught);
+      return false;
+    } finally {
+      feedbackBusyRef.current = false;
+      if (feedbackSessionRef.current === sessionToken) setBusyAction('');
+    }
+  }, [busyAction, sessionToken, surfaceActionError, detail.replace, detail.clear]);
 
   const renameProject = useCallback((project: StudioProject) => {
     if (!sessionToken || busyAction) return;
@@ -459,7 +532,10 @@ export function WorkHubScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-      <View style={[styles.workspace, split && styles.workspaceSplit]}>
+      <View
+        onLayout={({ nativeEvent }) => setContentWidth(nativeEvent.layout.width)}
+        style={[styles.workspace, split && styles.workspaceSplit]}
+      >
         <View style={[styles.listPane, split && styles.listPaneSplit]}>
           <FlashList
             data={rows}
@@ -492,11 +568,16 @@ export function WorkHubScreen({ navigation, route }: Props) {
           <View style={styles.detailPane}>
             <WorkProjectDetail
               actionError={actionError}
-              busyAction={busyAction}
+              busyAction={busyAction || (detail.loading ? 'loading' : '')}
+              detailLoading={detail.loading}
+              detailError={detail.error}
+              onRetryDetail={() => { void detail.refresh(); }}
+              onOpenWork={(id) => { setSelectedId(id); setSheetVisible(true); }}
               project={selectedProject}
               onOpenResult={openResult}
               onOpenSource={openSource}
               onContinueResult={continueResult}
+              onFeedback={submitFeedback}
               onRename={renameProject}
               onResolveCheckpoint={resolveCheckpoint}
             />
@@ -504,13 +585,18 @@ export function WorkHubScreen({ navigation, route }: Props) {
         ) : (
           <WorkProjectSheet
             actionError={actionError}
-            busyAction={busyAction}
+            busyAction={busyAction || (detail.loading ? 'loading' : '')}
+              detailLoading={detail.loading}
+              detailError={detail.error}
+              onRetryDetail={() => { void detail.refresh(); }}
+              onOpenWork={(id) => { setSelectedId(id); setSheetVisible(true); }}
             project={selectedProject}
             visible={sheetVisible}
             onClose={() => { setSheetVisible(false); setActionError(''); }}
             onOpenResult={openResult}
             onOpenSource={openSource}
             onContinueResult={continueResult}
+            onFeedback={submitFeedback}
             onRename={renameProject}
             onResolveCheckpoint={resolveCheckpoint}
           />

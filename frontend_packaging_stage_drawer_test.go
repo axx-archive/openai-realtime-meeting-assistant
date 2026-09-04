@@ -82,8 +82,8 @@ func TestContentStudioDesktopRailContract(t *testing.T) {
 	}
 	html := string(body)
 	for _, want := range []string{
-		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
-		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
+		// STRIDE 3 presents the durable outcome destination as Work.
+		`data-pd1-destination="Work" aria-label="Work"`,
 		`function openContentStudio(returnFocus)`,
 		`function closeContentStudio()`,
 		`frame.referrerPolicy = 'strict-origin-when-cross-origin'`,

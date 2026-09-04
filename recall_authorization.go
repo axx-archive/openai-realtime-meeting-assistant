@@ -267,9 +267,10 @@ func (app *kanbanBoardApp) recallStoreForPrincipal(ctx context.Context, principa
 		if app.memory.authorizationEntryVisitHook != nil {
 			app.memory.authorizationEntryVisitHook()
 		}
-		if memoryEntryHiddenFromRecall(stored) || !recallEntryScopeAllowed(stored.Metadata, principal) {
+		if memoryEntryHiddenFromRecall(stored) || !app.memory.meetingDigestSparseCurrentLocked(stored, &principal) || !recallEntryScopeAllowed(stored.Metadata, principal) {
 			continue
 		}
+		filtered.rememberAuthorizedSparseDigest(stored)
 		if stored.Kind == meetingMemoryKindOSArtifact {
 			header := app.memory.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
 			artifacts = append(artifacts, artifactCandidate{index: index, id: stored.ID, header: header})
@@ -390,9 +391,10 @@ func (app *kanbanBoardApp) meetingRecordStoreForPrincipal(ctx context.Context, p
 		stored := app.memory.entries[index]
 		meetingID := strings.TrimSpace(stored.Metadata["meetingId"])
 		retainedTranscript := stored.Kind == meetingMemoryKindTranscript && strings.EqualFold(strings.TrimSpace(stored.Metadata[retainedRawTranscriptMetadataKey]), "true")
-		if meetingID == "" || !meetingRecordMeetingWanted(meetingIDs, meetingID) || (memoryEntryHiddenFromRecall(stored) && !retainedTranscript) || !recallEntryScopeAllowed(stored.Metadata, principal) {
+		if meetingID == "" || !meetingRecordMeetingWanted(meetingIDs, meetingID) || (memoryEntryHiddenFromRecall(stored) && !retainedTranscript) || !app.memory.meetingDigestSparseCurrentLocked(stored, &principal) || !recallEntryScopeAllowed(stored.Metadata, principal) {
 			continue
 		}
+		filtered.rememberAuthorizedSparseDigest(stored)
 		if stored.Kind == meetingMemoryKindOSArtifact {
 			header := app.memory.resolveArtifactHeaderSecurityLocked(artifactAuthorizationHeaderFromEntry(meetingMemoryEntry{ID: stored.ID, Kind: stored.Kind, Metadata: stored.Metadata}))
 			artifacts = append(artifacts, artifactCandidate{index: index, id: stored.ID, meetingID: meetingID, header: header})
@@ -497,9 +499,10 @@ func (app *kanbanBoardApp) meetingBriefingStoreForPrincipal(principal RecallPrin
 				continue
 			}
 		}
-		if !recallEntryScopeAllowed(entry.Metadata, principal) {
+		if !app.memory.meetingDigestSparseCurrentLocked(entry, &principal) || !recallEntryScopeAllowed(entry.Metadata, principal) {
 			continue
 		}
+		filtered.rememberAuthorizedSparseDigest(entry)
 		cloned := cloneMemoryEntry(entry)
 		filtered.entries = append(filtered.entries, cloned)
 		filtered.seen[cloned.ID] = struct{}{}

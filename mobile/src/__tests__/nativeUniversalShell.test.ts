@@ -223,7 +223,7 @@ test('compact and iPad compositions are accessible, touch-safe, and resize-drive
   assert.match(shell, /case 'meet-camera'/u);
   assert.match(shell, /case 'work-pencil'/u);
   assert.doesNotMatch(shell, /Ellipse|two faces/u);
-  assert.match(shell, /<Text accessibilityRole="header" style=\{styles\.sidebarWordmark\}>stride<\/Text>/);
+  assert.match(shell, /<Text accessibilityRole="header" numberOfLines=\{1\} maxFontSizeMultiplier=\{1\} style=\{styles\.sidebarWordmark\}>stride<\/Text>/);
   assert.match(shell, /color=\{selected \? colors\.ember : colors\.text1\}/);
   assert.doesNotMatch(shell, /String\(selected \? colors\.ember : colors\.text1\)/);
   assert.match(shell, /compactItem:[\s\S]*zIndex: 1/);

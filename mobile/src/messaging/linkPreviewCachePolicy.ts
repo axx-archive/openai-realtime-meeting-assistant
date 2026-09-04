@@ -22,6 +22,7 @@ const previewStringKeys = [
   'description',
   'siteName',
   'imageUrl',
+  'imageRole',
   'mediaType',
   'authorName',
   'authorHandle',
@@ -36,6 +37,10 @@ function sanitizedPreview(value: unknown): LinkPreview | null {
   for (const key of previewStringKeys) {
     if (key === 'url') continue;
     const candidate = source[key];
+    if (key === 'imageRole') {
+      if (candidate === 'author_avatar' || candidate === 'content') preview.imageRole = candidate;
+      continue;
+    }
     if (typeof candidate === 'string' && candidate.length <= 12_000) {
       preview[key] = candidate;
     }

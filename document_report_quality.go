@@ -1107,7 +1107,7 @@ func compileDocumentReportPublish(app *kanbanBoardApp, plan *goalPlan, parentID 
 		fmt.Sprintf("- Rendered jury: %d distinct valid seats; minimum page average %.2f (floor %.2f).", review.ParsedSeats, review.MinimumAverage, documentReportReadyAverageFloor),
 		"- Publication used the exact admitted artifact and page set; no post-jury text scorer ran.",
 	}, "\n")
-	return body, map[string]string{
+	return body, documentDissentPublishedMetadata(app, review, map[string]string{
 		"documentArtifactId":       review.ArtifactID,
 		"shipArtifactIds":          review.ArtifactID,
 		"documentArtifactVersion":  strconv.Itoa(review.ArtifactVersion),
@@ -1118,5 +1118,12 @@ func compileDocumentReportPublish(app *kanbanBoardApp, plan *goalPlan, parentID 
 		"renderPagesDigest":        review.PagesDigest,
 		"documentJuryArtifactId":   review.JuryID,
 		"published":                "true",
-	}, nil
+	}), nil
+}
+
+func documentDissentPublishedMetadata(app *kanbanBoardApp, review documentReportQualityReview, metadata map[string]string) map[string]string {
+	for key, value := range documentDissentReviewMetadata(app, review) {
+		metadata[key] = value
+	}
+	return metadata
 }

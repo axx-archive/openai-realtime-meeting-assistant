@@ -49,31 +49,29 @@ func packagingWave11Section(t *testing.T, html, startMarker, endMarker string) s
 	return html[start : start+end]
 }
 
-func TestIndexPackagingStudioRenameEverywhere(t *testing.T) {
+func TestIndexWorkDestinationKeepsStudioRoutes(t *testing.T) {
 	html := readIndexForPackagingWave11(t)
 	for _, want := range []string{
 		// nav: the accessible name and the visible word; the destination id stays "Work"
-		`data-pd1-destination="Work" aria-label="Packaging Studio" aria-current="false" tabindex="-1" aria-describedby="workRailBadge">`,
-		"<span>Packaging Studio</span>",
+		`data-pd1-destination="Work" aria-label="Work" aria-current="false" tabindex="-1" aria-describedby="workRailBadge">`,
+		"<span>Work</span>",
 		// topbar title
-		"research: 'Packaging Studio',",
+		"research: 'Work',",
 		// hub heading — Wave 11 D15 moved the visible title into the topbar
 		// (tab name + mono subline); the <h2> stays for assistive tech only
 		`<header class="studio-projects__head sr-only">`,
-		`<h2 id="studioProjectsTitle">Packaging Studio</h2>`,
-		"|| ['Packaging Studio', 'Presentations and research stay organized from brief to final file.']",
+		`<h2 id="studioProjectsTitle">Work</h2>`,
+		"|| ['Work', 'Follow an outcome from its first brief to the difference it makes.']",
 		// states
-		"'Packaging Studio is temporarily unavailable'",
-		"'Packaging Studio could not be loaded'",
+		"'Work is temporarily unavailable'",
+		"'Work could not be loaded'",
 		"'Nothing in the studio yet'",
-		"'View in Packaging Studio'",
-		// the phone dock holds the two-line word
-		`.pd1-primary-nav__item[data-pd1-destination="Work"] > span:not(.pd1-primary-nav__count) { white-space: normal; line-height: 1.05; text-align: center; }`,
+		"'View in Work'",
 		// ⌘/⌥ tooltips derive from the aria-label, so they follow the rename
 		"button.title = `${label} · ${pd1ShortcutModifier}${index + 1}`",
 	} {
 		if !strings.Contains(html, want) {
-			t.Errorf("Packaging Studio rename missing %q", want)
+			t.Errorf("Work rename missing %q", want)
 		}
 	}
 	// ids and routes are not renamed
@@ -86,10 +84,10 @@ func TestIndexPackagingStudioRenameEverywhere(t *testing.T) {
 			t.Errorf("rename must not touch ids/routes; missing %q", keep)
 		}
 	}
-	// no user-facing "Work" label survives in the nav or the hub chrome
+	// The studio remains an output tool, not the top-level destination.
 	nav := packagingWave11Section(t, html, `<nav id="pd1PrimaryNav"`, `</nav>`)
-	if strings.Contains(nav, `aria-label="Work"`) || strings.Contains(nav, ">Work<") {
-		t.Error("the primary nav still says Work")
+	if strings.Contains(nav, `aria-label="Packaging Studio"`) || strings.Contains(nav, ">Packaging Studio<") {
+		t.Error("the primary nav still says Packaging Studio")
 	}
 	if strings.Contains(html, "<h2 id=\"studioProjectsTitle\">Recent work</h2>") {
 		t.Error("the hub heading still says Recent work")

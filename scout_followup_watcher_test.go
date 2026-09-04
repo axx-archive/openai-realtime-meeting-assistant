@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -386,7 +387,7 @@ func TestScoutFollowupPassJournalsAndAdvancesCursor(t *testing.T) {
 	scout := fixture.scout("Vendor comparison posted.")
 	question := fixture.human("tim@shareability.com", "Tim", "does Zebra ship to the EU?", &scout)
 	agent := scoutFollowupAgent()
-	if agent.providerSeat != seatChat || agent.inputKind != meetingMemoryKindTranscript || agent.artifactKind != meetingMemoryKindScoutFollowupPass || agent.cursorMetadataKey != scoutFollowupCursorMetadataKey || agent.intervalEnv != "SCOUT_FOLLOWUP_INTERVAL" || agent.defaultInterval != 75*time.Second {
+	if agent.providerSeat != seatChat || agent.inputKind != meetingMemoryKindTranscript || agent.artifactKind != meetingMemoryKindScoutFollowupPass || agent.cursorMetadataKey != scoutFollowupCursorMetadataKey || agent.intervalEnv != "SCOUT_FOLLOWUP_INTERVAL" || agent.defaultInterval != 75*time.Second || !agent.firstRunAnchor {
 		t.Fatalf("agent contract=%+v", agent)
 	}
 	calls := 0
@@ -422,6 +423,200 @@ func TestScoutFollowupPassJournalsAndAdvancesCursor(t *testing.T) {
 	}
 	if posted := fixture.scoutMessagesAfter(question.ID); len(posted) != 1 {
 		t.Fatalf("second pass re-posted: %d", len(posted))
+	}
+}
+
+// PRODUCTION REPRO (OPS-7, generation 250). Scout follow-up first shipped over
+// an already-populated transcript store. The retained checkpoint therefore had
+// durable_cursor_ambiguous with no baseline/window/anchor and the worker had
+// never produced a pass. Without the opt-in first-run anchor, every 75-second
+// tick stopped at the continuity circuit before reviewing a thread.
+func TestScoutFollowupStaleBlockedCheckpointAnchorsForNeverProducedScope(t *testing.T) {
+	resetCapabilityRuntimeForTest(t)
+	setupAuthTestEnv(t)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("EMBEDDINGS_DISABLED", "true")
+	dir := t.TempDir()
+	t.Setenv("MEETING_MEMORY_PATH", filepath.Join(dir, "memory.jsonl"))
+	t.Setenv("KANBAN_BOARD_PATH", filepath.Join(dir, "board.json"))
+
+	seed := newKanbanBoardApp()
+	now := time.Now().UTC()
+	oldThread, _, err := seed.ensureScoutChatThread("scout-followup-old-public", "aj@shareability.com", "AJ", "Old", scoutChatVisibilityPublic, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.commitScoutChatThreadMessages("aj@shareability.com", oldThread.ID,
+		scoutChatMessageRecord{ID: "scout-followup-old-scout", Kind: "message", Role: "scout", AuthorName: scoutParticipantName, Text: "Old status.", CreatedAt: now.Add(-73 * time.Hour).Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.commitScoutChatThreadMessages("aj@shareability.com", oldThread.ID,
+		scoutChatMessageRecord{ID: "scout-followup-old-mention", Kind: "message", Role: "user", AuthorName: "AJ", AuthorEmail: "aj@shareability.com", Text: "@Scout revisit this old ask?", CreatedAt: now.Add(-72 * time.Hour).Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+
+	thread, _, err := seed.ensureScoutChatThread("scout-followup-stale-block", "aj@shareability.com", "AJ", "Packaging", scoutChatVisibilityPublic, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.commitScoutChatThreadMessages("aj@shareability.com", thread.ID,
+		scoutChatMessageRecord{ID: "scout-followup-pre-boot-scout", Kind: "message", Role: "scout", AuthorName: scoutParticipantName, Text: "The presentation brief is ready.", CreatedAt: now.Add(-2 * time.Hour).Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.commitScoutChatThreadMessages("aj@shareability.com", thread.ID,
+		scoutChatMessageRecord{ID: "scout-followup-pre-boot-mention", Kind: "message", Role: "user", AuthorName: "AJ", AuthorEmail: "aj@shareability.com", Text: "@Scout please review it now?", CreatedAt: now.Add(-time.Hour).Format(time.RFC3339Nano)}); err != nil {
+		t.Fatal(err)
+	}
+	holdPath := seed.ambientHeldWindowPath()
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	agent := scoutFollowupAgent()
+	scope := ambientAgentScopeKey(agent, officeRoomID)
+	stale := ambientHeldWindow{
+		Agent: agent.name, RoomID: officeRoomID, InputKind: agent.inputKind,
+		ArtifactKind: agent.artifactKind, CursorMetadataKey: agent.cursorMetadataKey,
+		BlockedReason: ambientContinuityAmbiguous,
+	}
+	if err := persistAmbientHeldWindowState(holdPath, ambientHeldWindowState{
+		Version: 1, Windows: map[string]ambientHeldWindow{scope: stale},
+	}); err != nil {
+		t.Fatalf("persist production-shaped stale checkpoint: %v", err)
+	}
+
+	app := newKanbanBoardApp()
+	previousApp := kanbanApp
+	kanbanApp = app
+	t.Cleanup(func() {
+		kanbanApp = previousApp
+		_ = app.Close()
+	})
+
+	app.memory.mu.RLock()
+	preBootInput := app.memory.bootLatestIDs[meetingMemoryKindTranscript]
+	producedBefore := 0
+	for _, entry := range app.memory.entries {
+		if entry.Kind == meetingMemoryKindScoutFollowupPass {
+			producedBefore++
+		}
+	}
+	app.memory.mu.RUnlock()
+	if preBootInput == "" || producedBefore != 0 {
+		t.Fatalf("preBootInput=%q produced=%d, want existing history and a never-produced lane", preBootInput, producedBefore)
+	}
+
+	before := ambientWorkerCheckpointDiagnostics(app, agent)
+	if before["checkpointStatus"] != "blocked_anchorable" || before["blockedScopeCount"] != 1 || before["blockedAnchorableScopes"] != 1 {
+		t.Fatalf("pre-anchor diagnostics=%v, want the production block marked repairable", before)
+	}
+	baseline, blocked, err := app.bootstrapAmbientContinuity(agent, officeRoomID)
+	if err != nil || blocked != "" || baseline != preBootInput {
+		t.Fatalf("baseline=%q blocked=%q err=%v, want first-run anchor %q", baseline, blocked, err, preBootInput)
+	}
+	checkpoint, ok, err := app.ambientScopeCheckpoint(scope)
+	if err != nil || !ok || !checkpoint.FirstRunAnchor || checkpoint.BlockedReason != "" || checkpoint.BaselineID != preBootInput {
+		t.Fatalf("checkpoint=%+v ok=%v err=%v, want a durable cleared anchor", checkpoint, ok, err)
+	}
+	app.setAmbientAgentBaselineID(agent.name, baseline)
+
+	calls := 0
+	responder := func(_ context.Context, _ string, request openAITextRequest) (string, error) {
+		calls++
+		return `{"verdict":"reply","reason":"mentioned","reply":"@AJ I am reviewing it now."}`, nil
+	}
+	if _, err := app.drainedScoutFollowupPass(context.Background(), "test-key", responder); err != nil {
+		t.Fatalf("first drained pass after anchor: %v", err)
+	}
+	rows := followupJournalRows(app, thread.ID)
+	threadAfter, _, err := app.scoutChatThreadByID("aj@shareability.com", thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(rows) != 1 || rows[0].Metadata["verdict"] != "reply" || len(threadAfter.Messages) != 3 || threadAfter.Messages[2].Via != scoutFollowupVia {
+		t.Fatalf("calls=%d rows=%v messages=%v, want the recent pre-boot mention disposed exactly once", calls, rows, threadAfter.Messages)
+	}
+	cursors := app.scoutFollowupCursors()
+	if cursors[thread.ID].MessageID != "scout-followup-pre-boot-mention" {
+		t.Fatalf("recent cursor=%+v, want the pre-boot mention", cursors[thread.ID])
+	}
+	if _, seededOld := cursors[oldThread.ID]; seededOld || len(followupJournalRows(app, oldThread.ID)) != 0 {
+		t.Fatalf("old public history crossed the 48h seed cutoff: cursor=%+v rows=%v", cursors[oldThread.ID], followupJournalRows(app, oldThread.ID))
+	}
+
+	// Scout replies deliberately do not enter channel transcript ingestion.
+	// The first normal tick is genuinely drained; creating a pass here would
+	// fabricate a consumption cursor for an input that does not exist.
+	for _, input := range app.memory.entriesOfKind(meetingMemoryKindTranscript, 0) {
+		if input.Metadata["messageId"] == threadAfter.Messages[2].ID {
+			t.Fatalf("Scout reply incorrectly became ambient input: %+v", input)
+		}
+	}
+	pass, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, 1, officeRoomID)
+	if err != nil || pass.ID != "" || calls != 1 || len(followupJournalRows(app, thread.ID)) != 1 {
+		t.Fatalf("drained pass=%+v err=%v calls=%d, want no fabricated input or duplicate decision", pass, err, calls)
+	}
+
+	// A real human turn after the anchor must still enter the ordinary
+	// transcript lane, get one reply, and move the exact durable pass cursor.
+	postAnchor := scoutChatMessageRecord{ID: "scout-followup-post-anchor-mention", Kind: "message", Role: "user", AuthorName: "AJ", AuthorEmail: "aj@shareability.com", Text: "@Scout what should we verify next?", CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if _, err := app.commitScoutChatThreadMessages("aj@shareability.com", thread.ID, postAnchor); err != nil {
+		t.Fatal(err)
+	}
+	postAnchorInputID := ""
+	for _, input := range app.memory.entriesOfKind(meetingMemoryKindTranscript, 0) {
+		if input.Metadata["messageId"] == postAnchor.ID && input.Metadata["threadId"] == thread.ID {
+			postAnchorInputID = input.ID
+		}
+	}
+	if postAnchorInputID == "" || postAnchorInputID == preBootInput {
+		t.Fatalf("missing distinct post-anchor transcript input: %q", postAnchorInputID)
+	}
+	pass, err = app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, 1, officeRoomID)
+	if err != nil || pass.Kind != meetingMemoryKindScoutFollowupPass || pass.Metadata[scoutFollowupCursorMetadataKey] != postAnchorInputID || calls != 2 {
+		t.Fatalf("normal pass=%+v err=%v calls=%d, want exact post-anchor cursor and one new decision", pass, err, calls)
+	}
+	assertExactlyOnce := func() {
+		t.Helper()
+		current, _, err := app.scoutChatThreadByID("aj@shareability.com", thread.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replies := map[string]int{}
+		for _, message := range current.Messages {
+			if message.Via == scoutFollowupVia {
+				replies[message.CausedByMessageID]++
+			}
+		}
+		if calls != 2 || len(followupJournalRows(app, thread.ID)) != 2 || len(replies) != 2 || replies["scout-followup-pre-boot-mention"] != 1 || replies[postAnchor.ID] != 1 {
+			t.Fatalf("calls=%d replies=%v rows=%v, want one decision and reply for each human turn", calls, replies, followupJournalRows(app, thread.ID))
+		}
+		if cursor := app.scoutFollowupCursors()[thread.ID]; cursor.MessageID != postAnchor.ID {
+			t.Fatalf("thread cursor=%+v, want the newest human turn", cursor)
+		}
+	}
+	assertExactlyOnce()
+	if drained, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, 1, officeRoomID); err != nil || drained.ID != "" {
+		t.Fatalf("second ordinary tick=%+v err=%v, want a drained no-op", drained, err)
+	}
+	assertExactlyOnce()
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+	app = newKanbanBoardApp()
+	kanbanApp = app
+	if _, err := app.drainedScoutFollowupPass(context.Background(), "test-key", responder); err != nil {
+		t.Fatalf("drained pass after restart: %v", err)
+	}
+	assertExactlyOnce()
+	if drained, err := app.invokeAmbientAgentGuarded(agent, context.Background(), "test-key", responder, 1, officeRoomID); err != nil || drained.ID != "" {
+		t.Fatalf("ordinary tick after restart=%+v err=%v, want a durable drained cursor", drained, err)
+	}
+	assertExactlyOnce()
+	after := ambientWorkerCheckpointDiagnostics(app, agent)
+	if after["checkpointStatus"] != "ready" || after["blockedScopeCount"] != 0 || after["firstRunAnchorScopes"] != 1 || after["continuityError"] == true {
+		t.Fatalf("post-anchor diagnostics=%v, want a ready anchored worker", after)
 	}
 }
 

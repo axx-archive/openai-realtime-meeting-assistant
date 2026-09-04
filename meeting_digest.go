@@ -36,6 +36,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -1121,9 +1122,16 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 	var newest meetingMemoryEntry
 	for _, group := range groups {
 		prior, hasPrior := current[group.key]
+		if meetingDigestSparsePassFromContext(ctx) != nil {
+			prior, hasPrior = meetingMemoryEntry{}, false
+		}
+		inputApp := app
+		if meetingDigestSparsePassFromContext(ctx) != nil {
+			inputApp = nil
+		} // exact admitted brain only; no unbound directory title
 		instructions := meetingDigestInstructions()
 		generatedAt := group.brains[len(group.brains)-1].CreatedAt.UTC()
-		input := app.buildMeetingDigestInput(group.key, prior, hasPrior, group.brains, generatedAt)
+		input := inputApp.buildMeetingDigestInput(group.key, prior, hasPrior, group.brains, generatedAt)
 		attemptHash := meetingDigestAttemptHash(model, instructions, input)
 		if meetingDigestCircuitSuppress(attemptHash) {
 			recordMeetingDigestOutput("circuit_open", "identical_poison_input", attemptHash, group.key, false)
@@ -1161,13 +1169,16 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			attempt := request
 			if len(window) != len(fullGroup) || maxOutputTokens != meetingDigestMaxOutputTokens {
 				recordMeetingDigestOutput("truncation_retry", ambientTruncationReason, attemptHash, group.key, false)
-				attempt.Input = app.buildMeetingDigestInput(group.key, prior, hasPrior, window, generatedAt)
+				attempt.Input = inputApp.buildMeetingDigestInput(group.key, prior, hasPrior, window, generatedAt)
 				attempt.MaxOutputTokens = maxOutputTokens
 			}
 			return responder(ctx, apiKey, attempt)
 		}, func(attempts int) error {
 			recordMeetingDigestOutput("rejected", ambientTruncationReason, attemptHash, group.key, false)
 			app.markMeetingDigestStuck(group.key, ambientTruncationReason)
+			if meetingDigestSparsePassFromContext(ctx) != nil {
+				return &ambientAgentHoldError{err: errors.New("sparse digest source truncated; source remains pending")}
+			}
 			return app.skipAmbientStuckInput(meetingDigestAgent(), group.brains[0], ambientWindowRoomID(group.brains), ambientTruncationReason, attempts)
 		})
 		if err == nil && outcome.Skipped {
@@ -1304,7 +1315,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 		// withdrawal, or same-id body edit changes that source revision, so stale
 		// summary prose can never outlive its evidence.
 		metadata[meetingRecordDigestSourceRevisionsMetadataKey] = meetingRecordDigestSourceRevisionMetadata(payload, meetingRecordSegments(app.memory.snapshotForMeeting(group.key, 0), group.key))
-		entry, err := app.memory.upsertDigest(meetingMemoryKindMeetingDigest, group.key, string(canonical), metadata)
+		entry, err := app.persistMeetingDigestOutput(ctx, group.key, string(canonical), metadata)
 		if err != nil {
 			return newest, err
 		}
@@ -1321,7 +1332,7 @@ func (app *kanbanBoardApp) produceMeetingDigests(ctx context.Context, apiKey str
 			break
 		}
 	}
-	if newest.ID != "" {
+	if newest.ID != "" && meetingDigestSparsePassFromContext(ctx) == nil {
 		// The interval floor is recovery insurance, not freshness cadence. A
 		// current meeting digest immediately wakes the deterministic day fold and
 		// typed company-ledger reducer; their own cursor/run locks coalesce bursts.

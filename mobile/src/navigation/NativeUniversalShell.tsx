@@ -228,7 +228,7 @@ export function NativeUniversalShell({
           style={[styles.sidebar, { paddingTop: Math.max(insets.top, space[4]), paddingBottom: Math.max(insets.bottom, space[4]) }]}
         >
           {/* iPad wordmark at top of rail, above dest icons — matches web. */}
-          <Text accessibilityRole="header" style={styles.sidebarWordmark}>stride</Text>
+          <Text accessibilityRole="header" numberOfLines={1} maxFontSizeMultiplier={1} style={styles.sidebarWordmark}>stride</Text>
           <View style={styles.sidebarItems}>
             {visibleDestinations.map((destination) => (
               <ShellItem
@@ -351,6 +351,8 @@ const styles = StyleSheet.create({
   },
   sidebarWordmark: {
     ...type.wordmark,
+    fontSize: 16,
+    lineHeight: 22,
     color: colors.wordmark,
     textAlign: 'center',
     textTransform: 'lowercase',

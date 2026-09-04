@@ -83,8 +83,16 @@ func scoutFollowupAgent() ambientAgentConfig {
 		inputKind:         meetingMemoryKindTranscript,
 		artifactKind:      meetingMemoryKindScoutFollowupPass,
 		cursorMetadataKey: scoutFollowupCursorMetadataKey,
-		requestTimeout:    scoutFollowupRequestTimeout,
-		inputFilter:       channelSourcedTranscript,
+		// This worker first ships into workspaces that already have durable
+		// channel transcript history. It has never produced a pass at that
+		// point, so there is no consumption cursor to reconstruct and the
+		// continuity chassis must anchor at the newest pre-boot transcript.
+		// scoutFollowupCandidateThreads separately seeds recent public threads
+		// through the durable per-thread cursor, so the generic anchor cannot
+		// drop a still-fresh pre-release @Scout ask.
+		firstRunAnchor: true,
+		requestTimeout: scoutFollowupRequestTimeout,
+		inputFilter:    channelSourcedTranscript,
 		// On-demand contract: a quiet deployment with nothing addressed to
 		// Scout is healthy, not stale.
 		healthWorkDue: func(*kanbanBoardApp, time.Time) bool { return false },
@@ -194,8 +202,9 @@ func scoutFollowupThreadEligible(thread scoutChatThreadRecord) bool {
 	return thread.ArchivedAt == "" && thread.Riff == nil
 }
 
-// scoutFollowupCandidateThreads unions the three discovery lanes and keeps
-// the sweep bounded.
+// scoutFollowupCandidateThreads unions the four discovery lanes and keeps the
+// sweep bounded: current transcript input, waiting intakes, recent public
+// threads that have never been cursor-seeded, and recent private threads.
 func (app *kanbanBoardApp) scoutFollowupCandidateThreads(inputs []meetingMemoryEntry, now time.Time) []scoutChatThreadRecord {
 	seen := map[string]bool{}
 	ids := make([]string, 0, 8)
@@ -226,9 +235,34 @@ func (app *kanbanBoardApp) scoutFollowupCandidateThreads(inputs []meetingMemoryE
 			threads = append(threads, thread)
 		}
 	}
-	// Recently updated private threads (no transcript rows exist for them):
-	// metadata-only filter before any JSON decode.
+	// The generic first-run anchor intentionally skips old channel transcript
+	// history. Preserve recent addressed public work exactly once by discovering
+	// only threads that do not yet have a durable per-thread cursor. This is the
+	// worker's bounded catch-up contract: older history remains out of scope,
+	// while a deferred decision deliberately stays cursorless and retries.
 	cutoff := now.Add(-scoutFollowupRecentThreadWindow)
+	cursors := app.scoutFollowupCursors()
+	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindScoutChat, 0) {
+		if len(threads) >= scoutFollowupMaxThreadsPerPass {
+			break
+		}
+		if seen[entry.ID] || strings.TrimSpace(entry.Metadata["archivedAt"]) != "" {
+			continue
+		}
+		if normalizeScoutChatVisibility(entry.Metadata["visibility"]) != scoutChatVisibilityPublic || cursors[entry.ID].MessageID != "" {
+			continue
+		}
+		updated, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(entry.Metadata["updatedAt"]))
+		if err != nil || updated.Before(cutoff) {
+			continue
+		}
+		if thread, ok := decodeScoutChatThreadEntry(entry); ok && scoutFollowupThreadEligible(thread) && scoutFollowupHasRecentMessage(thread, cutoff) {
+			seen[entry.ID] = true
+			threads = append(threads, thread)
+		}
+	}
+	// Recently updated private threads have no transcript rows, so they always
+	// retain their existing metadata-only discovery lane.
 	for _, entry := range app.memory.entriesOfKind(meetingMemoryKindScoutChat, 0) {
 		if len(threads) >= scoutFollowupMaxThreadsPerPass {
 			break
@@ -254,6 +288,20 @@ func (app *kanbanBoardApp) scoutFollowupCandidateThreads(inputs []meetingMemoryE
 	return threads
 }
 
+// Thread metadata can change without a new conversation turn (for example a
+// rename or import). A recent update alone must not resurrect an old ask.
+func scoutFollowupHasRecentMessage(thread scoutChatThreadRecord, cutoff time.Time) bool {
+	for _, message := range thread.Messages {
+		if message.Kind != "message" {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(message.CreatedAt)); err == nil && !at.Before(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 // runScoutFollowupSweep reviews every candidate thread once and returns a
 // one-line summary for the pass artifact.
 func (app *kanbanBoardApp) runScoutFollowupSweep(ctx context.Context, apiKey string, inputs []meetingMemoryEntry, responder openAITextResponder) string {
@@ -266,16 +314,22 @@ func (app *kanbanBoardApp) runScoutFollowupSweep(ctx context.Context, apiKey str
 	replied, acted, silent := 0, 0, 0
 	changed := false
 	for _, thread := range threads {
-		review := app.scoutFollowupReview(thread, cursors[thread.ID].MessageID, now)
-		if len(review.fresh) == 0 {
-			continue
-		}
+		cursor := cursors[thread.ID].MessageID
 		stamp := func(messageID string) {
 			if messageID == "" {
 				return
 			}
 			cursors[thread.ID] = scoutFollowupThreadCursor{MessageID: messageID, At: now.Format(time.RFC3339Nano)}
 			changed = true
+		}
+		review := app.scoutFollowupReview(thread, cursor, now)
+		if len(review.fresh) == 0 {
+			// A newly seeded recent thread containing only Scout/system turns
+			// still needs a durable floor or it would be decoded every 75 s.
+			if cursor == "" && len(thread.Messages) > 0 {
+				stamp(thread.Messages[len(thread.Messages)-1].ID)
+			}
+			continue
 		}
 		newestFresh := review.fresh[len(review.fresh)-1].ID
 		if len(review.addressed) == 0 {
@@ -489,6 +543,11 @@ func (app *kanbanBoardApp) scoutFollowupReview(thread scoutChatThreadRecord, cur
 		message := thread.Messages[index]
 		if message.Kind != "message" || !strings.EqualFold(strings.TrimSpace(message.Role), "user") {
 			continue
+		}
+		if cursorMessageID == "" && !private {
+			if at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(message.CreatedAt)); err == nil && at.Before(now.Add(-scoutFollowupRecentThreadWindow)) {
+				continue
+			}
 		}
 		author := normalizeAccountEmail(message.AuthorEmail)
 		if author == "" || !scoutChatThreadAllowsViewer(thread, author) || accountIsDisabled(author) {

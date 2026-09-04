@@ -17,6 +17,8 @@ export type NativeRoomStatsSnapshot = NativeRoomQuality & {
   inboundVideoJitterBufferEmittedCount: number;
   inboundAudioPacketsReceived: number;
   inboundAudioPacketsLost: number;
+  inboundAudioJitterBufferDelay: number;
+  inboundAudioJitterBufferEmittedCount: number;
   outboundVideoBytesSent: number;
   outboundVideoBytesDelta: number;
   outboundVideoFramesEncoded: number;
@@ -103,6 +105,8 @@ export function summarizeNativeRoomStats(
     inboundVideoJitterBufferEmittedCount: 0,
     inboundAudioPacketsReceived: 0,
     inboundAudioPacketsLost: 0,
+    inboundAudioJitterBufferDelay: 0,
+    inboundAudioJitterBufferEmittedCount: 0,
     outboundVideoBytesSent: 0,
     outboundVideoFramesEncoded: 0,
     outboundVideoFramesSent: 0,
@@ -127,6 +131,8 @@ export function summarizeNativeRoomStats(
     } else if (stat.type === 'inbound-rtp' && mediaKind(stat) === 'audio') {
       totals.inboundAudioPacketsReceived += numberValue(stat.packetsReceived);
       totals.inboundAudioPacketsLost += numberValue(stat.packetsLost);
+      totals.inboundAudioJitterBufferDelay += numberValue(stat.jitterBufferDelay);
+      totals.inboundAudioJitterBufferEmittedCount += numberValue(stat.jitterBufferEmittedCount);
     } else if (stat.type === 'outbound-rtp' && mediaKind(stat) === 'video') {
       totals.outboundVideoBytesSent += numberValue(stat.bytesSent);
       totals.outboundVideoFramesEncoded += numberValue(stat.framesEncoded);
@@ -165,18 +171,36 @@ export function summarizeNativeRoomStats(
   const decodedDelta = previous ? Math.max(0, totals.inboundVideoFramesDecoded - previous.inboundVideoFramesDecoded) : 0;
   const receivedDelta = previous ? Math.max(0, totals.inboundVideoPacketsReceived - previous.inboundVideoPacketsReceived) : 0;
   const lostDelta = previous ? Math.max(0, totals.inboundVideoPacketsLost - previous.inboundVideoPacketsLost) : 0;
-  const packetLossPercent = previous && receivedDelta + lostDelta > 0
+  const videoPacketLossPercent = previous && receivedDelta + lostDelta > 0
     ? (lostDelta / (receivedDelta + lostDelta)) * 100
     : 0;
+  const audioReceivedDelta = previous ? Math.max(0, totals.inboundAudioPacketsReceived - previous.inboundAudioPacketsReceived) : 0;
+  const audioLostDelta = previous ? Math.max(0, totals.inboundAudioPacketsLost - previous.inboundAudioPacketsLost) : 0;
+  const audioPacketLossPercent = previous && audioReceivedDelta + audioLostDelta > 0
+    ? (audioLostDelta / (audioReceivedDelta + audioLostDelta)) * 100
+    : 0;
+  // A busy healthy video stream must not dilute impaired audio, including in
+  // audio-only rooms. Idle/silent streams alone do not imply packet loss.
+  const packetLossPercent = Math.max(videoPacketLossPercent, audioPacketLossPercent);
   const jitterBufferDelayDelta = previous
     ? Math.max(0, totals.inboundVideoJitterBufferDelay - previous.inboundVideoJitterBufferDelay)
     : 0;
   const jitterBufferEmittedDelta = previous
     ? Math.max(0, totals.inboundVideoJitterBufferEmittedCount - previous.inboundVideoJitterBufferEmittedCount)
     : 0;
-  const jitterBufferMs = jitterBufferEmittedDelta > 0
+  const videoJitterBufferMs = jitterBufferEmittedDelta > 0
     ? (jitterBufferDelayDelta / jitterBufferEmittedDelta) * 1000
     : 0;
+  const audioJitterBufferDelayDelta = previous
+    ? Math.max(0, totals.inboundAudioJitterBufferDelay - previous.inboundAudioJitterBufferDelay)
+    : 0;
+  const audioJitterBufferEmittedDelta = previous
+    ? Math.max(0, totals.inboundAudioJitterBufferEmittedCount - previous.inboundAudioJitterBufferEmittedCount)
+    : 0;
+  const audioJitterBufferMs = audioJitterBufferEmittedDelta > 0
+    ? (audioJitterBufferDelayDelta / audioJitterBufferEmittedDelta) * 1000
+    : 0;
+  const jitterBufferMs = Math.max(videoJitterBufferMs, audioJitterBufferMs);
   const receivedFramesPerSecond = previous ? decodedDelta / elapsedSeconds : 0;
   const outboundVideoBytesDelta = previous
     ? Math.max(0, totals.outboundVideoBytesSent - previous.outboundVideoBytesSent)

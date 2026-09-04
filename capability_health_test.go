@@ -19,10 +19,20 @@ func resetCapabilityRuntimeForTest(t *testing.T) {
 	previous := capabilityRuntime.states
 	capabilityRuntime.states = make(map[string]capabilityRuntimeState)
 	capabilityRuntime.Unlock()
+	// Workflow readiness also merges this process-wide evidence. Isolate it
+	// along with the central registry so earlier ticker tests cannot make a
+	// never-run fixture appear healthy.
+	workflowTickerStatMu.Lock()
+	previousPass, previousCount := workflowTickerLastPass, workflowTickerLastCount
+	workflowTickerLastPass, workflowTickerLastCount = time.Time{}, 0
+	workflowTickerStatMu.Unlock()
 	t.Cleanup(func() {
 		capabilityRuntime.Lock()
 		capabilityRuntime.states = previous
 		capabilityRuntime.Unlock()
+		workflowTickerStatMu.Lock()
+		workflowTickerLastPass, workflowTickerLastCount = previousPass, previousCount
+		workflowTickerStatMu.Unlock()
 	})
 }
 

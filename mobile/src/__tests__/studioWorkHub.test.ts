@@ -43,6 +43,10 @@ test('iPhone uses one swipe-dismissable project sheet while iPad keeps list and 
   const sheet = source('src', 'work', 'WorkProjectSheet.tsx');
 
   assert.match(hub, /const WORK_HUB_SPLIT_WIDTH = 744/u);
+  assert.match(hub, /onLayout=\{\(\{ nativeEvent \}\) => setContentWidth\(nativeEvent\.layout\.width\)\}/u);
+  assert.match(hub, /Platform\.OS !== 'ios' \|\| Platform\.isPad/u);
+  assert.match(hub, /fontScale < 1\.35[\s\S]*contentWidth >= WORK_HUB_SPLIT_WIDTH/u);
+  assert.doesNotMatch(hub, /const split = width >=/u);
   assert.match(hub, /split \? \([\s\S]*<WorkProjectDetail/u);
   assert.match(hub, /\) : \([\s\S]*<WorkProjectSheet/u);
   assert.match(sheet, /presentationStyle="formSheet"/u);

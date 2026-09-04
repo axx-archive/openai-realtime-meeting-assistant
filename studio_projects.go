@@ -96,6 +96,12 @@ type studioProjectView struct {
 	Brief      map[string]any              `json:"brief,omitempty"`
 	Commission *studioProjectCommissionRef `json:"commission,omitempty"`
 	Project    string                      `json:"project,omitempty"`
+	// Usage is an observed spending breakdown on authorized detail reads only.
+	Usage                 *studioWorkUsageView           `json:"usage,omitempty"`
+	Feedback              *studioWorkFeedbackView        `json:"feedback,omitempty"`
+	Execution             *studioDissentExecutionView    `json:"execution,omitempty"`
+	Assurance             *studioDissentAssuranceView    `json:"assurance,omitempty"`
+	PriorFeedbackEvidence []workFeedbackEvidenceCitation `json:"priorFeedbackEvidence,omitempty"`
 }
 
 // studioProjectCommissionRef is the row-level receipt of a Packaging Studio
@@ -1153,10 +1159,11 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPatch {
 		var payload struct {
-			ID               string `json:"id"`
-			Title            string `json:"title"`
-			Archived         *bool  `json:"archived"`
-			ExpectedRevision int    `json:"expectedRevision"`
+			ID               string                     `json:"id"`
+			Title            string                     `json:"title"`
+			Archived         *bool                      `json:"archived"`
+			ExpectedRevision int                        `json:"expectedRevision"`
+			Feedback         *studioWorkFeedbackRequest `json:"feedback"`
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&payload); err != nil {
 			writeAuthError(w, http.StatusBadRequest, "could not read project update")
@@ -1164,6 +1171,14 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		payload.ID = strings.TrimSpace(payload.ID)
 		payload.Title = boundedStudioProjectTitle(payload.Title)
+		if payload.Feedback != nil {
+			if payload.Title != "" || payload.Archived != nil {
+				writeAuthError(w, http.StatusBadRequest, "feedback cannot be combined with another update")
+				return
+			}
+			studioWorkFeedbackHandler(w, r, viewer, payload.ID, payload.ExpectedRevision, *payload.Feedback)
+			return
+		}
 		updateCount := 0
 		if payload.Title != "" {
 			updateCount++
@@ -1282,6 +1297,12 @@ func studioProjectsHandler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if project, ok := studioProjectViewForCandidate(r.Context(), viewer, candidate, resultIndex); ok && (kind == "" || project.Kind == kind) {
+				project.Usage = studioWorkUsageForViewer(r.Context(), viewer, candidate, resultIndex)
+				project.Feedback = studioWorkFeedbackForViewer(r.Context(), viewer, candidate.Entry, project)
+				project.PriorFeedbackEvidence = kanbanApp.studioPriorFeedbackEvidenceForViewer(r.Context(), viewer, project.Result)
+				if project.Result != nil {
+					project.Execution, project.Assurance = kanbanApp.studioDissentEvidenceForViewer(r.Context(), viewer, *project.Result)
+				}
 				writeAuthJSON(w, http.StatusOK, map[string]any{"ok": true, "project": project})
 				return
 			}

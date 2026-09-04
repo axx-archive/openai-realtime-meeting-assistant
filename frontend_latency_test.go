@@ -480,8 +480,8 @@ func TestIndexProvidesAuthenticatedWaveformHomeAndFloatingAssistant(t *testing.T
 		// topbar search (#globalSearch) covers it; the library keeps chips
 		`id="studioProjectKinds" class="studio-projects__kinds"`,
 		`id="studioProjectList" class="studio-projects__list"`,
-		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
-		`data-pd1-destination="Work" aria-label="Packaging Studio" aria-current="false"`,
+		// STRIDE 3 presents the durable outcome destination as Work.
+		`data-pd1-destination="Work" aria-label="Work" aria-current="false"`,
 		`data-pd1-destination="Drive" aria-label="Drive" aria-current="false"`,
 		`<p class="scout-private-caption">private · voice and chat route Scout work here</p>`,
 		// The 4 composer starter pills were cut with the propose-confirm

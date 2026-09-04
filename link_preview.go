@@ -16,9 +16,11 @@ import (
 )
 
 const (
-	linkPreviewMaxURLBytes  = 4 << 10
-	linkPreviewMaxHTMLBytes = 768 << 10
-	linkPreviewTimeout      = 7 * time.Second
+	linkPreviewMaxURLBytes            = 4 << 10
+	linkPreviewMaxHTMLBytes           = 768 << 10
+	linkPreviewTimeout                = 7 * time.Second
+	linkPreviewProviderTimeout        = 3 * time.Second
+	linkPreviewImageEnrichmentTimeout = 800 * time.Millisecond
 )
 
 type linkPreview struct {
@@ -28,6 +30,7 @@ type linkPreview struct {
 	Description  string `json:"description,omitempty"`
 	SiteName     string `json:"siteName,omitempty"`
 	ImageURL     string `json:"imageUrl,omitempty"`
+	ImageRole    string `json:"imageRole,omitempty"`
 	MediaType    string `json:"mediaType,omitempty"`
 	AuthorName   string `json:"authorName,omitempty"`
 	AuthorHandle string `json:"authorHandle,omitempty"`
@@ -101,7 +104,9 @@ func assistantLinkPreviewImageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("Accept", "image/webp,image/png,image/jpeg,image/gif")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
-	response, err := linkPreviewHTTPClient().Do(req)
+	client := linkPreviewHTTPClient()
+	defer client.CloseIdleConnections()
+	response, err := client.Do(req)
 	if err != nil {
 		writeAuthError(w, http.StatusUnprocessableEntity, "preview image is unavailable")
 		return
@@ -118,7 +123,7 @@ func assistantLinkPreviewImageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mime := http.DetectContentType(data)
-	if !linkPreviewImageMime(mime) {
+	if !linkPreviewImageMime(mime) || !linkPreviewImageDimensionsAllowed(mime, data) {
 		writeAuthError(w, http.StatusUnsupportedMediaType, "preview image format is unavailable")
 		return
 	}
@@ -128,6 +133,13 @@ func assistantLinkPreviewImageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// Inspect dimensions without allocating decoded pixel buffers. Raster magic
+// alone permits tiny files that ask the reader to allocate enormous images.
+func linkPreviewImageDimensionsAllowed(mime string, data []byte) bool {
+	width, height := attachmentImageDimensions(mime, data)
+	return width > 0 && height > 0 && width <= 12000 && height <= 12000 && int64(width)*int64(height) <= 32_000_000
 }
 
 func linkPreviewImageMime(value string) bool {
@@ -216,10 +228,11 @@ func linkPreviewHTTPClient() *http.Client {
 			}
 			return nil, lastErr
 		},
-		TLSHandshakeTimeout:   4 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
-		MaxIdleConns:          24,
-		IdleConnTimeout:       30 * time.Second,
+		TLSHandshakeTimeout:    4 * time.Second,
+		ResponseHeaderTimeout:  5 * time.Second,
+		MaxResponseHeaderBytes: 64 << 10,
+		MaxIdleConns:           24,
+		IdleConnTimeout:        30 * time.Second,
 	}
 	return &http.Client{
 		Transport: transport,
@@ -237,49 +250,62 @@ func linkPreviewHTTPClient() *http.Client {
 }
 
 func fetchLinkPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
-	if xPostURL(target) {
-		post, postErr := fetchXPostPreview(ctx, target)
-		if postErr == nil {
-			// X's official oEmbed response carries the post copy and author but no
-			// thumbnail. Its page Open Graph image is the author's avatar, which is
-			// useful in the dedicated post layout (never stretched as a hero image).
-			if page, pageErr := fetchHTMLLinkPreview(ctx, target); pageErr == nil {
-				post.ImageURL = page.ImageURL
+	client := linkPreviewHTTPClient()
+	defer client.CloseIdleConnections()
+	return fetchLinkPreviewWithClient(ctx, target, client)
+}
+
+// One total deadline covers every provider and HTML request. A slow optional
+// provider cannot consume the full fallback budget, and avatar enrichment
+// cannot hold an already usable X post until the total deadline.
+func fetchLinkPreviewWithClient(ctx context.Context, target *url.URL, client *http.Client) (linkPreview, error) {
+	ctx, cancel := context.WithTimeout(ctx, linkPreviewTimeout)
+	defer cancel()
+	if xPostURL(target) || youtubeVideoURL(target) || tiktokVideoURL(target) {
+		providerCtx, providerCancel := context.WithTimeout(ctx, linkPreviewProviderTimeout)
+		var rich linkPreview
+		var err error
+		switch {
+		case xPostURL(target):
+			rich, err = fetchXPostPreview(providerCtx, target, client)
+		case youtubeVideoURL(target):
+			rich, err = fetchYouTubeVideoPreview(providerCtx, target, client)
+		case tiktokVideoURL(target):
+			rich, err = fetchTikTokVideoPreview(providerCtx, target, client)
+		}
+		providerCancel()
+		if err == nil {
+			if xPostURL(target) {
+				imageCtx, imageCancel := context.WithTimeout(ctx, linkPreviewImageEnrichmentTimeout)
+				if page, pageErr := fetchHTMLLinkPreview(imageCtx, target, client); pageErr == nil {
+					page = normalizeProviderLinkPreview(target, page)
+					rich.ImageURL, rich.ImageRole = page.ImageURL, page.ImageRole
+				}
+				imageCancel()
 			}
-			return post, nil
+			return rich, nil
 		}
 	}
-	if youtubeVideoURL(target) {
-		if video, videoErr := fetchYouTubeVideoPreview(ctx, target); videoErr == nil {
-			return video, nil
-		}
-	}
-	if tiktokVideoURL(target) {
-		if video, videoErr := fetchTikTokVideoPreview(ctx, target); videoErr == nil {
-			return video, nil
-		}
-	}
-	page, pageErr := fetchHTMLLinkPreview(ctx, target)
+	page, pageErr := fetchHTMLLinkPreview(ctx, target, client)
 	if pageErr == nil {
 		return normalizeProviderLinkPreview(target, page), nil
 	}
-	// Provider APIs and public HTML endpoints are not uniformly available. A
-	// recognized public post should still render as a useful, honest card when
-	// richer metadata is blocked; clients never receive provider HTML or scripts.
+	// Public providers can require sign-in or decline bots. Preserve the
+	// original link, without claiming their login page is the shared content.
 	if fallback, ok := recognizedProviderLinkPreview(target); ok {
 		return fallback, nil
 	}
 	return linkPreview{}, pageErr
 }
 
-func fetchHTMLLinkPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
+func fetchHTMLLinkPreview(ctx context.Context, target *url.URL, client *http.Client) (linkPreview, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return linkPreview{}, err
 	}
 	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
-	response, err := linkPreviewHTTPClient().Do(req)
+	response, err := client.Do(req)
 	if err != nil {
 		return linkPreview{}, err
 	}
@@ -330,7 +356,7 @@ func youtubeVideoURL(target *url.URL) bool {
 	if target == nil {
 		return false
 	}
-	host := strings.ToLower(strings.TrimPrefix(target.Hostname(), "www."))
+	host := strings.TrimPrefix(strings.ToLower(target.Hostname()), "www.")
 	path := strings.Trim(target.Path, "/")
 	if host == "youtu.be" {
 		return path != "" && !strings.Contains(path, "/")
@@ -345,7 +371,7 @@ func youtubeVideoURL(target *url.URL) bool {
 	return len(parts) == 2 && (parts[0] == "shorts" || parts[0] == "embed") && strings.TrimSpace(parts[1]) != ""
 }
 
-func fetchYouTubeVideoPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
+func fetchYouTubeVideoPreview(ctx context.Context, target *url.URL, client *http.Client) (linkPreview, error) {
 	endpoint, _ := url.Parse("https://www.youtube.com/oembed")
 	query := endpoint.Query()
 	query.Set("url", target.String())
@@ -357,7 +383,7 @@ func fetchYouTubeVideoPreview(ctx context.Context, target *url.URL) (linkPreview
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
-	response, err := linkPreviewHTTPClient().Do(req)
+	response, err := client.Do(req)
 	if err != nil {
 		return linkPreview{}, err
 	}
@@ -389,7 +415,7 @@ func tiktokCanonicalVideoURL(target *url.URL) bool {
 	if target == nil {
 		return false
 	}
-	host := strings.ToLower(strings.TrimPrefix(target.Hostname(), "www."))
+	host := strings.TrimPrefix(strings.ToLower(target.Hostname()), "www.")
 	if host != "tiktok.com" && host != "m.tiktok.com" {
 		return false
 	}
@@ -439,7 +465,7 @@ func tiktokVideoURL(target *url.URL) bool {
 // same DNS-pinned, private-network-denying client as every other preview. The
 // final destination must be a canonical TikTok video; a short link cannot turn
 // this specialized lane into a general redirector.
-func resolveTikTokVideoURL(ctx context.Context, target *url.URL) (*url.URL, error) {
+func resolveTikTokVideoURL(ctx context.Context, target *url.URL, client *http.Client) (*url.URL, error) {
 	if tiktokCanonicalVideoURL(target) {
 		copy := *target
 		return &copy, nil
@@ -454,11 +480,14 @@ func resolveTikTokVideoURL(ctx context.Context, target *url.URL) (*url.URL, erro
 	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9")
 	req.Header.Set("Range", "bytes=0-0")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
-	response, err := linkPreviewHTTPClient().Do(req)
+	response, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("tiktok share link is unavailable")
+	}
 	canonical := response.Request.URL
 	if !tiktokCanonicalVideoURL(canonical) {
 		return nil, fmt.Errorf("tiktok share link did not resolve to a video")
@@ -468,8 +497,8 @@ func resolveTikTokVideoURL(ctx context.Context, target *url.URL) (*url.URL, erro
 	return &copy, nil
 }
 
-func fetchTikTokVideoPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
-	canonical, err := resolveTikTokVideoURL(ctx, target)
+func fetchTikTokVideoPreview(ctx context.Context, target *url.URL, client *http.Client) (linkPreview, error) {
+	canonical, err := resolveTikTokVideoURL(ctx, target, client)
 	if err != nil {
 		return linkPreview{}, err
 	}
@@ -483,7 +512,7 @@ func fetchTikTokVideoPreview(ctx context.Context, target *url.URL) (linkPreview,
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
-	response, err := linkPreviewHTTPClient().Do(req)
+	response, err := client.Do(req)
 	if err != nil {
 		return linkPreview{}, err
 	}
@@ -542,7 +571,7 @@ func instagramContentKind(target *url.URL) string {
 	if target == nil {
 		return ""
 	}
-	host := strings.ToLower(strings.TrimPrefix(target.Hostname(), "www."))
+	host := strings.TrimPrefix(strings.ToLower(target.Hostname()), "www.")
 	if host != "instagram.com" && host != "m.instagram.com" {
 		return ""
 	}
@@ -592,6 +621,9 @@ func recognizedProviderLinkPreview(target *url.URL) (linkPreview, bool) {
 			SiteName: "Instagram", MediaType: mediaType,
 		}, true
 	}
+	if xArticleURL(target) {
+		return linkPreview{URL: target.String(), Kind: "article", Title: "Article on X", Description: "Open the original article on X", SiteName: "X", MediaType: "article"}, true
+	}
 	if xPostURL(target) {
 		return linkPreview{
 			URL: target.String(), Kind: "x_post", Title: "Post on X", Description: "Open the original post on X",
@@ -618,6 +650,10 @@ func normalizeProviderLinkPreview(target *url.URL, preview linkPreview) linkPrev
 	if !recognized {
 		return preview
 	}
+	final, err := normalizeLinkPreviewURL(preview.URL)
+	if err != nil || !linkPreviewProviderSourceMatches(target, final) || linkPreviewProviderShellTitle(preview.Title) {
+		return fallback
+	}
 	preview.URL = fallback.URL
 	preview.Kind = fallback.Kind
 	preview.SiteName = fallback.SiteName
@@ -627,17 +663,81 @@ func normalizeProviderLinkPreview(target *url.URL, preview linkPreview) linkPrev
 	if preview.Description == "" {
 		preview.Description = fallback.Description
 	}
-	if preview.MediaType == "" {
-		preview.MediaType = fallback.MediaType
-	}
+	preview.MediaType = fallback.MediaType
 	return preview
+}
+
+// X Articles use a separate public permalink, not a post oEmbed endpoint.
+// Only the observed canonical /i/article/<numeric-id> shape is recognized.
+func xArticleURL(target *url.URL) bool {
+	if target == nil {
+		return false
+	}
+	host := strings.TrimPrefix(strings.ToLower(target.Hostname()), "www.")
+	if host != "x.com" && host != "twitter.com" {
+		return false
+	}
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "i" || parts[1] != "article" || parts[2] == "" {
+		return false
+	}
+	for _, c := range parts[2] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func linkPreviewProviderIdentity(target *url.URL) string {
+	if target == nil {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(target.Path, "/"), "/")
+	switch {
+	case xArticleURL(target):
+		return "x_article:" + parts[2]
+	case xPostURL(target):
+		return "x_post:" + parts[2]
+	case youtubeVideoURL(target):
+		if strings.TrimPrefix(strings.ToLower(target.Hostname()), "www.") == "youtu.be" {
+			return "youtube:" + parts[0]
+		}
+		if parts[0] == "watch" {
+			return "youtube:" + target.Query().Get("v")
+		}
+		return "youtube:" + parts[1]
+	case tiktokCanonicalVideoURL(target):
+		return "tiktok:" + parts[2]
+	case instagramContentKind(target) != "":
+		return instagramContentKind(target) + ":" + parts[1]
+	}
+	return ""
+}
+
+func linkPreviewProviderSourceMatches(target, final *url.URL) bool {
+	// A TikTok short link's content identity is only known after resolving it
+	// through the DNS-pinned client to a canonical video URL.
+	if tiktokShortVideoURL(target) {
+		return tiktokCanonicalVideoURL(final)
+	}
+	identity := linkPreviewProviderIdentity(target)
+	return identity != "" && identity == linkPreviewProviderIdentity(final)
+}
+
+func linkPreviewProviderShellTitle(title string) bool {
+	switch strings.ToLower(strings.TrimSpace(title)) {
+	case "log in to x / x", "log in / x", "sign in to x / x", "javascript is not available.", "login • instagram", "log in • instagram", "before you continue to youtube":
+		return true
+	}
+	return false
 }
 
 func xPostURL(target *url.URL) bool {
 	if target == nil {
 		return false
 	}
-	host := strings.ToLower(strings.TrimPrefix(target.Hostname(), "www."))
+	host := strings.TrimPrefix(strings.ToLower(target.Hostname()), "www.")
 	if host != "x.com" && host != "twitter.com" {
 		return false
 	}
@@ -653,7 +753,7 @@ func xPostURL(target *url.URL) bool {
 	return true
 }
 
-func fetchXPostPreview(ctx context.Context, target *url.URL) (linkPreview, error) {
+func fetchXPostPreview(ctx context.Context, target *url.URL, client *http.Client) (linkPreview, error) {
 	endpoint, _ := url.Parse("https://publish.twitter.com/oembed")
 	query := endpoint.Query()
 	query.Set("url", target.String())
@@ -666,7 +766,7 @@ func fetchXPostPreview(ctx context.Context, target *url.URL) (linkPreview, error
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "BonfireOS-LinkPreview/1.0")
-	response, err := linkPreviewHTTPClient().Do(req)
+	response, err := client.Do(req)
 	if err != nil {
 		return linkPreview{}, err
 	}
@@ -685,7 +785,7 @@ func fetchXPostPreview(ctx context.Context, target *url.URL) (linkPreview, error
 	}
 	handle := xAuthorHandle(embed.AuthorURL)
 	canonicalURL := target.String()
-	if embeddedURL, err := normalizeLinkPreviewURL(strings.TrimSpace(embed.URL)); err == nil && xPostURL(embeddedURL) {
+	if embeddedURL, err := normalizeLinkPreviewURL(strings.TrimSpace(embed.URL)); err == nil && linkPreviewProviderSourceMatches(target, embeddedURL) {
 		canonicalURL = embeddedURL.String()
 	}
 	return linkPreview{
@@ -701,7 +801,7 @@ func xAuthorHandle(raw string) string {
 	if err != nil {
 		return ""
 	}
-	host := strings.ToLower(strings.TrimPrefix(authorURL.Hostname(), "www."))
+	host := strings.TrimPrefix(strings.ToLower(authorURL.Hostname()), "www.")
 	if host != "x.com" && host != "twitter.com" {
 		return ""
 	}
@@ -833,6 +933,12 @@ func parseLinkPreviewHTML(base *url.URL, body []byte) linkPreview {
 	preview.Description = previewText(firstNonEmptyString(values["og:description"], values["twitter:description"], values["description"]), 320)
 	preview.SiteName = previewText(firstNonEmptyString(values["og:site_name"], base.Hostname()), 80)
 	preview.MediaType = previewText(firstNonEmptyString(values["og:type"], values["twitter:card"]), 60)
+	preview.AuthorName = previewText(values["author"], 80)
+	preview.PublishedAt = previewText(values["article:published_time"], 60)
+	if xArticleURL(base) {
+		preview.SiteName, preview.MediaType = "X", "article"
+		preview.AuthorHandle = strings.TrimPrefix(previewText(values["twitter:creator"], 40), "@")
+	}
 	imageRaw := firstNonEmptyString(values["og:image:secure_url"], values["og:image"], values["twitter:image"])
 	if imageRaw != "" {
 		if image, err := base.Parse(imageRaw); err == nil {
@@ -842,13 +948,26 @@ func parseLinkPreviewHTML(base *url.URL, body []byte) linkPreview {
 		}
 	}
 	preview.Kind = linkPreviewKind(base, preview.MediaType, preview.ImageURL)
+	if preview.Kind == "x_post" && preview.ImageURL != "" {
+		preview.ImageRole = linkPreviewXImageRole(preview.ImageURL)
+	}
 	return preview
+}
+
+// A post's Open Graph image is often the shared media, not its author. Only
+// X's explicit profile-image path establishes an avatar; preserve everything
+// else as content rather than cropping it into a tiny author circle.
+func linkPreviewXImageRole(raw string) string {
+	image, err := url.Parse(raw)
+	if err == nil && strings.EqualFold(image.Hostname(), "pbs.twimg.com") && strings.HasPrefix(image.Path, "/profile_images/") {
+		return "author_avatar"
+	}
+	return "content"
 }
 
 func linkPreviewKind(base *url.URL, mediaType, imageURL string) string {
 	if base != nil {
-		host := strings.ToLower(strings.TrimPrefix(base.Hostname(), "www."))
-		if host == "youtube.com" || host == "youtu.be" || host == "m.youtube.com" {
+		if youtubeVideoURL(base) {
 			return "youtube_video"
 		}
 		if tiktokVideoURL(base) {
@@ -856,6 +975,9 @@ func linkPreviewKind(base *url.URL, mediaType, imageURL string) string {
 		}
 		if kind := instagramContentKind(base); kind != "" {
 			return kind
+		}
+		if xArticleURL(base) {
+			return "article"
 		}
 		if xPostURL(base) {
 			return "x_post"

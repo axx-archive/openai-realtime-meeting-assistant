@@ -140,12 +140,12 @@ test('React Native shell separates the static logo from composer voice controls'
   assert.doesNotMatch(navigation, /Animated\.timing/);
   assert.match(composition, /<StrideCradle trace=\{EMPTY_TRACE\} listening=\{false\} \/>/);
   assert.match(composition, /export const canvasCradleComposition/);
-  assert.match(canvas, /contentContainerStyle=\{canvasCradleComposition\.body\}/);
-  assert.match(canvas, /canvasCradleComposition\.skyAbove/);
+  assert.match(canvas, /contentContainerStyle=\{styles\.operatingBody\}/);
+  assert.match(canvas, /styles\.operatingTop/);
   assert.match(canvas, /styles\.composerVoice/);
   assert.match(canvas, /SymbolView name="waveform"/);
   // homeCopyBlock removed with starters per continuity-first design (STRIDE mobile E2E evolution)
-  assert.match(canvas, /canvasCradleComposition\.skyBelow/);
+  assert.match(canvas, /styles\.operatingBottom/);
   assert.doesNotMatch(navigation, /StrideSignalGlyph/);
   assert.doesNotMatch(navigation, /Home:\s*'flame\.fill'/);
 });
@@ -265,8 +265,8 @@ test('Expo icon and splash sources have release-safe dimensions and alpha models
   assert.match(config, /image: '\.\/assets\/splash-icon-dark\.png'/);
 });
 
-test('the checked-in iOS build number matches the Build 76 source line', () => {
+test('the checked-in iOS build number matches the Build 77 source line', () => {
   const appConfig = text('app.config.ts');
-  assert.match(appConfig, /buildNumber:\s*'76'/);
-  assert.doesNotMatch(appConfig, /buildNumber:\s*'(?:66|68|70|71|72|73|74|75)'/);
+  assert.match(appConfig, /buildNumber:\s*'77'/);
+  assert.doesNotMatch(appConfig, /buildNumber:\s*'(?:66|68|70|71|72|73|74|75|76)'/);
 });

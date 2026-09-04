@@ -83,6 +83,10 @@ const (
 
 // goalPlan is the persisted state machine. One artifact = one goal = one plan.
 type goalPlan struct {
+	// Opaque compatibility marker: preserve all versions, including null, but
+	// dispatch none until Business authority/budgets are implemented.
+	BusinessEpisodeBinding json.RawMessage `json:"businessEpisodeBinding,omitempty"`
+
 	PlanVersion  int    `json:"planVersion"`
 	GoalID       string `json:"goalId"`
 	Objective    string `json:"objective"`
@@ -896,6 +900,9 @@ type goalLaunchSpec struct {
 // OpenAI key used by the rest of Scout; Anthropic credentials never admit this
 // path.
 func (app *kanbanBoardApp) launchGoalThread(spec goalLaunchSpec) (scoutAgentThread, error) {
+	if err := businessExecutionLaunchError(spec); err != nil {
+		return scoutAgentThread{}, err
+	}
 	if app == nil || app.memory == nil {
 		return scoutAgentThread{}, fmt.Errorf("assistant is unavailable")
 	}
@@ -1340,6 +1347,9 @@ func (e *goalEngine) drive(ctx context.Context, plan *goalPlan, parentID string)
 // --- Stage: decompose --------------------------------------------------------
 
 func (e *goalEngine) decompose(ctx context.Context, plan *goalPlan) error {
+	if err := businessExecutionPlanError(plan); err != nil {
+		return err
+	}
 	// A process-driven goal never free-forms: decompose IS "instantiate the
 	// definition" (spec §3) — deterministic, model-free, and identical on a
 	// restart, with per-stage checkpointing riding the existing per-transition
@@ -1532,6 +1542,9 @@ func (e *goalEngine) dispatchReady(plan *goalPlan, parentID string) {
 }
 
 func (e *goalEngine) launchSubtask(plan *goalPlan, st *goalSubtask, parentID string) error {
+	if err := e.businessExecutionCompatibilityError(plan, parentID); err != nil {
+		return err
+	}
 	if err := packagingStudioHistoricalRunError(plan); err != nil {
 		return err
 	}

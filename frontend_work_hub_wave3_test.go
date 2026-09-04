@@ -73,8 +73,8 @@ func TestIndexWorkHubLiveListAndRailCount(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<span id="workRailBadge" class="pd1-primary-nav__count" hidden aria-label="">0</span>`,
-		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
-		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
+		// STRIDE 3 presents the durable outcome destination as Work.
+		`data-pd1-destination="Work" aria-label="Work"`,
 		"function syncWorkRailBadge()",
 		"workRailBadge.hidden = count === 0",
 		"['queued', 'running'].includes(String(project?.status || ''))",

@@ -15,8 +15,8 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 	}
 	html := string(raw)
 	for _, marker := range []string{
-		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
-		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
+		// STRIDE 3 presents the durable outcome destination as Work.
+		`data-pd1-destination="Work" aria-label="Work"`,
 		`'/presentations': { destination: 'Work', output: 'presentation' }`,
 		`'/research': { destination: 'Work', output: 'document' }`,
 		`id="studioProjectList"`,
@@ -24,7 +24,7 @@ func TestWorkStudiosOwnDurablePresentationAndResearchProjects(t *testing.T) {
 		`const params = new URLSearchParams({ limit: '200' })`,
 		`function scoutStudioReceiptNode(message)`,
 		`scout-studio-receipt__progress`,
-		`View in Packaging Studio`, // Wave 11 D1
+		`View in Work`, // Wave 11 D1
 		`selectPD1Destination('Work', { projectId: selectedStudioProjectId })`,
 		`if (message?.studioProject?.id) return scoutStudioReceiptIsLatest(message)`,
 		`openDeckStudio(result.artifactId`,
@@ -112,10 +112,11 @@ const transientExactProject={...olderProject,id:'transient-deck',title:'Recovere
 const firstRenderDocument={schemaVersion:1,id:'doc-render-root',kind:'document',title:'First-render report',revision:1,status:'ready',progressPercent:100,phase:'ready',phases:phases(4).map(item=>({...item,status:'complete'})),createdAt:'2026-08-23T12:00:00Z',updatedAt:'2026-08-23T12:10:00Z',rootRunId:'doc-render-run',rootArtifactId:'doc-render-root',href:'/research?project=doc-render-root',source:{threadId:'private-scout'},result:{artifactId:'doc-render',type:'markdown',version:3,digest:documentDigest,title:'First-render report',qualityState:'admitted',canEdit:true,canPresent:false,canExport:true},canRename:true};
 const server=http.createServer((req,res)=>{
 	requestLog.push(req.url);
+ if(req.url==='/public/stride-operating.css'){res.writeHead(200,{'content-type':'text/css'});return res.end(fs.readFileSync(path.join(path.dirname(process.env.STUDIO_INDEX),'public/stride-operating.css')));}
  if(req.url==='/public/composer-dictation.js'){res.writeHead(200,{'content-type':'application/javascript'});return res.end('');}
  if(req.url==='/auth/me'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({email:'synthetic@example.test',name:'Synthetic',shellAccess:'full'}));}
  if(req.url==='/api/stride/v1/mobile/surfaces/organizations'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({availability:'available',surface:'organizations',revision:1,items:[{id:'membership',title:'Synthetic Lab',status:'current',kind:'organization-summary',detail:{kind:'organization-summary',isCurrent:true,role:'owner'},actions:[]}]}));}
- if(req.url.startsWith('/api/studio-projects/v1')){const parsed=new URL(req.url,'http://local');const id=parsed.searchParams.get('id');if(id){if(id==='older-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:olderProject}));}if(id==='receipt-only-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:receiptOnlyProject}));}if(id==='transient-deck'){if(++transientExactAttempts===1){res.writeHead(503,{'content-type':'application/json'});return res.end(JSON.stringify({error:'Temporary Work service interruption'}));}res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:transientExactProject}));}res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({error:'studio project not found'}));}if(parsed.searchParams.get('before')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,projects:[olderProject],hasMore:false}));}if(req.headers['if-none-match']==='"studio-v1"'){conditionalStudioRequests.push(req.url);res.writeHead(304);return res.end();}res.writeHead(200,{'content-type':'application/json','etag':'"studio-v1"'});return res.end(JSON.stringify({ok:true,projects,hasMore:true,nextBefore:'page-one'}));}
+ if(req.url.startsWith('/api/studio-projects/v1')){const parsed=new URL(req.url,'http://local');const id=parsed.searchParams.get('id');if(id){const known=projects.find(project=>project.id===id);if(known){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:known}));}if(id==='older-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:olderProject}));}if(id==='receipt-only-deck'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:receiptOnlyProject}));}if(id==='transient-deck'){if(++transientExactAttempts===1){res.writeHead(503,{'content-type':'application/json'});return res.end(JSON.stringify({error:'Temporary Work service interruption'}));}res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,project:transientExactProject}));}res.writeHead(404,{'content-type':'application/json'});return res.end(JSON.stringify({error:'studio project not found'}));}if(parsed.searchParams.get('before')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,projects:[olderProject],hasMore:false}));}if(req.headers['if-none-match']==='"studio-v1"'){conditionalStudioRequests.push(req.url);res.writeHead(304);return res.end();}res.writeHead(200,{'content-type':'application/json','etag':'"studio-v1"'});return res.end(JSON.stringify({ok:true,projects,hasMore:true,nextBefore:'page-one'}));}
  if(req.url.startsWith('/assistant/chat-threads/source-older?')){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({thread:{id:'source-older',title:'Earlier private source',visibility:'private',updatedAt:'2026-08-20T12:11:00Z',messages:[]},history:{mode:'tail',hasEarlier:false,messageCount:0}}));}
  if(req.url==='/artifacts/deck?id=deck-final'){res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({artifact:{id:'deck-final',title:'Western engagement army',type:'html_deck',version:4,contentDigest:digest,sceneRef},deck:{schemaVersion:1,width:1920,height:1080,slides:[]},canWrite:true}));}
  if(req.url==='/artifacts?id=deck-final'){const artifact={id:'deck-final',kind:'os_artifact',text:'<!doctype html><title>Deck</title>',metadata:{title:'Western engagement army',type:'html_deck',artifactVersion:'4',contentDigest:'0'.repeat(64),capabilityDigest:digest,deckSceneRef:sceneRef,assets:JSON.stringify([{ref:pdfRef,kind:'pdf',mime:'application/pdf',name:'Western engagement army.pdf'}]),renderPdfArtifactVersion:'4',renderPdfSourceSceneRef:sceneRef,renderPdfAssetRef:pdfRef}};res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({ok:true,artifacts:[artifact],dispositionRef:legacyDisposition}));}
@@ -244,7 +245,7 @@ const server=http.createServer((req,res)=>{
  if(renderDir){await page.evaluate(()=>document.querySelectorAll('.toast').forEach(node=>node.remove()));await page.locator('.scout-studio-receipt').last().screenshot({path:path.join(renderDir,'chat-work-receipt.png')});}
  assert.equal(receipt.oldChildren,0,JSON.stringify(receipt));
  assert.equal(receipt.newChildren,1,JSON.stringify(receipt));
- assert.match(receipt.text,/Receipt-only presentation/);assert.match(receipt.text,/Ready/);assert.match(receipt.text,/View in Packaging Studio/);
+ assert.match(receipt.text,/Receipt-only presentation/);assert.match(receipt.text,/Ready/);assert.match(receipt.text,/View in Work/);
  assert.equal(receipt.path,'/work');assert.equal(receipt.deckCards,0);
  assert.equal(receipt.projectParam,'receipt-only-deck',JSON.stringify(receipt));
  assert.equal(receipt.selectedProjectId,'receipt-only-deck',JSON.stringify(receipt));

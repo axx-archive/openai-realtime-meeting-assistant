@@ -301,6 +301,14 @@ func strideE10TenantSessionHashFromContext(ctx context.Context) string {
 // protected handler effect. Public assets, health probes, login forms and
 // purpose-bound internal callbacks stay outside tenant conversion.
 func strideE10TenantHTTPHandler(next http.Handler) http.Handler {
+	legacyNext := next
+	next = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if legacyNext == nil {
+			http.NotFound(w, r)
+			return
+		}
+		organizationExecutionHTTPUse(w, r, legacyNext)
+	})
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if next == nil {
 			http.NotFound(writer, request)
@@ -390,9 +398,10 @@ func strideE10TenantZeroOrganizationHTTPPath(path string) bool {
 }
 
 type strideE10TenantWebSocketLease struct {
-	sessionHash string
-	principal   StrideE10TenantPrincipal
-	canonical   bool
+	sessionHash    string
+	principal      StrideE10TenantPrincipal
+	canonical      bool
+	executionScope *organizationExecutionScope
 }
 
 func (t *threadSafeWriter) ReadTenantMessage(ctx context.Context) (messageType int, payload []byte, err error) {
@@ -408,7 +417,12 @@ func (t *threadSafeWriter) ReadTenantMessage(ctx context.Context) (messageType i
 		return
 	}
 	err = t.tenantLease.withCurrent(ctx, read)
-	if strideE10TenantAuthorityUnavailable(err) {
+	// A blocking read must not hold authority locks. Recheck after the frame
+	// arrives so a switch/revocation during the wait cannot admit the message.
+	if err == nil && !t.tenantLease.canonical {
+		err = t.tenantLease.withCurrent(ctx, func() error { return nil })
+	}
+	if strideE10TenantAuthorityUnavailable(err) || errors.Is(err, errOrganizationExecutionUnavailable) {
 		_ = t.Conn.Close()
 	}
 	return
@@ -443,9 +457,9 @@ func (t *threadSafeWriter) writeJSONWithTenantAuthorityContext(ctx context.Conte
 			err = ErrStrideE10TenantAuthorityStale
 		}
 	} else {
-		err = t.tenantLease.withCurrent(context.Background(), write)
+		err = t.tenantLease.withCurrentWrite(context.Background(), write)
 	}
-	if strideE10TenantAuthorityUnavailable(err) {
+	if strideE10TenantAuthorityUnavailable(err) || errors.Is(err, errOrganizationExecutionUnavailable) {
 		_ = t.Conn.Close()
 	}
 	if err != nil {
@@ -474,7 +488,7 @@ func (t *threadSafeWriter) writeControlWithTenantAuthority(messageType int, data
 	if t.tenantLease == nil {
 		err = write()
 	} else {
-		err = t.tenantLease.withCurrent(context.Background(), write)
+		err = t.tenantLease.withCurrentWrite(context.Background(), write)
 	}
 	if strideE10TenantAuthorityUnavailable(err) && messageType != websocket.CloseMessage {
 		_ = t.Conn.Close()
@@ -487,6 +501,9 @@ func (t *threadSafeWriter) writeControlWithTenantAuthority(messageType int, data
 }
 
 func strideE10BindTenantWebSocket(request *http.Request) (strideE10TenantWebSocketLease, error) {
+	if organizationExecutionGuestSocket(request) && !strideE10TenantCutoverEnabled() {
+		return strideE10TenantWebSocketLease{}, nil
+	}
 	hash := strideE10SessionHashFromRequest(request)
 	if !validStrideE10SessionHash(hash) {
 		if strideE10TenantCutoverEnabled() {
@@ -495,6 +512,13 @@ func strideE10BindTenantWebSocket(request *http.Request) (strideE10TenantWebSock
 		return strideE10TenantWebSocketLease{}, nil
 	}
 	lease := strideE10TenantWebSocketLease{sessionHash: hash}
+	if !strideE10TenantCutoverEnabled() {
+		scope, err := organizationExecutionScopeForSession(request.Context(), hash)
+		if err != nil {
+			return lease, err
+		}
+		lease.executionScope = scope
+	}
 	err := withStrideE10TenantRuntimeAuthority(request.Context(), StrideE10TenantSurfaceWebSocket, hash,
 		func() error { return nil },
 		func(principal StrideE10TenantPrincipal) error {
@@ -508,12 +532,27 @@ func (l strideE10TenantWebSocketLease) withCurrent(ctx context.Context, effect f
 	if effect == nil {
 		return ErrStrideE10TenantAuthorityInvalid
 	}
+	if !strideE10TenantCutoverEnabled() {
+		if err := withOrganizationExecutionScope(ctx, l.sessionHash, l.executionScope, true, func(*organizationExecutionScope) error { return nil }); err != nil {
+			return err
+		}
+		return effect()
+	}
 	return withStrideE10TenantRuntimeAuthority(ctx, StrideE10TenantSurfaceWebSocket, l.sessionHash, effect, func(principal StrideE10TenantPrincipal) error {
 		if !l.canonical || principal != l.principal {
 			return ErrStrideE10TenantAuthorityStale
 		}
 		return effect()
 	})
+}
+
+func (l strideE10TenantWebSocketLease) withCurrentWrite(ctx context.Context, effect func() error) error {
+	if strideE10TenantCutoverEnabled() {
+		return l.withCurrent(ctx, effect)
+	}
+	// Each frame is authorized immediately before output. Do not hold global
+	// identity locks over a slow network write. The next frame revalidates.
+	return l.withCurrent(ctx, effect)
 }
 
 type strideE10TenantCacheKey struct {

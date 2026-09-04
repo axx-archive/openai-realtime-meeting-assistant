@@ -129,7 +129,7 @@ func TestIndexPackagingBackgroundRenderNeverEatsALiveRename(t *testing.T) {
 	if render == "" {
 		t.Fatal("renderStudioProjects missing")
 	}
-	guard := strings.Index(render, "studioProjectDetail.querySelector('.studio-project-detail__title-input')")
+	guard := strings.Index(render, `!unavailableSelected && studioProjectDetail.dataset.workId === selectedStudioProjectId && studioProjectDetail.querySelector('.studio-project-detail__title-input, [data-work-review-dirty="true"]')`)
 	if guard < 0 {
 		t.Fatalf("no live-rename guard in the detail render:\n%s", render)
 	}

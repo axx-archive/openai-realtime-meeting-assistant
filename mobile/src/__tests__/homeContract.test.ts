@@ -103,7 +103,7 @@ test('native Home leaves Project association to server-owned inference', () => {
   assert.match(screen, /visible=\{explicitProjectAttachmentEnabled && projectChooserOpen/u);
   assert.match(screen, /if \(!explicitProjectAttachmentEnabled \|\| !sessionToken/u);
   assert.doesNotMatch(screen, /Add project/u);
-  assert.doesNotMatch(screen, /projectId\s*:/u);
+  assert.match(screen, /navigation\.navigate\('WorkHome', \{ projectId: item\.project\.id \}\)/u);
 });
 
 test('native Home has no permanent voice-policy or legacy live-line copy', () => {

@@ -39483,6 +39483,7 @@
       }
 
     </style>
+    <link rel="stylesheet" href="/public/stride-operating.css">
   </head>
   <body>
     <main id="appShell" data-tool="office" data-pd1-destination="Home">
@@ -39523,9 +39524,9 @@
             <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0-1.1.9-2 2-2h12c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2h-5l-4 4v-4H6c-1.1 0-2-.9-2-2V6Z"/></svg>
             <span>Conversations</span>
           </button>
-          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Packaging Studio" aria-current="false" tabindex="-1" aria-describedby="workRailBadge">
+          <button class="pd1-primary-nav__item" type="button" data-pd1-destination="Work" aria-label="Work" aria-current="false" tabindex="-1" aria-describedby="workRailBadge">
             <svg class="stride-mark stride-dest-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="8"/><path d="M4 4v5h5"/></svg>
-            <span>Packaging Studio</span>
+            <span>Work</span>
             <!-- Wave 3 D1: work in flight (queued + running) across every kind. -->
             <span id="workRailBadge" class="pd1-primary-nav__count" hidden aria-label="">0</span>
           </button>
@@ -39704,8 +39705,9 @@
 
       <div class="workspace">
         <section id="officeTool" class="office-tool" aria-label="Stride">
-          <div class="office-launch bf-view">
+          <div class="office-launch bf-view stride-operating-home">
             <div class="office-launch__wrap">
+              <p class="operating-eyebrow">Your company, in stride</p>
               <div class="office-launch__island">
                 <span class="office-launch__legacy-signal" hidden aria-hidden="true">
                   <!-- THE STRIDE SIGNAL CRADLE. A five-mass audio instrument,
@@ -39740,6 +39742,7 @@
                 <button type="button" class="home-starter pressable" data-category-id="challenge" aria-label="Challenge. Suggestions loading." aria-expanded="false" aria-controls="homeSuggestions" disabled><span class="home-starter__icon" aria-hidden="true"><svg class="stride-mark" data-icon="diamond" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 9-9 9-9-9 9-9Z"/></svg></span><span class="home-starter__label">Challenge</span><span class="home-starter__text"></span></button>
               </div>
               <div id="homeSuggestions" class="home-suggestions" role="group" aria-label="Suggestions based on your recent work" hidden></div>
+              <p class="operating-intro">Bring an outcome. Build on what your company knows.</p>
               <form id="homeScoutComposer" class="home-scout-composer" autocomplete="off">
                 <input id="homeScoutInput" class="home-scout-composer__input" type="text" maxlength="4000" placeholder="Message Scout" aria-label="Message Scout from home" disabled>
                 <button type="button" id="homeRealtimeVoice" aria-label="Start a new private voice chat with Scout" title="Start voice chat" data-start-realtime-voice class="home-realtime-voice pressable">
@@ -39767,6 +39770,24 @@
               </dialog>
               <button id="homeRefreshRetry" class="home-refresh-retry pressable" type="button" hidden>Retry</button>
             </div>
+            <section id="homeOperatingBrief" class="operating-brief" aria-label="Your work at a glance" hidden>
+              <div class="operating-brief__main">
+                <div class="operating-section-head"><div><p class="operating-eyebrow">The human part</p><h2>Your judgment</h2></div><span id="homeJudgmentCount" class="operating-count"></span></div>
+                <p class="operating-section-note">Questions, decisions, and work that needs your direction.</p>
+                <div id="homeJudgmentRows" class="operating-work-list"></div>
+              </div>
+              <div class="operating-brief__motion">
+                <div class="operating-section-head"><div><p class="operating-eyebrow">Moving forward</p><h2>In motion</h2></div><span id="homeMotionCount" class="operating-count"></span></div>
+                <p class="operating-section-note">Follow the work. Step in whenever you need to.</p>
+                <div id="homeMotionRows" class="operating-work-list"></div>
+              </div>
+              <p id="homeOperatingStatus" class="operating-load-state" role="status" hidden></p>
+              <div class="operating-brief__foot"><button type="button" id="homeOpenWork" class="operating-text-action">Open all work <span aria-hidden="true">↗</span></button><button type="button" id="homeWorkRetry" class="operating-text-action" hidden>Refresh work</button></div>
+            </section>
+            <button type="button" id="homeCompanyMemory" class="operating-memory">
+              <span class="operating-memory__symbol" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M10 10 30 15 20 31 10 10ZM10 10 30 28M30 15 9 27M20 31 20 7"/><circle cx="10" cy="10" r="3"/><circle cx="30" cy="15" r="3"/><circle cx="20" cy="31" r="3"/><circle cx="30" cy="28" r="2"/><circle cx="9" cy="27" r="2"/><circle cx="20" cy="7" r="2"/></svg></span>
+              <span><strong>Company memory</strong><span>Trace the sources. Revisit a decision. Correct what we know.</span></span><span aria-hidden="true">↗</span>
+            </button>
             <!-- Home v2: today · since you were away · continue. Rows render
                  from data the client already holds (rooms snapshot, scheduled
                  meetings, chat threads, Work list, the bell); a section with
@@ -40711,8 +40732,8 @@
                  ("Packaging Studio" + the mono subline); the heading stays for
                  assistive tech only so the region keeps its name. -->
             <header class="studio-projects__head sr-only">
-              <h2 id="studioProjectsTitle">Packaging Studio</h2>
-              <p id="studioProjectsMeta">Presentations and research stay organized from brief to final file.</p>
+              <h2 id="studioProjectsTitle">Work</h2>
+              <p id="studioProjectsMeta">Follow an outcome from its first brief to the difference it makes.</p>
             </header>
             <!-- Wave 11 D2: three studios. Research Desk commissions a
                  branded report, Presentation Studio briefs a deck, Story
@@ -43315,6 +43336,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
         // Every server-authenticated identity refresh advances the W2 request
         // generation, including a same-email session replacement. Late product
         // responses from the prior cookie/session can never render afterward.
+        desktopChatPreviewCache = new Map()
         authedUser = nextUser || null
         window.currentUserEmail = nextIdentity || ''
         window.__strideW2FenceAuthority?.(previousIdentity, nextIdentity)
@@ -48623,7 +48645,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           sheet: ['Spreadsheets', 'Models and tables stay here as downloadable workbooks.'],
           research: ['Research briefs', 'Briefs stay here from evidence gathering to the finished report.'],
           artifact: ['Files', 'PDFs, exports and other deliverables Scout produced along the way.']
-        })[String(kind || '')] || ['Packaging Studio', 'Presentations and research stay organized from brief to final file.']
+        })[String(kind || '')] || ['Work', 'Follow an outcome from its first brief to the difference it makes.']
       }
 
       function studioProjectRelativeTime(raw) {
@@ -48653,10 +48675,10 @@ Wrap the entire export in one code block. After the code block, say whether the 
       function studioProjectSubtitle() {
         const visible = filteredStudioProjects()
         const active = visible.filter(project => ['queued', 'running', 'needs_input', 'needs_attention'].includes(String(project?.status || ''))).length
-        if (studioProjectsLoading && !studioProjects.length) return 'Loading the studio…'
-        if (studioProjectsError) return 'Packaging Studio is temporarily unavailable'
-        if (!visible.length) return studioProjectFilter === 'document' ? 'No research yet' : studioProjectKindSpec(studioProjectFilter) ? `No ${studioProjectKindSpec(studioProjectFilter).plural} yet` : 'Nothing in the studio yet'
-        return active ? `${visible.length} projects · ${active} active` : `${visible.length} projects`
+        if (studioProjectsLoading && !studioProjects.length) return 'Loading work…'
+        if (studioProjectsError) return 'Work is temporarily unavailable'
+        if (!visible.length) return studioProjectFilter === 'document' ? 'No research yet' : studioProjectKindSpec(studioProjectFilter) ? `No ${studioProjectKindSpec(studioProjectFilter).plural} yet` : 'No work yet'
+        return active ? `${visible.length} ${visible.length === 1 ? 'project' : 'projects'} · ${active} active` : `${visible.length} ${visible.length === 1 ? 'project' : 'projects'}`
       }
 
       function studioProjectIconName(kind) {
@@ -49106,9 +49128,222 @@ Wrap the entire export in one code block. After the code block, say whether the 
         return card
       }
 
+      var studioDetailRequests = new Map()
+      var studioReviewDrafts = new Map()
+
+      async function hydrateStudioWorkDetail(project, force = false) {
+        const id = String(project?.id || '')
+        if (!id || (!force && project._detailLoadedAt)) return
+        if (!(studioDetailRequests instanceof Map)) studioDetailRequests = new Map()
+        const epoch = studioProjectsLoadEpoch
+        const key = `${epoch}:${id}`
+        if (studioDetailRequests.has(key)) return studioDetailRequests.get(key)
+        const request = (async () => {
+          try {
+            const response = await fetch(`/api/studio-projects/v1?id=${encodeURIComponent(id)}`, { cache: 'no-store' })
+            const payload = await response.json().catch(() => ({}))
+            if (epoch !== studioProjectsLoadEpoch) return
+            if ([401, 403, 404].includes(response.status)) {
+              studioProjects = studioProjects.filter(row => row.id !== id)
+              if (studioReviewDrafts instanceof Map) for (const [key, draft] of studioReviewDrafts) if (draft.workId === id) studioReviewDrafts.delete(key)
+              if (selectedStudioProjectId === id) { studioProjectDeepLinkUnavailable = id; renderStudioProjects() }
+              return
+            }
+            if (!response.ok || payload?.project?.id !== id) throw new Error('This work could not be refreshed. Reopen it to try again.')
+            const updated = { ...payload.project, _detailLoadedAt: Date.now() }
+            studioProjects = studioProjects.map(row => row.id === id ? updated : row)
+            if (selectedStudioProjectId === id && (force || !studioProjectDetail.querySelector('[data-work-review-dirty="true"]'))) renderStudioProjectDetail(updated)
+            return true
+          } catch (error) {
+            if (epoch !== studioProjectsLoadEpoch || selectedStudioProjectId !== id) return
+            const status = studioProjectDetail.querySelector('.work-evidence-loading')
+            if (status) status.textContent = error.message
+            return false
+          } finally { studioDetailRequests.delete(key) }
+        })()
+        studioDetailRequests.set(key, request)
+        return request
+      }
+
+      function studioWorkUsageNode(project) {
+        const usage = project.usage
+        if (!usage) return null
+        const section = bfEl('details', 'work-evidence')
+        section.appendChild(bfEl('summary', '', 'Resources used'))
+        if (usage.coverage === 'unavailable') {
+          section.appendChild(bfEl('p', 'work-evidence__note', 'Usage is not available for this work. Missing records do not mean it ran for free.'))
+          return section
+        }
+        const tokens = ['inputTokens', 'cachedInputTokens', 'cacheCreationTokens', 'outputTokens'].reduce((total, key) => total + Math.max(0, Number(usage[key]) || 0), 0)
+        const facts = bfEl('div', 'work-evidence__facts')
+        const usd = Number(usage.estimatedCostUsd)
+        facts.append(bfEl('span', '', `${tokens.toLocaleString()} tokens recorded`), bfEl('span', '', `${Number(usage.calls).toLocaleString()} calls`))
+        if (Number.isFinite(usd) && Number(usage.calls) > Number(usage.unpricedCalls)) facts.appendChild(bfEl('span', '', `${new Intl.NumberFormat('en-US', {style:'currency', currency:'USD', minimumFractionDigits:2, maximumFractionDigits:4}).format(usd)} estimated`))
+        section.appendChild(facts)
+        const note = ['Partial coverage · recent 31 days.', Number(usage.unpricedCalls) ? `${usage.unpricedCalls} calls have no reliable cost estimate.` : '', usage.scanLimited || usage.readErrors ? 'Some records could not be included.' : ''].filter(Boolean).join(' ')
+        section.appendChild(bfEl('p', 'work-evidence__note', note))
+        for (const model of usage.models || []) section.appendChild(bfEl('p', 'work-evidence__model', `${model.provider} · ${model.model} · ${model.calls} calls`))
+        return section
+      }
+
+      function studioWorkExecutionNode(project) {
+        const execution = project.execution
+        const assurance = project.assurance
+        if (!execution && !assurance) return null
+        const section = bfEl('details', 'work-evidence')
+        section.appendChild(bfEl('summary', '', 'How this work was made'))
+        if (execution?.status === 'observed') {
+          section.appendChild(bfEl('p', 'work-evidence__model', `${execution.provider} · ${execution.actualModel || execution.requestedModel}${execution.reasoningEffort ? ' · ' + execution.reasoningEffort + ' reasoning' : ''}`))
+          if (execution.fallbackUsed) section.appendChild(bfEl('p', 'work-evidence__note', `A fallback was used. The requested model was ${execution.requestedModel}.`))
+          section.appendChild(bfEl('p', 'work-evidence__note', 'Execution recorded for this result. Recording a model does not certify its suitability.'))
+        } else section.appendChild(bfEl('p', 'work-evidence__note', 'Execution evidence is unavailable for this result.'))
+        if (assurance?.type === 'same_provider_rendered_review') {
+          section.appendChild(bfEl('p', 'work-evidence__note', 'The rendered result passed review using models from the same provider. It has not received an independent model-family review.'))
+        } else section.appendChild(bfEl('p', 'work-evidence__note', 'No verified rendered review is attached to this version.'))
+        if (assurance?.judgmentRequired) section.appendChild(bfEl('p', 'work-evidence__note', 'Your judgment is required before the proposed external action. Independent review is unavailable.'))
+        return section
+      }
+
+      function studioWorkLearningSourcesNode(project) {
+        const sources = project.priorFeedbackEvidence
+        if (!Array.isArray(sources) || !sources.length) return null
+        const section = bfEl('section', 'work-review')
+        section.append(bfEl('h4', '', 'Earlier work in context'), bfEl('p', 'work-evidence__note', 'A prior human review and reported outcome from this conversation were included as context. Open the source to judge what still applies.'))
+        for (const source of sources) {
+          if (!source.rootId || !source.result?.version) continue
+          const button = studioProjectAction(`Earlier work · reviewed version ${source.result.version}`, false, () => openHomeDestination({route:'work', projectId:String(source.rootId)}))
+          section.appendChild(button)
+        }
+        return section
+      }
+
+      function studioWorkFeedbackNode(project) {
+        const feedback = project.feedback
+        if (!feedback || !project.result?.artifactId) return null
+        const section = bfEl('section', 'work-review')
+        section.appendChild(bfEl('h4', '', 'Human judgment'))
+        const review = feedback.currentReview
+        const label = ({ accepted: 'Accepted by a person', revision_requested: 'Revision requested', unreviewed: 'Not yet reviewed by a person' })[feedback.reviewState] || 'Not yet reviewed by a person'
+        section.appendChild(bfEl('p', 'work-review__state', `${label} · version ${project.result.version}`))
+        if (review?.note) section.appendChild(bfEl('p', 'work-review__record', review.note))
+        if (feedback.currentOutcome) {
+          const outcome = feedback.currentOutcome
+          section.appendChild(bfEl('p', 'work-review__record', `Reported outcome: ${{helped:'helped', did_not_help:'did not help', inconclusive:'not yet conclusive'}[outcome.verdict] || outcome.verdict}${outcome.note ? ' — ' + outcome.note : ''}`))
+        }
+        section.appendChild(bfEl('p', 'work-evidence__note', 'Your review belongs to this exact version. Acceptance does not publish the work or prove a business outcome.'))
+        if (studioReviewDrafts instanceof Map) for (const [key, draft] of studioReviewDrafts) {
+          const currentKey = JSON.stringify([project.id, project.result.artifactId, project.result.version, project.result.digest, draft.type, draft.type === 'outcome' ? feedback.currentReview?.id : ''])
+          if (draft.workId !== project.id || key === currentKey || !draft.note) continue
+          const saved = bfEl('aside', 'work-review__previous-draft')
+          saved.append(bfEl('p', 'work-evidence__note', `Your unsaved ${draft.type === 'outcome' ? 'outcome' : 'review'} note for ${draft.version === project.result.version ? 'an earlier result or review' : 'version ' + draft.version}. It has not been applied to the current result.`), bfEl('p', 'work-review__record', draft.note))
+          saved.appendChild(studioProjectAction('Discard this draft', false, () => { studioReviewDrafts.delete(key); saved.remove() }))
+          section.appendChild(saved)
+        }
+        const addForm = (type, existing) => {
+          if (!(studioReviewDrafts instanceof Map)) studioReviewDrafts = new Map()
+          const draftKey = JSON.stringify([project.id, project.result.artifactId, project.result.version, project.result.digest, type, type === 'outcome' ? feedback.currentReview?.id : ''])
+          const draft = studioReviewDrafts.get(draftKey)
+          const form = bfEl('form', 'work-review__form')
+          const select = bfEl('select', 'work-review__select')
+          select.setAttribute('aria-label', type === 'review' ? 'Review verdict' : 'Reported outcome')
+          for (const [value, text] of (type === 'review' ? [['accepted','Accept this version'],['revision_requested','Record a revision request']] : [['helped','It helped'],['did_not_help','It did not help'],['inconclusive','The outcome is still unclear']])) {
+            const option = bfEl('option', '', text); option.value = value; select.appendChild(option)
+          }
+          const note = bfEl('textarea', 'work-review__note')
+          note.maxLength = 2000; note.rows = 2
+          note.placeholder = type === 'review' ? 'What worked, or what should change?' : 'What happened when you used this work?'
+          note.setAttribute('aria-label', type === 'review' ? 'Review note' : 'Outcome note')
+          if (existing) { select.value = existing.verdict; note.value = existing.note || '' }
+          if (draft) { select.value = draft.verdict; note.value = draft.note; form.dataset.workReviewDirty = 'true' }
+          const submit = bfEl('button', 'work-review__submit', type === 'review' ? 'Save review' : 'Record outcome'); submit.type = 'submit'
+          const status = bfEl('p', 'work-evidence__note'); status.setAttribute('role','status')
+          form.append(select, note, submit, status)
+          form.addEventListener('input', () => {
+            form.dataset.workReviewDirty = 'true'
+            studioReviewDrafts.delete(draftKey)
+            studioReviewDrafts.set(draftKey, { workId:project.id, version:project.result.version, type, verdict: select.value, note: note.value })
+            while (studioReviewDrafts.size > 64) studioReviewDrafts.delete(studioReviewDrafts.keys().next().value)
+          })
+          let operationID = draft?.operationID || ''
+          let operationBody = draft?.operationBody || ''
+          form.addEventListener('submit', async event => {
+            event.preventDefault()
+            if (submit.disabled) return
+            if (select.value === 'revision_requested' && !note.value.trim()) { status.textContent = 'Describe what needs to change.'; note.focus(); return }
+            const body = {id:project.id, expectedRevision:project.revision, feedback:{type, verdict:select.value, note:note.value.trim(), result:{artifactId:project.result.artifactId, version:project.result.version, digest:project.result.digest}}}
+            if (type === 'outcome') body.feedback.acceptedReviewId = feedback.currentReview?.id
+            const signature = JSON.stringify(body)
+            if (operationBody !== signature) { operationID = crypto.randomUUID(); operationBody = signature }
+            studioReviewDrafts.set(draftKey, { workId:project.id, version:project.result.version, type, verdict:select.value, note:note.value, operationID, operationBody })
+            body.feedback.idempotencyKey = operationID
+            const epoch = studioProjectsLoadEpoch
+            submit.disabled = true; select.disabled = true; note.disabled = true; status.textContent = 'Saving…'
+            try {
+              const response = await fetch('/api/studio-projects/v1', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+              const payload = await response.json().catch(() => ({}))
+              if (epoch !== studioProjectsLoadEpoch) return
+              if ([401, 403, 404].includes(response.status)) {
+                studioProjects = studioProjects.filter(row => row.id !== project.id)
+                for (const [key, draft] of studioReviewDrafts) if (draft.workId === project.id) studioReviewDrafts.delete(key)
+                if (selectedStudioProjectId === project.id) { studioProjectDeepLinkUnavailable = project.id; renderStudioProjects() }
+                return
+              }
+              if (response.status === 409) {
+                status.textContent = 'This work changed while you were reviewing it. Refresh to review its current version. Your note is kept with the version you were reviewing.'
+                const refresh = studioProjectAction('Refresh work', false, async () => {
+                  form.dataset.workReviewDirty = 'false'
+                  refresh.disabled = true
+                  if (await hydrateStudioWorkDetail(project, true) === false) {
+                    refresh.disabled = false
+                    refresh.textContent = 'Refresh failed · try again'
+                  }
+                })
+                status.appendChild(refresh)
+                return
+              }
+              if (!response.ok || !payload.feedback) throw new Error(payload.error || 'Your review could not be saved. Try again.')
+              studioReviewDrafts.delete(draftKey)
+              form.dataset.workReviewDirty = 'false'
+              const updated = {...project, feedback:payload.feedback}
+              studioProjects = studioProjects.map(row => row.id === project.id ? updated : row)
+              if (selectedStudioProjectId === project.id) renderStudioProjectDetail(updated)
+              showToast({text:type === 'outcome' ? 'Outcome recorded' : select.value === 'accepted' ? 'This version is accepted' : 'Revision request recorded',kind:'done'})
+            } catch(error) { status.textContent = error.message; submit.disabled = false; select.disabled = false; note.disabled = false }
+          })
+          if (existing) {
+            const change = bfEl('details', 'work-review__change')
+            if (draft) change.open = true
+            change.append(bfEl('summary', '', type === 'review' ? 'Change your review' : 'Update the reported outcome'), form)
+            section.appendChild(change)
+          } else section.appendChild(form)
+        }
+        if (feedback.canReview) addForm('review', review)
+        if (feedback.canObserveOutcome) {
+          section.appendChild(bfEl('h5', '', 'Did it make a difference?'))
+          addForm('outcome', feedback.currentOutcome)
+        }
+        if (feedback.reviewState === 'revision_requested' && project.source?.threadId) section.appendChild(studioProjectAction('Revise with Scout', false, () => askForStudioProjectChanges(project)))
+        if (Array.isArray(feedback.history) && feedback.history.length) {
+          const history = bfEl('details', 'work-review__change')
+          history.appendChild(bfEl('summary', '', 'Review history'))
+          for (const event of feedback.history) {
+            const row = bfEl('article', 'work-review__history-row')
+            const verdict = ({accepted:'Accepted',revision_requested:'Revision requested',helped:'Reported that it helped',did_not_help:'Reported that it did not help',inconclusive:'Reported an unclear outcome'})[event.verdict] || 'Review recorded'
+            row.appendChild(bfEl('p', 'work-review__state', `${verdict} · version ${event.result?.version || '—'}`))
+            const at = new Date(event.at)
+            row.appendChild(bfEl('p', 'work-evidence__note', `${event.actorName || 'A team member'}${Number.isFinite(at.getTime()) ? ' · ' + at.toLocaleString() : ''}`))
+            if (event.note) row.appendChild(bfEl('p', 'work-review__record', event.note))
+            history.appendChild(row)
+          }
+          section.appendChild(history)
+        }
+        return section
+      }
+
       function renderStudioProjectDetail(project) {
         studioProjectDetail?.replaceChildren()
         if (!studioProjectDetail) return
+        studioProjectDetail.dataset.workId = String(project?.id || '')
         if (!project) {
           studioProjectDetail.appendChild(studioProjectEmptyNode())
           return
@@ -49204,6 +49439,18 @@ Wrap the entire export in one code block. After the code block, say whether the 
         const tools = studioProjectToolsRow(project, { resultReady })
         if (tools) deliverable.appendChild(tools)
         if (resultReady || !structuredCheckpoint) root.appendChild(deliverable)
+        const feedbackNode = studioWorkFeedbackNode(project)
+        if (feedbackNode) root.appendChild(feedbackNode)
+        const executionNode = studioWorkExecutionNode(project)
+        if (executionNode) root.appendChild(executionNode)
+        const learningSourcesNode = studioWorkLearningSourcesNode(project)
+        if (learningSourcesNode) root.appendChild(learningSourcesNode)
+        const usageNode = studioWorkUsageNode(project)
+        if (usageNode) root.appendChild(usageNode)
+        if (!project._detailLoadedAt) {
+          root.appendChild(bfEl('p', 'work-evidence-loading work-evidence__note', 'Loading execution and review details…'))
+          void hydrateStudioWorkDetail(project)
+        }
         const versions = studioProjectVersionsNode(project)
         if (versions) root.appendChild(versions)
 
@@ -49276,13 +49523,14 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		const routedSelectionPending = Boolean(routedProjectId) && routedProjectId === selectedStudioProjectId
 		if (!projects.some(project => String(project.id || '') === selectedStudioProjectId) && !unavailableSelected && !routedSelectionPending && (!compactStudio || !studioProjectsMobileLibraryOpen)) selectedStudioProjectId = projects[0]?.id || ''
 		studioProjectsWorkspace?.classList.toggle('is-library-view', compactStudio && studioProjectsMobileLibraryOpen)
+        document.getElementById('researchTool').dataset.workDetail = String(Boolean(selectedStudioProjectId) && !studioProjectsMobileLibraryOpen)
 		renderStudioProjectList(projects)
 		// Wave 11 D7: a live inline rename OWNS the detail pane. Every
 		// background re-render (the 15 s commission poll, the 30 s list
 		// fallback, an os_events tick) would otherwise replace the subtree
 		// under the caret — and Chrome fires no blur for a removed focused
 		// node, so the typed title would vanish with no commit and no toast.
-		if (studioProjectDetail.querySelector('.studio-project-detail__title-input')) {
+		if (!unavailableSelected && studioProjectDetail.dataset.workId === selectedStudioProjectId && studioProjectDetail.querySelector('.studio-project-detail__title-input, [data-work-review-dirty="true"]')) {
 		  // leave the pane exactly as the person is editing it
 		} else if (studioProjectDeepLinkUnavailable && studioProjectDeepLinkUnavailable === selectedStudioProjectId) {
 		  studioProjectDetail.replaceChildren(studioProjectEmptyNode({
@@ -49318,6 +49566,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
          never render afterward. */
       function resetStudioProjectsState() {
         studioProjectsLoadEpoch += 1
+        studioReviewDrafts instanceof Map && studioReviewDrafts.clear()
         studioProjects = []
         studioProjectsETag = ''
         selectedStudioProjectId = ''
@@ -49407,7 +49656,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  if (response.status !== 304) {
 			const payload = await response.json().catch(() => ({}))
 			if (epoch !== studioProjectsLoadEpoch) return
-			if (!response.ok || !Array.isArray(payload?.projects)) throw new Error(payload?.error || 'Packaging Studio could not be loaded')
+			if (!response.ok || !Array.isArray(payload?.projects)) throw new Error(payload?.error || 'Work could not be loaded')
 			// W2: the chip may have moved while this page was in flight. Its rows
 			// still render (the client filter hides other kinds) but its cursor
 			// and ETag belong to the previous ?kind=; the kind-scoped re-read the
@@ -49430,8 +49679,8 @@ Wrap the entire export in one code block. After the code block, say whether the 
 			const exact = await fetch(`/api/studio-projects/v1?id=${encodeURIComponent(requestedID)}`, { cache: 'no-store' })
 			const exactPayload = await exact.json().catch(() => ({}))
 			if (epoch !== studioProjectsLoadEpoch) return
-			if (exact.ok && exactPayload?.project?.id) {
-			  const exactProject = exactPayload.project
+			if (exact.ok && exactPayload?.project?.id === requestedID) {
+			  const exactProject = { ...exactPayload.project, _detailLoadedAt: Date.now() }
 			  studioProjects = [exactProject, ...studioProjects]
 			  canonicalizeStudioProjectRoute(exactProject)
 			  studioProjectDeepLinkUnavailable = ''
@@ -49450,7 +49699,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
 		  }
 		  if (!requestedID) studioProjectDeepLinkUnavailable = ''
         } catch (error) {
-          if (epoch === studioProjectsLoadEpoch) studioProjectsError = error?.message || 'Packaging Studio could not be loaded'
+          if (epoch === studioProjectsLoadEpoch) studioProjectsError = error?.message || 'Work could not be loaded'
 		} finally {
 		  // a fenced page touches nothing: the next identity owns these flags
 		  if (epoch === studioProjectsLoadEpoch) {
@@ -50853,7 +51102,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           known = scoutChatThreads.some(thread => String(thread?.id || '') === threadId)
         }
         if (!known) {
-          showToast({ text: 'The outline thread is not listed for you yet — open it from Packaging Studio in a moment.', kind: 'note' })
+          showToast({ text: 'The outline thread is not listed for you yet — open it from Work in a moment.', kind: 'note' })
           return false
         }
         selectScoutChatThread(threadId)
@@ -52318,7 +52567,7 @@ Wrap the entire export in one code block. After the code block, say whether the 
           room: 'Rooms',
           chat: 'Conversations',
           artifacts: 'Intelligence',
-          research: 'Packaging Studio',
+          research: 'Work',
           board: 'Board',
           memory: 'Memory',
           files: 'Drive',
@@ -74638,6 +74887,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        homeProjectGeneration += 1
 	        window.clearTimeout(homeProjectTimer)
 	        homeSnapshotGeneration += 1
+            homeDayProjectsGeneration = (homeDayProjectsGeneration || 0) + 1
+            homeDayProjects = []
+            homeDayProjectsLoadedAt = 0
+            homeDayProjectsRequest = null
+            homeDayProjectsState = 'loading'
+            renderHomeOperatingBrief()
 	        homeSnapshotRequest = null
 	        homeSnapshotRefreshQueued = false
 	        homeSnapshot = { version: 'home-v2', generatedAt: '', items: [], starters: [], allClear: false }
@@ -83856,7 +84111,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         node.dataset.studioProjectId = String(project.id || '')
 		node.dataset.status = String(project.status || 'running')
 		const progress = project.status === 'ready' ? 100 : Math.max(0, Math.min(100, Number(project.progressPercent || 0)))
-        node.setAttribute('aria-label', `View ${project.title || studioProjectKindLabel(project.kind)} in Packaging Studio · ${studioProjectStatusLabel(project.status)} · ${progress}%`)
+        node.setAttribute('aria-label', `View ${project.title || studioProjectKindLabel(project.kind)} in Work · ${studioProjectStatusLabel(project.status)} · ${progress}%`)
         const icon = bfEl('span', 'scout-studio-receipt__icon')
         icon.appendChild(studioProjectIcon(project.kind).firstElementChild)
         const copy = bfEl('span', 'scout-studio-receipt__copy')
@@ -83883,7 +84138,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		const edge = bfEl('span', 'scout-studio-receipt__edge')
         const status = bfEl('span', 'scout-studio-receipt__status', studioProjectStatusLabel(project.status))
         status.dataset.status = String(project.status || 'running')
-		edge.append(status, bfEl('span', 'scout-studio-receipt__action', 'View in Packaging Studio'))
+		edge.append(status, bfEl('span', 'scout-studio-receipt__action', 'View in Work'))
         node.append(icon, copy, edge, bfEl('span', 'scout-studio-receipt__chevron', '›'))
         node.addEventListener('click', () => openStudioProjectReceipt(project))
 		group.appendChild(node)
@@ -87101,6 +87356,32 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        return ''
 	      }
 
+	      function requestDesktopChatLinkPreview(url) {
+	        const cache = desktopChatPreviewCache || (desktopChatPreviewCache = new Map())
+	        const cached = cache.get(url)
+	        if (cached && cached.expiresAt > Date.now()) return cached.promise
+	        if (cached) cache.delete(url)
+	        const entry = { expiresAt: Date.now() + 300000, promise: null }
+	        entry.promise = fetch(`/assistant/link-preview?url=${encodeURIComponent(url)}`, {
+	          credentials: 'same-origin', cache: 'default',
+	          signal: AbortSignal.timeout(15000),
+	          headers: { 'Accept': 'application/json' }
+	        }).then(async response => {
+	          const payload = await response.json().catch(() => ({}))
+	          if (!response.ok || !payload?.preview || desktopChatPreviewCache !== cache) throw new Error('preview unavailable')
+	          entry.expiresAt = Date.now() + 300000
+	          return payload.preview
+	        }).catch(error => {
+	          // A failed request is not a permanent cache entry. A later visit
+	          // can recover without a full application reload.
+	          if (cache.get(url) === entry) cache.delete(url)
+	          throw error
+	        })
+	        cache.set(url, entry)
+	        while (cache.size > 128) cache.delete(cache.keys().next().value)
+	        return entry.promise
+	      }
+
 	      function mountDesktopChatLinkPreview(stack, text) {
 	        // Skip HTML deck content — decks are rendered by renderInlineChatDeck,
 	        // not as link previews. Deck HTML contains xmlns/SVG namespace URLs
@@ -87167,21 +87448,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        // a channel switch used to fan out one request per linked message
 	        // in the whole tail. Fetches only: the <img> tags stay eager.
 	        deferDesktopChatCardFetch(card, () => {
-	          let previewRequest = desktopChatPreviewCache.get(url)
-	          if (!previewRequest) {
-	            previewRequest = fetch(`/assistant/link-preview?url=${encodeURIComponent(url)}`, {
-	              credentials: 'same-origin',
-	              cache: 'force-cache',
-	              headers: { 'Accept': 'application/json' }
-	            }).then(async response => {
-	              const payload = await response.json().catch(() => ({}))
-	              if (!response.ok || !payload?.preview) {
-	                throw new Error('preview unavailable')
-	              }
-	              return payload.preview
-	            })
-	            desktopChatPreviewCache.set(url, previewRequest)
-	          }
+	          const previewRequest = requestDesktopChatLinkPreview(url)
 	          previewRequest
 	            .then(preview => renderDesktopChatLinkPreview(card, url, preview))
 	            .catch(() => renderDesktopChatLinkPreviewFallback(card, url))
@@ -87297,7 +87564,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	          const postCopy = bfEl('span', 'desktop-chat-link-preview__copy')
 	          const postHeader = bfEl('span', 'desktop-chat-link-preview__post-header')
 	          const avatarFallback = bfEl('span', 'desktop-chat-link-preview__post-avatar-fallback', author.trim().slice(0, 1).toUpperCase() || 'X')
-	          if (imageURL.startsWith('/assistant/link-preview/image?')) {
+	          if (hasProxiedImage && preview?.imageRole === 'author_avatar') {
 	            const avatar = document.createElement('img')
 	            avatar.className = 'desktop-chat-link-preview__media desktop-chat-link-preview__post-avatar'
 	            avatar.alt = ''
@@ -87319,7 +87586,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	            bfEl('span', 'desktop-chat-link-preview__post-when', preview?.publishedAt ? `${preview.publishedAt} · x.com` : 'x.com'),
 	            bfEl('span', '', 'open ↗')
 	          )
-	          postCopy.append(postHeader, postText, postFooter)
+	          postCopy.append(postHeader, postText)
+	          if (hasProxiedImage && preview?.imageRole !== 'author_avatar') {
+	            const postMedia = document.createElement('img')
+	            postMedia.className = 'desktop-chat-link-preview__post-media'
+	            postMedia.alt = 'Image shared in the original post'
+	            bfChatImage(postMedia, imageURL)
+	            postMedia.addEventListener('error', () => postMedia.remove(), { once: true })
+	            postCopy.appendChild(postMedia)
+	          }
+	          postCopy.appendChild(postFooter)
 	          card.replaceChildren(postCopy)
 	          return
 	        }
@@ -103607,6 +103883,8 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
       var homeDayProjects = []
       var homeDayProjectsLoadedAt = 0
       var homeDayProjectsRequest = null
+      var homeDayProjectsGeneration = 0
+      var homeDayProjectsState = 'loading'
       var homeDaySinceMs = 0
       var homeDayLastTool = ''
 
@@ -103660,23 +103938,107 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
         if (!authedUser || guestMode) return
         if (homeDayProjectsRequest) return homeDayProjectsRequest
         if (!force && Date.now() - homeDayProjectsLoadedAt < 60000) return
-        homeDayProjectsRequest = (async () => {
+        const generation = homeDayProjectsGeneration || 0
+        const audience = String(authedUser.email || authedUser.id || '')
+        const current = () => generation === (homeDayProjectsGeneration || 0) && audience === String(authedUser?.email || authedUser?.id || '') && !guestMode
+        homeDayProjectsState = 'loading'
+        const request = (async () => {
           try {
             const response = await fetch('/api/studio-projects/v1?limit=50', { cache: 'no-store', headers: { Accept: 'application/json' } })
-            if (!response.ok) return
-            const payload = await response.json().catch(() => ({}))
-            if (!Array.isArray(payload?.projects)) return
+            if (!response.ok) throw new Error('work_unavailable')
+            const payload = await response.json()
+            if (!Array.isArray(payload?.projects)) throw new Error('work_unavailable')
+            if (!current()) return
             homeDayProjects = payload.projects
             homeDayProjectsLoadedAt = Date.now()
+            homeDayProjectsState = 'ready'
           } catch {
-            // Home paints honestly from what it has
+            if (!current()) return
+            // Authorization may have changed: never retain work after a failed refresh.
+            homeDayProjects = []
+            homeDayProjectsLoadedAt = 0
+            homeDayProjectsState = 'unavailable'
           } finally {
-            homeDayProjectsRequest = null
+            if (current()) { homeDayProjectsRequest = null; paintHomeDay(); renderHomeSnapshot() }
           }
-          paintHomeDay()
-          renderHomeSnapshot()
         })()
-        return homeDayProjectsRequest
+        homeDayProjectsRequest = request
+        return request
+      }
+
+      function homeOperatingGroups(projects) {
+        const rows = (Array.isArray(projects) ? projects : []).filter(project => project?.id)
+          .sort((a, b) => (Date.parse(b.updatedAt || '') || 0) - (Date.parse(a.updatedAt || '') || 0))
+        return {
+          judgment: rows.filter(project => ['needs_input', 'needs_attention'].includes(project.status) || homeWorkReviewPending(project)),
+          motion: rows.filter(project => ['queued', 'running'].includes(project.status))
+        }
+      }
+
+      function homeWorkReviewPending(project) {
+        const result = project.result
+        return project.status === 'ready' && result?.reviewManaged !== false && result?.canContinue === true
+          && (['draft_needs_attention', 'edited_after_admission'].includes(result.qualityState) || result.approvalState === 'edited_after_approval')
+      }
+
+      function homeOperatingWorkNode(project) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'operating-work'
+        button.dataset.workId = String(project.id)
+        const status = document.createElement('span')
+        status.className = 'operating-work__status'
+        status.dataset.state = String(project.status || '')
+        status.textContent = homeWorkReviewPending(project) ? 'Review changes' : studioProjectStatusLabel(project.status)
+        const title = document.createElement('strong')
+        title.className = 'operating-work__title'
+        title.textContent = String(project.title || 'Untitled work')
+        const detail = document.createElement('span')
+        detail.className = 'operating-work__detail'
+        const phase = project.phases?.find(item => item.status === 'active')?.label || ({brief:'Brief', build:'Build', polish:'Polish', ready:'Ready'})[project.phase]
+        detail.textContent = String(project.checkpoint?.question || project.attention?.body || phase || 'Open to see the current state.')
+        const footer = document.createElement('span')
+        footer.className = 'operating-work__foot'
+        const context = document.createElement('span')
+        context.textContent = String(project.companyProject?.title || project.project || studioProjectKindLabel(project.kind))
+        const arrow = document.createElement('span')
+        arrow.textContent = '↗'; arrow.setAttribute('aria-hidden', 'true')
+        footer.append(context, arrow)
+        button.append(status, title, detail, footer)
+        button.addEventListener('click', () => openHomeDestination({ route: 'work', projectId: String(project.id) }))
+        return button
+      }
+
+      function renderHomeOperatingBrief() {
+        const brief = document.getElementById('homeOperatingBrief')
+        if (!brief) return
+        const ready = Boolean(authedUser && !guestMode)
+        brief.hidden = !ready
+        const memory = document.getElementById('homeCompanyMemory')
+        if (memory) { memory.hidden = !ready; memory.onclick = () => setActiveTool('memory') }
+        document.getElementById('homeOpenWork').onclick = () => selectPD1Destination('Work')
+        document.getElementById('homeWorkRetry').onclick = () => { void loadHomeDayProjects(true) }
+        const state = homeDayProjectsState || 'loading'
+        const groups = homeOperatingGroups(ready ? homeDayProjects : [])
+        const status = document.getElementById('homeOperatingStatus')
+        status.hidden = state === 'ready'
+        status.textContent = state === 'unavailable' ? 'Work could not be refreshed. Try again to see the current state.' : 'Finding your current work…'
+        document.getElementById('homeWorkRetry').hidden = state !== 'unavailable'
+        for (const [kind, label] of [['judgment', 'Judgment'], ['motion', 'Motion']]) {
+          const host = document.getElementById('home' + label + 'Rows')
+          const rows = groups[kind]
+          document.getElementById('home' + label + 'Count').textContent = state === 'ready' ? String(rows.length) : '—'
+          const signature = JSON.stringify([ready, state, rows.slice(0, 3)])
+          if (host.dataset.signature === signature) continue
+          host.dataset.signature = signature
+          host.replaceChildren(...rows.slice(0, 3).map(homeOperatingWorkNode))
+          if (!rows.length && state === 'ready') {
+            const empty = document.createElement('p')
+            empty.className = 'operating-empty'
+            empty.textContent = kind === 'judgment' ? 'No decisions waiting in your recent work.' : 'Start with an outcome above. Follow its progress here.'
+            host.append(empty)
+          }
+        }
       }
 
       // today — rooms live right now, then meetings scheduled for today
@@ -103891,6 +104253,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
       // pure paint from in-memory state; signature-guarded so repaints are free
       function paintHomeDay() {
+        renderHomeOperatingBrief()
         if (!homeToday) homeToday = document.getElementById('homeToday')
         if (!homeAway) homeAway = document.getElementById('homeAway')
         if (!homeToday || !homeAway) return

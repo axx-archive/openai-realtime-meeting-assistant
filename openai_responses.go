@@ -494,6 +494,8 @@ func createOpenAITextResponseHTTP(ctx context.Context, apiKey string, request op
 			OutputFailureReason:  strings.TrimSpace(reason),
 			FallbackUsed:         request.FallbackReplay,
 		}
+		identity, _ := ctx.Value(workUsageIdentityContextKey{}).(workUsageIdentity)
+		entry.ThreadID, entry.GoalID = identity.ThreadID, identity.GoalID
 		if usage != nil {
 			cached := usage.InputTokensDetails.CachedTokens
 			// The Responses API reports input_tokens inclusive of cached reads;

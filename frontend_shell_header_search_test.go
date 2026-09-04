@@ -46,7 +46,7 @@ func TestIndexShellHeaderEveryTabHasTopbarTitleAndSubline(t *testing.T) {
 		"office: 'Home',",
 		"room: 'Rooms',",
 		"chat: 'Conversations',",
-		"research: 'Packaging Studio',",
+		"research: 'Work',",
 		"files: 'Drive',",
 		"memory: 'Memory',",
 	} {
@@ -112,7 +112,7 @@ func TestIndexShellHeaderNoInContentPageTitles(t *testing.T) {
 	}
 	for _, want := range []string{
 		`<header class="studio-projects__head sr-only">`,
-		`<h2 id="studioProjectsTitle">Packaging Studio</h2>`,
+		`<h2 id="studioProjectsTitle">Work</h2>`,
 		"<div class=\"sr-only\">\n                  <h2 id=\"filesScopeTitle\">Home</h2>",
 		"      .sr-only {",
 	} {

@@ -11,7 +11,7 @@ test('native TikTok previews are portrait-first and open the canonical video', (
   const card = source('src', 'messaging', 'LinkPreviewCard.tsx');
   assert.match(card, /preview\.kind === 'tiktok_video'/);
   assert.match(card, /accessibilityLabel=\{`Play \$\{title\} by \$\{creator\} on TikTok`\}/);
-  assert.match(card, /Linking\.openURL\(destination\)/);
+  assert.match(card, /openLink\(destination\)/);
   assert.match(card, /tikTokHero: \{ aspectRatio: 3 \/ 4/);
   assert.match(card, /recyclingKey=\{`\$\{url\}-tiktok-poster`\}/);
   assert.match(card, /cachePolicy="memory-disk"/);

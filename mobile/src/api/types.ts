@@ -77,7 +77,7 @@ export type HomeSnapshot = {
 
 export type HomeResponse = { ok: boolean; home: HomeSnapshot };
 
-export type StudioProjectKind = 'presentation' | 'document';
+export type StudioProjectKind = 'presentation' | 'document' | 'image' | 'sheet' | 'research' | 'artifact';
 export type StudioProjectStatus =
   | 'queued'
   | 'running'
@@ -131,6 +131,41 @@ export type StudioProjectResult = {
   canExport: boolean;
 };
 
+export type StudioWorkResultIdentity = { artifactId: string; version: number; digest: string };
+export type StudioWorkFeedbackInput = {
+  type: 'review' | 'outcome';
+  verdict: 'accepted' | 'revision_requested' | 'helped' | 'did_not_help' | 'inconclusive';
+  note: string;
+  idempotencyKey: string;
+  result: StudioWorkResultIdentity;
+  acceptedReviewId?: string;
+};
+export type StudioWorkFeedbackEvent = Omit<StudioWorkFeedbackInput, 'idempotencyKey'> & {
+  id: string; rootId: string; actorId: string; actorName: string; at: string;
+};
+export type StudioWorkFeedback = {
+  reviewState: 'unreviewed' | 'accepted' | 'revision_requested';
+  currentReview?: StudioWorkFeedbackEvent;
+  currentOutcome?: StudioWorkFeedbackEvent;
+  history: StudioWorkFeedbackEvent[];
+  historyTruncated: boolean;
+  canReview: boolean;
+  canObserveOutcome: boolean;
+};
+export type StudioWorkFeedbackResponse = {
+  ok: boolean; replayed: boolean; event: StudioWorkFeedbackEvent;
+  feedback: StudioWorkFeedback; rerunStarted: false;
+};
+export type StudioWorkExecution = {
+  status: string; provider: string; requestedModel: string; actualModel?: string;
+  reasoningEffort: string; qualification: string; receiptDigest?: string;
+  policy?: string; fallbackUsed: boolean;
+};
+export type StudioWorkAssurance = {
+  type: string; status: string; independent: boolean;
+  judgmentRequired?: boolean; receiptDigest?: string;
+};
+
 /** Viewer-authorized projection over one canonical Presentation or Research root. */
 export type StudioProject = {
   schemaVersion: 1;
@@ -153,6 +188,10 @@ export type StudioProject = {
   checkpoint?: StudioProjectCheckpoint;
   attention?: StudioProjectAttention;
   canRename: boolean;
+  feedback?: StudioWorkFeedback;
+  execution?: StudioWorkExecution;
+  assurance?: StudioWorkAssurance;
+  priorFeedbackEvidence?: Array<{ id: string; rootId: string; result: StudioWorkResultIdentity; acceptanceId: string; outcomeId?: string; href: string }>;
 };
 
 export type StudioProjectsResponse = {
@@ -809,6 +848,7 @@ export type LinkPreview = {
   description?: string;
   siteName?: string;
   imageUrl?: string;
+  imageRole?: 'author_avatar' | 'content';
   mediaType?: string;
   authorName?: string;
   authorHandle?: string;
@@ -1312,3 +1352,11 @@ export type ApiError = {
   status: number;
   message: string;
 };
+
+/** Server-authorized memory inspector, distinct from the meeting timeline. */
+export type MemoryInspectItem = {
+  id: string; kind: string; entity?: string; title: string; summary: string; at: string;
+  provenance: Array<{ type: string; id: string; label?: string }>;
+  status: string; person?: string; subject?: string; own?: boolean;
+};
+export type MemoryInspectResponse = { ok: boolean; viewer: string; count: number; items: MemoryInspectItem[] };

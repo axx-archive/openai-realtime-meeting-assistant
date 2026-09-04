@@ -22,10 +22,10 @@ import {
   submitHomeScoutOpening,
   type HomeScoutOpeningAttempt,
 } from '../canvas/homeScoutOpening';
-import { canvasCradleComposition } from '../components/CanvasCradleComposition';
 import { Waveform } from '../components/Waveform';
-import { BonfireChatShortcut } from '../components/BonfireChatShortcut';
 import { useHomeCanvas } from '../canvas/useLiveLine';
+import { useHomeOperatingBrief } from '../canvas/useHomeOperatingBrief';
+import { homeOperatingBriefColumns, type HomeWorkItem } from '../canvas/homeOperatingBrief';
 import { createConversationOperationId } from '../conversations/newConversation';
 import { usePersonalRealtimeContext } from '../realtime/PersonalRealtimeContext';
 import { runPersonalRealtimeTap } from '../realtime/personalRealtimeTap';
@@ -36,32 +36,54 @@ import type { HomeProjectChoice } from '../api/types';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, space, type } from '../theme/tokens';
 import { personalizedHomeGreeting } from '../canvas/homeGreeting';
-import { bonfireStatusLanePlacement } from '../canvas/bonfireShortcutPlacement';
 import { isBonfireChat } from '../messaging/channelPresentation';
 
 type CanvasNav = NativeStackNavigationProp<RootStackParamList>;
 
-/**
- * The Canvas — design §4 and §9 (STRIDE mobile E2E evolution).
- *
- * Home is continuity: a personal greeting, direct Bonfire Chat, and the last
- * work and threads to resume. Starter dashboards stay retired. The root is a
- * conversation, not a dashboard. Realtime voice and one ordinary
- * text field are two inputs to the same private Scout contract.
- *
- * Nothing here blocks first paint: the compact voice control renders before
- * current context resolves, then the server-owned snapshot fills in beneath
- * the composer without changing what the primary input means.
- */
+/** Home connects human judgment, active work, and the company record. */
+function HomeWorkSection({ title, subtitle, items, empty, onOpen }: {
+  title: string;
+  subtitle: string;
+  items: HomeWorkItem[];
+  empty: string;
+  onOpen: (item: HomeWorkItem) => void;
+}) {
+  return (
+    <View style={styles.briefSection}>
+      <Text accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+      {items.length ? items.slice(0, 4).map((item) => (
+        <Pressable
+          key={item.project.id}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.label}. ${item.project.title}. ${item.detail}`}
+          onPress={() => onOpen(item)}
+          style={({ pressed }) => [styles.workRow, pressed && styles.continuityRowPressed]}
+        >
+          <View style={styles.continuityCopy}>
+            <Text style={styles.workLabel}>{item.label}</Text>
+            <Text style={styles.workTitle}>{item.project.title}</Text>
+            <Text style={styles.workDetail}>{item.detail}</Text>
+            {item.project.companyProject?.title ? <Text style={styles.workContext}>{item.project.companyProject.title}</Text> : null}
+          </View>
+          <SymbolView name="arrow.up.right" size={15} tintColor={colors.text3} />
+        </Pressable>
+      )) : <Text style={styles.sectionEmpty}>{empty}</Text>}
+      {items.length > 4 ? <Text style={styles.workContext}>{items.length - 4} more in Work</Text> : null}
+    </View>
+  );
+}
 
 export function CanvasScreen() {
   const navigation = useNavigation<CanvasNav>();
-  const { width: canvasWidth, height: canvasHeight } = useWindowDimensions();
+  const { fontScale } = useWindowDimensions();
+  const [contentWidth, setContentWidth] = useState(0);
+  const wideBrief = homeOperatingBriefColumns(contentWidth, fontScale);
   const { sessionToken, user } = useAuth();
   const home = useHomeCanvas();
+  const workBrief = useHomeOperatingBrief();
   const realtime = usePersonalRealtimeContext();
   const listening = realtime.active;
-  const bonfireStatusLane = bonfireStatusLanePlacement(canvasWidth, canvasHeight);
   const [draft, setDraft] = useState('');
   const [draftDestination, setDraftDestination] = useState<HomeStarterDestination | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -178,7 +200,7 @@ export function CanvasScreen() {
       const threadId = await loadBonfireTarget(token);
       if (!bonfireAttemptIsCurrent(token, generation)) return;
       if (!threadId) {
-        setBonfireError('Bonfire Chat is unavailable right now. Tap the icon to try again.');
+        setBonfireError('Bonfire Chat is unavailable right now. Try again below.');
         return;
       }
       bonfireTargetRef.current = { sessionToken: token, threadId };
@@ -381,6 +403,8 @@ export function CanvasScreen() {
   })();
   const liveMeeting = home.continuity.find((item) => item.kind === 'live-meeting');
   const continuityItems = home.continuity.filter((item) => item.kind !== 'live-meeting');
+  const contextItems = continuityItems.filter((item) => !item.workId || !workBrief.ready);
+  const openBriefWork = (item: HomeWorkItem) => navigation.navigate('WorkHome', { projectId: item.project.id });
 
   const openContinuity = useCallback((item: (typeof home.continuity)[number]) => {
     if (item.workId && (item.kind === 'active-work' || item.kind === 'needs-you')) {
@@ -407,6 +431,11 @@ export function CanvasScreen() {
     <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
       {/* In-app bell — navigates to Alerts */}
       <View style={styles.bellHeader}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Settings"
+          onPress={() => navigation.navigate('Settings')}
+          style={({ pressed }) => [styles.bellButton, pressed && styles.bellPressed]}>
+          <SymbolView name="gearshape" size={20} tintColor={colors.text2} />
+        </Pressable>
         <Pressable
           accessibilityLabel="Notifications"
           accessibilityRole="button"
@@ -418,12 +447,13 @@ export function CanvasScreen() {
         </Pressable>
       </View>
       <ScrollView
-        contentContainerStyle={canvasCradleComposition.body}
+        contentContainerStyle={styles.operatingBody}
         automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-          <View style={[canvasCradleComposition.skyAbove, keyboardVisible && styles.keyboardSky]} />
+          <View style={[styles.operatingTop, keyboardVisible && styles.keyboardSky]} />
+          <View onLayout={({ nativeEvent }) => setContentWidth(nativeEvent.layout.width)} style={styles.operatingContent}>
 
           {liveMeeting ? (
             <Pressable
@@ -441,9 +471,8 @@ export function CanvasScreen() {
 
           {!keyboardVisible ? (
             <View style={styles.greeting}>
-              <Text accessibilityRole="header" maxFontSizeMultiplier={1.8} style={styles.greetingTitle}>
-                {personalizedHomeGreeting(user?.name)}
-              </Text>
+              <Text style={styles.greetingEyebrow}>{personalizedHomeGreeting(user?.name)}</Text>
+              <Text accessibilityRole="header" style={styles.greetingTitle}>Make room for what matters.</Text>
               <Text maxFontSizeMultiplier={1.8} style={styles.greetingBody}>
                 What can Scout help move forward?
               </Text>
@@ -582,60 +611,83 @@ export function CanvasScreen() {
             <Text accessibilityRole={realtime.error ? 'alert' : 'text'} maxFontSizeMultiplier={1.35} style={[styles.voiceNotice, realtime.error && styles.voiceError]}>{voiceNotice}</Text>
           ) : null}
 
-          {continuityItems.length > 0 ? (
-            <View accessibilityLabel="Your current context" style={styles.continuity}>
-              {continuityItems.map((item) => (
-                <Pressable
-                  key={item.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${item.eyebrow}. ${item.title}. ${item.detail}`}
-                  onPress={() => openContinuity(item)}
-                  style={({ pressed }) => [styles.continuityRow, pressed && styles.continuityRowPressed]}
-                >
-                  <View style={styles.continuityCopy}>
-                    <Text maxFontSizeMultiplier={1.6} style={styles.continuityEyebrow}>{item.eyebrow}</Text>
-                    <Text maxFontSizeMultiplier={1.6} style={styles.continuityTitle}>{item.title}</Text>
-                    <Text maxFontSizeMultiplier={1.8} style={styles.continuityDetail}>{item.detail}</Text>
-                  </View>
-                  <Text accessibilityElementsHidden maxFontSizeMultiplier={1} style={styles.continuityArrow}>›</Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
-          {home.freshness === 'loading' && home.continuity.length === 0 ? (
-            <ActivityIndicator accessibilityLabel="Loading your current context" color={colors.text3} size="small" style={styles.homeLoading} />
-          ) : null}
-          {home.refreshError ? (
-            <Pressable accessibilityRole="button" onPress={() => { void home.refresh(); }} style={styles.refreshError}>
-              <Text accessibilityRole="alert" maxFontSizeMultiplier={1.8} style={styles.refreshErrorText}>{home.refreshError}</Text>
-              <Text maxFontSizeMultiplier={1.6} style={styles.refreshAction}>{home.refreshing ? 'Refreshing…' : 'Try again'}</Text>
+          <View style={styles.briefToolbar}>
+            <Text style={styles.briefEyebrow}>YOUR OPERATING BRIEF</Text>
+            <Pressable accessibilityRole="button" onPress={() => navigation.navigate('WorkHome')} style={styles.briefLink}>
+              <Text style={styles.briefLinkText}>All work →</Text>
+            </Pressable>
+          </View>
+          {workBrief.loading && !workBrief.ready ? <ActivityIndicator accessibilityLabel="Loading your work" color={colors.text3} style={styles.homeLoading} /> : null}
+          {workBrief.error ? (
+            <Pressable accessibilityRole="button" onPress={() => { void workBrief.refresh(); }} style={styles.briefError}>
+              <Text accessibilityRole="alert" style={styles.refreshErrorText}>{workBrief.error}</Text>
+              <Text style={styles.refreshAction}>{workBrief.loading ? 'Refreshing…' : 'Try again'}</Text>
             </Pressable>
           ) : null}
+          <View style={[styles.briefColumns, wideBrief && styles.briefColumnsWide]}>
+            <View style={styles.briefMain}>
+              {workBrief.ready ? <>
+                <HomeWorkSection title="Your judgment" subtitle="Decisions and reviews that need a person."
+                  items={workBrief.judgment} empty="No decisions waiting in your recent work." onOpen={openBriefWork} />
+                <HomeWorkSection title="In motion" subtitle="What is moving forward while you focus."
+                  items={workBrief.moving} empty="No active work in this brief. Tell Scout what you want to move forward." onOpen={openBriefWork} />
+                {workBrief.hasMore ? <Text style={styles.workContext}>Showing recent work. Open All work for the full library.</Text> : null}
+              </> : null}
+            </View>
+            <View style={[styles.briefAside, wideBrief && styles.briefAsideWide]}>
+              <View style={styles.briefSection}>
+                <Text accessibilityRole="header" style={styles.sectionTitle}>Around you</Text>
+                <Text style={styles.sectionSubtitle}>Conversations worth returning to.</Text>
+                {contextItems.map((item) => (
+                  <Pressable key={item.id} accessibilityRole="button"
+                    accessibilityLabel={`${item.eyebrow}. ${item.title}. ${item.detail}`}
+                    onPress={() => openContinuity(item)}
+                    style={({ pressed }) => [styles.continuityRow, pressed && styles.continuityRowPressed]}>
+                    <View style={styles.continuityCopy}>
+                      <Text style={styles.continuityEyebrow}>{item.eyebrow}</Text>
+                      <Text style={styles.continuityTitle}>{item.title}</Text>
+                      <Text style={styles.continuityDetail}>{item.detail}</Text>
+                    </View>
+                    <Text accessibilityElementsHidden maxFontSizeMultiplier={1} style={styles.continuityArrow}>›</Text>
+                  </Pressable>
+                ))}
+                <Pressable accessibilityRole="button" accessibilityLabel={bonfireError ? 'Try Bonfire Chat again' : 'Open Bonfire Chat'}
+                  accessibilityState={{ busy: bonfireOpening, disabled: bonfireOpening }} disabled={bonfireOpening}
+                  onPress={() => { void openBonfireChat(); }} style={({ pressed }) => [styles.continuityRow, pressed && styles.continuityRowPressed]}>
+                  <View style={styles.continuityCopy}>
+                    <Text style={styles.continuityTitle}>Bonfire Chat</Text>
+                    <Text style={styles.continuityDetail}>{bonfireOpening ? 'Opening…' : 'Return to the company conversation.'}</Text>
+                  </View>
+                  <Text accessibilityElementsHidden style={styles.continuityArrow}>›</Text>
+                </Pressable>
+                {bonfireError ? <Text accessibilityRole="alert" style={styles.refreshErrorText}>{bonfireError}</Text> : null}
+                {home.freshness === 'current' && !contextItems.length ? <Text style={styles.sectionEmpty}>Your next conversation starts here.</Text> : null}
+                {home.freshness === 'loading' && home.continuity.length === 0 ? <ActivityIndicator accessibilityLabel="Loading your current context" color={colors.text3} size="small" style={styles.homeLoading} /> : null}
+                {home.refreshError ? (
+                  <Pressable accessibilityRole="button" onPress={() => { void home.refresh(); }} style={styles.refreshError}>
+                    <Text accessibilityRole="alert" style={styles.refreshErrorText}>{home.refreshError}</Text>
+                    <Text style={styles.refreshAction}>{home.refreshing ? 'Refreshing…' : 'Try again'}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+              {workBrief.ready && workBrief.recent.length ? <HomeWorkSection title="Recent results" subtitle="Pick up the work already here."
+                items={workBrief.recent} empty="" onOpen={openBriefWork} /> : null}
+              <Pressable accessibilityRole="button" accessibilityLabel="Open company memory"
+                onPress={() => navigation.navigate('Memory')}
+                style={({ pressed }) => [styles.memoryEntry, pressed && styles.continuityRowPressed]}>
+                <View style={styles.continuityCopy}>
+                  <Text style={styles.workLabel}>COMPANY MEMORY</Text>
+                  <Text style={styles.memoryTitle}>Start with what you know.</Text>
+                  <Text style={styles.workDetail}>Find decisions, inspect sources, and correct what is remembered.</Text>
+                  <Text style={styles.memoryAction}>Explore company memory →</Text>
+                </View>
+              </Pressable>
+            </View>
+          </View>
+          </View>
 
-        <View style={[canvasCradleComposition.skyBelow, keyboardVisible && styles.keyboardSky]} />
+        <View style={styles.operatingBottom} />
       </ScrollView>
-      {!keyboardVisible && bonfireError ? (
-        <View
-          accessibilityRole="alert"
-          pointerEvents="none"
-          style={[
-            styles.bonfireStatusLane,
-            {
-              height: bonfireStatusLane.height,
-              left: bonfireStatusLane.left,
-              top: bonfireStatusLane.top,
-              width: bonfireStatusLane.width,
-            },
-          ]}
-        >
-          <Text maxFontSizeMultiplier={1.4} numberOfLines={2} style={styles.bonfireStatusText}>
-            {bonfireStatusLane.compact ? 'Bonfire unavailable' : bonfireError}
-          </Text>
-        </View>
-      ) : null}
-      {!keyboardVisible ? (
-        <BonfireChatShortcut busy={bonfireOpening} unavailable={Boolean(bonfireError)} onPress={() => { void openBonfireChat(); }} />
-      ) : null}
 		  <Modal animationType="slide" presentationStyle="pageSheet" visible={explicitProjectAttachmentEnabled && projectChooserOpen && projectSessionToken === sessionToken} onRequestClose={() => setProjectChooserOpen(false)}>
 		<SafeAreaView style={styles.projectSheet}>
 		  <View style={styles.projectSheetHeader}>
@@ -661,25 +713,36 @@ export function CanvasScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bgApp },
-  bonfireStatusLane: {
-    position: 'absolute',
-    zIndex: 19,
-    justifyContent: 'center',
-    paddingHorizontal: space[3],
-    borderRadius: radius.lg,
-    borderCurve: 'continuous',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.danger,
-    backgroundColor: colors.surface1,
-  },
-  bonfireStatusText: {
-    ...type.captionMedium,
-    color: colors.text1,
-  },
+  operatingBody: { flexGrow: 1, alignItems: 'center', paddingHorizontal: space[5] },
+  operatingContent: { width: '100%', maxWidth: 1120 },
+  operatingTop: { height: 8 },
+  operatingBottom: { height: 112 },
+  greetingEyebrow: { ...type.captionMedium, color: colors.text2 },
+  briefToolbar: { marginTop: space[8], marginBottom: space[3], flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
+  briefEyebrow: { ...type.label, color: colors.text2, letterSpacing: 1.2 },
+  briefLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[2] },
+  briefLinkText: { ...type.captionMedium, color: colors.text1 },
+  briefColumns: { gap: space[6] },
+  briefColumnsWide: { flexDirection: 'row', alignItems: 'flex-start', gap: space[8] },
+  briefMain: { minWidth: 0, flex: 1, gap: space[6] },
+  briefAside: { minWidth: 0, gap: space[6] },
+  briefAsideWide: { flex: 0.82 },
+  briefSection: { gap: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line2, paddingTop: space[4] },
+  sectionTitle: { ...type.title2, color: colors.text1 },
+  sectionSubtitle: { ...type.caption, color: colors.text2, marginBottom: space[2] },
+  sectionEmpty: { ...type.body, color: colors.text2, paddingVertical: space[4] },
+  workRow: { minHeight: 96, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingVertical: space[4], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line1 },
+  workLabel: { ...type.label, color: colors.emberText, marginBottom: space[1] },
+  workTitle: { ...type.bodyMedium, color: colors.text1, marginBottom: space[1] },
+  workDetail: { ...type.caption, color: colors.text2 },
+  workContext: { ...type.caption, color: colors.text3, marginTop: space[2] },
+  briefError: { gap: space[2], alignItems: 'flex-start', paddingVertical: space[4] },
+  memoryEntry: { padding: space[5], borderRadius: radius.xl, backgroundColor: colors.surface1 },
+  memoryTitle: { ...type.title2, color: colors.text1, marginBottom: space[2] },
+  memoryAction: { ...type.captionMedium, color: colors.text1, marginTop: space[4] },
   bellHeader: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
     zIndex: 10,
     paddingTop: space[1],
     paddingRight: space[3],
@@ -697,21 +760,21 @@ const styles = StyleSheet.create({
   },
   greeting: {
     width: '100%',
-    maxWidth: 560,
-    alignItems: 'center',
-    gap: space[1],
-    marginTop: space[3],
-    paddingHorizontal: space[4],
+    alignItems: 'flex-start',
+    gap: space[2],
+    marginTop: space[4],
   },
   greetingTitle: {
     ...type.title1,
+    fontSize: 36,
+    lineHeight: 41,
+    letterSpacing: -1.2,
+    fontWeight: '600',
     color: colors.text1,
-    textAlign: 'center',
   },
   greetingBody: {
     ...type.body,
     color: colors.text2,
-    textAlign: 'center',
   },
   projectChip: { minHeight: 44, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1, backgroundColor: colors.surface1 },
   projectChipText: { ...type.caption, color: colors.text2 },
@@ -779,16 +842,15 @@ const styles = StyleSheet.create({
   starterPressed: { opacity: 0.62 },
   composerBlock: {
     width: '100%',
-    maxWidth: 560,
-    marginTop: space[4],
+    marginTop: space[5],
     gap: space[2],
   },
   liveMeetingJump: {
     minHeight: 34,
-    maxWidth: 360,
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'center',
+    alignSelf: 'flex-start',
     gap: space[2],
     marginTop: space[3],
     paddingHorizontal: space[3],
@@ -912,7 +974,7 @@ const styles = StyleSheet.create({
   continuityCopy: { minWidth: 0, flex: 1, gap: 2 },
   continuityEyebrow: {
     ...type.label,
-    color: colors.ember,
+    color: colors.emberText,
     textTransform: 'uppercase',
     letterSpacing: 0.7,
   },

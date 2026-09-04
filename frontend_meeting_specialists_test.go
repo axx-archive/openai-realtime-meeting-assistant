@@ -64,7 +64,7 @@ func TestFrontendWorkHasNoStandaloneLegacyDesignOrGrillSurface(t *testing.T) {
 			t.Fatalf("dead standalone Work tool surface remains: %q", forbidden)
 		}
 	}
-	for _, want := range []string{`id="researchTool"`, `Presentations and research stay organized`, `research and presentations land here as durable outputs.`} {
+	for _, want := range []string{`id="researchTool"`, `Follow an outcome from its first brief to the difference it makes.`, `research and presentations land here as durable outputs.`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("canonical Work surface is missing %q", want)
 		}

@@ -570,7 +570,10 @@ func TestDriveStoreEntriesOfKindByMetadataClones(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id, ref := range map[string]string{"file-shared-a": shared, "file-shared-b": shared, "file-other": other} {
+	// The assertion below is about insertion order; map iteration cannot
+	// establish that order and made this clone-isolation test nondeterministic.
+	for _, fixture := range []struct{ id, ref string }{{"file-shared-a", shared}, {"file-shared-b", shared}, {"file-other", other}} {
+		id, ref := fixture.id, fixture.ref
 		if _, _, err := app.memory.appendEntry(meetingMemoryKindFile, id, "File "+id+" uploaded.", map[string]string{
 			"name": id + ".txt", "blobRef": ref, "mime": "text/plain", "uploaderEmail": "aj@shareability.com", "visibility": fileVisibilityCompany,
 		}); err != nil {

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import * as Linking from 'expo-linking';
@@ -12,26 +12,6 @@ import { buildApiUrl, buildAuthHeaders } from '../api/requestHelpers';
 import { colors, radius, space, type } from '../theme/tokens';
 import { cachedLinkPreview } from './linkPreviewCache';
 import { messageLongPressDelayMs } from './messageGestures';
-
-const previewCache = new Map<string, Promise<LinkPreview | null>>();
-const resolvedPreviewCache = new Map<string, LinkPreview | null>();
-
-function previewCacheKey(url: string): string {
-  return url;
-}
-
-function previewFor(sessionToken: string, url: string): Promise<LinkPreview | null> {
-  const key = previewCacheKey(url);
-  const cached = previewCache.get(key);
-  if (cached) return cached;
-  const request = cachedLinkPreview(url, () => api.linkPreview(sessionToken, url).then((result) => result.preview))
-    .then((value) => {
-      resolvedPreviewCache.set(key, value);
-      return value;
-    });
-  previewCache.set(key, request);
-  return request;
-}
 
 function hostLabel(raw: string): string {
   try {
@@ -50,28 +30,33 @@ type Props = {
 };
 
 export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessionToken, own, seamless = false, onLongPress }: Props) {
-  const key = previewCacheKey(url);
-  const [preview, setPreview] = useRecyclingState<LinkPreview | null | undefined>(() => (
-    resolvedPreviewCache.has(key) ? resolvedPreviewCache.get(key) : undefined
-  ), [key]);
+  // The bounded disk cache owns freshness. A second permanent cache here
+  // would pin transient failures and defeat its expiry policy.
+  const key = `${sessionToken}:${url}`;
+  const [preview, setPreview] = useRecyclingState<LinkPreview | null | undefined>(undefined, [key]);
+  const [imageFailed, setImageFailed] = useRecyclingState(false, [key, preview?.imageUrl]);
   useEffect(() => {
     let active = true;
-    if (!resolvedPreviewCache.has(key)) {
-      void previewFor(sessionToken, url).then((value) => {
-        if (active) setPreview(value);
-      });
-    }
+    void cachedLinkPreview(url, () => api.linkPreview(sessionToken, url).then((result) => result.preview))
+      .then((value) => { if (active) setPreview(value); })
+      .catch(() => { if (active) setPreview(null); });
     return () => { active = false; };
   }, [key, sessionToken, setPreview, url]);
 
+  const openLink = (destination: string) => {
+    void Linking.openURL(destination).catch(() => {
+      Alert.alert('Link could not open', 'Try this link again when its app or website is available.');
+    });
+  };
+
   const imageSource = useMemo(() => {
     const path = preview?.imageUrl?.trim();
-    if (!path?.startsWith('/assistant/link-preview/image?')) return null;
+    if (imageFailed || !path?.startsWith('/assistant/link-preview/image?')) return null;
     return {
       uri: buildApiUrl(API_BASE_URL, path),
       headers: buildAuthHeaders(NATIVE_CLIENT_HEADER, sessionToken, { Accept: 'image/*' }),
     };
-  }, [preview?.imageUrl, sessionToken]);
+  }, [imageFailed, preview?.imageUrl, sessionToken]);
 
   const site = preview?.siteName?.trim() || hostLabel(url);
   const title = preview?.title?.trim() || hostLabel(url);
@@ -95,7 +80,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={`Open ${url}`}
-        onPress={() => void Linking.openURL(url).catch(() => undefined)}
+        onPress={() => openLink(url)}
         onLongPress={onLongPress}
         delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [styles.card, styles.cardSeamless, styles.plainCard, own && styles.cardSeamlessOwn, pressed && styles.pressed]}
@@ -112,12 +97,13 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
   if (preview.kind === 'x_post') {
     const author = preview.authorName?.trim() || title;
     const handle = preview.authorHandle?.trim();
+    const avatar = preview.imageRole === 'author_avatar';
     return (
       <Pressable
         accessibilityRole="link"
         accessibilityLabel={`${author} on X: ${description || 'Post'}`}
         accessibilityHint="Opens this post on X"
-        onPress={() => void Linking.openURL(url).catch(() => undefined)}
+        onPress={() => openLink(url)}
         onLongPress={onLongPress}
         delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [
@@ -129,8 +115,8 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         ]}
       >
         <View style={styles.postHeader}>
-          {imageSource ? (
-            <Image source={imageSource} cachePolicy="memory-disk" contentFit="cover" enforceEarlyResizing recyclingKey={`${url}-avatar`} style={styles.avatar} />
+          {imageSource && avatar ? (
+            <Image onError={() => setImageFailed(true)} source={imageSource} cachePolicy="memory-disk" contentFit="cover" enforceEarlyResizing recyclingKey={`${url}-avatar`} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}><Text style={styles.avatarInitial}>{author.slice(0, 1)}</Text></View>
           )}
@@ -141,8 +127,12 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
           <Text style={[styles.xMark, own && styles.copyOwn]}>𝕏</Text>
         </View>
         {description ? <Text numberOfLines={5} style={[styles.postText, own && styles.copyOwn]}>{description}</Text> : null}
+        {imageSource && !avatar ? <View style={[styles.hero, styles.postMedia]}>
+          <Image source={imageSource} accessibilityLabel="Post image" cachePolicy="memory-disk" contentFit="cover"
+            enforceEarlyResizing onError={() => setImageFailed(true)} recyclingKey={`${url}-post-media`} style={StyleSheet.absoluteFill} />
+        </View> : null}
         <View style={styles.postFooter}>
-          <Text style={[styles.postDate, own && styles.descriptionOwn]}>{preview.publishedAt ? `${preview.publishedAt} · x.com` : 'x.com'}</Text>
+          <Text numberOfLines={1} style={[styles.postDate, own && styles.descriptionOwn]}>{preview.publishedAt ? `${preview.publishedAt} · x.com` : 'x.com'}</Text>
           <SymbolView name="arrow.up.right" tintColor={own ? colors.onAccent : colors.text3} size={10} />
         </View>
       </Pressable>
@@ -158,7 +148,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityRole="link"
         accessibilityLabel={`Play ${title} by ${creator} on TikTok`}
         accessibilityHint="Opens the original video in TikTok"
-        onPress={() => void Linking.openURL(destination).catch(() => undefined)}
+        onPress={() => openLink(destination)}
         onLongPress={onLongPress}
         delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [
@@ -172,6 +162,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         <View style={[styles.hero, styles.tikTokHero]}>
           {imageSource ? (
             <Image
+            onError={() => setImageFailed(true)}
               source={imageSource}
               cachePolicy="memory-disk"
               contentFit="cover"
@@ -209,7 +200,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
           accessibilityRole="link"
           accessibilityLabel={`Open ${title} on YouTube`}
           accessibilityHint="Opens the original video on YouTube"
-          onPress={() => void Linking.openURL(destination).catch(() => undefined)}
+          onPress={() => openLink(destination)}
           onLongPress={onLongPress}
           delayLongPress={messageLongPressDelayMs}
           style={({ pressed }) => [styles.card, styles.providerFallbackCard, seamless && styles.cardSeamless, pressed && styles.pressed]}
@@ -228,13 +219,14 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityRole="link"
         accessibilityLabel={`Play ${title} on YouTube`}
         accessibilityHint="Opens the original video on YouTube"
-        onPress={() => void Linking.openURL(destination).catch(() => undefined)}
+        onPress={() => openLink(destination)}
         onLongPress={onLongPress}
         delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [styles.card, styles.visualCard, styles.youTubeCard, seamless && styles.cardSeamless, pressed && styles.pressed]}
       >
         <View style={styles.hero}>
           <Image
+            onError={() => setImageFailed(true)}
             source={imageSource}
             cachePolicy="memory-disk"
             contentFit="cover"
@@ -265,7 +257,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
           accessibilityRole="link"
           accessibilityLabel={`Open ${title} on Instagram`}
           accessibilityHint={`Opens the original Instagram ${format}`}
-          onPress={() => void Linking.openURL(destination).catch(() => undefined)}
+          onPress={() => openLink(destination)}
           onLongPress={onLongPress}
           delayLongPress={messageLongPressDelayMs}
           style={({ pressed }) => [styles.card, styles.providerFallbackCard, styles.instagramFallbackCard, seamless && styles.cardSeamless, pressed && styles.pressed]}
@@ -284,13 +276,14 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityRole="link"
         accessibilityLabel={`${instagramVideo ? 'Play' : 'Open'} ${title} on Instagram`}
         accessibilityHint={`Opens the original Instagram ${format}`}
-        onPress={() => void Linking.openURL(destination).catch(() => undefined)}
+        onPress={() => openLink(destination)}
         onLongPress={onLongPress}
         delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [styles.card, styles.visualCard, styles.instagramCard, seamless && styles.cardSeamless, pressed && styles.pressed]}
       >
         <View style={[styles.hero, instagramVideo ? styles.instagramVideoHero : styles.instagramPostHero]}>
           <Image
+            onError={() => setImageFailed(true)}
             source={imageSource}
             cachePolicy="memory-disk"
             contentFit="cover"
@@ -323,7 +316,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
         accessibilityRole="link"
         accessibilityLabel={`${playable ? 'Play' : 'Open'} ${title}, ${site}`}
         accessibilityHint={`Opens this ${playable ? 'video' : 'website'}`}
-        onPress={() => void Linking.openURL(url).catch(() => undefined)}
+        onPress={() => openLink(url)}
         onLongPress={onLongPress}
         delayLongPress={messageLongPressDelayMs}
         style={({ pressed }) => [
@@ -335,6 +328,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
       >
         <View style={styles.hero}>
           <Image
+            onError={() => setImageFailed(true)}
             source={imageSource}
             cachePolicy="memory-disk"
             contentFit="cover"
@@ -366,7 +360,7 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
       accessibilityRole="link"
       accessibilityLabel={`${title}, ${site}`}
       accessibilityHint="Opens this link"
-      onPress={() => void Linking.openURL(url).catch(() => undefined)}
+      onPress={() => openLink(url)}
       onLongPress={onLongPress}
       delayLongPress={messageLongPressDelayMs}
       style={({ pressed }) => [
@@ -392,8 +386,9 @@ export const LinkPreviewCard = React.memo(function LinkPreviewCard({ url, sessio
 
 const styles = StyleSheet.create({
   card: {
-    minWidth: 252,
-    maxWidth: 300,
+    width: 300,
+    minWidth: 0,
+    maxWidth: '100%',
     overflow: 'hidden',
     marginTop: space[2],
     borderRadius: radius.md,
@@ -413,12 +408,13 @@ const styles = StyleSheet.create({
   avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.surface3 },
   avatarFallback: { alignItems: 'center', justifyContent: 'center' },
   avatarInitial: { ...type.bodyMedium, color: colors.text2 },
-  authorCopy: { flex: 1 },
+  authorCopy: { flex: 1, minWidth: 0 },
   author: { ...type.bodyMedium, color: colors.text1 },
   handle: { ...type.caption, color: colors.text2 },
   xMark: { fontSize: 19, lineHeight: 23, color: colors.text1 },
+  postMedia: { borderRadius: radius.md },
   postText: { ...type.body, color: colors.text1 },
-  postDate: { ...type.caption, color: colors.text3 },
+  postDate: { ...type.caption, flex: 1, color: colors.text3 },
   postFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
   cardOwn: { backgroundColor: 'rgba(0,0,0,0.08)', borderColor: 'rgba(0,0,0,0.10)' },
   visualCard: { gap: 0, backgroundColor: colors.surface2 },
@@ -426,7 +422,7 @@ const styles = StyleSheet.create({
   imageOutline: { ...StyleSheet.absoluteFill, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.line1 },
 	providerFallbackCard: { minHeight: 116, gap: space[2], justifyContent: 'center', padding: space[3] },
 	providerFallbackHeader: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
-	providerFallbackName: { ...type.caption, color: colors.text2, fontWeight: '700' },
+	providerFallbackName: { ...type.caption, flexShrink: 1, color: colors.text2, fontWeight: '700' },
 	youTubeFallbackMark: { width: 28, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 7, backgroundColor: '#E32636' },
 	youTubeCard: { width: 300 },
 	youTubeBrand: {
@@ -441,7 +437,7 @@ const styles = StyleSheet.create({
 	  borderColor: 'rgba(255,255,255,0.12)',
 	  backgroundColor: 'rgba(9,9,11,0.68)',
 	},
-	instagramCard: { width: 272, minWidth: 252, maxWidth: 284 },
+	instagramCard: { width: 272, minWidth: 0, maxWidth: '100%' },
 	instagramVideoHero: { aspectRatio: 4 / 5, backgroundColor: '#171215' },
 	instagramPostHero: { aspectRatio: 1, backgroundColor: '#171215' },
 	instagramImageOutline: { borderColor: 'rgba(255,255,255,0.10)' },
@@ -461,7 +457,7 @@ const styles = StyleSheet.create({
 	instagramFallbackCard: { borderColor: 'rgba(216,95,115,0.26)' },
 	instagramFallbackMark: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: 'rgba(216,95,115,0.14)' },
 	instagramFallbackGlyph: { color: '#D85F73', fontSize: 20, lineHeight: 22, fontWeight: '700' },
-	  tikTokCard: { width: 272, minWidth: 252, maxWidth: 284 },
+	  tikTokCard: { width: 272, minWidth: 0, maxWidth: '100%' },
 	  tikTokHero: { aspectRatio: 3 / 4, backgroundColor: '#09090B' },
 	  tikTokPosterFallback: { backgroundColor: '#141418' },
 	  tikTokImageOutline: { borderColor: 'rgba(255,255,255,0.10)' },
@@ -499,7 +495,7 @@ const styles = StyleSheet.create({
   visualTitle: { ...type.bodyMedium, color: colors.text1 },
 	visualDescription: { ...type.caption, color: colors.text2 },
 	visualFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
-  visualSite: { ...type.caption, color: colors.text3 },
+  visualSite: { ...type.caption, flexShrink: 1, color: colors.text3 },
   copy: { gap: 3, padding: space[3] },
   siteRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   site: { ...type.caption, flexShrink: 1, color: colors.text2 },

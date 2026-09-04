@@ -1,10 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"image"
+	"image/png"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeLinkPreviewURLRejectsUnsafeTargets(t *testing.T) {
@@ -258,7 +266,7 @@ func TestRecognizedProviderFallbacksStayHonestAndTyped(t *testing.T) {
 func TestNormalizeProviderLinkPreviewKeepsSafeMetadataAndProviderContract(t *testing.T) {
 	target, _ := url.Parse("https://www.instagram.com/reel/C9x_Ab-1234/")
 	preview := normalizeProviderLinkPreview(target, linkPreview{
-		URL: "https://redirect.example.net/login", Title: "Instagram", Description: "", SiteName: "redirect.example.net",
+		URL: target.String(), Title: "Instagram", Description: "", SiteName: "redirect.example.net",
 		ImageURL: "https://cdn.example.net/poster.jpg",
 	})
 	if preview.URL != target.String() || preview.Kind != "instagram_reel" || preview.SiteName != "Instagram" || preview.Title != "Instagram reel" ||
@@ -302,4 +310,165 @@ func TestParseXEmbedHTMLExtractsPostCopyAndDate(t *testing.T) {
 	if post != "I went on a hike.\n\nWork can be done anywhere." || date != "July 26, 2026" {
 		t.Fatalf("post=%q date=%q", post, date)
 	}
+}
+
+func TestXArticlePreviewUsesPublicMetadataAndExistingArticleContract(t *testing.T) {
+	target, _ := normalizeLinkPreviewURL("https://x.com/i/article/2034593904100618240")
+	requests := 0
+	client := &http.Client{Transport: linkPreviewRoundTrip(func(req *http.Request) (*http.Response, error) {
+		requests++
+		if req.URL.String() != target.String() {
+			t.Fatalf("article used unexpected endpoint %s", req.URL)
+		}
+		return linkPreviewResponse(req, 200, "text/html", `<head><meta property="og:title" content="A practical expansion plan"><meta property="og:description" content="What the pilot taught us."><meta property="og:image" content="https://pbs.twimg.com/media/cover.jpg"><meta name="author" content="Morgan"><meta name="twitter:creator" content="@morgan"><meta property="article:published_time" content="2026-09-04T12:00:00Z"></head><script>throw new Error('must never execute')</script>`), nil
+	})}
+	preview, err := fetchLinkPreviewWithClient(context.Background(), target, client)
+	if err != nil || requests != 1 || preview.Kind != "article" || preview.MediaType != "article" || preview.SiteName != "X" || preview.Title != "A practical expansion plan" || preview.AuthorName != "Morgan" || preview.AuthorHandle != "morgan" || preview.ImageURL != "https://pbs.twimg.com/media/cover.jpg" || preview.PublishedAt == "" {
+		t.Fatalf("preview=%+v requests=%d err=%v", preview, requests, err)
+	}
+	for _, raw := range []string{"https://x.com/i/article/not-numeric", "https://x.com/i/article/123/extra", "https://evil-x.com/i/article/123", "https://x.com/morgan/article/123"} {
+		parsed, _ := url.Parse(raw)
+		if xArticleURL(parsed) {
+			t.Fatalf("recognized unsupported article %s", raw)
+		}
+	}
+}
+
+func TestProviderLoginRedirectOrDifferentContentCannotMasqueradeAsOriginal(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"https://x.com/i/article/123", "https://x.com/i/flow/login"},
+		{"https://x.com/i/article/123", "https://x.com/i/article/456"},
+		{"https://x.com/person/status/123", "https://x.com/person/status/456"},
+		{"https://instagram.com/reel/ABCD1234", "https://elsewhere.example/post"},
+		{"https://youtube.com/watch?v=one", "https://youtube.com/watch?v=two"},
+	} {
+		target, _ := url.Parse(pair[0])
+		final, _ := url.Parse(pair[1])
+		client := &http.Client{Transport: linkPreviewRoundTrip(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/oembed" {
+				return linkPreviewResponse(req, 404, "text/plain", "unavailable"), nil
+			}
+			response := linkPreviewResponse(req, 200, "text/html", `<meta property="og:title" content="Unrelated title"><meta property="og:image" content="https://elsewhere.example/image.png">`)
+			response.Request = &http.Request{URL: final}
+			return response, nil
+		})}
+		got, err := fetchLinkPreviewWithClient(context.Background(), target, client)
+		want, _ := recognizedProviderLinkPreview(target)
+		if err != nil || got != want {
+			t.Fatalf("%s -> %s: got=%+v want=%+v err=%v", pair[0], pair[1], got, want, err)
+		}
+	}
+	target, _ := url.Parse("https://x.com/i/article/123")
+	shell := normalizeProviderLinkPreview(target, linkPreview{URL: target.String(), Title: "Log in to X / X", Description: "Enter your password", ImageURL: "https://x.com/login.png"})
+	if shell.Title != "Article on X" || shell.ImageURL != "" || shell.Description == "Enter your password" {
+		t.Fatalf("login shell reused: %+v", shell)
+	}
+}
+
+func TestProviderFallbackDeadlineLeavesBudgetForHTML(t *testing.T) {
+	target, _ := url.Parse("https://www.youtube.com/watch/?v=123")
+	calls := 0
+	client := &http.Client{Transport: linkPreviewRoundTrip(func(req *http.Request) (*http.Response, error) {
+		calls++
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			t.Fatal("unbounded request")
+		}
+		remaining := time.Until(deadline)
+		if req.URL.Path == "/oembed" {
+			if remaining > linkPreviewProviderTimeout {
+				t.Fatalf("provider has entire budget: %v", remaining)
+			}
+			return nil, context.DeadlineExceeded
+		}
+		if remaining <= linkPreviewProviderTimeout {
+			t.Fatalf("fallback inherited provider cancellation: %v", remaining)
+		}
+		return linkPreviewResponse(req, 200, "text/html", `<meta property="og:title" content="Recovered public metadata">`), nil
+	})}
+	preview, err := fetchLinkPreviewWithClient(context.Background(), target, client)
+	if err != nil || calls != 2 || preview.Title != "Recovered public metadata" || preview.Kind != "youtube_video" {
+		t.Fatalf("preview=%+v calls=%d err=%v", preview, calls, err)
+	}
+}
+
+func TestXPostOptionalImageCannotHoldUsablePostForFullDeadline(t *testing.T) {
+	target, _ := url.Parse("https://x.com/Morgan/status/123")
+	client := &http.Client{Transport: linkPreviewRoundTrip(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Hostname() == "publish.twitter.com" {
+			return linkPreviewResponse(req, 200, "application/json", `{"author_name":"Morgan","author_url":"https://x.com/Morgan","html":"<blockquote><p>Public post copy</p></blockquote>"}`), nil
+		}
+		deadline, ok := req.Context().Deadline()
+		if !ok || time.Until(deadline) > linkPreviewImageEnrichmentTimeout {
+			t.Fatal("optional image has full deadline")
+		}
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	})}
+	start := time.Now()
+	preview, err := fetchLinkPreviewWithClient(context.Background(), target, client)
+	if err != nil || preview.Description != "Public post copy" || preview.ImageURL != "" || time.Since(start) > 2*time.Second {
+		t.Fatalf("usable post delayed/lost: %+v %v %v", preview, err, time.Since(start))
+	}
+}
+
+func TestProviderFallbackRemainsUsefulWhenXArticleDeclinesPublicMetadata(t *testing.T) {
+	target, _ := url.Parse("https://x.com/i/article/123")
+	client := &http.Client{Transport: linkPreviewRoundTrip(func(req *http.Request) (*http.Response, error) {
+		return linkPreviewResponse(req, 403, "text/html", "sign in required"), nil
+	})}
+	preview, err := fetchLinkPreviewWithClient(context.Background(), target, client)
+	if err != nil || preview.Kind != "article" || preview.Title != "Article on X" || preview.URL != target.String() || preview.ImageURL != "" {
+		t.Fatalf("fallback=%+v err=%v", preview, err)
+	}
+}
+
+func TestLinkPreviewYouTubeNonVideoPagesDoNotBecomePlayableCards(t *testing.T) {
+	for _, raw := range []string{"https://youtube.com/", "https://youtube.com/@creator", "https://youtube.com/playlist?list=123"} {
+		target, _ := url.Parse(raw)
+		if kind := linkPreviewKind(target, "website", ""); kind == "youtube_video" {
+			t.Fatalf("%s classified playable", raw)
+		}
+	}
+}
+
+func TestLinkPreviewRasterDimensionsRejectHeaderOnlyAndOversizedImages(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if !linkPreviewImageDimensionsAllowed("image/png", encoded.Bytes()) {
+		t.Fatal("valid small PNG refused")
+	}
+	if linkPreviewImageDimensionsAllowed("image/png", []byte("\x89PNG\r\n\x1a\n")) {
+		t.Fatal("signature-only PNG accepted")
+	}
+	hugeGIF := append([]byte("GIF89a"), []byte{0xff, 0xff, 0xff, 0xff, 0, 0, 0}...)
+	if linkPreviewImageDimensionsAllowed("image/gif", hugeGIF) {
+		t.Fatal("oversized GIF accepted")
+	}
+	if linkPreviewImageDimensionsAllowed("image/webp", []byte("RIFFxxxxWEBPVP8X")) {
+		t.Fatal("signature-only WebP accepted")
+	}
+}
+
+func TestLinkPreviewClientRejectsPrivateRedirectAndDirectDial(t *testing.T) {
+	client := linkPreviewHTTPClient()
+	defer client.CloseIdleConnections()
+	target, _ := url.Parse("http://127.0.0.1/")
+	if err := client.CheckRedirect(&http.Request{URL: target}, nil); err == nil {
+		t.Fatal("private redirect accepted")
+	}
+	request, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, target.String(), nil)
+	if response, err := client.Do(request); err == nil {
+		response.Body.Close()
+		t.Fatal("private dial accepted")
+	}
+}
+
+type linkPreviewRoundTrip func(*http.Request) (*http.Response, error)
+
+func (fn linkPreviewRoundTrip) RoundTrip(req *http.Request) (*http.Response, error) { return fn(req) }
+func linkPreviewResponse(req *http.Request, status int, mime, body string) *http.Response {
+	return &http.Response{StatusCode: status, Status: fmt.Sprint(status), Header: http.Header{"Content-Type": []string{mime}}, Body: io.NopCloser(strings.NewReader(body)), Request: req}
 }

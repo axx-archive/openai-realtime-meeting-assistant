@@ -3,6 +3,7 @@ import { File } from "expo-file-system";
 import { API_BASE_URL, NATIVE_CLIENT_HEADER } from "../config";
 import type {
   BoardResponse,
+  MemoryInspectResponse,
   BoardCardInput,
   ConsentDecisionResponse,
   ConsentDisposition,
@@ -48,6 +49,8 @@ import type {
   StudioProjectKind,
   StudioProjectResponse,
   StudioProjectsResponse,
+  StudioWorkFeedbackInput,
+  StudioWorkFeedbackResponse,
 } from "./types";
 import {
   buildConsentDecision,
@@ -822,6 +825,16 @@ export const api = {
     });
   },
 
+  memoryInspect(sessionToken: string, filter: { subject?: string; kinds?: string; person?: string } = {}): Promise<MemoryInspectResponse> {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(filter)) if (value?.trim()) params.set(key, value.trim());
+    return request(`/assistant/memory/inspect?${params.toString()}`, { sessionToken });
+  },
+
+  correctMemory(sessionToken: string, id: string, correction: string): Promise<{ ok: boolean; id: string; status?: string }> {
+    return request('/assistant/memory/inspect/action', { method: 'POST', sessionToken, body: { id, action: 'correct', correction } });
+  },
+
   memory(sessionToken: string): Promise<{ ok: boolean; memory: unknown }> {
     return request("/assistant/memory", { sessionToken });
   },
@@ -1033,6 +1046,17 @@ export const api = {
     const normalizedId = id.trim();
     if (!normalizedId) return Promise.reject(new Error('That Studio project is invalid.'));
     return request<StudioProjectResponse>(`/api/studio-projects/v1?id=${encodeURIComponent(normalizedId)}`, {
+      sessionToken,
+    });
+  },
+
+  studioWorkFeedback(
+    sessionToken: string,
+    body: { id: string; expectedRevision: number; feedback: StudioWorkFeedbackInput },
+  ): Promise<StudioWorkFeedbackResponse> {
+    return request<StudioWorkFeedbackResponse>('/api/studio-projects/v1', {
+      method: 'PATCH',
+      body,
       sessionToken,
     });
   },

@@ -51,8 +51,8 @@ func TestPD1PrimaryInformationArchitectureIsExactAndOrdered(t *testing.T) {
 		`data-pd1-destination="Home" aria-label="Home" aria-current="page" tabindex="0"`,
 		`data-pd1-destination="Video" aria-label="Rooms"`,
 		`data-pd1-destination="Conversations" aria-label="Conversations"`,
-		// Wave 11 D1: the destination reads "Packaging Studio"; the id/route stay "Work".
-		`data-pd1-destination="Work" aria-label="Packaging Studio"`,
+		// STRIDE 3 presents the durable outcome destination as Work.
+		`data-pd1-destination="Work" aria-label="Work"`,
 		`data-pd1-destination="Drive" aria-label="Drive"`,
 		`const PD1_DESTINATIONS = Object.freeze(['Home', 'Video', 'Conversations', 'Work', 'Drive'])`,
 		`aria-label="Application navigation"`,

@@ -125,6 +125,9 @@ func (e *goalEngine) prepareGoalRoute(plan *goalPlan, parentID string) error {
 		return fmt.Errorf("goal plan is unavailable")
 	}
 	plan.routeVerified = false
+	if err := e.businessExecutionCompatibilityError(plan, parentID); err != nil {
+		return err
+	}
 	// Plain historical goals are allowed to remain visible but use only the
 	// unavailable stub. They carry no persisted tool/process authority.
 	if strings.TrimSpace(plan.ToolTemplate) == "" && strings.TrimSpace(plan.ProcessID) == "" && plan.RouteReceipt == nil {
@@ -721,6 +724,9 @@ func (app *kanbanBoardApp) verifyGoalChildReservation(child meetingMemoryEntry) 
 }
 
 func (app *kanbanBoardApp) verifyGoalChildRouteState(child meetingMemoryEntry, allowReserved bool) error {
+	if err := businessExecutionMetadataError(child.Metadata); err != nil {
+		return err
+	}
 	metadata := child.Metadata
 	parentID := strings.TrimSpace(metadata["goalParentId"])
 	if app == nil || parentID == "" {

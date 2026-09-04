@@ -43,12 +43,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // and remain the fallback if this bundle is ever rejected.
       // Regenerate both with `npm run brand:regen` from the repo root.
       icon: './assets/Stride.icon',
-      // Build 76 makes Work a first-class mobile destination and gives Meet an
-      // unmistakable camera mark while retaining the native private Realtime
-      // 2.1 voice-first surface, authenticated Studio downloads, and exact
-      // Scout-thread continuity across navigation.
+      // Build 77 adds the operating brief, exact-result human judgment,
+      // source-backed memory inspection and responsive rich-media cards.
       // Pin the app and ReplayKit extension to the same release.
-      buildNumber: '76',
+      buildNumber: '77',
       // Public team identifier only; EAS continues to own the signing
       // certificates and provisioning profiles.
       appleTeamId: '73PT36P58W',

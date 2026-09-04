@@ -48,7 +48,7 @@ export const studioProjectFilters: ReadonlyArray<{ id: StudioProjectFilter; labe
 ];
 
 export function studioProjectKindLabel(kind: StudioProjectKind): string {
-  return kind === 'presentation' ? 'Presentation' : 'Research';
+  return ({ presentation: 'Presentation', document: 'Research', research: 'Research', image: 'Image', sheet: 'Spreadsheet', artifact: 'Artifact' })[kind] || 'Work';
 }
 
 export function studioProjectStatusLabel(status: StudioProjectStatus): string {

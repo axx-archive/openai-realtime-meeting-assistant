@@ -106,7 +106,7 @@ func TestIndexWorkHubIdentitySwitchResetsProjects(t *testing.T) {
 	requireWorkHubFixMarkers(t, "loadStudioProjects epoch fence", load, []string{
 		"const epoch = studioProjectsLoadEpoch",
 		"if (epoch !== studioProjectsLoadEpoch) return",
-		"if (epoch === studioProjectsLoadEpoch) studioProjectsError = error?.message || 'Packaging Studio could not be loaded'", // Wave 11 D1
+		"if (epoch === studioProjectsLoadEpoch) studioProjectsError = error?.message || 'Work could not be loaded'", // Wave 11 D1
 		"if (epoch === studioProjectsLoadEpoch) {",
 	})
 	if strings.Count(load, "if (epoch !== studioProjectsLoadEpoch) return") < 3 {

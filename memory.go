@@ -433,6 +433,12 @@ var lowQualityTranscriptPhrases = map[string]struct{}{
 }
 
 type meetingMemoryStore struct {
+	// Request-local read evidence for sparse children whose raw source is outside
+	// a bounded projection. Never persisted or populated on the authoritative store.
+	authorizedSparseDigests map[string]string
+	// Sparse recovery indexes include withheld outputs so recovery cannot recreate them.
+	sparseRecoveryRooms map[string]*meetingDigestSparseRoomIndex
+
 	// mu is an RWMutex (Wave 8 D10): writers and index maintenance take the
 	// exclusive lock exactly as before; the lexical search lane takes the read
 	// lock and scores entries in place instead of cloning the whole store per
@@ -767,6 +773,7 @@ func (store *meetingMemoryStore) reloadVisibleMemoryGenerationLocked() error {
 }
 
 func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
+	store.sparseRecoveryRooms = nil
 	store.artifactIndexes = nil
 	store.entryIndexByID = map[string]int{}
 	store.artifactIndexByID = map[string]int{}
@@ -787,6 +794,7 @@ func (store *meetingMemoryStore) rebuildMeetingEntryIndexesLocked() {
 }
 
 func (store *meetingMemoryStore) indexMeetingEntryLocked(index int, entry meetingMemoryEntry) {
+	store.indexMeetingDigestSparseEntryLocked(index, entry)
 	if strings.TrimSpace(entry.ID) != "" {
 		if store.entryIndexByID == nil {
 			store.entryIndexByID = map[string]int{}
@@ -1438,7 +1446,7 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataIfHeaderToolPreimag
 	return store.updateOSArtifactWithMetadataExpected(&expected, nil, strings.TrimSpace(expectedSemanticPostimage), strings.TrimSpace(expectedFullPreimage), strings.TrimSpace(expectedStoreGeneration), id, title, text, updatedBy, metadataUpdates)
 }
 
-func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedMetadata map[string]string, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (result meetingMemoryEntry, changed bool, resultErr error) {
+func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *ArtifactAuthorizationHeader, expectedMetadata map[string]string, expectedPostimage, expectedFullPreimage, expectedStoreGeneration string, id string, title string, text string, updatedBy string, metadataUpdates map[string]string, feedbackFences ...*workFeedbackTerminalFence) (result meetingMemoryEntry, changed bool, resultErr error) {
 	if store == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("memory store is unavailable")
 	}
@@ -1452,6 +1460,13 @@ func (store *meetingMemoryStore) updateOSArtifactWithMetadataExpected(expected *
 	}
 
 	store.mu.Lock()
+	for _, fence := range feedbackFences {
+		if fence != nil && !store.workFeedbackTerminalFenceCurrentLocked(fence) {
+			store.mu.Unlock()
+			return meetingMemoryEntry{}, false, errPriorWorkFeedbackChanged
+		}
+	}
+
 	defer func() {
 		store.mu.Unlock()
 		if resultErr == nil && changed && result.Kind == meetingMemoryKindOSArtifact && store.workArtifactMutationHook != nil {
@@ -2332,7 +2347,7 @@ func (store *meetingMemoryStore) metadataSnapshotOfKind(kind string, limit int) 
 	// neither the body copy nor that UTF-8/truncation work.
 	visible := make([]meetingMemoryEntry, 0, len(store.entries))
 	for _, entry := range store.entries {
-		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(entry) {
+		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || (memoryEntryHiddenFromRecall(entry) || !store.meetingDigestSparseCurrentLocked(entry, nil)) {
 			continue
 		}
 		if kind != "" && entry.Kind != kind {
@@ -2598,11 +2613,11 @@ func stripOversizeBody(entry meetingMemoryEntry) meetingMemoryEntry {
 func (store *meetingMemoryStore) visibleEntriesLocked() []meetingMemoryEntry {
 	visible := make([]meetingMemoryEntry, 0, len(store.entries))
 	for _, entry := range store.entries {
-		hidden := memoryEntryHiddenFromRecall(entry)
+		hidden := (memoryEntryHiddenFromRecall(entry) || !store.meetingDigestSparseCurrentLocked(entry, nil))
 		if hidden && store.includeRetainedTranscripts && entry.Kind == meetingMemoryKindTranscript && strings.EqualFold(strings.TrimSpace(entry.Metadata[retainedRawTranscriptMetadataKey]), "true") {
 			hidden = false
 		}
-		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || hidden {
+		if entry.Kind == meetingMemoryKindSlopPass || entry.Kind == meetingMemoryKindSignal || entry.Kind == meetingMemoryKindWorkReview || hidden {
 			continue
 		}
 		visible = append(visible, stripOversizeBody(entry))
@@ -2638,7 +2653,7 @@ func (store *meetingMemoryStore) snapshotForMeeting(meetingID string, limit int)
 			store.meetingEntryVisitHook()
 		}
 		stored := store.entries[index]
-		if strings.TrimSpace(stored.Metadata["meetingId"]) != meetingID || stored.Kind == meetingMemoryKindSlopPass || stored.Kind == meetingMemoryKindSignal || memoryEntryHiddenFromRecall(stored) {
+		if strings.TrimSpace(stored.Metadata["meetingId"]) != meetingID || stored.Kind == meetingMemoryKindSlopPass || stored.Kind == meetingMemoryKindSignal || (memoryEntryHiddenFromRecall(stored) || !store.meetingDigestSparseCurrentLocked(stored, nil)) {
 			continue
 		}
 		entries = append(entries, stripOversizeBody(stored))
@@ -2756,7 +2771,7 @@ func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meeting
 		matched := make([]meetingMemoryEntry, 0, limit)
 		for index := len(store.entries) - 1; index >= 0 && len(matched) < limit; index-- {
 			entry := store.entries[index]
-			if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
+			if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) && store.meetingDigestSparseCurrentLocked(entry, nil) {
 				matched = append(matched, cloneMemoryEntry(entry))
 			}
 		}
@@ -2771,7 +2786,7 @@ func (store *meetingMemoryStore) entriesOfKind(kind string, limit int) []meeting
 		// entriesOfKind feeds artifact/model/worker lanes as well as maintenance
 		// callers. Release canaries are visible only through the dedicated,
 		// authenticated exact-scope probe reader.
-		if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) {
+		if entry.Kind == kind && !memoryEntryIsMediaSoakCanary(entry) && store.meetingDigestSparseCurrentLocked(entry, nil) {
 			matched = append(matched, entry)
 		}
 	}
@@ -3211,6 +3226,13 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
+	return store.upsertDigestLocked(kind, key, text, metadata, false)
+}
+
+// Caller holds store.mu; sparse recovery additionally validates source revisions
+// under that same lock before the durable digest write.
+func (store *meetingMemoryStore) upsertDigestLocked(kind, key, text string, metadata map[string]string, forceDurable bool) (meetingMemoryEntry, error) {
+
 	// Mint a unique id under the lock so the seen-map guard is race-free.
 	id := fmt.Sprintf("%s-%s-%d", kind, key, time.Now().UnixNano())
 	for suffix := 1; ; suffix++ {
@@ -3281,7 +3303,7 @@ func (store *meetingMemoryStore) upsertDigest(kind string, key string, text stri
 	store.seen[id] = struct{}{}
 
 	var err error
-	if len(superseded) == 0 {
+	if len(superseded) == 0 && !forceDurable {
 		err = store.appendEntryLineLocked(entry)
 	} else {
 		err = store.rewriteLocked(true)
@@ -3413,7 +3435,7 @@ func (store *meetingMemoryStore) latestDigestPerMeeting() map[string]meetingMemo
 			continue
 		}
 		entry := store.entries[index]
-		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) || meetingDigestIsSparse(entry) {
 			continue
 		}
 		if digestEntryKey(entry) != key || key == "" {
@@ -3437,7 +3459,7 @@ func (store *meetingMemoryStore) currentDigest(kind, key string) (meetingMemoryE
 		return meetingMemoryEntry{}, false
 	}
 	entry := store.entries[index]
-	if entry.Kind != kind || digestEntryKey(entry) != key || !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+	if entry.Kind != kind || digestEntryKey(entry) != key || !digestEntryCurrent(entry) || (memoryEntryHiddenFromRecall(entry) || !store.meetingDigestSparseCurrentLocked(entry, nil)) {
 		return meetingMemoryEntry{}, false
 	}
 	return cloneMemoryEntry(entry), true
@@ -3566,7 +3588,7 @@ func (store *meetingMemoryStore) digestsInRange(start time.Time, end time.Time) 
 		if entry.Kind != meetingMemoryKindDayDigest && entry.Kind != meetingMemoryKindMeetingDigest {
 			continue
 		}
-		if !digestEntryCurrent(entry) || memoryEntryHiddenFromRecall(entry) {
+		if (meetingDigestIsSparse(entry) && store.authorizedSparseDigests[entry.ID] != meetingDigestSparseReadToken(entry)) || !digestEntryCurrent(entry) || (memoryEntryHiddenFromRecall(entry) || !store.meetingDigestSparseCurrentLocked(entry, nil)) {
 			continue
 		}
 		spanStart, spanEnd := digestSpan(entry, location)
@@ -4054,6 +4076,9 @@ func (store *meetingMemoryStore) recoverJournaledMemoryDeletionsLocked() error {
 // deliberately absent: decision statements ARE knowledge and must ground
 // Scout's answers.
 func isUIStateMemoryKind(kind string) bool {
+	if kind == meetingMemoryKindWorkReview {
+		return true
+	}
 	return kind == meetingMemoryKindScoutChat || kind == meetingMemoryKindAgentMindPosition || kind == meetingMemoryKindScoutAttention || kind == meetingMemoryKindConversationContinuity || kind == meetingMemoryKindCodexProposal || kind == meetingMemoryKindMissionInsight || kind == meetingMemoryKindDecisionPass || kind == meetingMemoryKindPackage || kind == meetingMemoryKindDealRoom || kind == meetingMemoryKindSlopPass || kind == meetingMemoryKindSignal || kind == meetingMemoryKindDayDigestPass || kind == meetingMemoryKindChannelDigestPass || kind == meetingMemoryKindLedgerEvent || kind == meetingMemoryKindLedgerPass || kind == meetingMemoryKindDeadLetter || kind == meetingMemoryKindChatDelete || kind == meetingMemoryKindAmbientReplayPromotion || kind == meetingMemoryKindPackagingIntake || kind == meetingMemoryKindScoutFollowupPass || kind == meetingMemoryKindScoutFollowupState
 }
 

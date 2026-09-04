@@ -668,6 +668,8 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 	prefix := agent.name + "@"
 	checkpoints, held, blocked, invalid, firstRun, anchorable := 0, 0, 0, 0, 0, 0
 	continuityScopes := make([]map[string]any, 0)
+	sparseScopes := 0
+	sparseCounts := map[string]int{}
 	for key, checkpoint := range state.Windows {
 		if key != agent.name && !strings.HasPrefix(key, prefix) {
 			continue
@@ -686,6 +688,21 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 			(strings.TrimSpace(checkpoint.InputKind) != "" && checkpoint.InputKind != agent.inputKind) ||
 			(strings.TrimSpace(checkpoint.ArtifactKind) != "" && checkpoint.ArtifactKind != agent.artifactKind) ||
 			(strings.TrimSpace(checkpoint.CursorMetadataKey) != "" && checkpoint.CursorMetadataKey != agent.cursorMetadataKey)
+		if agent.name == meetingDigestAgentName && !contractInvalid && checkpoint.WindowID == "" && checkpoint.BaselineID == "" {
+			recovery, active, loadErr := loadMeetingDigestSparseState(app.meetingDigestSparsePath(expectedRoom), expectedRoom)
+			if loadErr != nil {
+				invalid++
+				continuityScopes = append(continuityScopes, map[string]any{"blockedReason": "digest_coverage_checkpoint_invalid"})
+				continue
+			}
+			if active {
+				sparseScopes++
+				for _, ref := range recovery.Sources {
+					sparseCounts[ref.Status]++
+				}
+				continue
+			}
+		}
 		reason := strings.TrimSpace(checkpoint.BlockedReason)
 		// A blocked scope is not necessarily stuck: one this worker has never
 		// produced for, whose block only means "I cannot resolve where to
@@ -749,6 +766,14 @@ func ambientWorkerCheckpointDiagnostics(app *kanbanBoardApp, agent ambientAgentC
 		"blockedAnchorableScopes":  anchorable,
 		"invalidScopeCount":        invalid,
 		"ambientContinuityHealthy": invalid == 0 && blocked == 0,
+	}
+	if sparseScopes > 0 {
+		out["sparseCoverageScopes"] = sparseScopes
+		out["sparseCoverageCounts"] = sparseCounts
+		out["coverageStatus"] = "partial_source_coverage"
+		if sparseCounts["needs_attention"] > 0 {
+			out["coverageStatus"] = "source_needs_attention"
+		}
 	}
 	if firstRun > 0 || agent.firstRunAnchor {
 		// Scopes the worker anchored instead of failing closed

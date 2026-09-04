@@ -826,6 +826,7 @@ func (app *kanbanBoardApp) agentThreadProviderContext(ctx context.Context, threa
 			return AgentJobContext{}, sourceErr
 		}
 		base = appendUniqueFileContextEntries(sourceEntries, base)
+		base = appendUniqueFileContextEntries(app.priorWorkFeedbackContext(ctx, thread), base)
 	}
 	context := AgentJobContext{Memory: base}
 	refs := decodeAssistantContextRefs(metadata["contextRefs"])

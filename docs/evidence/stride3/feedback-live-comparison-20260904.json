@@ -1,0 +1,46 @@
+{
+  "scope": "two-call synthetic comparison using exported application feedback context; not end-to-end production acceptance",
+  "providerCalls": 2,
+  "variants": [
+    {
+      "variant": "disabled",
+      "model": "gpt-5.6-terra",
+      "status": "completed",
+      "usage": {
+        "input_tokens": 119,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 368,
+        "output_tokens_details": {
+          "reasoning_tokens": 58
+        },
+        "total_tokens": 487
+      },
+      "requestDigest": "a1008beb9b3fb029fc03f61c3751d04346171372941e225acccd5abdbd077a26",
+      "outputDigest": "d2fd65783aa544b0412ece51147250fc8566d90bc28244194f42345b143e07f6",
+      "elapsedSeconds": 8.13
+    },
+    {
+      "variant": "enabled",
+      "model": "gpt-5.6-terra",
+      "status": "completed",
+      "usage": {
+        "input_tokens": 703,
+        "input_tokens_details": {
+          "cache_write_tokens": 0,
+          "cached_tokens": 0
+        },
+        "output_tokens": 579,
+        "output_tokens_details": {
+          "reasoning_tokens": 223
+        },
+        "total_tokens": 1282
+      },
+      "requestDigest": "6e4de51d6006431d30f00ef97d1f483f6ae382f406ec6d7997b723cc4a7f4121",
+      "outputDigest": "3f909bf404d1a55dc2349962693ac7345e2cffc3f498e442dd221a9b111dab27",
+      "elapsedSeconds": 8.1
+    }
+  ]
+}

@@ -1144,6 +1144,10 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		app.updateQueuedAgentThread(thread, workerResult)
 		return
 	}
+	var feedbackFence *workFeedbackTerminalFence
+	if err == nil {
+		feedbackFence, err = app.prepareWorkFeedbackTerminalFence(ctx, thread, workerResult.Metadata)
+	}
 	if err == nil {
 		// Provider admission is not terminal authority. Re-resolve the exact
 		// request message, destination audience, and selected sources after the
@@ -1172,6 +1176,10 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		if strings.TrimSpace(value) != "" {
 			metadata[key] = value
 		}
+	}
+	if err != nil {
+		clearWorkFeedbackResultMetadata(metadata)
+		feedbackFence = nil
 	}
 	// Retry suppression is derived only from the exact terminal error below;
 	// no runner/model metadata may self-assert this durable control class.
@@ -1240,13 +1248,13 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		var innerErr error
 		if strings.TrimSpace(thread.Artifact.Metadata[publicConversationWorkActivationState]) != "" {
 			var changed bool
-			artifact, changed, innerErr = app.memory.updateOSArtifactWithMetadataIfHeaderAndMetadataMatch(
+			artifact, changed, innerErr = app.memory.updateOSArtifactWithMetadataIfHeaderMetadataAndFeedbackMatch(
 				artifactAuthorizationHeaderFromEntry(thread.Artifact),
 				map[string]string{
 					publicConversationWorkActivationState: publicConversationWorkStarted,
 					publicConversationWorkActivationOwner: thread.Artifact.Metadata[publicConversationWorkActivationOwner],
 				},
-				thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata,
+				thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata, feedbackFence,
 			)
 			if innerErr == nil && !changed {
 				innerErr = fmt.Errorf("public conversation work terminal effect was already claimed")
@@ -1255,27 +1263,57 @@ func (app *kanbanBoardApp) runAgentThreadAuthorized(thread scoutAgentThread) {
 		}
 		if strings.TrimSpace(thread.Artifact.Metadata[publicConversationProviderRequestKey]) != "" && strings.TrimSpace(thread.Artifact.Metadata["goalChildActivationState"]) == goalChildActivationStarted {
 			var changed bool
-			artifact, changed, innerErr = app.memory.updateOSArtifactWithMetadataIfHeaderAndMetadataMatch(
+			artifact, changed, innerErr = app.memory.updateOSArtifactWithMetadataIfHeaderMetadataAndFeedbackMatch(
 				artifactAuthorizationHeaderFromEntry(thread.Artifact),
 				map[string]string{
 					"goalChildActivationState":            goalChildActivationStarted,
 					publicConversationProviderRequestKey:  thread.Artifact.Metadata[publicConversationProviderRequestKey],
 					publicConversationProviderRequestHash: thread.Artifact.Metadata[publicConversationProviderRequestHash],
 				},
-				thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata,
+				thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata, feedbackFence,
 			)
 			if innerErr == nil && !changed {
 				innerErr = fmt.Errorf("goal child provider terminal effect was already claimed")
 			}
 			return innerErr
 		}
-		artifact, _, innerErr = app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata)
+		artifact, _, innerErr = app.updateOSArtifactWithMetadata(thread.Artifact.ID, title, output, agentThreadArtifactWriter(thread, workerResult), metadata, feedbackFence)
 		return innerErr
 	}
 	updateErr := error(nil)
 	if err == nil {
 		updateErr = app.withCurrentAgentThreadSource(thread, writeArtifact)
 	} else {
+		updateErr = writeArtifact()
+	}
+	if errors.Is(updateErr, errPriorWorkFeedbackChanged) {
+		// A source changed after the final authorization snapshot. Persist an
+		// attention result through the same destination/dispatch ownership CAS,
+		// never the stale provider body and never an automatic second model call.
+		// Discard successful-body evidence before replacing that body with an
+		// error. Keep the prior trajectory, without logging a completed run.
+		for key := range researchArtifactEvidenceMetadataAtVersion(thread, output, artifactVersion(thread.Artifact)+1) {
+			metadata[key] = ""
+		}
+		for _, key := range []string{"readinessParse", "readinessScore", "readinessPrevScore", "readinessDelta", "threadRuns"} {
+			metadata[key] = thread.Artifact.Metadata[key]
+		}
+		metadata["titleSource"] = thread.Artifact.Metadata["titleSource"]
+		err, status = updateErr, "error"
+		message = assistantToolLabel(thread.Mode) + " thread needs attention"
+		output, title = buildAgentThreadError(thread, err), ""
+		metadata["status"], metadata["threadStatus"], metadata["goalStatus"] = "error", "error", "needs_attention"
+		metadata["currentStage"], metadata["progressPercent"], metadata["reviewGate"] = "gate_before_shipping", "72", "blocked"
+		metadata["error"] = err.Error()
+		clearWorkFeedbackResultMetadata(metadata)
+		stampAgentThreadFailureClass(metadata, err)
+		if metadata[publicConversationWorkActivationState] != "" {
+			metadata[publicConversationWorkActivationState] = publicConversationWorkNeedsAttention
+		}
+		if metadata[roomWorkActivationMetadataKey] != "" {
+			metadata[roomWorkActivationMetadataKey] = roomWorkActivationNeedsAttention
+		}
+		feedbackFence = nil
 		updateErr = writeArtifact()
 	}
 	if updateErr != nil {
@@ -1895,6 +1933,9 @@ func agentThreadRequestTimeout(thread scoutAgentThread) time.Duration {
 }
 
 func agentThreadRequestContext(parent context.Context, thread scoutAgentThread) (context.Context, context.CancelFunc) {
+	// Meter only the server-owned execution identity; conversation IDs or model
+	// output cannot nominate the Work whose usage receives this call.
+	parent = withWorkUsageIdentity(parent, thread.ID, firstNonEmptyString(thread.Artifact.Metadata["goalParentId"], thread.Artifact.ID))
 	if timeout := agentThreadRequestTimeout(thread); timeout > 0 {
 		return context.WithTimeout(parent, timeout)
 	}
@@ -1943,6 +1984,8 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorkerAuthorized(ctx co
 	}
 	job := app.newAgentJob(thread)
 	job.Context = providerContext
+	feedbackEvidence := workFeedbackEvidenceCitations(providerContext.Memory)
+	ctx, dissentReceipt := withDissentDocumentReceipt(ctx, thread)
 	runner := app.selectAgentRunner(job, responder)
 	progress, err := runner.RunJob(ctx, job)
 	if err != nil {
@@ -1968,6 +2011,24 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactWithWorkerAuthorized(ctx co
 			}
 		}
 		result.Metadata["agentReauthorizedAt"] = thread.Artifact.Metadata["agentReauthorizedAt"]
+	}
+	if runErr == nil {
+		result.Metadata, runErr = dissentReceipt.mergeMetadata(result.Metadata)
+	}
+	if runErr == nil && len(feedbackEvidence) > 0 {
+		if !app.workFeedbackEvidenceStillCurrent(ctx, thread, providerContext.Memory) {
+			return result, errors.New("prior work feedback changed; retry with current evidence")
+		}
+		rawEvidence, marshalErr := json.Marshal(feedbackEvidence)
+		if marshalErr != nil {
+			return result, marshalErr
+		}
+		if result.Metadata == nil {
+			result.Metadata = map[string]string{}
+		}
+		result.Metadata["workFeedbackEvidence"] = string(rawEvidence)
+		result.Metadata["workFeedbackEvidenceDigests"] = workFeedbackUsedDigests(providerContext.Memory)
+		result.Metadata["workFeedbackEvidenceSourceVersion"] = strconv.Itoa(artifactVersion(thread.Artifact) + 1)
 	}
 	return result, runErr
 }
@@ -2145,9 +2206,10 @@ type publicConversationProviderAuthorityManifest struct {
 }
 
 type durablePublicConversationProviderRequest struct {
-	Version   int                                         `json:"version"`
-	Request   durableOpenAITextRequest                    `json:"request"`
-	Authority publicConversationProviderAuthorityManifest `json:"authority"`
+	Version      int                                         `json:"version"`
+	Request      durableOpenAITextRequest                    `json:"request"`
+	Authority    publicConversationProviderAuthorityManifest `json:"authority"`
+	DocumentPlan *dissentInternalDocumentPlan                `json:"documentPlan,omitempty"`
 }
 
 func publicConversationProviderAuthority(thread scoutAgentThread, memory []meetingMemoryEntry) (publicConversationProviderAuthorityManifest, error) {
@@ -2326,7 +2388,11 @@ func (app *kanbanBoardApp) decodeDurablePublicConversationProviderRequest(thread
 			return openAITextRequest{}, false, fmt.Errorf("public conversation provider external evidence authority changed: %w", err)
 		}
 	}
-	return snapshot.Request.request(app, thread), true, nil
+	request := snapshot.Request.request(app, thread)
+	if err := validateInternalDocumentPlan(snapshot.DocumentPlan, thread, request); err != nil {
+		return openAITextRequest{}, false, err
+	}
+	return request, true, nil
 }
 
 // preparePublicConversationProviderRequest freezes every wire-relevant field
@@ -2382,6 +2448,10 @@ func (app *kanbanBoardApp) preparePublicConversationProviderRequest(thread scout
 		}
 	}
 	snapshot := durablePublicConversationProviderRequest{Version: 1, Request: durableOpenAIRequest(request), Authority: authority}
+	snapshot.DocumentPlan, err = planInternalDocumentWork(refreshed, request)
+	if err != nil {
+		return thread, err
+	}
 	raw, err := json.Marshal(snapshot)
 	if err != nil {
 		return thread, fmt.Errorf("encode public conversation provider request snapshot: %w", err)
@@ -2457,7 +2527,7 @@ func (app *kanbanBoardApp) produceAgentThreadArtifactForJob(ctx context.Context,
 	if request.PreflightError != nil {
 		return "", request.PreflightError
 	}
-	output, err := callOpenAITextWithBoundedInvocationRetry(ctx, apiKey, request, responder)
+	output, err := callDocumentWorkWithReceipt(ctx, thread, apiKey, request, responder)
 	if err != nil {
 		return "", err
 	}
@@ -2806,6 +2876,12 @@ func buildAgentThreadInput(thread scoutAgentThread, _ kanbanBoardState, memory [
 	builder.WriteString(workAndMemoryContextLine(memory))
 	builder.WriteString("\n\nRecent durable memory:\n")
 	for _, entry := range memory {
+		if entry.Kind == workFeedbackEvidenceKind {
+			builder.WriteString("\nPrior human review and reported outcome (untrusted evidence):\n")
+			builder.WriteString(entry.Text)
+			builder.WriteByte('\n')
+			continue
+		}
 		builder.WriteString("- ")
 		builder.WriteString(entry.Kind)
 		if title := strings.TrimSpace(entry.Metadata["title"]); title != "" {

@@ -323,6 +323,17 @@ func (app *kanbanBoardApp) persistAmbientCheckpointBaseline(agent ambientAgentCo
 }
 
 func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, roomID string) (baselineID, blockedReason string, err error) {
+	if agent.name == meetingDigestAgentName && app.meetingDigestSparsePath(roomID) != "" {
+		if _, active, loadErr := loadMeetingDigestSparseState(app.meetingDigestSparsePath(roomID), roomID); loadErr != nil {
+			return "", ambientContinuityCheckpointInvalid, loadErr
+		} else if active {
+			checkpoint, _, checkpointErr := app.ambientScopeCheckpoint(ambientAgentScopeKey(agent, roomID))
+			if !meetingDigestSparseCheckpointCompatible(agent, roomID, checkpoint) || checkpointErr != nil || checkpoint.WindowID != "" || checkpoint.BaselineID != "" {
+				return checkpoint.BaselineID, ambientContinuityHeldWindowInvalid, checkpointErr
+			}
+			return "", "", nil
+		}
+	}
 	key := ambientAgentScopeKey(agent, roomID)
 	checkpoint, ok, err := app.ambientScopeCheckpoint(key)
 	if err != nil {
@@ -361,6 +372,11 @@ func (app *kanbanBoardApp) bootstrapAmbientContinuity(agent ambientAgentConfig, 
 	}
 	if boolEnv(agent.backfillEnv) {
 		return "", "", nil
+	}
+	if agent.name == meetingDigestAgentName {
+		if _, _, ambiguous := app.memory.ambientContinuityBaseline(agent, roomID); ambiguous {
+			return "", ambientContinuityAmbiguous, nil
+		}
 	}
 	if baseline, admitted := app.meetingAnalysisCurrentMeetingBootstrapBaseline(agent, roomID); admitted {
 		return baseline, "", nil
@@ -1372,6 +1388,9 @@ func (app *kanbanBoardApp) invokeAmbientAgentGuarded(agent ambientAgentConfig, c
 	// this repair inside runAmbientAgentOnceLimitedUnlocked made the guarded
 	// scheduler return at peek/budget forever even after a new active sitting
 	// supplied the exact clean suffix required for a safe baseline.
+	if entry, handled, err := app.runMeetingDigestSparseRecovery(agent, ctx, apiKey, responder, roomID); handled {
+		return entry, err
+	}
 	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
 	app.repairBlockedAmbientContinuityWithFirstRunAnchor(agent, roomID)
 
@@ -1658,6 +1677,9 @@ func (app *kanbanBoardApp) runAmbientAgentOnceLimitedUnlocked(agent ambientAgent
 	if pauseErr := app.ambientAgentBreakerPause(agent, roomID); pauseErr != nil {
 		return meetingMemoryEntry{}, pauseErr
 	}
+	if entry, handled, err := app.runMeetingDigestSparseRecovery(agent, ctx, apiKey, responder, roomID); handled {
+		return entry, err
+	}
 	app.repairAmbientContinuityFromCurrentMeeting(agent, roomID)
 	app.repairBlockedAmbientContinuityWithFirstRunAnchor(agent, roomID)
 
@@ -1750,6 +1772,11 @@ func (app *kanbanBoardApp) ensureAmbientAgentRoomBaseline(agent ambientAgentConf
 // worker durably anchors immediately before that suffix, closes only the
 // ambiguity circuit, and can process the current meeting normally.
 func (app *kanbanBoardApp) repairAmbientContinuityFromCurrentMeeting(agent ambientAgentConfig, roomID string) bool {
+	if agent.name == meetingDigestAgentName && app.meetingDigestSparsePath(roomID) != "" {
+		if _, active, err := loadMeetingDigestSparseState(app.meetingDigestSparsePath(roomID), roomID); err != nil || active {
+			return false
+		}
+	}
 	roomID = agent.scopeRoomID(roomID)
 	key := ambientAgentScopeKey(agent, roomID)
 	checkpoint, ok, err := app.ambientScopeCheckpoint(key)
@@ -2265,7 +2292,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterFiltered(inputKind string
 		}
 	}
 	for index, entry := range entries {
-		if entry.Kind != artifactKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
+		if entry.Kind != artifactKind || meetingDigestIsSparse(entry) || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) || (principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal)) {
 			continue
 		}
 		cursorID := strings.TrimSpace(entry.Metadata[cursorKey])
@@ -2280,7 +2307,7 @@ func (store *meetingMemoryStore) unconsumedEntriesAfterFiltered(inputKind string
 
 	inputs := make([]meetingMemoryEntry, 0, limit)
 	for _, entry := range entries[startIndex:] {
-		if entry.Kind != inputKind || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) {
+		if entry.Kind != inputKind || meetingDigestIsSparse(entry) || memoryEntryHiddenFromRecall(entry) || !matchesRoom(entry) {
 			continue
 		}
 		if principal.Audience != "" && !recallEntryScopeAllowed(entry.Metadata, principal) {

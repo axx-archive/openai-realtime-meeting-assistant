@@ -796,7 +796,7 @@ func (app *kanbanBoardApp) updateOSArtifact(id string, title string, text string
 	return entry, changed, err
 }
 
-func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string) (meetingMemoryEntry, bool, error) {
+func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string, text string, updatedBy string, metadataUpdates map[string]string, feedbackFences ...*workFeedbackTerminalFence) (meetingMemoryEntry, bool, error) {
 	if app == nil || app.memory == nil {
 		return meetingMemoryEntry{}, false, fmt.Errorf("artifact memory is unavailable")
 	}
@@ -817,7 +817,7 @@ func (app *kanbanBoardApp) updateOSArtifactWithMetadata(id string, title string,
 	}
 	normalizedUpdates["type"] = artifactType(meetingMemoryEntry{Text: text, Metadata: resolvedMetadata})
 
-	entry, changed, err := app.memory.updateOSArtifactWithMetadata(id, title, text, updatedBy, normalizedUpdates)
+	entry, changed, err := app.memory.updateOSArtifactWithMetadataExpected(nil, nil, "", "", "", id, title, text, updatedBy, normalizedUpdates, feedbackFences...)
 	if changed && err == nil {
 		// Unified push channel: a status transition (progress → complete, a
 		// publish) fans out title-only. Bookkeeping re-writes that leave the

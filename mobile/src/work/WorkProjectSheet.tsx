@@ -13,6 +13,7 @@ import { SymbolView } from 'expo-symbols';
 
 import type { StudioProject, StudioProjectCheckpoint } from '../api/types';
 import { colors, hitMin, radius, shadow, space, type } from '../theme/tokens';
+import { WorkEvidencePanel, type WorkFeedbackAction } from './WorkEvidencePanel';
 import {
   studioProjectAttentionCopy,
   studioProjectKindLabel,
@@ -26,6 +27,10 @@ type CheckpointOption = NonNullable<StudioProjectCheckpoint['options']>[number];
 type DetailProps = {
   project: StudioProject | null;
   compact?: boolean;
+  detailLoading?: boolean;
+  detailError?: string;
+  onRetryDetail?: () => void;
+  onOpenWork?: (id: string) => void;
   busyAction?: string;
   actionError?: string;
   onClose?: () => void;
@@ -34,6 +39,7 @@ type DetailProps = {
   onContinueResult: (project: StudioProject) => void;
   onResolveCheckpoint: (project: StudioProject, option: CheckpointOption) => void;
   onRename: (project: StudioProject) => void;
+  onFeedback?: WorkFeedbackAction;
 };
 
 function projectStatusTone(project: StudioProject) {
@@ -45,6 +51,7 @@ function projectStatusTone(project: StudioProject) {
 
 export function WorkProjectDetail({
   project,
+  detailLoading, detailError, onRetryDetail, onOpenWork,
   compact = false,
   busyAction = '',
   actionError = '',
@@ -54,6 +61,7 @@ export function WorkProjectDetail({
   onContinueResult,
   onResolveCheckpoint,
   onRename,
+  onFeedback,
 }: DetailProps) {
   if (!project) {
     return (
@@ -61,8 +69,10 @@ export function WorkProjectDetail({
         <View style={styles.emptyMark}>
           <SymbolView name="square.stack.3d.up" tintColor={colors.text3} size={22} />
         </View>
-        <Text style={styles.emptyTitle}>Select a project</Text>
-        <Text style={styles.emptyBody}>Its progress, decisions, and finished work will appear here.</Text>
+        <Text style={styles.emptyTitle}>{detailLoading ? 'Loading work…' : detailError ? 'Work unavailable' : 'Select a project'}</Text>
+        <Text style={styles.emptyBody}>{detailError || 'Its progress, decisions, and finished work will appear here.'}</Text>
+        {detailLoading ? <ActivityIndicator color={colors.emberText} /> : detailError ? <Pressable accessibilityRole="button" onPress={onRetryDetail}><Text style={styles.emptyBody}>Try again</Text></Pressable> : null}
+        {onClose ? <Pressable accessibilityRole="button" onPress={onClose}><Text style={styles.emptyBody}>Close</Text></Pressable> : null}
       </View>
     );
   }
@@ -262,6 +272,12 @@ export function WorkProjectDetail({
           </View>
         )}
 
+        {project.result ? <WorkEvidencePanel
+          key={`${project.id}:${project.result.artifactId}:${project.result.version}:${project.result.digest}`}
+          project={project} busy={Boolean(busyAction)} onFeedback={onFeedback}
+          onOpenWork={onOpenWork}
+        /> : null}
+
         {project.companyProject?.title ? (
           <View style={styles.filedRow}>
             <SymbolView name="folder.fill" tintColor={colors.text3} size={13} />
@@ -311,7 +327,7 @@ export function WorkProjectSheet({ visible, project, onClose, ...detailProps }: 
       allowSwipeDismissal
       animationType="slide"
       presentationStyle="formSheet"
-      visible={visible && Boolean(project)}
+      visible={visible}
       onRequestClose={onClose}
     >
       <SafeAreaView accessibilityViewIsModal style={styles.sheet} edges={['left', 'right', 'bottom']}>

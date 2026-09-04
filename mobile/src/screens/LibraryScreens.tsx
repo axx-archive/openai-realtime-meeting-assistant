@@ -2,21 +2,9 @@ import React from 'react';
 import { api } from '../api/client';
 import { CollectionScreen } from './CollectionScreen';
 
-const memoryKeys = ['entries', 'memory', 'items'];
 const intelligenceKeys = ['themes', 'signals', 'opportunities', 'priorities', 'items'];
 
-export function MemoryScreen() {
-  return (
-    <CollectionScreen
-      title="Memory"
-      subtitle="The shared record across meetings, Scout, and the web"
-      empty="Memory is quiet right now."
-      keys={memoryKeys}
-      load={api.memory}
-      events={['memory']}
-    />
-  );
-}
+export { MemoryInspectorScreen as MemoryScreen } from './MemoryInspectorScreen';
 
 export { MeetingsScreen } from './MeetingsScreen';
 
