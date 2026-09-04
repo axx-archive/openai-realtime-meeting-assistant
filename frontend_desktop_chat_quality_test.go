@@ -118,7 +118,10 @@ func TestDesktopChatChromeKeepsOneUsefulConversationIdentity(t *testing.T) {
 
 func TestDesktopChatRichPreviewsStayOnAuthorizedSameOriginRoutes(t *testing.T) {
 	html := desktopChatQualityHTML(t)
-	start := strings.Index(html, "function mountDesktopChatLinkPreview(stack, text)")
+	start := strings.Index(html, "function requestDesktopChatLinkPreview(url)")
+	if start < 0 {
+		t.Fatal("could not isolate desktop link preview request helper")
+	}
 	end := strings.Index(html[start:], "function renderDesktopChatLinkPreviewFallback(card, url)")
 	if start < 0 || end < 0 {
 		t.Fatal("could not isolate desktop link preview renderer")

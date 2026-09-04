@@ -65,7 +65,7 @@ func TestIndexWorkDestinationKeepsStudioRoutes(t *testing.T) {
 		// states
 		"'Work is temporarily unavailable'",
 		"'Work could not be loaded'",
-		"'Nothing in the studio yet'",
+		"'No work yet'",
 		"'View in Work'",
 		// ⌘/⌥ tooltips derive from the aria-label, so they follow the rename
 		"button.title = `${label} · ${pd1ShortcutModifier}${index + 1}`",
