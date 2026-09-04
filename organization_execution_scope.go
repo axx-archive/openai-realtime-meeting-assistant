@@ -54,7 +54,7 @@ func withOrganizationExecutionScope(ctx context.Context, sessionHash string, exp
 		return use(nil)
 	}
 	if record.Kind != "" || !time.Now().Before(record.Expires) || record.ActiveOrganizationID == "" ||
-		record.ActiveOrganizationID != canonicalTenantID() || record.ActiveOrganizationID != canonicalArtifactTenantID() ||
+		!organizationExecutionTenantMatches(strideE10LiveProductRuntime, record.ActiveOrganizationID) ||
 		sha256Hex([]byte(normalizeAccountEmail(record.Email))) != record.AccountSubjectDigest || strideE10LiveProductRuntime == nil || strideE10LiveProductRuntime.organization == nil {
 		return errOrganizationExecutionUnavailable
 	}

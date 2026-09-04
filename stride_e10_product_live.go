@@ -36,6 +36,9 @@ type StrideE10ProductLiveRuntime struct {
 	idempotency    map[string]strideE10LiveIdempotency
 	now            func() time.Time
 	persistRuntime func(*StrideE10ProductLiveRuntime) error
+	// Read-only deployment crosswalk recovered from the signed W4 migration.
+	// It never changes the legacy data tenant or grants another organization use.
+	legacyExecutionBinding *organizationExecutionLegacyBinding
 }
 
 type StrideE10LiveActionBinding struct {

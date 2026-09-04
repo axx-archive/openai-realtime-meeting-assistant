@@ -536,6 +536,9 @@ func installStrideE10W4ProductionRuntimeFromEnvironment() error {
 		return err
 	}
 	runtime := runtimeFromStrideE10W4Snapshot(snapshot, operationStore)
+	if err := bindOrganizationExecutionMigration(context.Background(), runtime, keyring); err != nil {
+		return err
+	}
 	for _, feature := range features {
 		runtime.features[feature] = true
 	}

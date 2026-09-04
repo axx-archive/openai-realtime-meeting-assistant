@@ -848,6 +848,9 @@ func setSubscriberLayerTier(sessionID string, tier layerTier) bool {
 }
 
 func handleMeetingAssistReadOnlyCommand(args []string, stdout, stderr io.Writer) (bool, int) {
+	if len(args) == 1 && args[0] == "verify-legacy-execution-binding" {
+		return true, verifyOrganizationExecutionBindingCLI(stdout, stderr)
+	}
 	return HandleStrideE10W7W8SuccessorReadOnlyCLI(args, stdout, stderr)
 }
 
