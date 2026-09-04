@@ -6,6 +6,7 @@ import {
   createNavigationContainerRef,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { navigationThemeColors } from './navigationTheme';
 import { useAuth } from '../auth/AuthContext';
 import { usePushRegistration } from '../push/usePushRegistration';
 import type { PushTarget } from '../push/deepLink';
@@ -173,14 +174,7 @@ export function RootNavigator() {
   const navTheme = {
     ...DefaultTheme,
     dark,
-    colors: {
-      ...DefaultTheme.colors,
-      background: dark ? '#09090B' : '#F5F5F7',
-      card: dark ? '#141418' : '#FFFFFF',
-      text: dark ? '#F7F7F9' : '#0E0E10',
-      border: dark ? 'rgba(255,255,255,0.09)' : 'rgba(14,14,16,0.08)',
-      primary: dark ? '#F7F7F9' : '#0E0E10',
-    },
+    colors: navigationThemeColors(dark),
   };
 
   const selectShellDestination = useCallback((destination: (typeof nativeShellDestinations)[number]) => {

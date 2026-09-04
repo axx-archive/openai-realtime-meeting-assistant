@@ -1,2 +1,2 @@
-/** Re-export live Glass & Ink colors. Prefer importing from `./tokens`. */
+/** Compatibility export; the canonical palette is generated from design/stride.tokens.json. */
 export { colors } from './tokens';

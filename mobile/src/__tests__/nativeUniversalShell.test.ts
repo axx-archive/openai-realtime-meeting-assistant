@@ -13,6 +13,7 @@ import {
   nativeShellSelectionAnnouncement,
   nativeShellVisibleForRoute,
 } from '../navigation/nativeShellModel';
+import { strideTokens, strideLight, strideDark } from '../theme/generatedTokens';
 import { registerTestStubModules } from './support/registerTestStubModules';
 
 const mobileRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -56,7 +57,7 @@ test('mounted shell press preserves its navigator child through destination, ful
     __nativeShellAnnouncements?: string[];
   };
   registerTestStubModules('native-shell-stub:', {
-        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1,absoluteFill:{},absoluteFillObject:{}}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>({dynamic:value}); export const Easing={bezier:()=>()=>0}; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message),isReduceTransparencyEnabled:async()=>false,isReduceMotionEnabled:async()=>false,addEventListener:()=>({remove(){}})}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
+        'native-shell-stub:react-native': `export const Pressable='Pressable'; export const Text='Text'; export const View='View'; export const StyleSheet={create:value=>value,hairlineWidth:1,absoluteFill:{},absoluteFillObject:{}}; export const Platform={OS:'ios',isPad:true}; export const DynamicColorIOS=value=>({dynamic:value}); export const useColorScheme=()=> 'light'; export const Easing={bezier:()=>()=>0}; export const AccessibilityInfo={announceForAccessibility:message=>globalThis.__nativeShellAnnouncements.push(message),isReduceTransparencyEnabled:async()=>false,isReduceMotionEnabled:async()=>false,addEventListener:()=>({remove(){}})}; export const useWindowDimensions=()=>({width:globalThis.__nativeShellWidth||390,height:844,fontScale:globalThis.__nativeShellFontScale||1});`,
         'native-shell-stub:react-native-svg': `const Svg='Svg'; export default Svg; export const Path='Path'; export const Circle='Circle'; export const Ellipse='Ellipse';`,
         'native-shell-stub:expo-symbols': `export const SymbolView='SymbolView';`,
         'native-shell-stub:react-native-safe-area-context': `export const useSafeAreaInsets=()=>globalThis.__nativeShellInsets||({top:0,right:0,bottom:0,left:0});`,
@@ -103,10 +104,10 @@ test('mounted shell press preserves its navigator child through destination, ful
   const mountID = mountedNavigator.props.mountID;
   const pathType = 'Path' as unknown as React.ElementType;
   const renderedPaths = renderer!.root.findAllByType(pathType);
-  assert.equal(renderedPaths[0].props.stroke, '#FF5A19', 'selected custom mark lost its static ember stroke');
+  assert.equal(renderedPaths[0].props.stroke, strideTokens.color.constant.brandCobalt, 'selected custom mark lost its canonical brand stroke');
   assert.deepEqual(
     renderedPaths[1].props.stroke,
-    { dynamic: { light: '#26231E', dark: '#F7F7F9' } },
+    { dynamic: { light: strideLight.text, dark: strideDark.text } },
     'inactive custom mark did not preserve the native adaptive ColorValue',
   );
   assert.notEqual(renderedPaths[1].props.stroke, '[object Object]', 'adaptive SVG stroke was string-coerced into an invalid color');

@@ -1,8 +1,8 @@
 import React from 'react';
-import { StyleSheet, View, type ViewProps, type ViewStyle } from 'react-native';
+import { StyleSheet, View, useColorScheme, type ColorValue, type ViewProps, type ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
-import { colors } from './tokens';
+import { colors, resolveThemeTint, shadow } from './tokens';
 import { useReduceTransparency } from './motion';
 
 /**
@@ -36,7 +36,7 @@ export type GlassProps = ViewProps & {
    */
   interactive?: boolean;
   /** Earned-only tint. Pass `colors.ember` when agent work is live — never ambient. */
-  tint?: string;
+  tint?: ColorValue;
   /** `'regular'` for chrome, `'clear'` for glass over media. */
   variant?: 'regular' | 'clear';
 };
@@ -63,6 +63,7 @@ export function Glass({
   ...rest
 }: GlassProps) {
   const reduceTransparency = useReduceTransparency();
+  const resolvedTint = resolveThemeTint(tint, useColorScheme() === 'dark');
   const shape: ViewStyle = { borderRadius: radius, overflow: 'hidden' };
 
   /**
@@ -79,14 +80,19 @@ export function Glass({
   const material = reduceTransparency ? (
     <View style={[shape, styles.opaque, StyleSheet.absoluteFill, styles.inert]} />
   ) : liquidGlass ? (
-    <GlassView
-      // NOTE: never animate a GlassView by driving `opacity` to 0 — that kills
-      // the effect outright. Use `glassEffectStyle.animate` instead.
-      glassEffectStyle={variant}
-      isInteractive={interactive}
-      tintColor={tint}
-      style={[shape, StyleSheet.absoluteFill, styles.inert]}
-    />
+    <>
+      <GlassView
+        // NOTE: never animate a GlassView by driving `opacity` to 0 — that kills
+        // the effect outright. Use `glassEffectStyle.animate` instead.
+        glassEffectStyle={variant}
+        isInteractive={interactive}
+        tintColor={resolvedTint}
+        style={[shape, StyleSheet.absoluteFill, styles.inert]}
+      />
+      {tint !== undefined && resolvedTint === undefined ? (
+        <View style={[shape, StyleSheet.absoluteFill, styles.inert, { backgroundColor: tint, opacity: 0.12 }]} />
+      ) : null}
+    </>
   ) : (
     // Pre-iOS 26: blur plus an explicit hairline, because BlurView alone has no
     // edge and the panel dissolves into the canvas without one.
@@ -116,7 +122,7 @@ const styles = StyleSheet.create({
    * hovering a few millimetres off the page; a hard shadow reads as a sticker.
    */
   lift: {
-    shadowColor: '#0E0E10',
+    shadowColor: shadow[2].shadowColor,
     shadowOpacity: 0.1,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 6 },
