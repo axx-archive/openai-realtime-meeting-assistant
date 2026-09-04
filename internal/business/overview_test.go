@@ -101,7 +101,7 @@ func TestPostgresOverviewProjectionBackfillAndAtomicity(t *testing.T) {
 	if _, e = oldAdmin.Exec(ctx, `CREATE SCHEMA business; CREATE TABLE business.schema_migrations(version text PRIMARY KEY,digest text NOT NULL)`); e != nil {
 		t.Fatal(e)
 	}
-	for _, name := range []string{"001_business.sql", "002_attempts.sql"} {
+	for _, name := range []string{"001_business.sql", "002_attempts.sql", "004_provider_journal.sql"} {
 		raw, e := migrationFiles.ReadFile("migrations/" + name)
 		if e != nil {
 			t.Fatal(e)
@@ -113,8 +113,9 @@ func TestPostgresOverviewProjectionBackfillAndAtomicity(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	// Simulate the retained 002 writer before the new migration; New correctly
-	// rejects it as current startup, so this test explicitly constructs oldStore.
+	// Exercise the current writer with only the overview migration omitted.
+	// New must reject incomplete startup. This fixture is not an old binary
+	// compatibility test; provider authority tables are required by current code.
 	if _, e = New(ctx, oldRuntime); e == nil {
 		t.Fatal("accepted missing overview migration")
 	}
@@ -151,8 +152,8 @@ func TestPostgresOverviewProjectionBackfillAndAtomicity(t *testing.T) {
 	if e != nil || view.UnknownCostOperations != 1 {
 		t.Fatalf("rollback lost projection %+v %v", view, e)
 	}
-	// The retained Go write path needs no changes: its normal completion triggers
-	// projection removal and actual settlement in the same commit.
+	// Normal current-writer completion triggers projection removal and actual
+	// settlement in the same commit.
 	cost := int64(11)
 	if _, e = oldStore.CompleteAttempt(ctx, f.scope, completeArgs(a, &cost)); e != nil {
 		t.Fatal(e)

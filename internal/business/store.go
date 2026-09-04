@@ -661,89 +661,93 @@ func databaseNow(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 
 func (s *Store) AdmitWork(ctx context.Context, scope Scope, in WorkArgs) (Work, error) {
 	return command(ctx, s, scope, in.IdempotencyKey, "admit_private_work", in, false, func(tx pgx.Tx) (Work, error) {
-		var w Work
-		if !validText(in.Objective, 10000) || in.OutputContract != "private_document_v1" || !money(in.ReservationMicros) {
-			return w, ErrInvalid
-		}
-		var b Business
-		if e := body(ctx, tx, "businesses", scope.OrganizationID, in.BusinessID, &b); e != nil {
-			return w, e
-		}
-		if b.Status != "active" {
-			return w, ErrInactive
-		}
-		if scope.Actor.Kind == "person" {
-			if _, e := member(ctx, tx, scope, true); e != nil {
-				return w, e
-			}
-		} else if scope.Actor.ID != in.EmploymentID || (b.AuthorityPreset != "take_initiative" && b.AuthorityPreset != "full_autonomy") {
-			return w, ErrDenied
-		}
-		var emp Employment
-		if e := body(ctx, tx, "employments", scope.OrganizationID, in.EmploymentID, &emp); e != nil {
-			return w, e
-		}
-		if emp.Status != "active" || emp.BusinessID != b.ID {
-			return w, ErrDenied
-		}
-		var m Mandate
-		if e := body(ctx, tx, "mandates", scope.OrganizationID, in.MandateID, &m); e != nil {
-			return w, e
-		}
-		now, e := databaseNow(ctx, tx)
-		if e != nil {
-			return w, e
-		}
-		if m.BusinessID != b.ID || m.EmploymentID != emp.ID {
-			return w, ErrDenied
-		}
-		if m.Revision != in.MandateRevision {
-			return w, ErrConflict
-		}
-		if m.Status != "active" || !m.ExpiresAt.After(now) {
-			return w, ErrInactive
-		}
-		var issuerValid bool
-		e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM business.memberships WHERE organization_id=$1 AND id=$2 AND revision=$3 AND status='active' AND role='owner')`, scope.OrganizationID, m.IssuerID, m.IssuerRevision).Scan(&issuerValid)
-		if e != nil {
-			return w, e
-		}
-		if !issuerValid {
-			return w, ErrInactive
-		}
-		if in.ReservationMicros > m.MaxWorkCostMicros {
-			return w, ErrBudget
-		}
-		if e = businessLiability(ctx, tx, scope.OrganizationID, b.ID); e != nil {
-			return w, e
-		}
-		var open int
-		e = tx.QueryRow(ctx, `SELECT count(*) FROM business.work_intents WHERE organization_id=$1 AND employment_id=$2 AND body->>'status' IN ('admitted','reconciling')`, scope.OrganizationID, emp.ID).Scan(&open)
-		if e != nil {
-			return w, e
-		}
-		if open >= m.MaxOpenWork {
-			return w, ErrConcurrency
-		}
-		fund, e := budget(ctx, tx, scope.OrganizationID, b.ID)
-		if e != nil {
-			return w, e
-		}
-		if in.ReservationMicros > min(fund.FundedMicros, fund.CapMicros)-fund.ReservedMicros-fund.SettledMicros {
-			return w, ErrBudget
-		}
-		w = Work{BusinessRevision: b.Revision, EmploymentRevision: emp.Revision, ID: id("work"), BusinessID: b.ID, EmploymentID: emp.ID, MandateID: m.ID, MandateRevision: m.Revision, Actor: scope.Actor, Objective: in.Objective, OutputContract: in.OutputContract, ReservationMicros: in.ReservationMicros, HeldMicros: in.ReservationMicros, MaxAttempts: m.MaxAttempts, Status: "admitted", CreatedAt: now}
-		if _, e = tx.Exec(ctx, `INSERT INTO business.work_intents VALUES($1,$2,$3,$4,$5,$6)`, scope.OrganizationID, w.ID, b.ID, emp.ID, m.ID, jsonBytes(w)); e != nil {
-			return w, e
-		}
-		if _, e = tx.Exec(ctx, `UPDATE business.budgets SET reserved_micros=reserved_micros+$3,revision=revision+1 WHERE organization_id=$1 AND business_id=$2`, scope.OrganizationID, b.ID, in.ReservationMicros); e != nil {
-			return w, e
-		}
-		return w, event(ctx, tx, scope.OrganizationID, "budget_reserved", w.ID, struct {
-			Amount int64 `json:"amountMicros"`
-		}{in.ReservationMicros})
+		return admitWorkTx(ctx, tx, scope, in)
 	})
 }
+func admitWorkTx(ctx context.Context, tx pgx.Tx, scope Scope, in WorkArgs) (Work, error) {
+	var w Work
+	if !validText(in.Objective, 10000) || in.OutputContract != "private_document_v1" || !money(in.ReservationMicros) {
+		return w, ErrInvalid
+	}
+	var b Business
+	if e := body(ctx, tx, "businesses", scope.OrganizationID, in.BusinessID, &b); e != nil {
+		return w, e
+	}
+	if b.Status != "active" {
+		return w, ErrInactive
+	}
+	if scope.Actor.Kind == "person" {
+		if _, e := member(ctx, tx, scope, true); e != nil {
+			return w, e
+		}
+	} else if scope.Actor.ID != in.EmploymentID || (b.AuthorityPreset != "take_initiative" && b.AuthorityPreset != "full_autonomy") {
+		return w, ErrDenied
+	}
+	var emp Employment
+	if e := body(ctx, tx, "employments", scope.OrganizationID, in.EmploymentID, &emp); e != nil {
+		return w, e
+	}
+	if emp.Status != "active" || emp.BusinessID != b.ID {
+		return w, ErrDenied
+	}
+	var m Mandate
+	if e := body(ctx, tx, "mandates", scope.OrganizationID, in.MandateID, &m); e != nil {
+		return w, e
+	}
+	now, e := databaseNow(ctx, tx)
+	if e != nil {
+		return w, e
+	}
+	if m.BusinessID != b.ID || m.EmploymentID != emp.ID {
+		return w, ErrDenied
+	}
+	if m.Revision != in.MandateRevision {
+		return w, ErrConflict
+	}
+	if m.Status != "active" || !m.ExpiresAt.After(now) {
+		return w, ErrInactive
+	}
+	var issuerValid bool
+	e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM business.memberships WHERE organization_id=$1 AND id=$2 AND revision=$3 AND status='active' AND role='owner')`, scope.OrganizationID, m.IssuerID, m.IssuerRevision).Scan(&issuerValid)
+	if e != nil {
+		return w, e
+	}
+	if !issuerValid {
+		return w, ErrInactive
+	}
+	if in.ReservationMicros > m.MaxWorkCostMicros {
+		return w, ErrBudget
+	}
+	if e = businessLiability(ctx, tx, scope.OrganizationID, b.ID); e != nil {
+		return w, e
+	}
+	var open int
+	e = tx.QueryRow(ctx, `SELECT count(*) FROM business.work_intents WHERE organization_id=$1 AND employment_id=$2 AND body->>'status' IN ('admitted','reconciling')`, scope.OrganizationID, emp.ID).Scan(&open)
+	if e != nil {
+		return w, e
+	}
+	if open >= m.MaxOpenWork {
+		return w, ErrConcurrency
+	}
+	fund, e := budget(ctx, tx, scope.OrganizationID, b.ID)
+	if e != nil {
+		return w, e
+	}
+	if in.ReservationMicros > min(fund.FundedMicros, fund.CapMicros)-fund.ReservedMicros-fund.SettledMicros {
+		return w, ErrBudget
+	}
+	w = Work{BusinessRevision: b.Revision, EmploymentRevision: emp.Revision, ID: id("work"), BusinessID: b.ID, EmploymentID: emp.ID, MandateID: m.ID, MandateRevision: m.Revision, Actor: scope.Actor, Objective: in.Objective, OutputContract: in.OutputContract, ReservationMicros: in.ReservationMicros, HeldMicros: in.ReservationMicros, MaxAttempts: m.MaxAttempts, Status: "admitted", CreatedAt: now}
+	if _, e = tx.Exec(ctx, `INSERT INTO business.work_intents VALUES($1,$2,$3,$4,$5,$6)`, scope.OrganizationID, w.ID, b.ID, emp.ID, m.ID, jsonBytes(w)); e != nil {
+		return w, e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE business.budgets SET reserved_micros=reserved_micros+$3,revision=revision+1 WHERE organization_id=$1 AND business_id=$2`, scope.OrganizationID, b.ID, in.ReservationMicros); e != nil {
+		return w, e
+	}
+	return w, event(ctx, tx, scope.OrganizationID, "budget_reserved", w.ID, struct {
+		Amount int64 `json:"amountMicros"`
+	}{in.ReservationMicros})
+}
+
 func (s *Store) ListWork(ctx context.Context, scope Scope, bid string) ([]Work, error) {
 	out := []Work{}
 	e := s.read(ctx, scope, func(tx pgx.Tx) error {

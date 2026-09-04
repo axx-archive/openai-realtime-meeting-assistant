@@ -132,6 +132,9 @@ func executor(ctx context.Context, tx pgx.Tx, scope Scope, w Work) error {
 	return actorCurrent(ctx, tx, scope, false)
 }
 func currentWorkAuthority(ctx context.Context, tx pgx.Tx, org string, w Work) error {
+	if e := providerWorkResourceCurrent(ctx, tx, org, w.ID); e != nil {
+		return e
+	}
 	if w.CancelRequested {
 		return ErrInactive
 	}
@@ -339,9 +342,29 @@ func (s *Store) PrepareOperation(ctx context.Context, scope Scope, in PrepareOpe
 	if e = lockOrg(ctx, tx, scope); e != nil {
 		return a, e
 	}
+	a, e = prepareOperationTx(ctx, tx, scope, in, false)
+	if e != nil {
+		return a, e
+	}
+	return a, tx.Commit(ctx)
+}
+
+func prepareOperationTx(ctx context.Context, tx pgx.Tx, scope Scope, in PrepareOperationArgs, provider bool) (Attempt, error) {
+	var a Attempt
+	op := in.Operation
+	if !validText(op.ID, 200) || !validText(op.RequestDigest, 200) || !validText(op.AdapterID, 200) || !validText(op.RouteRevision, 200) || !validText(op.PriceRevision, 200) || !money(op.MaximumCostMicros) {
+		return a, ErrInvalid
+	}
 	a, w, e := leaseCurrent(ctx, tx, scope, in.Lease)
 	if e != nil {
 		return a, e
+	}
+	var bound bool
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM business.provider_requests WHERE organization_id=$1 AND work_id=$2)`, scope.OrganizationID, w.ID).Scan(&bound); e != nil {
+		return a, e
+	}
+	if bound != provider {
+		return a, ErrDenied
 	}
 	if e = currentWorkAuthority(ctx, tx, scope.OrganizationID, w); e != nil {
 		return a, e
@@ -353,7 +376,7 @@ func (s *Store) PrepareOperation(ctx context.Context, scope Scope, in PrepareOpe
 		if a.State != "prepared" || a.Mode != "execute" {
 			return a, ErrReconciliation
 		}
-		return a, tx.Commit(ctx)
+		return a, nil
 	}
 	if a.State != "claimed" || a.Mode != "execute" || w.Status != "admitted" {
 		return a, ErrInactive
@@ -383,8 +406,9 @@ func (s *Store) PrepareOperation(ctx context.Context, scope Scope, in PrepareOpe
 	if e = event(ctx, tx, scope.OrganizationID, "operation_may_issue", a.ID, op); e != nil {
 		return a, e
 	}
-	return a, tx.Commit(ctx)
+	return a, nil
 }
+
 func (s *Store) CompleteAttempt(ctx context.Context, scope Scope, in CompleteAttemptArgs) (AttemptCompletion, error) {
 	return s.finishAttempt(ctx, scope, in, false)
 }
@@ -456,6 +480,9 @@ func (s *Store) finishAttempt(ctx context.Context, scope Scope, in CompleteAttem
 	}
 	if a.Outcome != "" && a.Outcome != in.Outcome {
 		return out, ErrConflict
+	}
+	if e = validateProviderCompletion(ctx, tx, scope.OrganizationID, a, in); e != nil {
+		return out, e
 	}
 	eligible := currentWorkAuthority(ctx, tx, scope.OrganizationID, w) == nil
 	var result *Result
@@ -565,6 +592,9 @@ func settleAttempt(ctx context.Context, tx pgx.Tx, org string, w *Work, a Attemp
 	if terminal {
 		release = w.HeldMicros
 	}
+	if e = settleProviderReservation(ctx, tx, org, w.ID, release, value, terminal); e != nil {
+		return e
+	}
 	w.HeldMicros -= release
 	w.SettledMicros += value
 	if _, e = tx.Exec(ctx, `UPDATE business.budgets SET reserved_micros=reserved_micros-$3,settled_micros=settled_micros+$4,revision=revision+1 WHERE organization_id=$1 AND business_id=$2`, org, w.BusinessID, release, value); e != nil {
@@ -580,6 +610,9 @@ func settleAttempt(ctx context.Context, tx pgx.Tx, org string, w *Work, a Attemp
 	}{value, cost.EvidenceRef, release})
 }
 func releaseWorkReservation(ctx context.Context, tx pgx.Tx, org string, w *Work) error {
+	if e := settleProviderReservation(ctx, tx, org, w.ID, w.HeldMicros, 0, true); e != nil {
+		return e
+	}
 	if w.HeldMicros == 0 {
 		return nil
 	}
