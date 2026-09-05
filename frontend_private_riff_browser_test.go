@@ -52,6 +52,7 @@ function riffThread(activeEpisodeId, viewedEpisodeId = activeEpisodeId) {
 const sourceThread = {id:'source',title:'Country Golf',visibility:'public',messagesLoaded:true,messages:sourceMessages};
 
 const server = http.createServer(async (req, res) => {
+  if (require('./scripts/frontend-design-assets.cjs')(req, res)) return;
   if (req.url === '/public/composer-dictation.js') {
     res.writeHead(200, {'content-type':'application/javascript'}); return res.end('');
   }
@@ -129,6 +130,14 @@ const server = http.createServer(async (req, res) => {
   assert.match(await page.locator('#chatContextRail').innerText(),/Resume this pass/);
   assert.ok(requests.some(item => item.kind === 'view' && item.episodeId === 'ep-1'));
 
+  // The normal index deliberately excludes private Riff spaces. Its background
+  // refresh must preserve the selected historical pass and disabled composer.
+  await page.evaluate(() => loadScoutChatThreads());
+  assert.equal(await page.locator('#chatContextRail').isVisible(), true);
+  assert.equal(await page.locator('#chatContextReplyInput').isDisabled(), true);
+  assert.match(await page.locator('#chatContextRail').innerText(),/Earlier pass/);
+  assert.equal(await page.locator('#chatAgentThreads [data-thread-id="riff-space"]').count(),0);
+
   await page.getByRole('button',{name:'Resume this pass'}).click();
   await page.waitForFunction(() => document.getElementById('chatContextReplyInput').disabled === false);
   const resume=requests.filter(item => item.kind === 'open').at(-1);
@@ -148,6 +157,10 @@ const server = http.createServer(async (req, res) => {
   assert.equal(publish.body.episodeId,'ep-1');
   assert.equal(publish.body.messageId,'scout-ep-1');
 
+  // Losing the source cannot leave its private space pinned by this exception.
+  await page.evaluate(() => { scoutChatThreads = mergeScoutChatIndexRows([]); syncDesktopOpenChatContext(); });
+  assert.equal(await page.locator('#chatContextRail').isVisible(),false);
+  assert.equal(await page.evaluate(() => scoutChatThreads.some(t => t.id === 'riff-space')),false);
   await browser.close(); server.close();
 })().catch(error => { console.error(error); server.close(); process.exit(1); });`
 	cmd := exec.Command("node", "-e", script)

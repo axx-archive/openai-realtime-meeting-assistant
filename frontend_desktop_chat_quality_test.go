@@ -297,7 +297,7 @@ func TestDesktopThreadRepliesExposeOwnedEditAndDeleteActions(t *testing.T) {
 		"label: 'More reply actions'",
 		"reply.setAttribute('aria-label', 'Reply in this thread')",
 		"chatContextReplyInput?.focus()",
-		"onEdit: isOwn ? () => beginDesktopContextMessageEdit(thread, message, card) : null",
+		"onEdit: isOwn && !deleteOnly ? () => beginDesktopContextMessageEdit(thread, message, card) : null",
 		"onDelete: isOwn ? remove => deleteDesktopContextMessage(thread, message, remove) : null",
 		"menu.setAttribute('role', 'menu')",
 		"pressTimer = window.setTimeout(() => {",

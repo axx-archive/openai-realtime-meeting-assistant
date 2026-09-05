@@ -360,7 +360,7 @@ func TestDesignSystemV2MenuComponent(t *testing.T) {
 	for _, site := range []struct{ name, want string }{
 		{"org menu", "bfMenu(switcher, { menu, radio: true, origin: 'top-left'"},
 		{"header popovers (members + bell)", "const shared = bfMenu(trigger, {\n\t          menu: popover,\n\t          radio: isMenu,\n\t          keyboard: isMenu,"},
-		{"chat more-menu", "const control = bfMenu(trigger, { menu, origin: 'top-right' })"},
+		{"chat more-menu", "const control = bfMenu(trigger, {\n\t          menu,\n\t          origin: 'top-right',\n\t          onClose: () => resetDesktopMessageDeleteConfirmation(menu.querySelector('[data-danger=\"true\"]'))"},
 		{"reaction picker", "bfMenu(trigger, { menu, orientation: 'horizontal', itemSelector: 'button'"},
 		{"greenroom filters", "bfMenu(greenRoomFiltersBtnEl, { menu: greenRoomFiltersEl"},
 		{"account menu", "bfMenu(accountMenuButton, { menu: accountMenu"},

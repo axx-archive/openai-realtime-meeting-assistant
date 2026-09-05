@@ -74952,7 +74952,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function mergeScoutChatIndexRows(rows) {
 		const currentByID = new Map(scoutChatThreads.map(thread => [String(thread?.id || ''), thread]))
-		return rows.map(row => {
+		const merged = rows.map(row => {
 		  const current = currentByID.get(String(row?.id || ''))
 		  const revisionOrder = scoutChatThreadRevisionCompare(current?.updatedAt, row?.updatedAt)
 		  // W1 D4/D6: viewer state (unread count, read marker, notification
@@ -74988,6 +74988,16 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 		  }
 		  return { ...row, ...viewerState, messagesLoaded: false, messages: undefined }
 		})
+                // Private Riff spaces are intentionally absent from the ordinary
+                // index. Retain only the open space while its source is still
+                // visible; an index refresh is not a replacement episode.
+                const context = chatContextState
+                if (context?.mode === 'riff' && merged.some(row => String(row?.id || '') === String(context.sourceThreadId || ''))) {
+                  const openRiff = currentByID.get(String(context.threadId || ''))
+                  if (openRiff?.riff && String(openRiff.riff.sourceThreadId || '') === String(context.sourceThreadId || '') &&
+                      !merged.some(row => String(row?.id || '') === String(openRiff.id))) merged.push(openRiff)
+                }
+                return merged
 	      }
 
 	      function scoutChatTailHydrationURL(threadId, options = {}) {
