@@ -68,8 +68,21 @@ func (store *PostgresCanonicalStore) projectChatReplyMediaReceiptTTL() time.Dura
 	return 30 * time.Minute
 }
 
-func OpenPostgresCanonicalStore(ctx context.Context, databaseURL string, registry *CanonicalPayloadRegistry) (*PostgresCanonicalStore, error) {
+// canonicalPoolConfig fixes the serving pool budget independently of host CPU
+// count or DSN pool overrides. Connection identity and tenant settings survive.
+func canonicalPoolConfig(databaseURL string) (*pgxpool.Config, error) {
 	config, err := pgxpool.ParseConfig(strings.TrimSpace(databaseURL))
+	if err != nil {
+		return nil, err
+	}
+	config.MaxConns = 4
+	config.MinConns = 0
+	config.MinIdleConns = 0
+	return config, nil
+}
+
+func OpenPostgresCanonicalStore(ctx context.Context, databaseURL string, registry *CanonicalPayloadRegistry) (*PostgresCanonicalStore, error) {
+	config, err := canonicalPoolConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse canonical database URL: %w", err)
 	}

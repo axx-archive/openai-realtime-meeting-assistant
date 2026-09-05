@@ -74,17 +74,29 @@ func authenticateBusinessPerson(r *http.Request) (businessViewer, error) {
 	return businessViewer{personID, user.Name}, nil
 }
 
+// businessPoolConfig reserves four connections for the serving Business lane.
+// Keep the supplied restricted identity; business.New still validates its role.
+func businessPoolConfig(databaseURL string) (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	config.MaxConns = 4
+	config.MinConns = 0
+	config.MinIdleConns = 0
+	config.ConnConfig.ConnectTimeout = 5 * time.Second
+	return config, nil
+}
+
 func newBusinessHTTP(ctx context.Context, databaseURL string) (*businessHTTP, *pgxpool.Pool, error) {
 	handler := &businessHTTP{authenticate: authenticateBusinessPerson}
 	if strings.TrimSpace(databaseURL) == "" {
 		return handler, nil, nil
 	}
-	config, err := pgxpool.ParseConfig(databaseURL)
+	config, err := businessPoolConfig(databaseURL)
 	if err != nil {
 		return nil, nil, errors.New("invalid Business database configuration")
 	}
-	config.MaxConns = 8
-	config.ConnConfig.ConnectTimeout = 5 * time.Second
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, nil, errors.New("Business database connection unavailable")

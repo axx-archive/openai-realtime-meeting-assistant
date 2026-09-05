@@ -1317,6 +1317,14 @@ func readinessCodexRunnerSnapshot() map[string]any {
 		"heartbeatPath":   codexRunnerHeartbeatPath(),
 		"callbackSecured": strings.TrimSpace(os.Getenv("BONFIRE_RUNNER_TOKEN")) != "",
 	}
+	// Configured legacy dials cannot make the retired production executor live.
+	// Return before reading a historical heartbeat: freshness is not authority.
+	if !codexExecutionEnabled() {
+		snapshot["enabled"] = false
+		snapshot["status"] = "retired"
+		snapshot["reason"] = "legacy_codex_executor_retired"
+		return snapshot
+	}
 	if worker != agentThreadWorkerCodexExec {
 		snapshot["enabled"] = false
 		return snapshot
