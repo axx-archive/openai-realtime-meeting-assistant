@@ -654,3 +654,69 @@ Bonfire installs to a phone home screen and can send Web Push notifications for 
 ### Background blur — vendored MediaPipe assets (card 079)
 
 The "blur bg" video look runs person-segmentation on the client via a pinned MediaPipe Tasks Vision build vendored under `public/video-blur/` (~9 MB wasm + a ~250 KB model). There is **no runtime CDN dependency and no new env var** — the files are committed to the repo, the Dockerfile already `COPY public /app/public`, and rsync deploys carry them unchanged. The asset handler serves them with a long-lived `Cache-Control: public, max-age=604800, immutable`, and the browser fetches them lazily only when a user selects blur, so nobody pays the download otherwise (blur is insertable-tier only: Chrome/Edge/Android; other browsers show an honest "using raw camera" status). To re-derive or verify the exact bytes: `node scripts/vendor-video-blur.mjs --check` (drop `--check` to re-download the pinned version; the sha256 of each file is recorded in the script and in `public/video-blur/MEDIAPIPE_TASKS_COPYING.txt`).
+
+## Business SQL: typed, receipted activation
+
+Business uses a separate `stride_business` database and a restricted login in the
+existing private `canonical-postgres` service. Never reuse the canonical
+`bonfire` credential: Business startup rejects privileged or owning roles.
+Provision/migrate the new database with a separate administrator, verify the
+restricted role and forced tenant RLS, and qualify connection/memory headroom
+before activation. Do not modify canonical database contents or credentials.
+Business startup does not run migrations automatically.
+
+The Business DSN transition requires **two exact releases**. First activate a
+bootstrap containing the new retained tool while the base env remains
+byte-identical and `STRIDE_BUSINESS_DATABASE_URL` is entirely absent. Verify and
+retain that bootstrap normally. Then use its retained tool to activate a distinct
+reviewed successor. Never activate with the candidate tool or hot-edit base env.
+
+Privately create a root-owned mode-0600 regular file containing only the DSN,
+with no trailing newline. Its URL must have this exact structure:
+`postgres://<restricted-login>:<encoded-password>@canonical-postgres:5432/stride_business?sslmode=disable`.
+The login must not be `bonfire` or `postgres`. The value must contain no dotenv
+interpolation, quoting, whitespace, fragment or newline. Prefer a generated
+hexadecimal password. Do not put its value in shell arguments, public output,
+release receipts or the source tree.
+
+Invoke the retained bootstrap tool's ordinary `activate` arguments plus:
+
+```
+--business-database-value-file /root/private-business-dsn
+--target-base-env-expected-sha256 <exact-current-base-env-sha256>
+--target-base-env-backup-dir /opt/meetingassist-backups
+```
+
+This is an absent-key-only transition. Even comments mentioning the key or an
+empty existing assignment are rejected. It appends one canonical assignment and
+preserves every unrelated byte. The tool retains a private, digest-bound value
+copy in the backup directory before journaling, so interruption/recovery does
+not depend on the original input file. The base-env before copy and all value
+copies are secret files; receipts and journals contain only paths and digests.
+An interrupted planning operation may leave a private value copy without a
+transaction; do not indiscriminately prune the backup directory.
+
+The ordinary durable release phases install the target environment before
+candidate preflight, start, private verification, ledger commit and public
+verification. Failure restores the exact prior bytes before restarting the
+retained predecessor. Rollback from the activating successor to its immediate
+no-Business predecessor requires the returned transaction receipt with
+`--business-database-rollback-receipt <exact-receipt-path>`. A failed reverse
+activation reinstalls the retained value before restarting the enabled release.
+Keep the new database and data on rollback; do not perform destructive schema
+rollback or drop roles merely because the application is disabled.
+
+The active ledger carries separate active/previous Business configuration plans.
+Later ordinary releases inherit the same exact configuration, and same-config
+rollback does not remove it. Crossing the recorded absent boundary requires its
+receipt; an unreceipted runtime key, changed base-env digest or lost lineage is
+rejected. Enabled successors must retain this tool capability. Mixing another
+base-env patch with active Business configuration is deliberately unsupported;
+the existing private-Realtime qualification rules remain unchanged. In
+particular this does not bypass the existing voice=true successor restriction.
+
+After normal exact-release verification, prove authenticated Business context,
+setup, exact private reads and foreign-tenant denial. SQL activation alone does
+not enable agent execution, grant model credit, or establish device/call quality.
+Retain a tested backup/restore path for the new database separately from app
+rollback. Never treat a generic `/readyz` response as proof of these product flows.

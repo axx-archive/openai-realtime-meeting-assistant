@@ -26,6 +26,8 @@ const releaseOperationLockSchema = 'bonfire.release-operation-lock.v1'
 const releaseTransactionSchema = 'bonfire.release-transaction.v2'
 const baseEnvPatchSchema = 'bonfire.base-env-patch.v1'
 const baseEnvPatchReceiptSchema = 'bonfire.base-env-patch-receipt.v1'
+const businessDatabaseKey = 'STRIDE_BUSINESS_DATABASE_URL'
+const businessPatchSchema = 'bonfire.business-env-patch.v1'
 const privateRealtimeVoiceQualificationKey = 'PRIVATE_REALTIME_VOICE_QUALIFIED'
 const privateRealtimeVoiceQualificationValue = 'true'
 const baseEnvPatchBackupRoot = '/opt/meetingassist-backups'
@@ -1794,6 +1796,8 @@ async function verifyRunning(options, printResult = true, {
     const ledger = await readActiveReleaseLedger(options.releaseDir)
     if (!ledger) throw new Error('active release ledger is missing')
     assertLedgerEntryMatches(ledger.active, options.releaseDir, receipt, 'active')
+    assertBusinessEnvironmentBinding(ledger, await readFile(resolve(options.baseEnv)),
+      Object.hasOwn(appEnvironment, businessDatabaseKey) ? sha256(businessDatabaseValue(appEnvironment[businessDatabaseKey])) : null)
   }
   const result = { verified: true, attestation: 'verified-local-unsigned', releaseCommit: receipt.source.releaseCommit,
     bundleSha256: receipt.bundleSha256, images: Object.fromEntries(Object.entries(receipt.images).map(([name, image]) => [name, image.imageId])),
@@ -1805,6 +1809,7 @@ async function verifyRunning(options, printResult = true, {
   Object.defineProperty(result, 'qualificationState', {
     value: privateRealtimeVoiceQualificationRuntimeState(appEnvironment), enumerable: false
   })
+  Object.defineProperty(result, 'businessDatabaseDigest', { value: Object.hasOwn(appEnvironment, businessDatabaseKey) ? sha256(businessDatabaseValue(appEnvironment[businessDatabaseKey])) : null, enumerable: false })
   if (printResult) process.stdout.write(`${JSON.stringify(result)}\n`)
   return result
 }
@@ -1855,6 +1860,13 @@ export function verifyBaseEnvPatchRuntimeEnvironment(environment, plan, state) {
   if (!plan) return
   validateBaseEnvPatchPlan(plan)
   if (!['target', 'prior'].includes(state)) throw new Error('base env runtime verification state is invalid')
+  if (plan.schema === businessPatchSchema) {
+    const present = Object.hasOwn(environment || {}, businessDatabaseKey)
+    if (state === 'prior' ? present : (!present || sha256(businessDatabaseValue(environment[businessDatabaseKey])) !== plan.valueSha256)) {
+      throw new Error('Business runtime environment differs from the bound configuration')
+    }
+    return
+  }
   const expected = state === 'target' ? privateRealtimeVoiceQualificationValue : plan.priorQualificationState
   if (privateRealtimeVoiceQualificationRuntimeState(environment) !== expected) {
     throw new Error(`running environment ${privateRealtimeVoiceQualificationKey} differs from the ${state} base env`)
@@ -1983,7 +1995,52 @@ const targetBaseEnvPatchOptionNames = [
   'targetBaseEnvExpectedSha256', 'targetBaseEnvPatchKey', 'targetBaseEnvPatchValue', 'targetBaseEnvBackupDir'
 ]
 
+export function businessDatabaseValue(body) {
+  const raw = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+  const value = raw.toString('utf8')
+  // One literal dotenv value: interpolation, quoting, newlines and fragments
+  // are forbidden. Errors never include URL components or secret bytes.
+  if (!Buffer.from(value).equals(raw) || value.length > 4096 || !/^[A-Za-z0-9%:_.\/?=&+@-]+$/.test(value)) {
+    throw new Error('Business database value must be one canonical private URL')
+  }
+  let url
+  try { url = new URL(value) } catch { throw new Error('Business database URL is invalid') }
+  if (url.protocol !== 'postgres:' || url.hostname !== 'canonical-postgres' || url.port !== '5432' ||
+      url.pathname !== '/stride_business' || !url.username || ['bonfire', 'postgres'].includes(url.username) ||
+      !url.password || url.search !== '?sslmode=disable' || url.hash) {
+    throw new Error('Business database URL does not target its dedicated private database and login')
+  }
+  return value
+}
+
+export function businessDatabaseEnvPatch(body, valueBody) {
+  const before = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+  const text = before.toString('utf8')
+  if (!Buffer.from(text).equals(before) || text.includes(businessDatabaseKey)) {
+    throw new Error('Business database key must be entirely absent from valid UTF-8 base env')
+  }
+  const value = businessDatabaseValue(valueBody)
+  const separator = before.length && !text.endsWith('\n') ? '\n' : ''
+  const after = Buffer.concat([before, Buffer.from(`${separator}${businessDatabaseKey}=${value}\n`)])
+  return { before, after, beforeSha256: sha256(before), afterSha256: sha256(after), priorQualificationState: 'absent' }
+}
+
+export function requestedBusinessDatabasePatch(options, action) {
+  const file = options?.businessDatabaseValueFile
+  if (!file) return null
+  if (action !== 'activated' || targetBaseEnvPatchOptionNames.some(name => name !== 'targetBaseEnvExpectedSha256' && name !== 'targetBaseEnvBackupDir' && options?.[name])) {
+    throw new Error('Business database activation cannot combine other environment transitions')
+  }
+  if (!isAbsolute(file) || resolve(file) !== file || !shaPattern.test(String(options.targetBaseEnvExpectedSha256 || '')) ||
+      options.targetBaseEnvBackupDir !== baseEnvPatchBackupRoot) {
+    throw new Error('Business activation requires an exact private value path, prior digest, and approved backup directory')
+  }
+  return { patchKey: businessDatabaseKey, valueFile: file, expectedBeforeSha256: options.targetBaseEnvExpectedSha256, backupDir: baseEnvPatchBackupRoot }
+}
+
 export function requestedTargetBaseEnvPatch(options, action) {
+  const business = requestedBusinessDatabasePatch(options, action)
+  if (business) return business
   const supplied = targetBaseEnvPatchOptionNames.filter(name => String(options?.[name] || '').trim())
   if (!supplied.length) return null
   if (action !== 'activated') throw new Error('target base-env patch arguments are permitted only for activate')
@@ -2013,7 +2070,8 @@ export function requestedTargetBaseEnvPatch(options, action) {
 }
 
 export function requestedQualificationRollbackReceipt(options, action) {
-  const raw = String(options?.qualificationRollbackReceipt || '')
+  if (options?.qualificationRollbackReceipt && options?.businessDatabaseRollbackReceipt) throw new Error('only one environment rollback is allowed')
+  const raw = String(options?.qualificationRollbackReceipt || options?.businessDatabaseRollbackReceipt || '')
   if (!raw) return null
   if (action !== 'rolledBack') throw new Error('--qualification-rollback-receipt is permitted only for rollback')
   if (!isAbsolute(raw) || resolve(raw) !== raw || dirname(raw) !== baseEnvPatchBackupRoot) {
@@ -2074,7 +2132,7 @@ export function assertQualificationTransitionBound(action, currentState, baseEnv
 
 export function validatePrivateReleasePathInfo(info, kind, ownerUid = 0) {
   if (!info || !Number.isSafeInteger(ownerUid) || ownerUid < 0) throw new Error(`${kind} ownership proof is invalid`)
-  if (kind === 'base env' || kind === 'base env backup' || kind === 'base env patch receipt') {
+  if (kind === 'base env' || kind === 'base env backup' || kind === 'base env patch receipt' || kind === 'Business database value') {
     if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o777) !== 0o600 || info.uid !== ownerUid) {
       throw new Error(`${kind} must be an owner-private regular file`)
     }
@@ -2093,11 +2151,15 @@ export function validatePrivateReleasePathInfo(info, kind, ownerUid = 0) {
 export function validateBaseEnvPatchPlan(value, backupRoot = baseEnvPatchBackupRoot) {
   const expected = ['afterSha256', 'backupDir', 'backupPath', 'baseEnvPath', 'beforeSha256', 'patchKey', 'receiptPath',
     'priorQualificationState', 'rollbackReleaseCommit', 'schema', 'targetLedgerGeneration', 'targetReleaseCommit', 'transactionToken'].sort()
+  const business = value?.schema === businessPatchSchema
+  if (business) expected.push('valuePath', 'valueSha256')
+  expected.sort()
   const planStem = value && `base-env-${value.targetReleaseCommit}-${value.transactionToken}`
   if (!isAbsolute(String(backupRoot || '')) || resolve(backupRoot) !== backupRoot || !value ||
-      Object.keys(value).sort().join('\n') !== expected.join('\n') || value.schema !== baseEnvPatchSchema ||
+      Object.keys(value).sort().join('\n') !== expected.join('\n') || ![baseEnvPatchSchema, businessPatchSchema].includes(value.schema) ||
       !shaPattern.test(String(value.beforeSha256 || '')) || !shaPattern.test(String(value.afterSha256 || '')) ||
-      value.beforeSha256 === value.afterSha256 || value.patchKey !== privateRealtimeVoiceQualificationKey ||
+      value.beforeSha256 === value.afterSha256 || value.patchKey !== (business ? businessDatabaseKey : privateRealtimeVoiceQualificationKey) ||
+      (business && (value.priorQualificationState !== 'absent' || !shaPattern.test(String(value.valueSha256 || '')) || value.valuePath !== join(backupRoot, `${planStem}.value`))) ||
       !['absent', 'false'].includes(value.priorQualificationState) ||
       !commitPattern.test(String(value.targetReleaseCommit || '')) || !commitPattern.test(String(value.rollbackReleaseCommit || '')) ||
       !Number.isSafeInteger(value.targetLedgerGeneration) || value.targetLedgerGeneration < 1 ||
@@ -2113,7 +2175,9 @@ export function validateBaseEnvPatchReceipt(value, plan, backupRoot = baseEnvPat
   validateBaseEnvPatchPlan(plan, backupRoot)
   const expected = ['afterSha256', 'backupPath', 'baseEnvPath', 'beforeSha256', 'committedAt', 'patchKey', 'priorQualificationState', 'priorRestoredAt',
     'rollbackReleaseCommit', 'schema', 'state', 'targetLedgerGeneration', 'targetObservedAt', 'targetReleaseCommit', 'transactionToken'].sort()
-  if (!value || Object.keys(value).sort().join('\n') !== expected.join('\n') || value.schema !== baseEnvPatchReceiptSchema ||
+  if (plan.schema === businessPatchSchema) expected.push('valuePath', 'valueSha256')
+  expected.sort()
+  if (!value || (plan.schema === businessPatchSchema && (value.valuePath !== plan.valuePath || value.valueSha256 !== plan.valueSha256)) || Object.keys(value).sort().join('\n') !== expected.join('\n') || value.schema !== baseEnvPatchReceiptSchema ||
       value.transactionToken !== plan.transactionToken || value.targetReleaseCommit !== plan.targetReleaseCommit ||
       value.rollbackReleaseCommit !== plan.rollbackReleaseCommit ||
       value.targetLedgerGeneration !== plan.targetLedgerGeneration || value.baseEnvPath !== plan.baseEnvPath ||
@@ -2133,7 +2197,8 @@ export function validateBaseEnvPatchReceipt(value, plan, backupRoot = baseEnvPat
 
 export function baseEnvPatchPlanFromReceipt(receiptPath, receipt, backupRoot = baseEnvPatchBackupRoot) {
   const plan = validateBaseEnvPatchPlan({
-    schema: baseEnvPatchSchema,
+    schema: receipt?.patchKey === businessDatabaseKey ? businessPatchSchema : baseEnvPatchSchema,
+    ...(receipt?.patchKey === businessDatabaseKey ? { valuePath: receipt.valuePath, valueSha256: receipt.valueSha256 } : {}),
     transactionToken: receipt?.transactionToken,
     targetReleaseCommit: receipt?.targetReleaseCommit,
     rollbackReleaseCommit: receipt?.rollbackReleaseCommit,
@@ -2204,7 +2269,18 @@ export async function prepareTargetBaseEnvPatch({
   if (request.backupDir !== backupRoot) throw new Error('base env patch request backup root differs from policy')
   validatePrivateReleasePathInfo(await lstat(backupRoot), 'base env backup directory', ownerUid)
   validatePrivateReleasePathInfo(await lstat(request.backupDir), 'base env backup directory', ownerUid)
-  const patch = privateRealtimeVoiceQualificationEnvPatch(await readFile(baseEnvPath))
+  let patch
+  if (request.patchKey === businessDatabaseKey) {
+    const value = await readPrivateReleaseFile(request.valueFile, 'Business database value', ownerUid)
+    businessDatabaseValue(value)
+    draft.schema = businessPatchSchema
+    draft.valuePath = join(backupRoot, `${planStem}.value`)
+    draft.valueSha256 = sha256(value)
+    patch = businessDatabaseEnvPatch(await readFile(baseEnvPath), value)
+    if (patch.beforeSha256 !== request.expectedBeforeSha256) throw new Error('Business prior environment digest differs')
+    await writeExclusive(draft.valuePath, value, 0o600)
+    await syncDirectory(backupRoot)
+  } else patch = privateRealtimeVoiceQualificationEnvPatch(await readFile(baseEnvPath))
   if (patch.beforeSha256 !== request.expectedBeforeSha256) {
     throw new Error('base env digest differs from the explicitly approved prior digest')
   }
@@ -2225,7 +2301,7 @@ async function readOptionalPatchReceipt(plan, ownerUid, backupRoot = baseEnvPatc
 
 export async function prepareQualificationRollbackBaseEnvPatch({
   baseEnv, receiptPath, operationLock, targetReleaseCommit, rollbackReleaseCommit, activeLedgerGeneration,
-  ownerUid = 0, backupRoot = baseEnvPatchBackupRoot
+  ownerUid = 0, backupRoot = baseEnvPatchBackupRoot, activeLedger = null
 }) {
   if (!receiptPath) return null
   await assertReleaseOperationLock(operationLock)
@@ -2234,8 +2310,10 @@ export async function prepareQualificationRollbackBaseEnvPatch({
   const receipt = parseJSON(await readFile(receiptPath), 'qualification rollback receipt')
   const plan = baseEnvPatchPlanFromReceipt(receiptPath, receipt, backupRoot)
   if (receipt.state !== 'target_committed' || plan.baseEnvPath !== resolve(baseEnv) ||
-      plan.targetReleaseCommit !== rollbackReleaseCommit || plan.rollbackReleaseCommit !== targetReleaseCommit ||
-      plan.targetLedgerGeneration !== activeLedgerGeneration) {
+      plan.rollbackReleaseCommit !== targetReleaseCommit ||
+      (plan.schema === businessPatchSchema
+        ? (!activeLedger || businessPlanIdentity(activeLedger.businessEnvironment?.active) !== businessPlanIdentity(plan) || activeLedger.businessEnvironment?.previous !== null)
+        : (plan.targetReleaseCommit !== rollbackReleaseCommit || plan.targetLedgerGeneration !== activeLedgerGeneration))) {
     throw new Error('qualification rollback receipt does not bind the exact active and target releases')
   }
   await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
@@ -2277,6 +2355,7 @@ async function writeBaseEnvPatchReceipt(plan, state, targetObservedAt, ownerUid,
   const now = new Date().toISOString()
   const receipt = validateBaseEnvPatchReceipt({
     schema: baseEnvPatchReceiptSchema,
+    ...(plan.schema === businessPatchSchema ? { valuePath: plan.valuePath, valueSha256: plan.valueSha256 } : {}),
     transactionToken: plan.transactionToken,
     targetReleaseCommit: plan.targetReleaseCommit,
     rollbackReleaseCommit: plan.rollbackReleaseCommit,
@@ -2303,12 +2382,19 @@ async function installTargetBaseEnvPatchWithPolicy(
   if (!plan) return null
   await assertReleaseOperationLock(operationLock)
   await assertBaseEnvPatchFilesystem(plan, ownerUid, backupRoot)
+  const existingReceiptBeforeInstall = await readOptionalPatchReceipt(plan, ownerUid, backupRoot)
+  if (existingReceiptBeforeInstall?.state.startsWith('prior_') && !allowPriorReinstall) throw new Error('restored base env patch cannot be reinstalled by forward resume')
   const current = await readFile(plan.baseEnvPath)
   const currentSha256 = sha256(current)
   const currentState = baseEnvPatchDigestState(currentSha256, plan, backupRoot)
   let targetObservedAt = ''
   if (currentState === 'prior') {
-    const patch = privateRealtimeVoiceQualificationEnvPatch(current)
+    let patch
+    if (plan.schema === businessPatchSchema) {
+      const value = await readPrivateReleaseFile(plan.valuePath, 'Business database value', ownerUid)
+      if (sha256(value) !== plan.valueSha256) throw new Error('Business retained value digest differs')
+      patch = businessDatabaseEnvPatch(current, value)
+    } else patch = privateRealtimeVoiceQualificationEnvPatch(current)
     if (patch.afterSha256 !== plan.afterSha256 || patch.priorQualificationState !== plan.priorQualificationState) {
       throw new Error('base env patch bytes or prior qualification state differ from the durable plan')
     }
@@ -2524,12 +2610,16 @@ export function validateReleaseTransactionJournal(value, lock) {
       plan.transactionToken === value.token && plan.targetReleaseCommit === value.nextLedger.active.releaseCommit &&
       plan.rollbackReleaseCommit === value.priorLedger?.active.releaseCommit && plan.targetLedgerGeneration === value.nextLedger.generation
     const rollbackBinding = value.baseEnvPatchMode === 'rollback' && value.action === 'rolledBack' &&
-      plan.targetReleaseCommit === value.priorLedger?.active.releaseCommit &&
-      plan.rollbackReleaseCommit === value.nextLedger.active.releaseCommit && plan.targetLedgerGeneration === value.priorLedger?.generation
+      plan.rollbackReleaseCommit === value.nextLedger.active.releaseCommit &&
+      (plan.schema === businessPatchSchema
+        ? businessPlanIdentity(value.priorLedger?.businessEnvironment?.active) === businessPlanIdentity(plan) && value.priorLedger?.businessEnvironment?.previous === null
+        : plan.targetReleaseCommit === value.priorLedger?.active.releaseCommit && plan.targetLedgerGeneration === value.priorLedger?.generation)
     if (value.priorLedger === null || (!activationBinding && !rollbackBinding)) {
       throw new Error('release transaction journal base env patch binding is invalid')
     }
   }
+  const expectedBusiness = nextBusinessEnvironment(value.priorLedger, value.baseEnvPatch, value.baseEnvPatchMode, value.action)
+  if (businessPlanIdentity(value.nextLedger.businessEnvironment?.active) !== businessPlanIdentity(expectedBusiness?.active) || businessPlanIdentity(value.nextLedger.businessEnvironment?.previous) !== businessPlanIdentity(expectedBusiness?.previous)) throw new Error('release transaction Business lineage is invalid')
   const recovery = String(value.phase).startsWith('recovery_')
   if ((recovery && !forwardReleasePhases.includes(value.recoveryFromPhase)) || (!recovery && value.recoveryFromPhase !== null)) {
     throw new Error('release transaction journal recovery origin is invalid')
@@ -2649,10 +2739,76 @@ function releaseLedgerEntry(releaseDir, receipt) {
   }
 }
 
+function businessPlanIdentity(plan) { return plan ? JSON.stringify(Object.entries(plan).sort(([a], [b]) => a.localeCompare(b))) : 'null' }
+
+export function nextBusinessEnvironment(prior, plan, mode, action) {
+  const active = prior?.businessEnvironment?.active || null
+  const previous = prior?.businessEnvironment?.previous || null
+  if (plan?.schema === businessPatchSchema) {
+    if (mode === 'activate') {
+      if (active) throw new Error('Business database is already activated')
+      return { active: plan, previous: active }
+    }
+    if (mode !== 'rollback' || !active || previous !== null || businessPlanIdentity(active) !== businessPlanIdentity(plan)) {
+      throw new Error('Business rollback does not cross its recorded absent boundary')
+    }
+    return { active: null, previous: active }
+  }
+  if (plan && active) throw new Error('Business configuration cannot combine another environment patch')
+  if (action === 'rolledBack' && businessPlanIdentity(active) !== businessPlanIdentity(previous)) {
+    throw new Error('Business configuration boundary requires its exact rollback receipt')
+  }
+  return prior?.businessEnvironment ? { active, previous: active } : null
+}
+
+export function businessDatabaseEnvState(body) {
+  const bytes = Buffer.isBuffer(body) ? body : Buffer.from(String(body))
+  const text = bytes.toString('utf8')
+  if (!Buffer.from(text).equals(bytes)) throw new Error('base env is not valid UTF-8')
+  const lines = text.split('\n').filter(line => line.includes(businessDatabaseKey))
+  if (!lines.length) return null
+  if (lines.length !== 1 || !lines[0].startsWith(`${businessDatabaseKey}=`)) throw new Error('Business environment is ambiguous')
+  return sha256(businessDatabaseValue(lines[0].slice(businessDatabaseKey.length + 1)))
+}
+
+export function assertBusinessEnvironmentBinding(ledger, body, runtimeDigest) {
+  const plan = ledger?.businessEnvironment?.active || null
+  const hostDigest = businessDatabaseEnvState(body)
+  if (hostDigest !== (plan?.valueSha256 || null) || runtimeDigest !== hostDigest ||
+      (plan && sha256(body) !== plan.afterSha256)) {
+    throw new Error('Business host, runtime and durable configuration lineage disagree')
+  }
+}
+
+// Ordinary successors have no env patch of their own, but must preserve the
+// inherited configuration at every phase, including after a process restart.
+export async function assertBusinessHostBinding(ledger, baseEnv, ownerUid = 0) {
+  const path = resolve(baseEnv)
+  const plan = ledger?.businessEnvironment?.active || null
+  if (plan && plan.baseEnvPath !== path) throw new Error('Business environment path differs from its durable lineage')
+  const body = await readPrivateReleaseFile(path, 'base env', ownerUid)
+  assertBusinessEnvironmentBinding(ledger, body, businessDatabaseEnvState(body))
+  return body
+}
+
+export async function verifyBusinessPrivateEnvironment(ledger, baseEnv, environment, ownerUid = 0) {
+  const body = await assertBusinessHostBinding(ledger, baseEnv, ownerUid)
+  const runtimeDigest = Object.hasOwn(environment || {}, businessDatabaseKey)
+    ? sha256(businessDatabaseValue(environment[businessDatabaseKey])) : null
+  assertBusinessEnvironmentBinding(ledger, body, runtimeDigest)
+}
+
 export function validateActiveReleaseLedger(ledger) {
   if (ledger?.schema !== activeReleaseLedgerSchema || !Number.isSafeInteger(ledger.generation) || ledger.generation < 1 ||
       typeof ledger.updatedAt !== 'string' || Number.isNaN(Date.parse(ledger.updatedAt))) {
     throw new Error('active release ledger is invalid')
+  }
+  if (ledger.businessEnvironment !== undefined) {
+    const state = ledger.businessEnvironment
+    if (!state || Object.keys(state).sort().join(',') !== 'active,previous') throw new Error('Business environment lineage is invalid')
+    for (const plan of [state.active, state.previous]) {
+      if (plan !== null && validateBaseEnvPatchPlan(plan).schema !== businessPatchSchema) throw new Error('Business environment lineage plan is invalid')
+    }
   }
   for (const [label, entry] of [['active', ledger.active], ['previous', ledger.previous]]) {
     if (!entry || resolve(String(entry.releaseDir || '')) !== entry.releaseDir ||
@@ -2889,7 +3045,7 @@ async function startReleaseApplicationPrivately(options, bundle) {
   })
 }
 
-async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha256 = '', baseEnvPatch = null, baseEnvPatchState = '') {
+async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha256 = '', baseEnvPatch = null, baseEnvPatchState = '', expectedLedger = null) {
   const preflight = await preflightComposeBundle(options, bundle, expectedRenderedComposeSha256)
   const containers = await inspectProjectServiceInventory(true)
   const { stdout: caddyRaw } = await execFileAsync('docker', ['container', 'inspect', containers.caddy], { maxBuffer: 16 << 20 })
@@ -2916,6 +3072,7 @@ async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha2
       const environment = environmentFromInspect(inspected)
       verifyRuntimeEnvironment(environment, bundle.receipt)
       verifyBaseEnvPatchRuntimeEnvironment(environment, baseEnvPatch, baseEnvPatchState)
+      await verifyBusinessPrivateEnvironment(expectedLedger, options.baseEnv, environment)
       appContainer = container
     }
   }
@@ -3267,6 +3424,11 @@ export function releaseTransactionCompletionEvidence(journal, initialPhase) {
       typeof initialPhase !== 'string') {
     throw new Error('release completion evidence is invalid')
   }
+  if (journal.baseEnvPatch?.schema === businessPatchSchema) return {
+    action: journal.action, ledgerGeneration: journal.nextLedger.generation, resumed: initialPhase !== 'prepared',
+    businessDatabaseReceipt: journal.baseEnvPatch.receiptPath,
+    businessDatabaseState: journal.baseEnvPatchMode === 'rollback' ? 'prior' : 'target'
+  }
   return {
     action: journal.action,
     ledgerGeneration: journal.nextLedger.generation,
@@ -3288,12 +3450,16 @@ async function resumeDurableReleaseTransaction(options, operationLock, journal) 
     }
     current = await writeReleaseTransactionJournal(operationLock, current, phase)
   }
-  const assertForwardBaseEnv = () => current.baseEnvPatchMode === 'rollback'
-    ? assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
-    : assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
-  const assertOriginBaseEnv = () => current.baseEnvPatchMode === 'rollback'
-    ? assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
-    : assertTargetBaseEnvPatchReady(operationLock, current.baseEnvPatch)
+  const assertForwardBaseEnv = async () => {
+    if (current.baseEnvPatchMode === 'rollback') await assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
+    else await assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+    await assertBusinessHostBinding(current.nextLedger, options.baseEnv)
+  }
+  const assertOriginBaseEnv = async () => {
+    if (current.baseEnvPatchMode === 'rollback') await assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+    else await assertTargetBaseEnvPatchReady(operationLock, current.baseEnvPatch)
+    await assertBusinessHostBinding(current.priorLedger, options.baseEnv)
+  }
   const withForwardBaseEnv = async effect => {
     await assertForwardBaseEnv()
     const result = await effect()
@@ -3318,7 +3484,7 @@ async function resumeDurableReleaseTransaction(options, operationLock, journal) 
     verifyTargetRuntime: () => withForwardBaseEnv(() => runStrideE10W4Maintenance(context.targetOptions, context.target, 'verifyRuntime')),
     startTargetPrivate: () => withForwardBaseEnv(() => startReleaseApplicationPrivately(context.targetOptions, context.target)),
     verifyTargetPrivate: () => withForwardBaseEnv(() => verifyPrivateRelease(context.targetOptions, context.target,
-      current.targetRenderedComposeSha256, current.baseEnvPatch, forwardRuntimeState)),
+      current.targetRenderedComposeSha256, current.baseEnvPatch, forwardRuntimeState, current.nextLedger)),
     writeTargetLedger: () => withForwardBaseEnv(async () => {
     // Reassert the ingress fence at the ledger linearization point. This is
     // idempotent and prevents a privately verified candidate from becoming
@@ -3374,12 +3540,16 @@ async function recoverDurableReleaseTransaction(options, operationLock, journal)
   const recoveryPriorReceiptRequired = current.baseEnvPatchMode === 'rollback' ||
     releasePhaseAtLeast(current.recoveryFromPhase, 'base_env_patched')
   const advance = async phase => { current = await writeReleaseTransactionJournal(operationLock, current, phase) }
-  const assertRecoveryBaseEnv = () => current.baseEnvPatchMode === 'rollback'
-    ? assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
-    : assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: recoveryPriorReceiptRequired })
-  const assertForwardBaseEnv = () => current.baseEnvPatchMode === 'rollback'
-    ? assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
-    : assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+  const assertRecoveryBaseEnv = async () => {
+    if (current.baseEnvPatchMode === 'rollback') await assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+    else await assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: recoveryPriorReceiptRequired })
+    await assertBusinessHostBinding(current.priorLedger, options.baseEnv)
+  }
+  const assertForwardBaseEnv = async () => {
+    if (current.baseEnvPatchMode === 'rollback') await assertPriorBaseEnvRestored(operationLock, current.baseEnvPatch, 0, { requireReceipt: true })
+    else await assertTargetBaseEnvPatchInstalled(operationLock, current.baseEnvPatch)
+    await assertBusinessHostBinding(current.nextLedger, options.baseEnv)
+  }
   const withRecoveryBaseEnv = async effect => {
     await assertRecoveryBaseEnv()
     const result = await effect()
@@ -3423,15 +3593,15 @@ async function recoverDurableReleaseTransaction(options, operationLock, journal)
     }),
     startRollbackPrivate: () => withRecoveryBaseEnv(() => startReleaseApplicationPrivately(context.rollbackOptions, context.rollback)),
     verifyRollbackPrivate: () => withRecoveryBaseEnv(() => verifyPrivateRelease(context.rollbackOptions, context.rollback,
-      current.rollbackRenderedComposeSha256, current.baseEnvPatch, recoveryRuntimeState)),
-    restoreLedger: async () => {
+      current.rollbackRenderedComposeSha256, current.baseEnvPatch, recoveryRuntimeState, current.priorLedger)),
+    restoreLedger: () => withRecoveryBaseEnv(async () => {
       const ledger = await readActiveReleaseLedger(context.targetDir)
       if (sha256(canonical(ledger)) === sha256(canonical(current.nextLedger))) {
         await writeActiveReleaseLedger(context.targetDir, current.priorLedger)
       } else if (sha256(canonical(ledger)) !== sha256(canonical(current.priorLedger))) {
         throw new Error('release ledger is neither durable prior nor target state during recovery')
       }
-    },
+    }),
     openRollbackIngress: () => withRecoveryBaseEnv(() => setReleaseIngress(context.rollbackOptions, context.rollback, 'start')),
     verifyRollbackExternal: () => withRecoveryBaseEnv(async () => {
       await verifyRunning(context.rollbackOptions, false, { verifyTool: false, verifyLedger: true,
@@ -3503,6 +3673,7 @@ async function activateRelease(options, action) {
       throw new Error('currently serving Compose project resources changed during baseline verification')
     }
     const ledger = await readActiveReleaseLedger(targetDir)
+    assertBusinessEnvironmentBinding(ledger, await readFile(resolve(options.baseEnv)), rollbackVerified.businessDatabaseDigest)
     validateReleaseTransition(action, ledger, targetDir, target.receipt, rollbackDir, rollback.receipt)
     await assertActiveReleaseLedgerUnchanged(targetDir, ledger)
     const nextLedger = nextActiveReleaseLedger(targetDir, target.receipt, rollbackDir, rollback.receipt, ledger)
@@ -3528,9 +3699,15 @@ async function activateRelease(options, action) {
         operationLock,
         targetReleaseCommit: target.receipt.source.releaseCommit,
         rollbackReleaseCommit: rollback.receipt.source.releaseCommit,
-        activeLedgerGeneration: ledger.generation
+        activeLedgerGeneration: ledger.generation, activeLedger: ledger
       })
       baseEnvPatchMode = 'rollback'
+    }
+    const businessEnvironment = nextBusinessEnvironment(ledger, baseEnvPatch, baseEnvPatchMode, action)
+    if (businessEnvironment) nextLedger.businessEnvironment = businessEnvironment
+    if (businessEnvironment?.active) {
+      const targetTool = await readFile(target.paths.releaseTool, 'utf8')
+      if (!targetTool.includes("const businessPatchSchema = 'bonfire.business-env-patch.v1'")) throw new Error('target release lacks Business configuration lineage support')
     }
     const qualificationBeforeMutation = privateRealtimeVoiceQualificationEnvState(await readFile(resolve(options.baseEnv)))
     if (qualificationBeforeMutation.state !== currentQualification.state) {
@@ -3797,10 +3974,10 @@ async function spawnWithInput(command, args, input) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2))
-  if (options.command !== 'activate' && targetBaseEnvPatchOptionNames.some(name => String(options[name] || '').trim())) {
+  if (options.command !== 'activate' && (options.businessDatabaseValueFile || targetBaseEnvPatchOptionNames.some(name => String(options[name] || '').trim()))) {
     throw new Error('target base-env patch arguments are permitted only for activate')
   }
-  if (options.command !== 'rollback' && String(options.qualificationRollbackReceipt || '').trim()) {
+  if (options.command !== 'rollback' && String(options.qualificationRollbackReceipt || options.businessDatabaseRollbackReceipt || '').trim()) {
     throw new Error('--qualification-rollback-receipt is permitted only for rollback')
   }
   if (options.command === 'scope') await scope(options)

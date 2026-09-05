@@ -10,6 +10,12 @@
     },
     {
       "kind": "prefixSuffix",
+      "prefix": "internal/business/",
+      "suffix": ".go",
+      "excludeSuffix": "_test.go"
+    },
+    {
+      "kind": "prefixSuffix",
       "prefix": "internal/dr/",
       "suffix": ".go",
       "excludeSuffix": "_test.go"
@@ -19,6 +25,10 @@
       "prefix": "internal/e10evidence/",
       "suffix": ".go",
       "excludeSuffix": "_test.go"
+    },
+    {
+      "kind": "prefix",
+      "prefix": "internal/business/migrations/"
     },
     {
       "kind": "prefix",
