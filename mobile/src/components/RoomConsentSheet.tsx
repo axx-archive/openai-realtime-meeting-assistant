@@ -16,7 +16,8 @@ import type {
   ConsentScope,
   ConsentStatus,
 } from '../api/types';
-import { colors, hitMin, ink, radius, shadow, space, type } from '../theme/tokens';
+import { hitMin, radius, shadow, space, type } from '../theme/tokens';
+import { callColors } from '../theme/callTokens';
 
 export type RoomConsentSheetProps = {
   sessionToken: string;
@@ -174,7 +175,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
           <View style={styles.header}>
             <View style={styles.headerIdentity}>
               <View style={styles.headerIcon}>
-                <SymbolView name="lock.shield.fill" tintColor="#FFFFFF" size={19} />
+                <SymbolView name="lock.shield.fill" tintColor={callColors.text} size={19} />
               </View>
               <View style={styles.headerCopy}>
                 <Text accessibilityRole="header" style={styles.title}>Microphone data</Text>
@@ -193,7 +194,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
                 pressed && styles.pressed,
               ]}
             >
-              <SymbolView name="xmark" tintColor="#FFFFFF" size={16} />
+              <SymbolView name="xmark" tintColor={callColors.text} size={16} />
             </Pressable>
           </View>
 
@@ -203,7 +204,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
           >
             <View style={styles.disclosure}>
               <View style={styles.disclosureIcon}>
-                <SymbolView name="phone.fill" tintColor={colors.success} size={18} />
+                <SymbolView name="phone.fill" tintColor={callColors.success} size={18} />
               </View>
               <View style={styles.disclosureCopy}>
                 <Text style={styles.disclosureTitle}>Your call keeps working</Text>
@@ -215,7 +216,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
 
             {error ? (
               <View accessibilityLiveRegion="polite" accessibilityRole="alert" style={styles.errorBanner}>
-                <SymbolView name="exclamationmark.triangle.fill" tintColor={colors.warn} size={17} />
+                <SymbolView name="exclamationmark.triangle.fill" tintColor={callColors.warning} size={17} />
                 <Text style={styles.errorText}>{error}</Text>
                 <Pressable
                   accessibilityLabel="Retry loading microphone data choices"
@@ -231,14 +232,14 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
 
             {loading && !status ? (
               <View accessibilityLabel="Loading microphone data choices" style={styles.loadingState}>
-                <ActivityIndicator color="#FFFFFF" />
+                <ActivityIndicator color={callColors.text} />
                 <Text style={styles.loadingText}>Loading your choices…</Text>
               </View>
             ) : null}
 
             {status && !status.storeAvailable ? (
               <View accessibilityRole="alert" style={styles.unavailableBanner}>
-                <SymbolView name="lock.fill" tintColor={colors.warn} size={16} />
+                <SymbolView name="lock.fill" tintColor={callColors.warning} size={16} />
                 <Text style={styles.unavailableText}>
                   Choices are unavailable, so server capture and all derived uses stay off. Your direct call is unaffected.
                 </Text>
@@ -249,7 +250,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
                   onPress={() => void loadStatus()}
                   style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
                 >
-                  {loading ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.retryText}>Retry</Text>}
+                  {loading ? <ActivityIndicator color={callColors.text} size="small" /> : <Text style={styles.retryText}>Retry</Text>}
                 </Pressable>
               </View>
             ) : null}
@@ -267,7 +268,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
                     <View key={choice.scope} style={styles.choiceCard}>
                       <View style={styles.choiceHeading}>
                         <View style={styles.choiceIcon}>
-                          <SymbolView name={choice.icon} tintColor="#FFFFFF" size={18} />
+                          <SymbolView name={choice.icon} tintColor={callColors.text} size={18} />
                         </View>
                         <View style={styles.choiceTitleWrap}>
                           <Text style={styles.choiceTitle}>{choice.title}</Text>
@@ -283,7 +284,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
                             </Text>
                           </View>
                         </View>
-                        {savingThis ? <ActivityIndicator color="#FFFFFF" size="small" /> : null}
+                        {savingThis ? <ActivityIndicator color={callColors.text} size="small" /> : null}
                       </View>
                       <Text style={styles.choiceDetail}>{choice.detail}</Text>
                       <Text style={styles.choiceDependency}>{choice.dependency}</Text>
@@ -306,7 +307,7 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
                           ]}
                         >
                           {disposition === 'granted' ? (
-                            <SymbolView name="checkmark" tintColor={ink[950]} size={13} />
+                            <SymbolView name="checkmark" tintColor={callColors.onSelected} size={13} />
                           ) : null}
                           <Text style={[
                             styles.choiceButtonText,
@@ -361,8 +362,8 @@ export const RoomConsentSheet = memo(function RoomConsentSheet({
 });
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: ink[950] },
-  sheet: { flex: 1, backgroundColor: ink[950] },
+  safe: { flex: 1, backgroundColor: callColors.canvas },
+  sheet: { flex: 1, backgroundColor: callColors.canvas },
   header: {
     minHeight: 72,
     flexDirection: 'row',
@@ -372,7 +373,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[4],
     paddingVertical: space[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.09)',
+    borderBottomColor: callColors.border,
   },
   headerIdentity: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: space[3] },
   headerIcon: {
@@ -381,18 +382,20 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ink[800],
+    backgroundColor: callColors.surface,
   },
   headerCopy: { flex: 1, minWidth: 0 },
-  title: { ...type.headline, color: '#FFFFFF' },
-  subtitle: { ...type.caption, marginTop: 1, color: 'rgba(255,255,255,0.48)' },
+  title: { ...type.headline, color: callColors.text },
+  subtitle: { ...type.caption, marginTop: 1, color: callColors.textSecondary },
   close: {
     width: hitMin,
     height: hitMin,
     borderRadius: hitMin / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: callColors.borderControl,
+    backgroundColor: callColors.control,
   },
   content: { padding: space[4], paddingBottom: space[8] },
   disclosure: {
@@ -402,8 +405,8 @@ const styles = StyleSheet.create({
     padding: space[4],
     borderRadius: radius.xl,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.11)',
-    backgroundColor: ink[850],
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   disclosureIcon: {
     width: 38,
@@ -411,11 +414,11 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(48,209,88,0.12)',
+    backgroundColor: callColors.successSurface,
   },
   disclosureCopy: { flex: 1 },
-  disclosureTitle: { ...type.bodyMedium, color: '#FFFFFF' },
-  disclosureText: { ...type.caption, marginTop: 3, color: 'rgba(255,255,255,0.62)' },
+  disclosureTitle: { ...type.bodyMedium, color: callColors.text },
+  disclosureText: { ...type.caption, marginTop: 3, color: callColors.textSecondary },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -426,21 +429,23 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,159,10,0.28)',
-    backgroundColor: 'rgba(255,159,10,0.10)',
+    borderColor: callColors.warning,
+    backgroundColor: callColors.warningSurface,
   },
-  errorText: { ...type.caption, flex: 1, color: 'rgba(255,255,255,0.76)' },
+  errorText: { ...type.caption, flex: 1, color: callColors.text },
   retry: {
     minWidth: 64,
     minHeight: hitMin,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: callColors.borderControl,
+    backgroundColor: callColors.control,
   },
-  retryText: { ...type.button, color: '#FFFFFF' },
+  retryText: { ...type.button, color: callColors.text },
   loadingState: { minHeight: 220, alignItems: 'center', justifyContent: 'center', gap: space[3] },
-  loadingText: { ...type.bodySm, color: 'rgba(255,255,255,0.52)' },
+  loadingText: { ...type.bodySm, color: callColors.textSecondary },
   unavailableBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -448,16 +453,16 @@ const styles = StyleSheet.create({
     marginTop: space[3],
     padding: space[3],
     borderRadius: radius.lg,
-    backgroundColor: 'rgba(255,159,10,0.10)',
+    backgroundColor: callColors.warningSurface,
   },
-  unavailableText: { ...type.caption, flex: 1, color: 'rgba(255,255,255,0.70)' },
+  unavailableText: { ...type.caption, flex: 1, color: callColors.textSecondary },
   choiceList: { gap: space[3], marginTop: space[4] },
   choiceCard: {
     padding: space[4],
     borderRadius: radius.xl,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.09)',
-    backgroundColor: ink[850],
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   choiceHeading: { flexDirection: 'row', alignItems: 'center', gap: space[3] },
   choiceIcon: {
@@ -466,17 +471,17 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: ink[800],
+    backgroundColor: callColors.surface,
   },
   choiceTitleWrap: { flex: 1, minWidth: 0 },
-  choiceTitle: { ...type.bodyMedium, color: '#FFFFFF' },
+  choiceTitle: { ...type.bodyMedium, color: callColors.text },
   stateRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
-  stateDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.30)' },
-  stateDotAllowed: { backgroundColor: colors.success },
-  stateDotOff: { backgroundColor: 'rgba(255,255,255,0.42)' },
-  stateText: { ...type.caption, flexShrink: 1, color: 'rgba(255,255,255,0.50)' },
-  choiceDetail: { ...type.bodySm, marginTop: space[3], color: 'rgba(255,255,255,0.76)' },
-  choiceDependency: { ...type.caption, marginTop: 2, color: 'rgba(255,255,255,0.42)' },
+  stateDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: callColors.textSecondary },
+  stateDotAllowed: { backgroundColor: callColors.success },
+  stateDotOff: { backgroundColor: callColors.textSecondary },
+  stateText: { ...type.caption, flexShrink: 1, color: callColors.textSecondary },
+  choiceDetail: { ...type.bodySm, marginTop: space[3], color: callColors.text },
+  choiceDependency: { ...type.caption, marginTop: 2, color: callColors.textSecondary },
   choiceActions: {
     minHeight: hitMin + 8,
     flexDirection: 'row',
@@ -484,7 +489,7 @@ const styles = StyleSheet.create({
     marginTop: space[3],
     padding: 4,
     borderRadius: radius.lg,
-    backgroundColor: ink[800],
+    backgroundColor: callColors.surface,
   },
   choiceButton: {
     flex: 1,
@@ -495,12 +500,12 @@ const styles = StyleSheet.create({
     gap: 5,
     borderRadius: radius.md,
   },
-  choiceButtonSelected: { backgroundColor: '#FFFFFF' },
-  choiceButtonOffSelected: { backgroundColor: 'rgba(255,255,255,0.11)' },
-  choiceButtonText: { ...type.button, color: 'rgba(255,255,255,0.62)' },
-  choiceButtonTextSelected: { color: ink[950] },
-  choiceButtonTextOffSelected: { color: '#FFFFFF' },
-  footnote: { ...type.caption, marginTop: space[5], textAlign: 'center', color: 'rgba(255,255,255,0.38)' },
+  choiceButtonSelected: { backgroundColor: callColors.selected },
+  choiceButtonOffSelected: { borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.borderControl, backgroundColor: callColors.control },
+  choiceButtonText: { ...type.button, color: callColors.textSecondary },
+  choiceButtonTextSelected: { color: callColors.onSelected },
+  choiceButtonTextOffSelected: { color: callColors.text },
+  footnote: { ...type.caption, marginTop: space[5], textAlign: 'center', color: callColors.textSecondary },
   disabled: { opacity: 0.42 },
   pressed: { opacity: 0.76, transform: [{ scale: 0.97 }] },
 });

@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import { SymbolView, type SFSymbol } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, ink, radius, space, type } from '../theme/tokens';
+import { radius, space, type } from '../theme/tokens';
+import { callColors } from '../theme/callTokens';
 
 export type RoomParticipantRow = {
   key: string;
@@ -44,7 +45,7 @@ function endpointLabel(participant: RoomParticipantRow, duplicateIndex: number):
 function Status({ icon, label, live = false }: { icon: SFSymbol; label: string; live?: boolean }) {
   return (
     <View style={[styles.status, live && styles.statusLive]}>
-      <SymbolView name={icon} tintColor={live ? colors.ember : 'rgba(255,255,255,0.50)'} size={11} />
+      <SymbolView name={icon} tintColor={live ? callColors.speaking : callColors.textSecondary} size={11} />
       <Text style={[styles.statusText, live && styles.statusTextLive]}>{label}</Text>
     </View>
   );
@@ -87,7 +88,7 @@ export const RoomParticipantsSheet = memo(function RoomParticipantsSheet({
             onPress={onClose}
             style={({ pressed }) => [styles.close, pressed && styles.pressed]}
           >
-            <SymbolView name="xmark" tintColor="#FFFFFF" size={16} />
+            <SymbolView name="xmark" tintColor={callColors.text} size={16} />
           </Pressable>
         </View>
 
@@ -98,13 +99,13 @@ export const RoomParticipantsSheet = memo(function RoomParticipantsSheet({
           style={({ pressed }) => [styles.invite, pressed && styles.pressed]}
         >
           <View style={styles.inviteIcon}>
-            <SymbolView name="person.badge.plus" tintColor={ink[950]} size={18} />
+            <SymbolView name="person.badge.plus" tintColor={callColors.onSelected} size={18} />
           </View>
           <View style={styles.inviteCopy}>
             <Text style={styles.inviteTitle}>Invite someone</Text>
             <Text style={styles.inviteBody}>Share a secure room link</Text>
           </View>
-          <SymbolView name="chevron.right" tintColor="rgba(255,255,255,0.35)" size={13} />
+          <SymbolView name="chevron.right" tintColor={callColors.textSecondary} size={13} />
         </Pressable>
 
         <FlatList
@@ -139,33 +140,33 @@ export const RoomParticipantsSheet = memo(function RoomParticipantsSheet({
 });
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: ink[950] },
+  sheet: { flex: 1, backgroundColor: callColors.canvas },
   header: { minHeight: 64, flexDirection: 'row', alignItems: 'center', paddingHorizontal: space[4], paddingBottom: space[3] },
   headerCopy: { flex: 1, minWidth: 0 },
-  title: { ...type.headline, color: '#FFFFFF' },
-  subtitle: { ...type.caption, marginTop: 1, color: 'rgba(255,255,255,0.48)' },
-  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.10)' },
-  invite: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: space[3], marginHorizontal: space[4], marginBottom: space[4], padding: space[3], borderRadius: radius.xl, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[850] },
-  inviteIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: '#FFFFFF' },
+  title: { ...type.headline, color: callColors.text },
+  subtitle: { ...type.caption, marginTop: 1, color: callColors.textSecondary },
+  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.borderControl, backgroundColor: callColors.control },
+  invite: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: space[3], marginHorizontal: space[4], marginBottom: space[4], padding: space[3], borderRadius: radius.xl, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.borderControl, backgroundColor: callColors.surface },
+  inviteIcon: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: callColors.selected },
   inviteCopy: { flex: 1, minWidth: 0 },
-  inviteTitle: { ...type.bodyMedium, color: '#FFFFFF' },
-  inviteBody: { ...type.caption, color: 'rgba(255,255,255,0.48)' },
+  inviteTitle: { ...type.bodyMedium, color: callColors.text },
+  inviteBody: { ...type.caption, color: callColors.textSecondary },
   list: { flex: 1 },
   listContent: { gap: space[2], paddingHorizontal: space[4] },
-  participant: { minHeight: 88, flexDirection: 'row', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.xl, backgroundColor: ink[850] },
-  avatar: { position: 'relative', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[700] },
-  avatarActive: { borderColor: 'rgba(48,209,88,0.58)' },
-  avatarText: { color: '#FFFFFF', fontSize: 18, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600' },
-  activeDot: { position: 'absolute', right: -2, bottom: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: ink[850], backgroundColor: colors.ember },
+  participant: { minHeight: 88, flexDirection: 'row', alignItems: 'center', gap: space[3], padding: space[3], borderRadius: radius.xl, backgroundColor: callColors.surface },
+  avatar: { position: 'relative', width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.border, backgroundColor: callColors.surface },
+  avatarActive: { borderColor: callColors.speaking },
+  avatarText: { color: callColors.text, fontSize: 18, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600' },
+  activeDot: { position: 'absolute', right: -2, bottom: -2, width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: callColors.border, backgroundColor: callColors.speaking },
   participantCopy: { flex: 1, minWidth: 0 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  participantName: { ...type.bodyMedium, flexShrink: 1, color: '#FFFFFF' },
-  sharingLabel: { fontSize: 8, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.7, color: colors.ember },
-  deviceLabel: { ...type.caption, marginBottom: 5, color: 'rgba(255,255,255,0.43)' },
+  participantName: { ...type.bodyMedium, flexShrink: 1, color: callColors.text },
+  sharingLabel: { fontSize: 8, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.7, color: callColors.speaking },
+  deviceLabel: { ...type.caption, marginBottom: 5, color: callColors.textSecondary },
   statusRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  status: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.07)' },
-  statusLive: { backgroundColor: 'rgba(48,209,88,0.12)' },
-  statusText: { fontSize: 9, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', lineHeight: 12, color: 'rgba(255,255,255,0.50)' },
-  statusTextLive: { color: colors.ember },
+  status: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, borderRadius: 9, backgroundColor: callColors.control },
+  statusLive: { backgroundColor: callColors.successSurface },
+  statusText: { fontSize: 9, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', lineHeight: 12, color: callColors.textSecondary },
+  statusTextLive: { color: callColors.speaking },
   pressed: { opacity: 0.76, transform: [{ scale: 0.98 }] },
 });

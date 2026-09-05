@@ -27,7 +27,8 @@ import type {
   ScoutResultWorkbookRef,
 } from '../api/types';
 import { Waveform } from './Waveform';
-import { colors, hitMin, ink, radius, shadow, space, type } from '../theme/tokens';
+import { hitMin, radius, shadow, space, type } from '../theme/tokens';
+import { callColors } from '../theme/callTokens';
 import { useComposerDictation } from '../voice/useComposerDictation';
 import { parseMentions } from '../messaging/mentions';
 import {
@@ -289,8 +290,8 @@ const RoomTypedResult = memo(function RoomTypedResult({
     return () => { active = false; };
   }, [artifactDigest, artifactId, artifactVersion, declaredType, message.workRunId, message.workTitle, message.resultTitle, sessionToken]);
 
-  if (loading) return <View accessibilityRole="progressbar" style={styles.resultLoading}><ActivityIndicator color="#FF8A5B" /><Text style={styles.resultLoadingText}>Loading exact deliverable…</Text></View>;
-  if (failed || !result) return <View accessibilityRole="alert" style={styles.resultLoading}><SymbolView name="exclamationmark.triangle" tintColor="#FF9F0A" size={18} /><Text style={styles.resultLoadingText}>Exact preview unavailable</Text></View>;
+  if (loading) return <View accessibilityRole="progressbar" style={styles.resultLoading}><ActivityIndicator color={callColors.action} /><Text style={styles.resultLoadingText}>Loading exact deliverable…</Text></View>;
+  if (failed || !result) return <View accessibilityRole="alert" style={styles.resultLoading}><SymbolView name="exclamationmark.triangle" tintColor={callColors.warning} size={18} /><Text style={styles.resultLoadingText}>Exact preview unavailable</Text></View>;
   return (
     <InlineArtifactPreview
       agentName="Scout"
@@ -408,7 +409,7 @@ const RoomMessageText = memo(function RoomMessageText({
       {segments.map((segment, index) => segment.kind === 'mention' ? (
         <Text
           key={`${index}-${segment.text}`}
-          style={segment.scout ? styles.messageMentionScout : styles.messageMention}
+          style={[segment.scout ? styles.messageMentionScout : styles.messageMention, own && styles.messageMentionOwn]}
         >
           {segment.text}
         </Text>
@@ -512,7 +513,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
       onPress={openPermanentRecord}
       style={({ pressed }) => [styles.meetingRecordAction, pressed && styles.pressed]}
     >
-      <SymbolView name="doc.text.magnifyingglass" tintColor="#FF8A5B" size={15} />
+      <SymbolView name="doc.text.magnifyingglass" tintColor={callColors.action} size={15} />
       <Text style={styles.meetingRecordActionText}>Open Meeting Record</Text>
     </Pressable>
   ) : null;
@@ -618,7 +619,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             }}
             style={({ pressed }) => [styles.deleteMessage, pressed && styles.pressed]}
           >
-            <SymbolView name="trash" tintColor="rgba(255,255,255,0.48)" size={14} />
+            <SymbolView name="trash" tintColor={callColors.textSecondary} size={14} />
           </Pressable>
         ) : null}
       </View>
@@ -689,7 +690,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             onPress={onClose}
             style={({ pressed }) => [styles.close, pressed && styles.pressed]}
           >
-            <SymbolView name="xmark" tintColor="#FFFFFF" size={16} />
+            <SymbolView name="xmark" tintColor={callColors.text} size={16} />
           </Pressable>
         </View>
 
@@ -707,7 +708,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               >
                 <SymbolView
                   name={item === 'chat' ? 'bubble.left.and.bubble.right.fill' : item === 'transcript' ? 'captions.bubble.fill' : 'doc.text.fill'}
-                  tintColor={selected ? ink[950] : 'rgba(255,255,255,0.58)'}
+                  tintColor={selected ? callColors.onSelected : callColors.textSecondary}
                   size={15}
                 />
                 <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>
@@ -723,7 +724,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             <FlatList
               ListEmptyComponent={(
                 <View style={styles.emptyState}>
-                  <SymbolView name={emptyCopy.icon as 'bubble.left.and.bubble.right'} tintColor="rgba(255,255,255,0.35)" size={28} />
+                  <SymbolView name={emptyCopy.icon as 'bubble.left.and.bubble.right'} tintColor={callColors.textSecondary} size={28} />
                   <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
                   <Text style={styles.emptyBody}>{emptyCopy.body}</Text>
                 </View>
@@ -764,7 +765,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                         ? 'Needs input'
                         : 'Working'}
                 </Text>
-                <SymbolView name="chevron.up" tintColor="rgba(255,255,255,0.54)" size={12} />
+                <SymbolView name="chevron.up" tintColor={callColors.textSecondary} size={12} />
               </Pressable>
             ) : null}
             <View style={[styles.composerShell, { paddingBottom: Math.max(safeArea.bottom, space[3]) }]}>
@@ -776,7 +777,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                   onPress={insertScoutMention}
                   style={({ pressed }) => [styles.scoutMentionShortcut, pressed && styles.pressed]}
                 >
-                  <SymbolView name="sparkles" tintColor="#FF7A45" size={13} />
+                  <SymbolView name="sparkles" tintColor={callColors.action} size={13} />
                   <Text style={styles.scoutMentionShortcutLabel}>@Scout</Text>
                 </Pressable>
               ) : null}
@@ -794,18 +795,18 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                       onPress={() => { void composerDictation.discard(); }}
                       style={({ pressed }) => [styles.composerIcon, pressed && styles.pressed]}
                     >
-                      <SymbolView name="xmark" tintColor="rgba(255,255,255,0.66)" size={17} />
+                      <SymbolView name="xmark" tintColor={callColors.textSecondary} size={17} />
                     </Pressable>
                     <View style={styles.voiceBody}>
                       {composerDictation.state === 'transcribing' ? (
                         <View style={styles.transcribingRow}>
-                          <ActivityIndicator color="rgba(255,255,255,0.66)" size="small" />
+                          <ActivityIndicator color={callColors.textSecondary} size="small" />
                           <Text accessibilityLiveRegion="polite" style={styles.voiceState}>Transcribing</Text>
                         </View>
                       ) : (
                         <>
                           <Waveform
-                            color="rgba(255,255,255,0.72)"
+                            color={callColors.textSecondary}
                             height={27}
                             listening={composerDictation.state === 'listening'}
                             scale={0.55}
@@ -829,7 +830,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                       onPress={() => { void composerDictation.commit(); }}
                       style={({ pressed }) => [styles.send, composerDictation.state === 'transcribing' && styles.sendDisabled, pressed && styles.pressed]}
                     >
-                      <SymbolView name="arrow.up" tintColor={ink[950]} size={16} />
+                      <SymbolView name="arrow.up" tintColor={callColors.onSelected} size={16} />
                     </Pressable>
                   </>
                 ) : (
@@ -841,7 +842,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                       onPress={() => { void composerDictation.start(); }}
                       style={({ pressed }) => [styles.composerIcon, pressed && styles.pressed]}
                     >
-                      <SymbolView name="mic.fill" tintColor="#FF5A19" size={18} />
+                      <SymbolView name="mic.fill" tintColor={callColors.action} size={18} />
                     </Pressable>
                     <TextInput
                       accessibilityLabel="Message the room or mention Scout"
@@ -853,7 +854,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                       }}
                       onSubmitEditing={submitDraft}
                       placeholder="Message the room or @Scout"
-                      placeholderTextColor="rgba(255,255,255,0.38)"
+                      placeholderTextColor={callColors.textSecondary}
                       ref={composerInputRef}
                       returnKeyType="send"
                       style={styles.input}
@@ -867,7 +868,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                       onPress={submitDraft}
                       style={({ pressed }) => [styles.send, !draft.trim() && styles.sendDisabled, pressed && styles.pressed]}
                     >
-                      <SymbolView name="arrow.up" tintColor={ink[950]} size={16} />
+                      <SymbolView name="arrow.up" tintColor={callColors.onSelected} size={16} />
                     </Pressable>
                   </>
                 )}
@@ -879,7 +880,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
             ListHeaderComponent={meetingRecordAction}
             ListEmptyComponent={(
               <View style={styles.emptyState}>
-                <SymbolView name="captions.bubble" tintColor="rgba(255,255,255,0.35)" size={28} />
+                <SymbolView name="captions.bubble" tintColor={callColors.textSecondary} size={28} />
                 <Text style={styles.emptyTitle}>{emptyCopy.title}</Text>
                 <Text style={styles.emptyBody}>{emptyCopy.body}</Text>
               </View>
@@ -933,7 +934,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
               </>
             ) : (
               <View style={styles.emptyState}>
-                <SymbolView name="doc.text" tintColor="rgba(255,255,255,0.35)" size={28} />
+                <SymbolView name="doc.text" tintColor={callColors.textSecondary} size={28} />
                 <Text style={styles.emptyTitle}>Notes are catching up</Text>
                 <Text style={styles.emptyBody}>The transcript remains live. One evolving recap will appear here when its source coverage is verified.</Text>
               </View>
@@ -959,7 +960,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
                 onPress={() => setActivityOpen(false)}
                 style={({ pressed }) => [styles.activityClose, pressed && styles.pressed]}
               >
-                <SymbolView name="xmark" tintColor="#FFFFFF" size={16} />
+                <SymbolView name="xmark" tintColor={callColors.text} size={16} />
               </Pressable>
             </View>
 			<FlatList
@@ -981,7 +982,7 @@ export const RoomConversationSheet = memo(function RoomConversationSheet({
 });
 
 const styles = StyleSheet.create({
-  sheet: { flex: 1, backgroundColor: ink[950] },
+  sheet: { flex: 1, backgroundColor: callColors.canvas },
   fill: { flex: 1 },
   header: {
     minHeight: 72,
@@ -992,9 +993,9 @@ const styles = StyleSheet.create({
     paddingBottom: space[3],
   },
   headerCopy: { flex: 1, minWidth: 0 },
-  title: { ...type.headline, color: '#FFFFFF' },
-  subtitle: { ...type.caption, marginTop: 1, color: 'rgba(255,255,255,0.48)' },
-  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.10)' },
+  title: { ...type.headline, color: callColors.text },
+  subtitle: { ...type.caption, marginTop: 1, color: callColors.textSecondary },
+  close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.borderControl, backgroundColor: callColors.control },
   segmentedControl: {
     minHeight: 52,
     flexDirection: 'row',
@@ -1003,103 +1004,104 @@ const styles = StyleSheet.create({
     marginBottom: space[3],
     padding: 4,
     borderRadius: radius.lg,
-    backgroundColor: ink[800],
+    backgroundColor: callColors.surface,
   },
   segment: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: radius.md },
-  segmentSelected: { backgroundColor: '#FFFFFF' },
-  segmentText: { ...type.button, color: 'rgba(255,255,255,0.58)' },
-  segmentTextSelected: { color: ink[950] },
+  segmentSelected: { backgroundColor: callColors.selected },
+  segmentText: { ...type.button, color: callColors.textSecondary },
+  segmentTextSelected: { color: callColors.onSelected },
   list: { flex: 1 },
   listContent: { gap: space[3], paddingHorizontal: space[4], paddingTop: space[2], paddingBottom: space[5] },
   emptyListContent: { flexGrow: 1 },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space[8], gap: space[2] },
-  emptyTitle: { ...type.headline, color: '#FFFFFF', marginTop: space[2] },
-  emptyBody: { ...type.bodySm, maxWidth: 280, textAlign: 'center', color: 'rgba(255,255,255,0.48)' },
+  emptyTitle: { ...type.headline, color: callColors.text, marginTop: space[2] },
+  emptyBody: { ...type.bodySm, maxWidth: 280, textAlign: 'center', color: callColors.textSecondary },
   messageRow: { maxWidth: '88%', alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   messageRowOwn: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
   messageRowScout: { maxWidth: '94%' },
-  messageBubble: { maxWidth: '100%', paddingHorizontal: space[3], paddingVertical: 10, borderRadius: 18, borderBottomLeftRadius: 6, backgroundColor: ink[800] },
+  messageBubble: { maxWidth: '100%', paddingHorizontal: space[3], paddingVertical: 10, borderRadius: 18, borderBottomLeftRadius: 6, backgroundColor: callColors.surface },
   messageBubbleResult: { width: '100%', paddingHorizontal: 0, paddingBottom: 0, overflow: 'hidden', backgroundColor: 'transparent' },
-  messageBubbleOwn: { borderBottomLeftRadius: 18, borderBottomRightRadius: 6, backgroundColor: '#FFFFFF' },
-  messageBubbleScout: { borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,90,25,0.42)', backgroundColor: 'rgba(255,90,25,0.10)' },
-  messageBubbleError: { borderColor: 'rgba(255,159,10,0.62)' },
+  messageBubbleOwn: { borderBottomLeftRadius: 18, borderBottomRightRadius: 6, backgroundColor: callColors.selected },
+  messageBubbleScout: { borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.action, backgroundColor: callColors.actionSurface },
+  messageBubbleError: { borderColor: callColors.warning },
   messageMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3 },
-  messageAuthor: { ...type.captionMedium, flexShrink: 1, color: '#FFFFFF' },
-  messageAuthorOwn: { color: ink[950] },
-  messageAuthorScout: { color: '#FF8A5B' },
-  messageTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
-  messageTimeOwn: { color: 'rgba(9,9,11,0.42)' },
-  messageText: { ...type.body, color: 'rgba(255,255,255,0.88)' },
-  messageTextOwn: { color: ink[950] },
-  messageTextScout: { color: 'rgba(255,255,255,0.92)' },
-  followThroughStatus: { ...type.captionMedium, marginTop: 7, color: '#FF8A5B' },
-	resultLoading: { minWidth: 240, minHeight: 120, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: space[2], padding: space[4], borderRadius: radius.lg, backgroundColor: ink[800] },
-	resultLoadingText: { ...type.captionMedium, color: 'rgba(255,255,255,0.68)' },
-	workCard: { minWidth: 230, gap: 7, marginTop: space[3], padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.35)', backgroundColor: 'rgba(9,9,11,0.48)' },
+  messageAuthor: { ...type.captionMedium, flexShrink: 1, color: callColors.text },
+  messageAuthorOwn: { color: callColors.onSelected },
+  messageAuthorScout: { color: callColors.action },
+  messageTime: { fontSize: 10, lineHeight: 13, color: callColors.textSecondary },
+  messageTimeOwn: { color: callColors.onSelectedSecondary },
+  messageText: { ...type.body, color: callColors.text },
+  messageTextOwn: { color: callColors.onSelected },
+  messageTextScout: { color: callColors.text },
+  followThroughStatus: { ...type.captionMedium, marginTop: 7, color: callColors.action },
+	resultLoading: { minWidth: 240, minHeight: 120, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: space[2], padding: space[4], borderRadius: radius.lg, backgroundColor: callColors.surface },
+	resultLoadingText: { ...type.captionMedium, color: callColors.textSecondary },
+	workCard: { minWidth: 230, gap: 7, marginTop: space[3], padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.action, backgroundColor: callColors.surface },
 	workCardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space[2] },
-	workCardFamily: { ...type.captionMedium, flex: 1, color: 'rgba(255,255,255,0.62)' },
-	workCardStatus: { ...type.captionMedium, color: colors.ember },
-	workCardStatusAttention: { color: '#FF9F0A' },
-	workCardTitle: { ...type.body, color: '#FFFFFF' },
-	workProgressTrack: { height: 3, overflow: 'hidden', borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.12)' },
-	workProgressFill: { height: 3, borderRadius: 2, backgroundColor: '#FF8A5B' },
+	workCardFamily: { ...type.captionMedium, flex: 1, color: callColors.textSecondary },
+	workCardStatus: { ...type.captionMedium, color: callColors.action },
+	workCardStatusAttention: { color: callColors.warning },
+	workCardTitle: { ...type.body, color: callColors.text },
+	workProgressTrack: { height: 3, overflow: 'hidden', borderRadius: 2, backgroundColor: callColors.control },
+	workProgressFill: { height: 3, borderRadius: 2, backgroundColor: callColors.action },
 	workCardOpenRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-	workCardOpen: { ...type.captionMedium, color: '#FF8A5B' },
-  messageMention: { fontWeight: '600', color: '#82B7FF' },
-  messageMentionScout: { fontWeight: '700', color: '#FF8A5B' },
+	workCardOpen: { ...type.captionMedium, color: callColors.action },
+  messageMention: { fontWeight: '600', color: callColors.action },
+  messageMentionScout: { fontWeight: '700', color: callColors.action },
+  messageMentionOwn: { color: callColors.onSelected, textDecorationLine: 'underline' },
   deleteMessage: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 },
-  transcriptEntry: { gap: 6, padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.09)', backgroundColor: ink[850] },
+  transcriptEntry: { gap: 6, padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.border, backgroundColor: callColors.surface },
   transcriptMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  transcriptLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.ember },
-  transcriptSpeaker: { ...type.captionMedium, flex: 1, color: '#FFFFFF' },
-  transcriptTime: { fontSize: 10, lineHeight: 13, color: 'rgba(255,255,255,0.38)' },
-  transcriptText: { ...type.body, color: 'rgba(255,255,255,0.82)' },
+  transcriptLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: callColors.speaking },
+  transcriptSpeaker: { ...type.captionMedium, flex: 1, color: callColors.text },
+  transcriptTime: { fontSize: 10, lineHeight: 13, color: callColors.textSecondary },
+  transcriptText: { ...type.body, color: callColors.text },
   recapContent: { flexGrow: 1, gap: space[4], paddingHorizontal: space[4], paddingTop: space[2] },
-  recapStatusCard: { gap: 5, padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[850] },
+  recapStatusCard: { gap: 5, padding: space[3], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.border, backgroundColor: callColors.surface },
   recapStatusRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
-  recapStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ember },
-  recapStatusDotWarning: { backgroundColor: '#FF9F0A' },
-  recapStatusText: { ...type.captionMedium, flex: 1, color: '#FFFFFF' },
-  recapCoverage: { ...type.caption, color: 'rgba(255,255,255,0.48)' },
-  recapTitle: { ...type.title2, color: '#FFFFFF' },
+  recapStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: callColors.action },
+  recapStatusDotWarning: { backgroundColor: callColors.warning },
+  recapStatusText: { ...type.captionMedium, flex: 1, color: callColors.text },
+  recapCoverage: { ...type.caption, color: callColors.textSecondary },
+  recapTitle: { ...type.title2, color: callColors.text },
   recapSection: { gap: space[2] },
-  recapSectionTitle: { ...type.label, color: '#FF8A5B', textTransform: 'uppercase', letterSpacing: 0.7 },
+  recapSectionTitle: { ...type.label, color: callColors.action, textTransform: 'uppercase', letterSpacing: 0.7 },
   recapFact: { flexDirection: 'row', alignItems: 'flex-start', gap: space[2] },
-  recapBullet: { width: 6, height: 6, marginTop: 8, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.38)' },
+  recapBullet: { width: 6, height: 6, marginTop: 8, borderRadius: 3, backgroundColor: callColors.textSecondary },
   recapFactCopy: { minWidth: 0, flex: 1, gap: 2 },
-  recapFactText: { ...type.body, color: 'rgba(255,255,255,0.88)' },
-  recapFactMeta: { ...type.caption, color: 'rgba(255,255,255,0.46)' },
-  meetingRecordAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.36)', backgroundColor: 'rgba(255,90,25,0.08)' },
-  meetingRecordActionText: { ...type.button, color: '#FF8A5B' },
-  activityPill: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space[2], marginHorizontal: space[4], marginBottom: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,138,91,0.32)', backgroundColor: ink[850] },
-  activityPillDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF8A5B' },
-  activityPillTitle: { ...type.captionMedium, color: '#FFFFFF' },
-  activityPillStatus: { ...type.caption, flex: 1, textAlign: 'right', color: 'rgba(255,255,255,0.58)' },
-  activitySheet: { flex: 1, backgroundColor: ink[950] },
-  activityHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingBottom: space[3], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(255,255,255,0.09)' },
+  recapFactText: { ...type.body, color: callColors.text },
+  recapFactMeta: { ...type.caption, color: callColors.textSecondary },
+  meetingRecordAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: space[3], borderRadius: radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.action, backgroundColor: callColors.actionSurface },
+  meetingRecordActionText: { ...type.button, color: callColors.action },
+  activityPill: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: space[2], marginHorizontal: space[4], marginBottom: space[2], paddingHorizontal: space[3], borderRadius: radius.full, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.action, backgroundColor: callColors.surface },
+  activityPillDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: callColors.action },
+  activityPillTitle: { ...type.captionMedium, color: callColors.text },
+  activityPillStatus: { ...type.caption, flex: 1, textAlign: 'right', color: callColors.textSecondary },
+  activitySheet: { flex: 1, backgroundColor: callColors.canvas },
+  activityHeader: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: space[3], paddingHorizontal: space[4], paddingBottom: space[3], borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: callColors.border },
   activityHeaderCopy: { minWidth: 0, flex: 1 },
-  activityTitle: { ...type.title2, color: '#FFFFFF' },
-  activitySubtitle: { ...type.caption, marginTop: 2, color: 'rgba(255,255,255,0.48)' },
-  activityClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.10)' },
+  activityTitle: { ...type.title2, color: callColors.text },
+  activitySubtitle: { ...type.caption, marginTop: 2, color: callColors.textSecondary },
+  activityClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.borderControl, backgroundColor: callColors.control },
   activityList: { gap: space[3], padding: space[4] },
-  activityRow: { minHeight: 116, gap: space[2], padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: ink[850] },
+  activityRow: { minHeight: 116, gap: space[2], padding: space[4], borderRadius: radius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.border, backgroundColor: callColors.surface },
   activityRowTop: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
-  activityFamily: { ...type.label, flex: 1, color: 'rgba(255,255,255,0.52)', textTransform: 'uppercase', letterSpacing: 0.6 },
-  activityStatus: { ...type.captionMedium, color: '#FF8A5B' },
-  activityStatusAttention: { color: '#FF9F0A' },
-  activityRowTitle: { ...type.body, color: '#FFFFFF' },
-  activityTopology: { ...type.caption, color: 'rgba(255,255,255,0.44)' },
-  composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.09)', backgroundColor: 'rgba(13,13,16,0.96)' },
-  scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: 'rgba(255,90,25,0.10)' },
-  scoutMentionShortcutLabel: { ...type.captionMedium, color: '#FF8A5B' },
-  composerError: { ...type.caption, marginBottom: space[2], textAlign: 'center', color: '#FF9F0A' },
-  composer: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: 5, paddingRight: 5, paddingVertical: 5, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: ink[800] },
-  composerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },
+  activityFamily: { ...type.label, flex: 1, color: callColors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.6 },
+  activityStatus: { ...type.captionMedium, color: callColors.action },
+  activityStatusAttention: { color: callColors.warning },
+  activityRowTitle: { ...type.body, color: callColors.text },
+  activityTopology: { ...type.caption, color: callColors.textSecondary },
+  composerShell: { ...shadow.mark, paddingHorizontal: space[3], paddingTop: space[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: callColors.border, backgroundColor: callColors.surface },
+  scoutMentionShortcut: { minHeight: hitMin, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space[2], paddingHorizontal: 13, borderRadius: hitMin / 2, backgroundColor: callColors.actionSurface },
+  scoutMentionShortcutLabel: { ...type.captionMedium, color: callColors.action },
+  composerError: { ...type.caption, marginBottom: space[2], textAlign: 'center', color: callColors.warning },
+  composer: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: space[2], paddingLeft: 5, paddingRight: 5, paddingVertical: 5, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, borderColor: callColors.borderControl, backgroundColor: callColors.surface },
+  composerIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 20 },
   voiceBody: { flex: 1, minWidth: 0, minHeight: 38, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   transcribingRow: { flexDirection: 'row', alignItems: 'center', gap: space[2] },
-  voiceState: { ...type.caption, color: 'rgba(255,255,255,0.58)' },
-  input: { ...type.body, flex: 1, maxHeight: 112, minHeight: 40, paddingTop: 8, paddingBottom: 7, color: '#FFFFFF' },
-  send: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: '#FFFFFF' },
+  voiceState: { ...type.caption, color: callColors.textSecondary },
+  input: { ...type.body, flex: 1, maxHeight: 112, minHeight: 40, paddingTop: 8, paddingBottom: 7, color: callColors.text },
+  send: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: callColors.selected },
   sendDisabled: { opacity: 0.34 },
   pressed: { opacity: 0.76, transform: [{ scale: 0.96 }] },
 });

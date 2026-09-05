@@ -61,7 +61,8 @@ import {
 } from '../realtime/callPresentation';
 import { normalizedParticipantName } from '../realtime/participantMedia';
 import type { RootStackParamList } from '../navigation/types';
-import { colors, ink, radius, shadow, space, type } from '../theme/tokens';
+import { colors, radius, shadow, space, type } from '../theme/tokens';
+import { callColors } from '../theme/callTokens';
 import { API_BASE_URL } from '../config';
 import { firstArray } from '../utils/records';
 import {
@@ -210,7 +211,7 @@ const CallVideoTile = memo(function CallVideoTile({
           </View>
           {!compact ? (
             <View style={styles.cameraOffRow}>
-              <SymbolView name="video.slash.fill" tintColor="rgba(255,255,255,0.55)" size={13} />
+              <SymbolView name="video.slash.fill" tintColor={callColors.textSecondary} size={13} />
               <Text style={styles.cameraOffText}>{videoOff ? 'Video off' : 'Video unavailable'}</Text>
             </View>
           ) : null}
@@ -226,14 +227,14 @@ const CallVideoTile = memo(function CallVideoTile({
           waitingForContainedVideo && styles.callVideoLabelMeasuring,
         ]}
       >
-        {pinned ? <SymbolView name="pin.fill" tintColor="#FFFFFF" size={compact ? 9 : 10} /> : active ? <View style={styles.speakerDot} /> : null}
+        {pinned ? <SymbolView name="pin.fill" tintColor={callColors.text} size={compact ? 9 : 10} /> : active ? <View style={styles.speakerDot} /> : null}
         <Text numberOfLines={1} style={[styles.callVideoLabelText, compact && styles.callVideoLabelTextCompact]}>
           {participant.screenSharing ? `${name} · Sharing` : pinned ? `${name} · Pinned` : name}
         </Text>
       </View>
       {participant.screenSharing && !compact ? (
         <View accessible accessibilityLabel={`${name} is sharing their screen`} style={styles.screenShareBadge}>
-          <SymbolView name="rectangle.on.rectangle" tintColor={colors.ember} size={12} />
+          <SymbolView name="rectangle.on.rectangle" tintColor={callColors.speaking} size={12} />
           <Text style={styles.screenShareBadgeText}>PRESENTING</Text>
         </View>
       ) : null}
@@ -272,7 +273,7 @@ const RoomAgentBench = memo(function RoomAgentBench({
   return (
     <View style={[styles.agentBench, { bottom }]}>
       <View style={styles.agentBenchHeading}>
-        <SymbolView name="waveform" tintColor="rgba(255,255,255,0.68)" size={12} />
+        <SymbolView name="waveform" tintColor={callColors.textSecondary} size={12} />
         <Text style={styles.agentBenchLabel}>AGENTS IN THE ROOM</Text>
       </View>
       <FlatList
@@ -340,7 +341,7 @@ const LocalPreview = memo(function LocalPreview({ name, streamURL, cameraOff, su
             />
             {!rendererReady ? (
               <View pointerEvents="none" style={styles.localPreviewStarting}>
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator color={callColors.text} size="small" />
                 <Text style={styles.localPreviewStartingText}>{screenSharing ? 'Starting share…' : 'Starting video…'}</Text>
               </View>
             ) : null}
@@ -348,7 +349,7 @@ const LocalPreview = memo(function LocalPreview({ name, streamURL, cameraOff, su
         ) : (
           <View style={styles.localPlaceholder}>
             <Text style={styles.localAvatarText}>{participantInitials(name)}</Text>
-            <SymbolView name={suspended ? 'arrow.clockwise' : 'video.slash.fill'} tintColor="rgba(255,255,255,0.64)" size={14} />
+            <SymbolView name={suspended ? 'arrow.clockwise' : 'video.slash.fill'} tintColor={callColors.textSecondary} size={14} />
           </View>
         )}
         <View style={styles.localLabelPill}>
@@ -365,7 +366,7 @@ const LocalPreview = memo(function LocalPreview({ name, streamURL, cameraOff, su
           }}
           style={({ pressed }) => [styles.switchCamera, pressed && styles.switchCameraPressed]}
         >
-          <SymbolView name="camera.rotate.fill" tintColor="#FFFFFF" size={15} />
+          <SymbolView name="camera.rotate.fill" tintColor={callColors.text} size={15} />
         </Pressable>
       ) : null}
     </View>
@@ -393,10 +394,10 @@ const CallControl = memo(function CallControl({
 }: CallControlProps) {
   const inverted = tone === 'off';
   const tintColor = inverted
-    ? ink[950]
+    ? callColors.onSelected
     : tone === 'recording'
-      ? '#FF6B63'
-      : '#FFFFFF';
+      ? callColors.danger
+      : tone === 'danger' ? callColors.onLeave : callColors.text;
   const handlePress = useCallback(() => {
     void Haptics.impactAsync(tone === 'danger'
       ? Haptics.ImpactFeedbackStyle.Medium
@@ -533,7 +534,7 @@ const CallLayout = memo(function CallLayout({
         style={styles.audioOnlyStage}
       >
         <View style={styles.audioOnlyMark}>
-          <SymbolView name="waveform" tintColor="rgba(255,255,255,0.72)" size={28} />
+          <SymbolView name="waveform" tintColor={callColors.textSecondary} size={28} />
         </View>
         <Text style={styles.audioOnlyTitle}>Audio only</Text>
         <Text style={styles.audioOnlyCopy}>{audioParticipantCount} here · cameras are off</Text>
@@ -1714,13 +1715,13 @@ const styles = StyleSheet.create({
   joining: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: space[2] },
   joiningText: { ...type.bodySm, color: colors.text2 },
   roomError: { ...type.caption, color: colors.danger, textAlign: 'center', marginTop: space[2] },
-  callScreen: { backgroundColor: ink[950] },
+  callScreen: { backgroundColor: callColors.canvas },
   callSurface: {
     flex: 1,
     marginHorizontal: -space[5],
     marginTop: -space[3],
     overflow: 'hidden',
-    backgroundColor: ink[950],
+    backgroundColor: callColors.canvas,
   },
   screenCapturePicker: {
     position: 'absolute',
@@ -1735,20 +1736,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderRadius: radius.xl,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: ink[850],
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   callVideoTileCompact: { borderRadius: radius.lg },
-  callVideoTileSharing: { borderColor: 'rgba(48,209,88,0.55)' },
+  callVideoTileSharing: { borderColor: callColors.speaking },
   callVideoTilePressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
-  callVideo: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: ink[900] },
+  callVideo: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: callColors.letterbox },
   oneUpTile: { flex: 1, borderRadius: 0 },
   audioOnlyStage: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: space[2],
-    backgroundColor: ink[900],
+    backgroundColor: callColors.canvas,
   },
   audioOnlyMark: {
     width: 68,
@@ -1758,11 +1759,11 @@ const styles = StyleSheet.create({
     marginBottom: space[2],
     borderRadius: 34,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderColor: callColors.border,
+    backgroundColor: callColors.control,
   },
-  audioOnlyTitle: { ...type.headline, color: '#FFFFFF' },
-  audioOnlyCopy: { ...type.caption, color: 'rgba(255,255,255,0.56)' },
+  audioOnlyTitle: { ...type.headline, color: callColors.text },
+  audioOnlyCopy: { ...type.caption, color: callColors.textSecondary },
   oneUpStageSlot: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   oneUpPrimaryTile: { flex: 0, borderRadius: 0 },
   videoPlaceholder: {
@@ -1774,7 +1775,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space[3],
-    backgroundColor: ink[850],
+    backgroundColor: callColors.surface,
   },
   agentBench: {
     position: 'absolute',
@@ -1786,8 +1787,8 @@ const styles = StyleSheet.create({
     paddingBottom: 7,
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(13,13,16,0.88)',
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   agentBenchHeading: {
     height: 14,
@@ -1797,7 +1798,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   agentBenchLabel: {
-    color: 'rgba(255,255,255,0.52)',
+    color: callColors.textSecondary,
     fontSize: 9,
     fontFamily: 'GoogleSansFlex_600SemiBold',
     fontWeight: '600',
@@ -1815,14 +1816,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: callColors.control,
   },
-  agentBenchMemberSpeaking: { backgroundColor: 'rgba(255,255,255,0.11)' },
+  agentBenchMemberSpeaking: { backgroundColor: callColors.successSurface },
   agentBenchIdentity: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
   agentBenchDot: { width: 7, height: 7, borderRadius: 3.5 },
   agentBenchCopy: { minWidth: 0, flex: 1 },
   agentBenchName: {
-    color: '#FFFFFF',
+    color: callColors.text,
     fontSize: 11,
     fontFamily: 'GoogleSansFlex_600SemiBold',
     fontWeight: '600',
@@ -1830,7 +1831,7 @@ const styles = StyleSheet.create({
   },
   agentBenchState: {
     marginTop: 1,
-    color: 'rgba(255,255,255,0.50)',
+    color: callColors.textSecondary,
     fontSize: 9,
     fontFamily: 'GoogleSansFlex_500Medium',
     fontWeight: '500',
@@ -1843,14 +1844,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderColor: callColors.border,
+    backgroundColor: callColors.control,
   },
   videoAvatarCompact: { width: 44, height: 44, borderRadius: 22 },
-  videoAvatarText: { color: '#FFFFFF', fontSize: 27, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: -0.6 },
+  videoAvatarText: { color: callColors.text, fontSize: 27, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: -0.6 },
   videoAvatarTextCompact: { fontSize: 16, letterSpacing: -0.2 },
   cameraOffRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cameraOffText: { ...type.caption, color: 'rgba(255,255,255,0.55)' },
+  cameraOffText: { ...type.caption, color: callColors.textSecondary },
   callVideoLabel: {
     position: 'absolute',
     left: space[3],
@@ -1864,14 +1865,14 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(5,5,7,0.68)',
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   callVideoLabelCompact: { left: 6, bottom: 6, minHeight: 23, maxWidth: '88%', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 9 },
   callVideoLabelMeasuring: { opacity: 0 },
-  callVideoLabelText: { ...type.captionMedium, flexShrink: 1, color: '#FFFFFF' },
+  callVideoLabelText: { ...type.captionMedium, flexShrink: 1, color: callColors.text },
   callVideoLabelTextCompact: { fontSize: 10, lineHeight: 13 },
-  speakerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.ember },
+  speakerDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: callColors.speaking },
   screenShareBadge: {
     position: 'absolute',
     top: space[3],
@@ -1883,10 +1884,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(48,209,88,0.36)',
-    backgroundColor: 'rgba(5,5,7,0.76)',
+    borderColor: callColors.speaking,
+    backgroundColor: callColors.surface,
   },
-  screenShareBadgeText: { fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.75, color: colors.ember },
+  screenShareBadgeText: { fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', letterSpacing: 0.75, color: callColors.speaking },
   localPreview: {
     ...shadow.mark,
     position: 'absolute',
@@ -1897,8 +1898,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: ink[850],
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   localPreviewInline: { position: 'relative', right: undefined, zIndex: 1 },
   localPlaceholder: {
@@ -1906,7 +1907,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: space[2],
-    backgroundColor: ink[800],
+    backgroundColor: callColors.surface,
   },
   localPreviewStarting: {
     position: 'absolute',
@@ -1918,10 +1919,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: ink[850],
+    backgroundColor: callColors.surface,
   },
-  localPreviewStartingText: { color: 'rgba(255,255,255,0.76)', fontSize: 9, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600' },
-  localAvatarText: { color: '#FFFFFF', fontSize: 24, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: -0.4 },
+  localPreviewStartingText: { color: callColors.text, fontSize: 9, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600' },
+  localAvatarText: { color: callColors.text, fontSize: 24, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', letterSpacing: -0.4 },
   localLabelPill: {
     position: 'absolute',
     left: 7,
@@ -1930,9 +1931,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: 'rgba(5,5,7,0.68)',
+    backgroundColor: callColors.surface,
   },
-  localLabelText: { color: '#FFFFFF', fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 13 },
+  localLabelText: { color: callColors.text, fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 13 },
   switchCamera: {
     position: 'absolute',
     top: 6,
@@ -1943,10 +1944,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(5,5,7,0.68)',
+    borderColor: callColors.borderControl,
+    backgroundColor: callColors.surface,
   },
-  switchCameraPressed: { transform: [{ scale: 0.94 }], backgroundColor: 'rgba(5,5,7,0.84)' },
+  switchCameraPressed: { transform: [{ scale: 0.94 }], backgroundColor: callColors.surface },
   largeCallShell: {
     flex: 1,
     gap: space[2],
@@ -1985,12 +1986,12 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(7,7,8,0.76)',
+    borderColor: callColors.borderControl,
+    backgroundColor: callColors.surface,
   },
-  callRoomIdentityPressed: { backgroundColor: 'rgba(7,7,8,0.88)', transform: [{ scale: 0.99 }] },
-  callRoomName: { color: '#FFFFFF', fontSize: 13, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 16, letterSpacing: -0.08 },
-  callParticipantCount: { marginTop: 1, color: 'rgba(255,255,255,0.58)', fontSize: 10, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', lineHeight: 13, fontVariant: ['tabular-nums'] },
+  callRoomIdentityPressed: { backgroundColor: callColors.surface, transform: [{ scale: 0.99 }] },
+  callRoomName: { color: callColors.text, fontSize: 13, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 16, letterSpacing: -0.08 },
+  callParticipantCount: { marginTop: 1, color: callColors.textSecondary, fontSize: 10, fontFamily: 'GoogleSansFlex_500Medium', fontWeight: '500', lineHeight: 13, fontVariant: ['tabular-nums'] },
   callStatusPill: {
     minHeight: 42,
     maxWidth: '48%',
@@ -2000,13 +2001,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: space[3],
     borderRadius: 18,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(7,7,8,0.76)',
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
-  callStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ember },
-  callStatusDotWarning: { backgroundColor: '#FF9F0A' },
-  callStatusDotCritical: { backgroundColor: '#FF6B63' },
-  callStatusText: { flexShrink: 1, color: '#FFFFFF', fontSize: 11, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 14 },
+  callStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: callColors.speaking },
+  callStatusDotWarning: { backgroundColor: callColors.warning },
+  callStatusDotCritical: { backgroundColor: callColors.danger },
+  callStatusText: { flexShrink: 1, color: callColors.text, fontSize: 11, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 14 },
   callControlDockFrame: {
     position: 'absolute',
     left: space[2],
@@ -2023,8 +2024,8 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: radius.xxl,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(13,13,16,0.92)',
+    borderColor: callColors.border,
+    backgroundColor: callColors.surface,
   },
   callControl: {
     width: 44,
@@ -2033,16 +2034,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: callColors.borderControl,
+    backgroundColor: callColors.control,
   },
-  callControlOff: { backgroundColor: '#FFFFFF' },
-  callControlDivider: { width: StyleSheet.hairlineWidth, height: 28, marginHorizontal: 1, backgroundColor: 'rgba(255,255,255,0.16)' },
-  callControlRecording: { backgroundColor: 'rgba(255,69,58,0.15)' },
-  callControlDanger: { backgroundColor: '#FF453A' },
+  callControlOff: { backgroundColor: callColors.selected },
+  callControlDivider: { width: StyleSheet.hairlineWidth, height: 28, marginHorizontal: 1, backgroundColor: callColors.borderControl },
+  callControlRecording: { backgroundColor: callColors.dangerSurface },
+  callControlDanger: { backgroundColor: callColors.leave },
   callControlDisabled: { opacity: 0.42 },
   callControlPressed: { transform: [{ scale: 0.96 }] },
-  callControlLabel: { display: 'none', color: '#FFFFFF', fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 12 },
-  callControlLabelInverted: { color: ink[950] },
+  callControlLabel: { display: 'none', color: callColors.text, fontSize: 10, fontFamily: 'GoogleSansFlex_600SemiBold', fontWeight: '600', lineHeight: 12 },
+  callControlLabelInverted: { color: callColors.onSelected },
   callControlBadge: {
     position: 'absolute',
     top: 5,
@@ -2054,10 +2057,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     borderRadius: 9,
     borderWidth: 2,
-    borderColor: 'rgba(13,13,16,0.92)',
-    backgroundColor: '#FF453A',
+    borderColor: callColors.surface,
+    backgroundColor: callColors.leave,
   },
-  callControlBadgeText: { color: '#FFFFFF', fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', lineHeight: 11 },
+  callControlBadgeText: { color: callColors.onLeave, fontSize: 9, fontFamily: 'GoogleSansFlex_700Bold', fontWeight: '700', lineHeight: 11 },
   pressed: { transform: [{ scale: 0.96 }], opacity: 0.9 },
   sectionTitle: { ...type.label, color: colors.text3, textTransform: 'uppercase', marginTop: space[6], marginBottom: space[3] },
   people: { backgroundColor: colors.surface1, borderRadius: radius.xl, padding: space[4] },
