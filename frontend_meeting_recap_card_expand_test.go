@@ -224,6 +224,16 @@ const cardText=['**Meeting recap — Launch review**','the office · 1h 12m · 3
   assert.equal(await disclose.getAttribute('aria-expanded'),'true');
   assert.match(await disclose.innerText(),/Show less/);
   assert.equal(detailHits,1,'the expand did not fetch the record exactly once');
+  // The recording must own its height in document flow. A stage-wide
+  // video height:100% used to push metadata across the disclosure button.
+  const recordingFlow=await card.evaluate(node=>{
+    const media=node.querySelector('.meeting-record__media').getBoundingClientRect();
+    const metadata=node.querySelector('.meeting-record__recording-meta').getBoundingClientRect();
+    const footer=node.querySelector('.meeting-recap-card__foot').getBoundingClientRect();
+    return {mediaBottom:media.bottom,metadataTop:metadata.top,metadataBottom:metadata.bottom,footerTop:footer.top};
+  });
+  assert.ok(recordingFlow.metadataTop>=recordingFlow.mediaBottom,'recording metadata overlaps the player');
+  assert.ok(recordingFlow.footerTop>=recordingFlow.metadataBottom,'recording metadata overlaps the recap disclosure');
   // 4. collapsing restores the compact shape
   await disclose.click();
   assert.equal(await card.locator('.meeting-recap-card__detail').count(),0);

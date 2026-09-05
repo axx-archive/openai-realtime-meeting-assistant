@@ -4150,6 +4150,11 @@
       .meeting-record__media {
         display: block;
         width: 100%;
+        /* Recordings participate in document flow, unlike the live stage's
+           global video height:100%. Reserve their own intrinsic height so
+           metadata and the recap disclosure stay below the player. */
+        height: auto;
+        object-fit: contain;
         max-height: 360px;
         margin-top: 4px;
         border-radius: var(--r-md);
