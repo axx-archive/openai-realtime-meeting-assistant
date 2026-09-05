@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -22,8 +23,20 @@ func TestOpenAIDocumentCountUsesExactFrozenRequest(t *testing.T) {
 	transport, err := NewOpenAIDocumentTransport(OpenAIDocumentTransportConfig{APIKey: "test-secret", ProjectID: "test-project", RoundTripper: documentCountRoundTripper(func(r *http.Request) (*http.Response, error) {
 		calls++
 		body, _ := io.ReadAll(r.Body)
-		if r.URL.String() != openAIDocumentEndpoint+"/input_tokens" || r.Method != "POST" || string(body) != string(frozen.Bytes()) || r.Header.Get("OpenAI-Project") != "test-project" {
-			t.Fatal("count request changed frozen source or endpoint")
+		if r.URL.String() != openAIDocumentEndpoint+"/input_tokens" || r.Method != "POST" || r.Header.Get("OpenAI-Project") != "test-project" {
+			t.Fatal("count request changed endpoint or project")
+		}
+		var count, generation map[string]json.RawMessage
+		if json.Unmarshal(body, &count) != nil || json.Unmarshal(frozen.Bytes(), &generation) != nil {
+			t.Fatal("invalid request")
+		}
+		for _, key := range []string{"model", "instructions", "input", "tools", "tool_choice", "parallel_tool_calls", "reasoning", "text", "truncation"} {
+			if string(count[key]) != string(generation[key]) {
+				t.Fatalf("changed count input field %s", key)
+			}
+		}
+		if len(count) != 9 {
+			t.Fatal("generation-only fields leaked into count schema")
 		}
 		if _, ok := r.Context().Deadline(); !ok {
 			t.Fatal("unbounded count")
@@ -72,5 +85,17 @@ func TestOpenAIDocumentCountRejectsUncertainOrExcessInput(t *testing.T) {
 				t.Fatalf("unexpected evidence/replay: %+v %v calls=%d", count, err, calls)
 			}
 		})
+	}
+}
+
+func TestOpenAIDocumentCountFailureDoesNotEchoProviderText(t *testing.T) {
+	for _, param := range []string{"background", "private-source-title"} {
+		err := countHTTPError(&http.Response{StatusCode: 400, Body: io.NopCloser(strings.NewReader(`{"error":{"param":"` + param + `","message":"private source and credential must not escape"}}`))})
+		if !errors.Is(err, ErrOpenAIDocumentTokenCount) || strings.Contains(err.Error(), "private") {
+			t.Fatalf("unsafe diagnostic: %v", err)
+		}
+		if param == "background" && !strings.Contains(err.Error(), "background") {
+			t.Fatal("lost safe schema diagnostic")
+		}
 	}
 }

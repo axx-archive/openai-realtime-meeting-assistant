@@ -32,6 +32,14 @@ $0.10 maximum. `prepared.json` and `counted.json` preserve partial progress;
 If preparation fails, inspect the private checkpoint and database; do not rerun
 against another directory as an automatic retry.
 
+To diagnose counting against an existing `prepared.json`, the operator may run
+`count --state-dir /absolute/existing/private-proof --allow-live-model`. This
+checks the exact database, credential and current stored Business source before
+one count request, writes a new private `count-diagnostic-*.json` receipt, and
+prints only the token count or a static failure category. It creates no new
+Business, grant, Work, or generation and does not convert the diagnostic receipt
+into admission state.
+
 Each step starts a new process, validates the exact persisted request, count,
 source, database and credential binding, then calls Worker.Step exactly once.
 The first step may create one provider response. A subsequent process reconciles

@@ -146,14 +146,27 @@ func NewOpenAIDocumentTransport(c OpenAIDocumentTransportConfig) (*OpenAIDocumen
 	}
 	rt := c.RoundTripper
 	if rt == nil {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.Proxy = nil
-		t.DisableKeepAlives = true
-		t.ForceAttemptHTTP2 = false
-		t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
-		rt = t
+		rt = newDocumentHTTPTransport()
 	}
 	return &OpenAIDocumentTransport{&http.Client{Transport: rt, Timeout: c.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, c.APIKey, c.ProjectID}, nil
+}
+
+// Explicit ALPN and Protocols avoid inheriting HTTP/2 negotiation from the
+// process default while disabling its handler. That mismatch otherwise makes
+// HTTP/2 frames appear as a malformed HTTP/1 response on current Go runtimes.
+func newDocumentHTTPTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.Proxy = nil
+	t.DisableKeepAlives = true
+	t.ForceAttemptHTTP2 = false
+	t.Protocols = new(http.Protocols)
+	t.Protocols.SetHTTP1(true)
+	t.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	if t.TLSClientConfig == nil {
+		t.TLSClientConfig = &tls.Config{}
+	}
+	t.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	return t
 }
 
 type OpenAIDocumentAcceptance struct {

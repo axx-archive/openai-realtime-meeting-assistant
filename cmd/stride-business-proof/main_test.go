@@ -1,6 +1,7 @@
 package main
 
 import (
+	b "github.com/openai/openai-realtime-meeting-assistant/internal/business"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,11 +58,37 @@ func TestExplicitLiveAuthorizationRequiredBeforeSideEffects(t *testing.T) {
 	old := os.Args
 	defer func() { os.Args = old }()
 	path := filepath.Join(t.TempDir(), "must-not-exist")
-	os.Args = []string{"proof", "prepare", "--state-dir", path}
-	if e := run(); e == nil {
-		t.Fatal("missing live authorization accepted")
+	for _, mode := range []string{"prepare", "count", "step"} {
+		os.Args = []string{"proof", mode, "--state-dir", path}
+		if e := run(); e == nil {
+			t.Fatal("missing live authorization accepted")
+		}
 	}
 	if _, e := os.Stat(path); !os.IsNotExist(e) {
 		t.Fatal("side effect before authorization")
+	}
+}
+
+func TestPreparedCountDoesNotRequireOrCreateAdmittedState(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "proof")
+	if e := os.Mkdir(dir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	s := state{Version: 1, BusinessID: "business", RequestID: "request", Request: []byte("frozen"), Scope: b.Scope{OrganizationID: "org"}}
+	if e := exclusive(filepath.Join(dir, "prepared.json"), wire(s)); e != nil {
+		t.Fatal(e)
+	}
+	got, e := readProofFile(dir, true)
+	if e != nil || got.WorkID != "" || got.BusinessID != "business" {
+		t.Fatal("prepared checkpoint was not readable")
+	}
+	if _, e = readState(dir); !os.IsNotExist(e) {
+		t.Fatal("count checkpoint became admitted state")
+	}
+	if e = exclusive(filepath.Join(dir, "state.json"), wire(s)); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = readState(dir); e == nil {
+		t.Fatal("step accepted a preparation without Work or count")
 	}
 }

@@ -87,11 +87,18 @@ func privateDir(dir string) error {
 	return nil
 }
 func readState(dir string) (state, error) {
+	return readProofFile(dir, false)
+}
+func readProofFile(dir string, prepared bool) (state, error) {
 	var s state
 	if e := privateDir(dir); e != nil {
 		return s, e
 	}
-	p := filepath.Join(dir, "state.json")
+	name := "state.json"
+	if prepared {
+		name = "prepared.json"
+	}
+	p := filepath.Join(dir, name)
 	i, e := os.Lstat(p)
 	if e != nil {
 		return s, e
@@ -106,7 +113,10 @@ func readState(dir string) (state, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	e = dec.Decode(&s)
-	if e == nil && (s.Version != 1 || s.WorkID == "" || s.Count.InputTokens <= 0 || s.Count.InputTokens > b.OpenAIDocumentInputTokenLimit || s.Count.EnvelopeDigest == "" || s.Count.CountedAt.IsZero()) {
+	if e == nil && (s.Version != 1 || s.BusinessID == "" || s.RequestID == "" || len(s.Request) == 0 || s.Scope.OrganizationID == "") {
+		e = errors.New("incomplete proof preparation")
+	}
+	if e == nil && !prepared && (s.WorkID == "" || s.Count.InputTokens <= 0 || s.Count.InputTokens > b.OpenAIDocumentInputTokenLimit || s.Count.EnvelopeDigest == "" || s.Count.CountedAt.IsZero()) {
 		e = errors.New("incomplete proof state")
 	}
 	return s, e
@@ -119,6 +129,10 @@ func main() {
 	}
 }
 func safeError(e error) string {
+	var categorized interface{ FailureCategory() string }
+	if errors.As(e, &categorized) {
+		return categorized.FailureCategory()
+	}
 	switch {
 	case errors.Is(e, b.ErrDenied):
 		return "authority"
@@ -135,16 +149,16 @@ func safeError(e error) string {
 
 func run() error {
 	if len(os.Args) < 2 {
-		return errors.New("prepare or step required")
+		return errors.New("prepare, count, or step required")
 	}
 	mode := os.Args[1]
 	fs := flag.NewFlagSet("stride-business-proof "+mode, flag.ContinueOnError)
-	dir := fs.String("state-dir", "", "new private proof directory for prepare; existing directory for step")
+	dir := fs.String("state-dir", "", "new private proof directory for prepare; existing directory for count or step")
 	allow := fs.Bool("allow-live-model", false, "authorize private setup token counting and at most one admitted generation; step may retrieve its existing response")
 	if e := fs.Parse(os.Args[2:]); e != nil {
 		return e
 	}
-	if (mode != "prepare" && mode != "step") || !*allow || *dir == "" || !filepath.IsAbs(*dir) || fs.NArg() != 0 {
+	if (mode != "prepare" && mode != "count" && mode != "step") || !*allow || *dir == "" || !filepath.IsAbs(*dir) || fs.NArg() != 0 {
 		return errors.New("explicit mode, absolute state directory, and live model authorization required")
 	}
 	runtime, e := localConfig(os.Getenv("STRIDE_PROOF_DATABASE_URL"))
@@ -164,7 +178,7 @@ func run() error {
 	if mode == "prepare" {
 		return prepare(ctx, *dir, runtime, key, project, transport)
 	}
-	s, e := readState(*dir)
+	s, e := readProofFile(*dir, mode == "count")
 	if e != nil {
 		return e
 	}
@@ -179,6 +193,9 @@ func run() error {
 	store, e := b.New(ctx, pool)
 	if e != nil {
 		return e
+	}
+	if mode == "count" {
+		return countPrepared(ctx, *dir, store, s, transport)
 	}
 	check := func(ctx context.Context, scope b.Scope, w b.Work, evidence b.DocumentAdmissionEvidence) error {
 		if scope != s.Scope || w.ID != s.WorkID || w.BusinessID != s.BusinessID || !bytes.Equal(wire(evidence), wire(s.Evidence)) || evidence.RequestDigest != s.Count.RequestDigest || evidence.InputTokens != s.Count.InputTokens || evidence.TokenCountReceipt != "local-count:"+digest(wire(s.Count)) {
@@ -234,6 +251,37 @@ func run() error {
 	}
 	fmt.Printf("state=%s work=%s result=%s\n", result.State, s.WorkID, result.Work.ResultID)
 	return stepErr
+}
+
+// countPrepared never admits Work or mutates Business state. Its receipt is
+// diagnostic evidence only; it cannot silently resume generation admission.
+func countPrepared(ctx context.Context, dir string, store *b.Store, s state, transport *b.OpenAIDocumentTransport) error {
+	business, e := store.GetBusiness(ctx, s.Scope, s.BusinessID)
+	if e != nil {
+		return e
+	}
+	frozen, source, e := b.FreezePrivateBusinessBrief(business, s.RequestID)
+	if e != nil || business.Status != "active" || business.OrganizationID != s.Scope.OrganizationID || !bytes.Equal(frozen.Bytes(), s.Request) {
+		return b.ErrDenied
+	}
+	count, countErr := transport.CountInputTokens(ctx, frozen)
+	receipt := struct {
+		RequestDigest string
+		Source        b.PrivateBusinessBriefSource
+		Count         b.OpenAIDocumentTokenCount
+		ErrorCategory string
+	}{RequestDigest: frozen.Digest(), Source: source, Count: count}
+	if countErr != nil {
+		receipt.ErrorCategory = safeError(countErr)
+	}
+	if e = exclusive(filepath.Join(dir, "count-diagnostic-"+uuid.NewString()+".json"), wire(receipt)); e != nil {
+		return e
+	}
+	if countErr != nil {
+		return countErr
+	}
+	fmt.Printf("input_tokens=%d\n", count.InputTokens)
+	return nil
 }
 
 func prepare(ctx context.Context, dir string, runtime *pgxpool.Config, key, project string, t *b.OpenAIDocumentTransport) error {
