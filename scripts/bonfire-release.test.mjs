@@ -622,6 +622,23 @@ test('scope owns every internal package imported by production root files', asyn
   }
 })
 
+test('each literal HTML route is archived and copied into the runtime image', async () => {
+  const policy = validateReleaseScopePolicy(JSON.parse(await readFile(join(repoRoot, 'deploy/digitalocean/release-scope-policy.json'), 'utf8')))
+  const docker = await readFile(join(repoRoot, 'Dockerfile'), 'utf8')
+  const roots = (await readdir(repoRoot)).filter(name => name.endsWith('.go') && !name.endsWith('_test.go'))
+  const pages = new Set()
+  for (const name of roots) {
+    const body = await readFile(join(repoRoot, name), 'utf8')
+    for (const match of body.matchAll(/http\.ServeFile\([^\n]*?,\s*"([^"/]+\.html)"\)/g)) pages.add(match[1])
+  }
+  assert.ok(pages.has('business.html'), 'Business route must participate in runtime packaging verification')
+  for (const page of pages) {
+    assert.equal(releasePathOwned(page, policy), true, `release archive omits served page ${page}`)
+    assert.ok(docker.split('\n').some(line => line.trim() === `COPY ${page} /app/${page}`), `runtime image omits served page ${page}`)
+    assert.ok((await readFile(join(repoRoot, page))).length > 0)
+  }
+})
+
 test('scope owns every asset embedded by production Go', async () => {
   const policy = validateReleaseScopePolicy(JSON.parse(await readFile(join(repoRoot, 'deploy/digitalocean/release-scope-policy.json'), 'utf8')))
   const { stdout } = await execFileAsync('git', ['ls-files', '*.go'], { cwd: repoRoot })

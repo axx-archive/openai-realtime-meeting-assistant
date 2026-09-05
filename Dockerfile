@@ -60,6 +60,7 @@ WORKDIR /app
 COPY --from=build /out/meetingassist /app/meetingassist
 COPY --from=build /out/release-build-packages.txt /app/release-build-packages.txt
 COPY index.html /app/index.html
+COPY business.html /app/business.html
 COPY public /app/public
 
 EXPOSE 3000/tcp
