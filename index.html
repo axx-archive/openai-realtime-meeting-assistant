@@ -85860,6 +85860,12 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 
 	      function renderPrivateRiffContext(thread, options = {}) {
 	        if (chatContextState?.mode !== 'riff' || String(chatContextState.threadId || '') !== String(thread?.id || '')) return
+	        // Index refreshes also sync the open rail. Preserve its focused menu,
+	        // armed confirmation and scroll when the private snapshot is unchanged.
+	        const renderSignature = JSON.stringify([thread, Boolean(chatContextState.pending), String(authedUser?.email || '')])
+	        const priorRender = chatContextBody._privateRiffRender
+	        if (options.scrollToBottom === false && priorRender?.signature === renderSignature &&
+	          priorRender.firstChild === chatContextBody.firstChild) return
 	        chatContextKicker.textContent = 'Scout · private to you'
 	        chatContextTitle.textContent = `#${thread?.riff?.sourceTitle || 'channel'}`
 	        chatContextMeta.textContent = `${String(thread?.riff?.agentName || 'Scout')} · ${Math.max(1, Number(thread?.riff?.episodeCount || 1))} pass${Number(thread?.riff?.episodeCount || 1) === 1 ? '' : 'es'}`
@@ -85879,6 +85885,7 @@ registerProcessor('${voiceFocusProcessorName}', BonfireVoiceFocusProcessor)
 	        if (!messages.length) fragment.appendChild(bfEl('div', 'chat-context-empty', 'Ask Scout to explore, pressure-test, or rewrite something without adding the private exchange to the channel.'))
 	        if (chatContextState.pending) fragment.appendChild(bfEl('div', 'private-riff-thinking', 'Refreshing the authorized channel and company context…'))
 	        chatContextBody.replaceChildren(fragment)
+	        chatContextBody._privateRiffRender = { signature: renderSignature, firstChild: chatContextBody.firstChild }
 	        if (options.scrollToBottom !== false) chatContextBody.scrollTop = chatContextBody.scrollHeight
 	      }
 
