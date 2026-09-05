@@ -891,6 +891,18 @@ function exactByteSize(value, expected, label) {
   }
 }
 
+// The bridge admits two reviewed caps, but each running release must match
+// its own sealed Compose configuration exactly, including PostgreSQL tuning.
+export function validatePostgresRuntimeConfig(inspect, service) {
+  const expected = byteSize(service?.mem_limit, 'receipted PostgreSQL memory limit')
+  if (![256 * 1024 ** 2, 512 * 1024 ** 2].includes(expected) ||
+      inspect?.HostConfig?.Memory !== expected) {
+    throw new Error('running canonical-postgres memory differs from receipted Compose')
+  }
+  exactStringSequence(inspect?.Config?.Cmd, service?.command,
+    'running canonical-postgres command', { ordered: true })
+}
+
 function exactDuration(value, expectedText, expectedNanoseconds, label) {
   if (String(value) !== expectedText && String(value) !== String(expectedNanoseconds)) {
     throw new Error(`${label} differs from the approved topology`)
@@ -1191,7 +1203,7 @@ export function validateRenderedComposeConfig(config, receipt, suppliedTopology 
     },
     'canonical-postgres': {
       profiles: [], networks: ['default'], networkMode: '', restart: 'unless-stopped', user: '', readOnly: false,
-      capAdd: [], capDrop: [], securityOpt: [], ports: [], memory: 256 * 1024 ** 2, shm: 64 * 1024 ** 2, pids: null,
+      capAdd: [], capDrop: [], securityOpt: [], ports: [], memory: [256 * 1024 ** 2, 512 * 1024 ** 2], shm: 64 * 1024 ** 2, pids: null,
       mounts: [{ type: 'volume', source: 'canonical_postgres', target: '/var/lib/postgresql/data', readOnly: false }],
       dependencies: {}, dockerfile: ''
     },
@@ -1748,6 +1760,7 @@ async function verifyRunning(options, printResult = true, {
       throw new Error(`candidate Compose service ${service} is not running`)
     }
   }
+  validatePostgresRuntimeConfig(inspected['canonical-postgres'], composePreflight.postgresService)
   for (const [role, image] of Object.entries(receipt.images)) {
     const { stdout: raw } = await execFileAsync('docker', ['image', 'inspect', image.imageId], { maxBuffer: 16 << 20 })
     verifyLabels(parseJSON(raw, `Docker ${role} image inspect`)[0]?.Config?.Labels || {}, receipt.source, receipt.buildInputManifestSha256)
@@ -2980,7 +2993,7 @@ async function preflightComposeBundle(options, bundle, expectedSha256 = '') {
   if (expectedSha256 && digest !== expectedSha256) {
     throw new Error('rendered candidate Compose configuration changed during the locked release transaction')
   }
-  return { sha256: digest }
+  return { sha256: digest, postgresService: activationConfig.services['canonical-postgres'] }
 }
 
 async function verifyReleaseImages(receipt) {
@@ -3068,6 +3081,7 @@ async function verifyPrivateRelease(options, bundle, expectedRenderedComposeSha2
     if (service === 'render-queue-init') {
       if (inspected?.State?.Status !== 'exited' || inspected?.State?.ExitCode !== 0) throw new Error('private render-queue-init did not complete')
     } else if (inspected?.State?.Status !== 'running') throw new Error(`private candidate ${service} is not running`)
+    if (service === 'canonical-postgres') validatePostgresRuntimeConfig(inspected, preflight.postgresService)
     if (service === 'meetingassist') {
       const environment = environmentFromInspect(inspected)
       verifyRuntimeEnvironment(environment, bundle.receipt)

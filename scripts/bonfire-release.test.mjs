@@ -20,7 +20,7 @@ import {
   projectResourceClaimsFromContainers, projectResourceSnapshotSha256, releasePaths, renderedComposeSha256,
   reviewedInventoryDigest, validateBuildInputs, validateCandidateBundleManifest, validatePrepareState,
   validateActiveReleaseLedger, validateProjectResourceBaseline, validateProjectServiceInventory, validateReleaseReceipt, validateReleaseScopePolicy,
-  validateReleaseTransition, validateRenderedComposeConfig, validateRendererRuntimeConfinement, validateReviewedInventory, validateSourceReceipt,
+  validateReleaseTransition, validatePostgresRuntimeConfig, validateRenderedComposeConfig, validateRendererRuntimeConfinement, validateReviewedInventory, validateSourceReceipt,
   verifyArchiveIdentity, verifyCandidateConfig, verifyLabels, verifyProbeRelease,
   verifyExecutingReleaseTool, verifyReleaseEnvironmentFile, verifyRenderRunnerHeartbeat,
   verifyRetainedReleaseActivator, verifyRuntimeEnvironment,
@@ -2410,4 +2410,44 @@ test('activation ignores exported selectors and only adds the explicit base env 
     PATH: '/usr/bin', HOME: '/root', DOCKER_HOST: 'ssh://release-host',
     BONFIRE_BASE_ENV_FILE: '/opt/meetingassist/deploy/digitalocean/.env'
   })
+})
+
+
+test('PostgreSQL compatibility bridge admits only reviewed caps and exact runtime binding', () => {
+  const receipt = makeReceipt()
+  for (const cap of ['256m', '512m', '268435456', '536870912']) {
+    const config = renderedComposeConfig(receipt)
+    const service = config.services['canonical-postgres']
+    service.mem_limit = cap
+    assert.equal(validateRenderedComposeConfig(config, receipt, topologyContext), config)
+    const bytes = cap === '256m' || cap === '268435456' ? 268435456 : 536870912
+    const live = { HostConfig: { Memory: bytes }, Config: { Cmd: [...service.command] } }
+    assert.doesNotThrow(() => validatePostgresRuntimeConfig(live, service))
+    live.HostConfig.Memory = bytes === 268435456 ? 536870912 : 268435456
+    assert.throws(() => validatePostgresRuntimeConfig(live, service), /memory differs/)
+    live.HostConfig.Memory = bytes
+    live.Config.Cmd[2] = 'max_connections=100'
+    assert.throws(() => validatePostgresRuntimeConfig(live, service), /command differs/)
+  }
+  for (const cap of ['128m', '384m', '1g', '0', undefined]) {
+    const config = renderedComposeConfig(receipt)
+    config.services['canonical-postgres'].mem_limit = cap
+    assert.throws(() => validateRenderedComposeConfig(config, receipt, topologyContext), /memory limit/)
+  }
+  const changed = renderedComposeConfig(receipt)
+  changed.services['canonical-postgres'].mem_limit = '512m'
+  changed.services['canonical-postgres'].command[2] = 'max_connections=100'
+  assert.throws(() => validateRenderedComposeConfig(changed, receipt, topologyContext), /command differs/)
+  const oldConfig = renderedComposeConfig(receipt)
+  const newConfig = structuredClone(oldConfig)
+  newConfig.services['canonical-postgres'].mem_limit = '512m'
+  assert.notEqual(renderedComposeSha256(oldConfig), renderedComposeSha256(newConfig))
+})
+
+test('PostgreSQL runtime binding is checked before ingress and in retained verification', async () => {
+  const source = await readFile(releaseToolPath, 'utf8')
+  const publicVerify = source.slice(source.indexOf('async function verifyRunning('), source.indexOf('async function verifyRunning(') + 10000)
+  const privateVerify = source.slice(source.indexOf('async function verifyPrivateRelease('), source.indexOf('async function verifyPrivateRelease(') + 5000)
+  assert.match(publicVerify, /validatePostgresRuntimeConfig\(inspected\['canonical-postgres'\], composePreflight.postgresService\)/)
+  assert.match(privateVerify, /validatePostgresRuntimeConfig\(inspected, preflight.postgresService\)/)
 })
